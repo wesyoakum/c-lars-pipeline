@@ -30,7 +30,11 @@ function trim(v) {
 }
 
 /**
- * Validate an opportunity create/update payload.
+ * Validate an opportunity create/update payload. Covers every field the
+ * M3 forms expose (title, account, type, rfq_format, BANT, estimated
+ * value, expected close, primary contact, owner/salesperson). Stage
+ * transitions go through validateStageTransition below — this function
+ * never mutates stage.
  */
 export function validateOpportunity(input) {
   const errors = {};
@@ -47,25 +51,78 @@ export function validateOpportunity(input) {
     errors.transaction_type = 'Must be one of spares, eps, refurb, service';
   }
 
-  if (input.rfq_format !== undefined && input.rfq_format !== '') {
-    if (!RFQ_FORMATS.has(input.rfq_format)) {
-      errors.rfq_format = 'Unknown RFQ format';
-    }
+  // Optional: RFQ format. Empty string means "not specified" and we store null.
+  if (input.rfq_format === undefined || input.rfq_format === '' || input.rfq_format === null) {
+    value.rfq_format = null;
+  } else if (!RFQ_FORMATS.has(input.rfq_format)) {
+    errors.rfq_format = 'Unknown RFQ format';
+  } else {
     value.rfq_format = input.rfq_format;
   }
 
-  if (input.bant_budget !== undefined && input.bant_budget !== '') {
-    if (!BANT_BUDGET.has(input.bant_budget)) {
-      errors.bant_budget = 'Must be known, estimated, or unknown';
-    }
+  // BANT-lite
+  if (input.bant_budget === undefined || input.bant_budget === '' || input.bant_budget === null) {
+    value.bant_budget = null;
+  } else if (!BANT_BUDGET.has(input.bant_budget)) {
+    errors.bant_budget = 'Must be known, estimated, or unknown';
+  } else {
     value.bant_budget = input.bant_budget;
   }
+  value.bant_authority = trim(input.bant_authority) || null;
+  value.bant_need = trim(input.bant_need) || null;
+  value.bant_timeline = trim(input.bant_timeline) || null;
 
   value.description = trim(input.description) || null;
-  value.estimated_value_usd =
-    input.estimated_value_usd === '' || input.estimated_value_usd == null
-      ? null
-      : Number(input.estimated_value_usd);
+
+  // Estimated value: optional, must be a finite non-negative number if present.
+  if (input.estimated_value_usd === '' || input.estimated_value_usd == null) {
+    value.estimated_value_usd = null;
+  } else {
+    const n = Number(input.estimated_value_usd);
+    if (!Number.isFinite(n) || n < 0) {
+      errors.estimated_value_usd = 'Estimated value must be a non-negative number';
+      value.estimated_value_usd = null;
+    } else {
+      value.estimated_value_usd = n;
+    }
+  }
+
+  // Expected close date: optional ISO date (YYYY-MM-DD).
+  const ecd = trim(input.expected_close_date);
+  if (!ecd) {
+    value.expected_close_date = null;
+  } else if (!/^\d{4}-\d{2}-\d{2}$/.test(ecd)) {
+    errors.expected_close_date = 'Use YYYY-MM-DD';
+    value.expected_close_date = null;
+  } else {
+    value.expected_close_date = ecd;
+  }
+
+  // Optional ID references — stored as-is if present, otherwise null.
+  value.primary_contact_id = trim(input.primary_contact_id) || null;
+  value.owner_user_id = trim(input.owner_user_id) || null;
+  value.salesperson_user_id = trim(input.salesperson_user_id) || null;
+
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, value };
+}
+
+/**
+ * Validate a stage-transition payload. Only checks the shape — the
+ * transaction-type-aware "is this stage legal for this opp" check
+ * belongs in the route handler (it needs the opportunity row). Gate
+ * rule evaluation lives in lib/stages.js and is deferred to M7.
+ */
+export function validateStageTransition(input) {
+  const errors = {};
+  const value = {};
+
+  value.to_stage = trim(input.to_stage);
+  if (!nonEmpty(value.to_stage)) errors.to_stage = 'Target stage is required';
+
+  value.override_reason = trim(input.override_reason) || null;
+  value.close_reason = trim(input.close_reason) || null;
+  value.loss_reason_tag = trim(input.loss_reason_tag) || null;
 
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, value };
