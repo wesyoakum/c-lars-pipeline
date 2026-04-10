@@ -31,6 +31,15 @@ const RFQ_FORMAT_OPTIONS = [
   { value: 'other', label: 'Other' },
 ];
 
+const SOURCE_OPTIONS = [
+  { value: '', label: '— Not specified —' },
+  { value: 'inbound', label: 'Inbound (customer reached out)' },
+  { value: 'outreach', label: 'Outreach (we reached out)' },
+  { value: 'referral', label: 'Referral' },
+  { value: 'existing', label: 'Existing customer follow-on' },
+  { value: 'other', label: 'Other' },
+];
+
 const BANT_BUDGET_OPTIONS = [
   { value: '', label: '— Unknown —' },
   { value: 'known', label: 'Known' },
@@ -75,11 +84,20 @@ export async function renderEditForm(context, opts = {}) {
 
       <form method="post" action="/opportunities/${escape(opp.id)}" class="stacked opp-form"
             data-initial-account="${escape(opp.account_id ?? '')}">
-        <label>
-          <span>Title <em>*</em></span>
-          <input type="text" name="title" required value="${escape(opp.title ?? '')}">
-          ${errors.title ? html`<small class="field-error">${errors.title}</small>` : ''}
-        </label>
+        <div class="row">
+          <label style="flex:2">
+            <span>Title <em>*</em></span>
+            <input type="text" name="title" required value="${escape(opp.title ?? '')}">
+            ${errors.title ? html`<small class="field-error">${errors.title}</small>` : ''}
+          </label>
+          <label style="flex:1">
+            <span>Number</span>
+            <input type="text" name="number" inputmode="numeric"
+                   value="${escape(opp.number ?? '')}">
+            ${errors.number ? html`<small class="field-error">${errors.number}</small>` : ''}
+            <small class="muted">Editable; must be unique.</small>
+          </label>
+        </div>
 
         <div class="row">
           <label style="flex:1">
@@ -129,15 +147,28 @@ export async function renderEditForm(context, opts = {}) {
           <textarea name="description" rows="4">${escape(opp.description ?? '')}</textarea>
         </label>
 
-        <label>
-          <span>How did the RFQ arrive?</span>
-          <select name="rfq_format">
-            ${RFQ_FORMAT_OPTIONS.map(
-              (o) =>
-                html`<option value="${o.value}" ${(opp.rfq_format ?? '') === o.value ? 'selected' : ''}>${o.label}</option>`
-            )}
-          </select>
-        </label>
+        <div class="row">
+          <label style="flex:1">
+            <span>How did the RFQ arrive?</span>
+            <select name="rfq_format">
+              ${RFQ_FORMAT_OPTIONS.map(
+                (o) =>
+                  html`<option value="${o.value}" ${(opp.rfq_format ?? '') === o.value ? 'selected' : ''}>${o.label}</option>`
+              )}
+            </select>
+            ${errors.rfq_format ? html`<small class="field-error">${errors.rfq_format}</small>` : ''}
+          </label>
+          <label style="flex:1">
+            <span>Source</span>
+            <select name="source">
+              ${SOURCE_OPTIONS.map(
+                (o) =>
+                  html`<option value="${o.value}" ${(opp.source ?? '') === o.value ? 'selected' : ''}>${o.label}</option>`
+              )}
+            </select>
+            ${errors.source ? html`<small class="field-error">${errors.source}</small>` : ''}
+          </label>
+        </div>
 
         <div class="row">
           <label style="flex:1">
@@ -147,12 +178,54 @@ export async function renderEditForm(context, opts = {}) {
             ${errors.estimated_value_usd ? html`<small class="field-error">${errors.estimated_value_usd}</small>` : ''}
           </label>
           <label style="flex:1">
-            <span>Expected close date</span>
-            <input type="date" name="expected_close_date"
-                   value="${escape(opp.expected_close_date ?? '')}">
-            ${errors.expected_close_date ? html`<small class="field-error">${errors.expected_close_date}</small>` : ''}
+            <span>Probability (%)</span>
+            <input type="number" name="probability" min="0" max="100" step="1"
+                   value="${escape(opp.probability ?? '')}"
+                   placeholder="defaults from stage">
+            ${errors.probability ? html`<small class="field-error">${errors.probability}</small>` : ''}
           </label>
         </div>
+
+        <fieldset class="qualification-box">
+          <legend>Pipeline dates</legend>
+          <div class="row">
+            <label style="flex:1">
+              <span>RFQ received</span>
+              <input type="date" name="rfq_received_date"
+                     value="${escape(opp.rfq_received_date ?? '')}">
+              ${errors.rfq_received_date ? html`<small class="field-error">${errors.rfq_received_date}</small>` : ''}
+            </label>
+            <label style="flex:1">
+              <span>RFQ due</span>
+              <input type="date" name="rfq_due_date"
+                     value="${escape(opp.rfq_due_date ?? '')}">
+              ${errors.rfq_due_date ? html`<small class="field-error">${errors.rfq_due_date}</small>` : ''}
+            </label>
+          </div>
+          <div class="row">
+            <label style="flex:1">
+              <span>RFI due</span>
+              <input type="date" name="rfi_due_date"
+                     value="${escape(opp.rfi_due_date ?? '')}">
+              ${errors.rfi_due_date ? html`<small class="field-error">${errors.rfi_due_date}</small>` : ''}
+            </label>
+            <label style="flex:1">
+              <span>Quoted</span>
+              <input type="date" name="quoted_date"
+                     value="${escape(opp.quoted_date ?? '')}">
+              ${errors.quoted_date ? html`<small class="field-error">${errors.quoted_date}</small>` : ''}
+            </label>
+          </div>
+          <div class="row">
+            <label style="flex:1">
+              <span>Expected close</span>
+              <input type="date" name="expected_close_date"
+                     value="${escape(opp.expected_close_date ?? '')}">
+              ${errors.expected_close_date ? html`<small class="field-error">${errors.expected_close_date}</small>` : ''}
+            </label>
+            <div style="flex:1"></div>
+          </div>
+        </fieldset>
 
         <div class="row">
           <label style="flex:1">

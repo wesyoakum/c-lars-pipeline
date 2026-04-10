@@ -61,8 +61,8 @@ export async function onRequestPost(context) {
       env.DB,
       `INSERT INTO contacts
          (id, account_id, first_name, last_name, title, email, phone, mobile,
-          is_primary, created_at, updated_at, created_by_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          is_primary, notes, created_at, updated_at, created_by_user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         accountId,
@@ -73,6 +73,7 @@ export async function onRequestPost(context) {
         value.phone,
         value.mobile,
         value.is_primary,
+        value.notes,
         ts,
         ts,
         user?.id ?? null,

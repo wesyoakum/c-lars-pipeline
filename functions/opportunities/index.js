@@ -11,7 +11,7 @@
 import { all, one, stmt, batch } from '../lib/db.js';
 import { auditStmt } from '../lib/audit.js';
 import { validateOpportunity } from '../lib/validators.js';
-import { uuid, now, nextNumber, currentYear } from '../lib/ids.js';
+import { uuid, now, nextSequenceValue } from '../lib/ids.js';
 import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
 import { loadStageCatalog } from '../lib/stages.js';
@@ -34,8 +34,10 @@ export async function onRequestGet(context) {
   const rows = await all(
     env.DB,
     `SELECT o.id, o.number, o.title, o.transaction_type, o.stage,
-            o.estimated_value_usd, o.probability, o.updated_at,
-            o.expected_close_date,
+            o.estimated_value_usd, o.probability,
+            o.created_at, o.updated_at,
+            o.expected_close_date, o.rfq_received_date, o.rfq_due_date,
+            o.rfi_due_date, o.quoted_date,
             a.name AS account_name, a.id AS account_id
        FROM opportunities o
        LEFT JOIN accounts a ON a.id = o.account_id
@@ -52,14 +54,19 @@ export async function onRequestGet(context) {
   // under `pms.oppList.v1`. The table itself is server-rendered so the
   // page is useful even without JS.
   const columns = [
-    { key: 'number',       label: 'Number',  sort: 'text',   filter: 'text',   default: true },
-    { key: 'title',        label: 'Title',   sort: 'text',   filter: 'text',   default: true },
-    { key: 'account_name', label: 'Account', sort: 'text',   filter: 'text',   default: true },
-    { key: 'type_label',   label: 'Type',    sort: 'text',   filter: 'select', default: true },
-    { key: 'stage_label',  label: 'Stage',   sort: 'text',   filter: 'select', default: true },
-    { key: 'value',        label: 'Value',   sort: 'number', filter: 'range',  default: true },
-    { key: 'close',        label: 'Close',   sort: 'date',   filter: 'text',   default: true },
-    { key: 'updated',      label: 'Updated', sort: 'date',   filter: 'text',   default: false },
+    { key: 'number',       label: 'Number',       sort: 'number', filter: 'text',   default: true },
+    { key: 'title',        label: 'Title',        sort: 'text',   filter: 'text',   default: true },
+    { key: 'account_name', label: 'Account',      sort: 'text',   filter: 'text',   default: true },
+    { key: 'type_label',   label: 'Type',         sort: 'text',   filter: 'select', default: true },
+    { key: 'stage_label',  label: 'Stage',        sort: 'text',   filter: 'select', default: true },
+    { key: 'value',        label: 'Value',        sort: 'number', filter: 'range',  default: true },
+    { key: 'close',        label: 'Close',        sort: 'date',   filter: 'text',   default: true },
+    { key: 'updated',      label: 'Updated',      sort: 'date',   filter: 'text',   default: true },
+    { key: 'created',      label: 'Created',      sort: 'date',   filter: 'text',   default: false },
+    { key: 'rfq_received', label: 'RFQ received', sort: 'date',   filter: 'text',   default: false },
+    { key: 'rfq_due',      label: 'RFQ due',      sort: 'date',   filter: 'text',   default: false },
+    { key: 'rfi_due',      label: 'RFI due',      sort: 'date',   filter: 'text',   default: false },
+    { key: 'quoted',       label: 'Quoted',       sort: 'date',   filter: 'text',   default: false },
   ];
 
   // Shape rows once so each <tr> knows its sort/filter values and the
@@ -77,6 +84,11 @@ export async function onRequestGet(context) {
       r.estimated_value_usd != null ? `$${formatMoney(r.estimated_value_usd)}` : '',
     close: r.expected_close_date ?? '',
     updated: (r.updated_at ?? '').slice(0, 10),
+    created: (r.created_at ?? '').slice(0, 10),
+    rfq_received: r.rfq_received_date ?? '',
+    rfq_due: r.rfq_due_date ?? '',
+    rfi_due: r.rfi_due_date ?? '',
+    quoted: r.quoted_date ?? '',
   }));
 
   const body = html`
@@ -168,7 +180,12 @@ export async function onRequestGet(context) {
                         data-stage_label="${escape(r.stage_label)}"
                         data-value="${escape(r.value === '' ? '' : String(r.value))}"
                         data-close="${escape(r.close)}"
-                        data-updated="${escape(r.updated)}">
+                        data-updated="${escape(r.updated)}"
+                        data-created="${escape(r.created)}"
+                        data-rfq_received="${escape(r.rfq_received)}"
+                        data-rfq_due="${escape(r.rfq_due)}"
+                        data-rfi_due="${escape(r.rfi_due)}"
+                        data-quoted="${escape(r.quoted)}">
                       <td class="col-number" data-col="number"><code>${escape(r.number)}</code></td>
                       <td class="col-title" data-col="title">
                         <a href="/opportunities/${escape(r.id)}"><strong>${escape(r.title)}</strong></a>
@@ -183,6 +200,11 @@ export async function onRequestGet(context) {
                       <td class="col-value" data-col="value">${escape(r.value_display)}</td>
                       <td class="col-close" data-col="close"><small class="muted">${escape(r.close)}</small></td>
                       <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
+                      <td class="col-created" data-col="created"><small class="muted">${escape(r.created)}</small></td>
+                      <td class="col-rfq_received" data-col="rfq_received"><small class="muted">${escape(r.rfq_received)}</small></td>
+                      <td class="col-rfq_due" data-col="rfq_due"><small class="muted">${escape(r.rfq_due)}</small></td>
+                      <td class="col-rfi_due" data-col="rfi_due"><small class="muted">${escape(r.rfi_due)}</small></td>
+                      <td class="col-quoted" data-col="quoted"><small class="muted">${escape(r.quoted)}</small></td>
                     </tr>`
                 )}
               </tbody>
@@ -227,72 +249,106 @@ export async function onRequestPost(context) {
 
   const id = uuid();
   const ts = now();
-  const number = await nextNumber(env.DB, `OPP-${currentYear()}`);
 
-  // Default starting stage is 'lead'. Default probability copied from
-  // the stage catalog so the UI has something sensible to show.
+  // Number: if the user typed one, use it as-is (UNIQUE index catches
+  // collisions below). Otherwise allocate the next sequential value from
+  // the 'opportunity' scope and zero-pad it to 5 digits (25001+).
+  let number = value.number;
+  if (!number) {
+    const allocated = await nextSequenceValue(env.DB, 'opportunity');
+    number = String(allocated).padStart(5, '0');
+  }
+
+  // Default starting stage is 'lead'. Probability defaults from the stage
+  // catalog if the user didn't provide an explicit override.
   const catalog = await loadStageCatalog(env.DB);
   const typeStages = catalog.get(value.transaction_type) ?? [];
   const leadStage = typeStages.find((s) => s.stage_key === 'lead');
-  const probability = leadStage?.default_probability ?? 0;
+  const probability = value.probability != null
+    ? value.probability
+    : (leadStage?.default_probability ?? 0);
 
-  await batch(env.DB, [
-    stmt(
-      env.DB,
-      `INSERT INTO opportunities
-         (id, number, account_id, primary_contact_id, title, description,
-          transaction_type, stage, stage_entered_at, probability,
-          estimated_value_usd, currency, expected_close_date,
-          rfq_format, bant_budget, bant_authority, bant_authority_contact_id,
-          bant_need, bant_timeline,
-          owner_user_id, salesperson_user_id,
-          created_at, updated_at, created_by_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        number,
-        value.account_id,
-        value.primary_contact_id,
-        value.title,
-        value.description,
-        value.transaction_type,
-        'lead',
-        ts,
-        probability,
-        value.estimated_value_usd,
-        'USD',
-        value.expected_close_date,
-        value.rfq_format,
-        value.bant_budget,
-        value.bant_authority,
-        value.bant_authority_contact_id,
-        value.bant_need,
-        value.bant_timeline,
-        value.owner_user_id ?? user?.id ?? null,
-        value.salesperson_user_id ?? user?.id ?? null,
-        ts,
-        ts,
-        user?.id ?? null,
-      ]
-    ),
-    auditStmt(env.DB, {
-      entityType: 'opportunity',
-      entityId: id,
-      eventType: 'created',
-      user,
-      summary: `Created ${number}: "${value.title}" for ${acct.name}`,
-      changes: {
-        ...value,
-        number,
-        stage: 'lead',
-      },
-    }),
-  ]);
+  try {
+    await batch(env.DB, [
+      stmt(
+        env.DB,
+        `INSERT INTO opportunities
+           (id, number, account_id, primary_contact_id, title, description,
+            transaction_type, stage, stage_entered_at, probability,
+            estimated_value_usd, currency,
+            expected_close_date, rfq_received_date, rfq_due_date,
+            rfi_due_date, quoted_date,
+            rfq_format, source,
+            bant_budget, bant_authority, bant_authority_contact_id,
+            bant_need, bant_timeline,
+            owner_user_id, salesperson_user_id,
+            created_at, updated_at, created_by_user_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          id,
+          number,
+          value.account_id,
+          value.primary_contact_id,
+          value.title,
+          value.description,
+          value.transaction_type,
+          'lead',
+          ts,
+          probability,
+          value.estimated_value_usd,
+          'USD',
+          value.expected_close_date,
+          value.rfq_received_date,
+          value.rfq_due_date,
+          value.rfi_due_date,
+          value.quoted_date,
+          value.rfq_format,
+          value.source,
+          value.bant_budget,
+          value.bant_authority,
+          value.bant_authority_contact_id,
+          value.bant_need,
+          value.bant_timeline,
+          value.owner_user_id ?? user?.id ?? null,
+          value.salesperson_user_id ?? user?.id ?? null,
+          ts,
+          ts,
+          user?.id ?? null,
+        ]
+      ),
+      auditStmt(env.DB, {
+        entityType: 'opportunity',
+        entityId: id,
+        eventType: 'created',
+        user,
+        summary: `Created ${number}: "${value.title}" for ${acct.name}`,
+        changes: {
+          ...value,
+          number,
+          stage: 'lead',
+        },
+      }),
+    ]);
+  } catch (e) {
+    if (isUniqueNumberError(e)) {
+      const { renderNewForm } = await import('./new.js');
+      return renderNewForm(context, {
+        values: input,
+        errors: { number: 'That number is already in use' },
+      });
+    }
+    throw e;
+  }
 
   return redirectWithFlash(
     `/opportunities/${id}`,
     `Opportunity ${number} created.`
   );
+}
+
+function isUniqueNumberError(e) {
+  const msg = String(e?.message ?? e ?? '');
+  return /UNIQUE/i.test(msg) && /opportunities\.number|opportunities_number|\.number/i.test(msg);
 }
 
 // -- helpers ---------------------------------------------------------------

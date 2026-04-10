@@ -23,21 +23,24 @@ export function now() {
 }
 
 /**
- * Allocate the next number for a scope (e.g. 'OPP-2026') and return a
- * formatted string 'OPP-2026-0001'.
+ * Allocate the next integer for a scope from the `sequences` table.
  *
  * Uses UPDATE...RETURNING which D1 supports (SQLite 3.35+). If the scope
- * row doesn't exist yet, an INSERT OR IGNORE fallback seeds it at 1 and
- * retries.
+ * row doesn't exist yet, an INSERT OR IGNORE fallback seeds it at 2 and
+ * retries (so the first allocated value for a brand-new scope is 1).
  *
- * Callers should invoke this inside the same logical transaction as the
- * row they're inserting, but because D1 auto-commits per statement we
- * can't enforce true serializable here in P0. Collisions are vanishingly
- * unlikely for a solo-user system and a UNIQUE index on `number` would
- * catch any duplicates at insert time.
+ * The caller decides how to format the result — see `nextNumber()` (the
+ * legacy zero-padded prefixed format used by quotes/jobs) and the call
+ * site in functions/opportunities/index.js (which uses the bare integer
+ * directly for the new 5-digit opportunity number scheme).
+ *
+ * Collisions are still possible because D1 auto-commits per statement
+ * and we can't span a transaction across this allocation + the insert
+ * that consumes it. The UNIQUE index on the consuming column catches
+ * any duplicate at insert time, which surfaces as a normal validation
+ * error to the user.
  */
-export async function nextNumber(db, scope) {
-  // Try to increment atomically.
+export async function nextSequenceValue(db, scope) {
   let row = await one(
     db,
     'UPDATE sequences SET next_value = next_value + 1 WHERE scope = ? RETURNING next_value',
@@ -45,7 +48,6 @@ export async function nextNumber(db, scope) {
   );
 
   if (!row) {
-    // Seed row and retry once.
     await run(db, 'INSERT OR IGNORE INTO sequences (scope, next_value) VALUES (?, 2)', [scope]);
     row = await one(
       db,
@@ -55,7 +57,16 @@ export async function nextNumber(db, scope) {
   }
 
   // next_value has already been incremented; the *allocated* number is (next_value - 1).
-  const allocated = Number(row.next_value) - 1;
+  return Number(row.next_value) - 1;
+}
+
+/**
+ * Allocate the next number for a scope and return a zero-padded prefixed
+ * string like `Q-2026-0001`. Used by quotes and jobs (and originally by
+ * opportunities, before they switched to a bare 5-digit number).
+ */
+export async function nextNumber(db, scope) {
+  const allocated = await nextSequenceValue(db, scope);
   return `${scope}-${String(allocated).padStart(4, '0')}`;
 }
 

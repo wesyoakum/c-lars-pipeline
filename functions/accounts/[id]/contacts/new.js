@@ -65,6 +65,11 @@ export function renderNewContactForm(context, opts = {}) {
           <span>Primary contact for this account</span>
         </label>
 
+        <label>
+          <span>Notes</span>
+          <textarea name="notes" rows="4">${escape(values.notes ?? '')}</textarea>
+        </label>
+
         <div class="form-actions">
           <button type="submit" class="btn primary">Create contact</button>
           ${popup

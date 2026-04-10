@@ -17,9 +17,20 @@ const RFQ_FORMATS = new Set([
   'none',
   'other',
 ]);
+const SOURCES = new Set(['inbound', 'outreach', 'referral', 'existing', 'other']);
 const BANT_BUDGET = new Set(['known', 'estimated', 'unknown']);
 const PRICING_METHODS = new Set(['bottom_up', 'top_down', 'mixed']);
 const TOTAL_COST_SOURCES = new Set(['lines', 'manual']);
+
+// All four pipeline date fields the opportunity form exposes. Stored as
+// ISO YYYY-MM-DD strings; null means "not yet set".
+const DATE_FIELDS = [
+  'expected_close_date',
+  'rfq_received_date',
+  'rfq_due_date',
+  'rfi_due_date',
+  'quoted_date',
+];
 
 function nonEmpty(v) {
   return v !== undefined && v !== null && String(v).trim() !== '';
@@ -31,14 +42,34 @@ function trim(v) {
 
 /**
  * Validate an opportunity create/update payload. Covers every field the
- * M3 forms expose (title, account, type, rfq_format, BANT, estimated
- * value, expected close, primary contact, owner/salesperson). Stage
- * transitions go through validateStageTransition below — this function
- * never mutates stage.
+ * forms expose: identity (number, title, account, type), pipeline dates
+ * (rfq_received, rfq_due, rfi_due, expected_close, quoted), routing
+ * (rfq_format, source), BANT-lite, value/probability, ownership, and
+ * primary contact. Stage transitions go through validateStageTransition
+ * below — this function never mutates stage.
+ *
+ * `number` is optional on create (auto-allocated server-side when blank)
+ * but editable on update. Uniqueness is enforced by the UNIQUE index on
+ * `opportunities.number`; collisions surface as a normal SQL error which
+ * the route handler catches and turns into `errors.number`.
  */
 export function validateOpportunity(input) {
   const errors = {};
   const value = {};
+
+  // Number: optional. Empty/whitespace => null (let the route auto-allocate).
+  // When present, must look like a small positive integer (digits only,
+  // 1..10 chars). We don't enforce 5 digits because the user may want to
+  // type a shorter or longer one.
+  const rawNum = trim(input.number);
+  if (rawNum == null || rawNum === '') {
+    value.number = null;
+  } else if (!/^\d{1,10}$/.test(String(rawNum))) {
+    errors.number = 'Number must be digits only';
+    value.number = null;
+  } else {
+    value.number = String(rawNum);
+  }
 
   value.title = trim(input.title);
   if (!nonEmpty(value.title)) errors.title = 'Title is required';
@@ -58,6 +89,15 @@ export function validateOpportunity(input) {
     errors.rfq_format = 'Unknown RFQ format';
   } else {
     value.rfq_format = input.rfq_format;
+  }
+
+  // Optional: source — how the deal landed in our pipeline.
+  if (input.source === undefined || input.source === '' || input.source === null) {
+    value.source = null;
+  } else if (!SOURCES.has(input.source)) {
+    errors.source = 'Unknown source';
+  } else {
+    value.source = input.source;
   }
 
   // BANT-lite
@@ -91,15 +131,32 @@ export function validateOpportunity(input) {
     }
   }
 
-  // Expected close date: optional ISO date (YYYY-MM-DD).
-  const ecd = trim(input.expected_close_date);
-  if (!ecd) {
-    value.expected_close_date = null;
-  } else if (!/^\d{4}-\d{2}-\d{2}$/.test(ecd)) {
-    errors.expected_close_date = 'Use YYYY-MM-DD';
-    value.expected_close_date = null;
+  // Probability: optional manual override (0..100 integer). Default-from-stage
+  // logic lives in the route handler — this validator only sanity-checks
+  // whatever the user typed.
+  if (input.probability === '' || input.probability == null) {
+    value.probability = null;
   } else {
-    value.expected_close_date = ecd;
+    const p = Number(input.probability);
+    if (!Number.isFinite(p) || p < 0 || p > 100) {
+      errors.probability = 'Probability must be 0–100';
+      value.probability = null;
+    } else {
+      value.probability = Math.round(p);
+    }
+  }
+
+  // All five date fields: optional ISO YYYY-MM-DD.
+  for (const f of DATE_FIELDS) {
+    const v = trim(input[f]);
+    if (!v) {
+      value[f] = null;
+    } else if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      errors[f] = 'Use YYYY-MM-DD';
+      value[f] = null;
+    } else {
+      value[f] = v;
+    }
   }
 
   // Optional ID references — stored as-is if present, otherwise null.
@@ -148,13 +205,16 @@ export function validateAccount(input) {
   value.phone = trim(input.phone) || null;
   value.website = trim(input.website) || null;
   value.notes = trim(input.notes) || null;
+  value.owner_user_id = trim(input.owner_user_id) || null;
 
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, value };
 }
 
 /**
- * Validate a contact create/update payload.
+ * Validate a contact create/update payload. `account_id` is editable
+ * (so a contact can be moved between accounts) but is still required —
+ * a contact must always belong to some account.
  */
 export function validateContact(input) {
   const errors = {};
@@ -173,6 +233,7 @@ export function validateContact(input) {
   value.email = trim(input.email) || null;
   value.phone = trim(input.phone) || null;
   value.mobile = trim(input.mobile) || null;
+  value.notes = trim(input.notes) || null;
   value.is_primary = input.is_primary ? 1 : 0;
 
   if (Object.keys(errors).length) return { ok: false, errors };
@@ -182,7 +243,9 @@ export function validateContact(input) {
 export const ENUMS = {
   TRANSACTION_TYPES,
   RFQ_FORMATS,
+  SOURCES,
   BANT_BUDGET,
   PRICING_METHODS,
   TOTAL_COST_SOURCES,
+  DATE_FIELDS,
 };

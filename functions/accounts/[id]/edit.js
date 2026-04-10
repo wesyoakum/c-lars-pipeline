@@ -5,15 +5,15 @@
 // POST target is /accounts/:id (handled by ./index.js onRequestPost).
 // That handler re-renders this form via renderEditForm() on validation failure.
 
-import { one } from '../../lib/db.js';
+import { one, all } from '../../lib/db.js';
 import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
 import { readFlash } from '../../lib/http.js';
 import { loadAddresses, renderAddressEditor, addressEditorScript } from '../../lib/address_editor.js';
 
 const SEGMENTS = ['WROV', 'Research', 'Defense', 'Commercial', 'Other'];
 
-export function renderEditForm(context, opts = {}) {
-  const { data, request } = context;
+export async function renderEditForm(context, opts = {}) {
+  const { env, data, request } = context;
   const user = data?.user;
   const url = new URL(request.url);
   const account = opts.account;
@@ -21,6 +21,11 @@ export function renderEditForm(context, opts = {}) {
   // opts.addresses takes precedence (re-render path, user edits in progress);
   // otherwise use the DB-loaded list passed in by the GET handler.
   const addresses = opts.addresses ?? account.addresses ?? [];
+
+  const users = await all(
+    env.DB,
+    `SELECT id, display_name, email FROM users WHERE active = 1 ORDER BY display_name`
+  );
 
   const body = html`
     <section class="card">
@@ -54,6 +59,16 @@ export function renderEditForm(context, opts = {}) {
         </label>
 
         ${renderAddressEditor(addresses)}
+
+        <label>
+          <span>Owner</span>
+          <select name="owner_user_id">
+            <option value="">— None —</option>
+            ${users.map(
+              (u) => html`<option value="${escape(u.id)}" ${account.owner_user_id === u.id ? 'selected' : ''}>${u.display_name ?? u.email}</option>`
+            )}
+          </select>
+        </label>
 
         <label>
           <span>Notes</span>

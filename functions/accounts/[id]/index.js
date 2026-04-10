@@ -27,6 +27,7 @@ const UPDATE_FIELDS = [
   'address_billing',
   'address_physical',
   'notes',
+  'owner_user_id',
 ];
 
 export async function onRequestGet(context) {
@@ -37,7 +38,10 @@ export async function onRequestGet(context) {
 
   const account = await one(
     env.DB,
-    `SELECT * FROM accounts WHERE id = ?`,
+    `SELECT a.*, u.display_name AS owner_name, u.email AS owner_email
+       FROM accounts a
+       LEFT JOIN users u ON u.id = a.owner_user_id
+      WHERE a.id = ?`,
     [accountId]
   );
   if (!account) return notFound(context);
@@ -77,6 +81,9 @@ export async function onRequestGet(context) {
             ${account.phone ? html`· ${account.phone} ` : ''}
             ${account.website
               ? html`· <a href="${escape(ensureHttp(account.website))}" target="_blank" rel="noopener">${account.website}</a>`
+              : ''}
+            ${account.owner_user_id
+              ? html` · Owner: ${escape(account.owner_name ?? account.owner_email ?? '—')}`
               : ''}
           </p>
         </div>
@@ -128,7 +135,8 @@ export async function onRequestGet(context) {
                       <td>${c.email ? `<a href="mailto:${escape(c.email)}">${escape(c.email)}</a>` : ''}</td>
                       <td>${escape(c.phone ?? c.mobile ?? '')}</td>
                       <td>${c.is_primary ? '<span class="pill pill-success">primary</span>' : ''}</td>
-                      <td>
+                      <td class="row-actions">
+                        <a class="btn btn-sm" href="/contacts/${escape(c.id)}/edit">Edit</a>
                         <form method="post" action="/contacts/${escape(c.id)}/delete"
                               onsubmit="return confirm('Delete contact ${escape(name)}?');"
                               style="display:inline">
@@ -245,7 +253,7 @@ export async function onRequestPost(context) {
       `UPDATE accounts
           SET name = ?, segment = ?, phone = ?, website = ?,
               address_billing = ?, address_physical = ?, notes = ?,
-              updated_at = ?
+              owner_user_id = ?, updated_at = ?
         WHERE id = ?`,
       [
         value.name,
@@ -255,6 +263,7 @@ export async function onRequestPost(context) {
         after.address_billing,
         after.address_physical,
         value.notes,
+        value.owner_user_id,
         ts,
         accountId,
       ]

@@ -16,14 +16,21 @@ import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 import { loadStageCatalog } from '../../lib/stages.js';
 
 const UPDATE_FIELDS = [
+  'number',
   'title',
   'account_id',
   'primary_contact_id',
   'description',
   'transaction_type',
   'rfq_format',
+  'source',
   'estimated_value_usd',
+  'probability',
   'expected_close_date',
+  'rfq_received_date',
+  'rfq_due_date',
+  'rfi_due_date',
+  'quoted_date',
   'bant_budget',
   'bant_authority',
   'bant_authority_contact_id',
@@ -49,6 +56,14 @@ const RFQ_FORMAT_LABELS = {
   government_rfq: 'Government RFQ',
   rfi_preliminary: 'RFI / preliminary inquiry',
   none: 'None (proactive outreach)',
+  other: 'Other',
+};
+
+const SOURCE_LABELS = {
+  inbound: 'Inbound (customer reached out)',
+  outreach: 'Outreach (we reached out)',
+  referral: 'Referral',
+  existing: 'Existing customer follow-on',
   other: 'Other',
 };
 
@@ -186,13 +201,21 @@ export async function onRequestGet(context) {
           </p>
         </div>
         <div>
-          <strong>Expected close</strong>
-          <p class="muted" style="margin: 0.2rem 0 0">${escape(opp.expected_close_date ?? '—')}</p>
+          <strong>Probability</strong>
+          <p class="muted" style="margin: 0.2rem 0 0">
+            ${opp.probability != null ? `${opp.probability}%` : '—'}
+          </p>
         </div>
         <div>
           <strong>RFQ format</strong>
           <p class="muted" style="margin: 0.2rem 0 0">
             ${escape(RFQ_FORMAT_LABELS[opp.rfq_format] ?? (opp.rfq_format ?? '—'))}
+          </p>
+        </div>
+        <div>
+          <strong>Source</strong>
+          <p class="muted" style="margin: 0.2rem 0 0">
+            ${escape(SOURCE_LABELS[opp.source] ?? (opp.source ?? '—'))}
           </p>
         </div>
         <div>
@@ -209,6 +232,40 @@ export async function onRequestGet(context) {
             ${primaryContactName ? escape(primaryContactName) : '—'}
             ${opp.contact_email ? html` · <a href="mailto:${escape(opp.contact_email)}">${opp.contact_email}</a>` : ''}
           </p>
+        </div>
+      </div>
+
+      <div style="margin-top: 1rem;">
+        <strong>Pipeline dates</strong>
+        <div class="addr-grid">
+          <div>
+            <strong>RFQ received</strong>
+            <p class="muted" style="margin: 0.2rem 0 0">${escape(opp.rfq_received_date ?? '—')}</p>
+          </div>
+          <div>
+            <strong>RFQ due</strong>
+            <p class="muted" style="margin: 0.2rem 0 0">${escape(opp.rfq_due_date ?? '—')}</p>
+          </div>
+          <div>
+            <strong>RFI due</strong>
+            <p class="muted" style="margin: 0.2rem 0 0">${escape(opp.rfi_due_date ?? '—')}</p>
+          </div>
+          <div>
+            <strong>Quoted</strong>
+            <p class="muted" style="margin: 0.2rem 0 0">${escape(opp.quoted_date ?? '—')}</p>
+          </div>
+          <div>
+            <strong>Expected close</strong>
+            <p class="muted" style="margin: 0.2rem 0 0">${escape(opp.expected_close_date ?? '—')}</p>
+          </div>
+          <div>
+            <strong>Created</strong>
+            <p class="muted" style="margin: 0.2rem 0 0">${escape((opp.created_at ?? '').slice(0, 10) || '—')}</p>
+          </div>
+          <div>
+            <strong>Updated</strong>
+            <p class="muted" style="margin: 0.2rem 0 0">${escape((opp.updated_at ?? '').slice(0, 10) || '—')}</p>
+          </div>
         </div>
       </div>
 
@@ -347,53 +404,82 @@ export async function onRequestPost(context) {
     });
   }
 
+  // Number is editable but must stay unique. If the user blanked it out
+  // we keep the existing number (auto-allocation only happens on create).
+  const nextNum = value.number == null || value.number === '' ? before.number : value.number;
+
   const ts = now();
-  const after = { ...value };
+  const after = { ...value, number: nextNum };
   const changes = diff(before, after, UPDATE_FIELDS);
 
-  await batch(env.DB, [
-    stmt(
-      env.DB,
-      `UPDATE opportunities
-          SET title = ?, account_id = ?, primary_contact_id = ?, description = ?,
-              transaction_type = ?, rfq_format = ?,
-              estimated_value_usd = ?, expected_close_date = ?,
-              bant_budget = ?, bant_authority = ?, bant_authority_contact_id = ?,
-              bant_need = ?, bant_timeline = ?,
-              owner_user_id = ?, salesperson_user_id = ?,
-              updated_at = ?
-        WHERE id = ?`,
-      [
-        value.title,
-        value.account_id,
-        value.primary_contact_id,
-        value.description,
-        value.transaction_type,
-        value.rfq_format,
-        value.estimated_value_usd,
-        value.expected_close_date,
-        value.bant_budget,
-        value.bant_authority,
-        value.bant_authority_contact_id,
-        value.bant_need,
-        value.bant_timeline,
-        value.owner_user_id,
-        value.salesperson_user_id,
-        ts,
-        oppId,
-      ]
-    ),
-    auditStmt(env.DB, {
-      entityType: 'opportunity',
-      entityId: oppId,
-      eventType: 'updated',
-      user,
-      summary: `Updated ${before.number}`,
-      changes,
-    }),
-  ]);
+  try {
+    await batch(env.DB, [
+      stmt(
+        env.DB,
+        `UPDATE opportunities
+            SET number = ?, title = ?, account_id = ?, primary_contact_id = ?, description = ?,
+                transaction_type = ?, rfq_format = ?, source = ?,
+                estimated_value_usd = ?, probability = ?,
+                expected_close_date = ?, rfq_received_date = ?, rfq_due_date = ?,
+                rfi_due_date = ?, quoted_date = ?,
+                bant_budget = ?, bant_authority = ?, bant_authority_contact_id = ?,
+                bant_need = ?, bant_timeline = ?,
+                owner_user_id = ?, salesperson_user_id = ?,
+                updated_at = ?
+          WHERE id = ?`,
+        [
+          nextNum,
+          value.title,
+          value.account_id,
+          value.primary_contact_id,
+          value.description,
+          value.transaction_type,
+          value.rfq_format,
+          value.source,
+          value.estimated_value_usd,
+          value.probability,
+          value.expected_close_date,
+          value.rfq_received_date,
+          value.rfq_due_date,
+          value.rfi_due_date,
+          value.quoted_date,
+          value.bant_budget,
+          value.bant_authority,
+          value.bant_authority_contact_id,
+          value.bant_need,
+          value.bant_timeline,
+          value.owner_user_id,
+          value.salesperson_user_id,
+          ts,
+          oppId,
+        ]
+      ),
+      auditStmt(env.DB, {
+        entityType: 'opportunity',
+        entityId: oppId,
+        eventType: 'updated',
+        user,
+        summary: `Updated ${nextNum}`,
+        changes,
+      }),
+    ]);
+  } catch (e) {
+    if (isUniqueNumberError(e)) {
+      const { renderEditForm } = await import('./edit.js');
+      return renderEditForm(context, {
+        opportunity: { ...before, ...input },
+        errors: { number: 'That number is already in use' },
+      });
+    }
+    throw e;
+  }
 
   return redirectWithFlash(`/opportunities/${oppId}`, `Saved.`);
+}
+
+function isUniqueNumberError(e) {
+  const msg = String(e?.message ?? e ?? '');
+  return /UNIQUE/i.test(msg) && /opportunities\.number|opportunities_number|\.number/i.test(msg);
 }
 
 // -- helpers ---------------------------------------------------------------

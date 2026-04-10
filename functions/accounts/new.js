@@ -11,14 +11,15 @@
 // popup window; on successful create the opener gets a postMessage with
 // the new account's id + name and the popup auto-closes.
 
+import { all } from '../lib/db.js';
 import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { readFlash, isPopupMode } from '../lib/http.js';
 import { renderAddressEditor, addressEditorScript } from '../lib/address_editor.js';
 
 const SEGMENTS = ['WROV', 'Research', 'Defense', 'Commercial', 'Other'];
 
-export function renderNewForm(context, opts = {}) {
-  const { data, request } = context;
+export async function renderNewForm(context, opts = {}) {
+  const { env, data, request } = context;
   const user = data?.user;
   const url = new URL(request.url);
   const values = opts.values ?? {};
@@ -29,6 +30,12 @@ export function renderNewForm(context, opts = {}) {
   // user had entered. opts.addresses (supplied by the POST handler on
   // failure) wins over values.addresses_json so the user doesn't lose work.
   const initialAddresses = opts.addresses ?? [];
+
+  const users = await all(
+    env.DB,
+    `SELECT id, display_name, email FROM users WHERE active = 1 ORDER BY display_name`
+  );
+  const selectedOwner = values.owner_user_id ?? user?.id ?? '';
 
   const body = html`
     <section class="card">
@@ -68,6 +75,16 @@ export function renderNewForm(context, opts = {}) {
         </label>
 
         ${renderAddressEditor(initialAddresses)}
+
+        <label>
+          <span>Owner</span>
+          <select name="owner_user_id">
+            <option value="">— None —</option>
+            ${users.map(
+              (u) => html`<option value="${escape(u.id)}" ${selectedOwner === u.id ? 'selected' : ''}>${u.display_name ?? u.email}</option>`
+            )}
+          </select>
+        </label>
 
         <label>
           <span>Notes</span>

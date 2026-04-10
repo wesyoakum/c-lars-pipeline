@@ -158,7 +158,7 @@ export async function onRequestPost(context) {
         value.phone,
         value.website,
         value.notes,
-        user?.id ?? null,
+        value.owner_user_id ?? user?.id ?? null,
         ts,
         ts,
         user?.id ?? null,
