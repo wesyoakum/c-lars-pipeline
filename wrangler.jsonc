@@ -23,7 +23,14 @@
   ],
 
   "vars": {
-    "PMS_ENV": "production",
+    // TEMPORARY: set to 'development' while we verify the M1 checkpoint on
+    // the raw c-lars-pms.pages.dev URL (no Cloudflare Access in front yet).
+    // The middleware's resolveUser() returns the dev stub user
+    // (wes.yoakum@c-lars.com) when PMS_ENV !== 'production' and no Access
+    // header is present. Flip this back to 'production' once we either
+    //   (a) put Cloudflare Access in front of the site, or
+    //   (b) are done spot-checking.
+    "PMS_ENV": "development",
     "CF_ACCESS_TEAM_DOMAIN": "c-lars.cloudflareaccess.com",
     "CF_ACCESS_AUD": ""
   }
