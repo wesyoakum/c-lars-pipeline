@@ -7,7 +7,7 @@
 // by importing renderNewForm() below.
 
 import { all } from '../lib/db.js';
-import { layout, htmlResponse, html, escape } from '../lib/layout.js';
+import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { readFlash } from '../lib/http.js';
 
 const TYPE_OPTIONS = [
@@ -53,6 +53,20 @@ export async function renderNewForm(context, opts = {}) {
   // Allow ?account=<id> to preselect (e.g. "new opp" link from an account page).
   const preselectAccount = values.account_id ?? url.searchParams.get('account') ?? '';
 
+  // If an account is already selected, load its contacts so the user can
+  // pick an Authority without a round-trip. On a fresh form we omit this
+  // and let the client-side "Add contact" button kick in after the user
+  // picks an account.
+  const contacts = preselectAccount
+    ? await all(
+        env.DB,
+        `SELECT id, first_name, last_name, title FROM contacts
+          WHERE account_id = ?
+          ORDER BY is_primary DESC, last_name, first_name`,
+        [preselectAccount]
+      )
+    : [];
+
   const body = html`
     <section class="card">
       <h1>New opportunity</h1>
@@ -61,7 +75,8 @@ export async function renderNewForm(context, opts = {}) {
         documents, and the Job handoff all hang off it.
       </p>
 
-      <form method="post" action="/opportunities" class="stacked">
+      <form method="post" action="/opportunities" class="stacked opp-form"
+            data-initial-account="${escape(preselectAccount)}">
         <label>
           <span>Title <em>*</em></span>
           <input type="text" name="title" required value="${escape(values.title ?? '')}"
@@ -72,13 +87,16 @@ export async function renderNewForm(context, opts = {}) {
         <div class="row">
           <label style="flex:1">
             <span>Account <em>*</em></span>
-            <select name="account_id" required>
-              <option value="">— Select account —</option>
-              ${accounts.map(
-                (a) =>
-                  html`<option value="${escape(a.id)}" ${preselectAccount === a.id ? 'selected' : ''}>${a.name}</option>`
-              )}
-            </select>
+            <div class="picker-row">
+              <select name="account_id" required data-role="account-select">
+                <option value="">— Select account —</option>
+                ${accounts.map(
+                  (a) =>
+                    html`<option value="${escape(a.id)}" ${preselectAccount === a.id ? 'selected' : ''}>${a.name}</option>`
+                )}
+              </select>
+              <button type="button" class="btn btn-sm" data-action="new-account">+ New account</button>
+            </div>
             ${errors.account_id ? html`<small class="field-error">${errors.account_id}</small>` : ''}
           </label>
 
@@ -127,8 +145,8 @@ export async function renderNewForm(context, opts = {}) {
           </label>
         </div>
 
-        <fieldset style="border:1px solid var(--border); border-radius: var(--radius); padding: 0.75rem 1rem;">
-          <legend style="font-size: 0.85rem; color: var(--fg-muted);">BANT-lite</legend>
+        <fieldset class="qualification-box">
+          <legend>Qualification</legend>
           <div class="row">
             <label style="flex:1">
               <span>Budget</span>
@@ -140,9 +158,19 @@ export async function renderNewForm(context, opts = {}) {
               </select>
             </label>
             <label style="flex:1">
-              <span>Authority</span>
-              <input type="text" name="bant_authority" value="${escape(values.bant_authority ?? '')}"
-                     placeholder="Who signs the PO?">
+              <span>Authority (contact)</span>
+              <div class="picker-row">
+                <select name="bant_authority_contact_id" data-role="authority-select">
+                  <option value="">— None —</option>
+                  ${contacts.map((c) => {
+                    const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
+                    const titleSuffix = c.title ? ` — ${c.title}` : '';
+                    return html`<option value="${escape(c.id)}" ${values.bant_authority_contact_id === c.id ? 'selected' : ''}>${name}${titleSuffix}</option>`;
+                  })}
+                </select>
+                <button type="button" class="btn btn-sm" data-action="new-contact">+ New contact</button>
+              </div>
+              <input type="hidden" name="bant_authority" value="${escape(values.bant_authority ?? '')}">
             </label>
           </div>
           <div class="row">
@@ -165,6 +193,8 @@ export async function renderNewForm(context, opts = {}) {
         </div>
       </form>
     </section>
+
+    <script>${raw(oppPickerScript())}</script>
   `;
 
   return htmlResponse(
@@ -181,3 +211,116 @@ export async function renderNewForm(context, opts = {}) {
 export async function onRequestGet(context) {
   return renderNewForm(context);
 }
+
+/**
+ * Inline script for the opportunity form's on-the-fly picker behavior.
+ *
+ * - "+ New account" opens /accounts/new?popup=1 in a popup window. When
+ *   the popup posts the created account back via window.postMessage with
+ *   {type:'pms.account.created', account:{id,name}}, we append it to the
+ *   account <select>, select it, and trigger a contacts reload.
+ *
+ * - "+ New contact" opens /accounts/:account_id/contacts/new?popup=1 and
+ *   similarly listens for {type:'pms.contact.created', contact:{id,name}}.
+ *
+ * - When the account <select> changes we fetch /api/accounts/:id/contacts
+ *   (JSON) and repopulate the authority contact dropdown.
+ *
+ * Returned as a plain string so it can be interpolated via raw() without
+ * the html tagged template escaping angle brackets inside template
+ * literals.
+ */
+export function oppPickerScript() {
+  return `
+(function() {
+  const form = document.querySelector('form.opp-form');
+  if (!form) return;
+  const accountSelect = form.querySelector('select[data-role="account-select"]');
+  const authoritySelect = form.querySelector('select[data-role="authority-select"]');
+  const newAccountBtn = form.querySelector('button[data-action="new-account"]');
+  const newContactBtn = form.querySelector('button[data-action="new-contact"]');
+
+  function openPopup(url, name) {
+    return window.open(url, name, 'width=720,height=780,resizable=yes,scrollbars=yes');
+  }
+
+  async function loadContactsFor(accountId) {
+    if (!authoritySelect) return;
+    if (!accountId) {
+      authoritySelect.innerHTML = '<option value="">— None —</option>';
+      return;
+    }
+    try {
+      const res = await fetch('/api/accounts/' + encodeURIComponent(accountId) + '/contacts');
+      if (!res.ok) throw new Error('failed');
+      const contacts = await res.json();
+      const opts = ['<option value="">— None —</option>'];
+      for (const c of contacts) {
+        const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
+        const titleSuffix = c.title ? ' — ' + c.title : '';
+        opts.push('<option value="' + c.id + '">' + escapeHtml(name + titleSuffix) + '</option>');
+      }
+      authoritySelect.innerHTML = opts.join('');
+    } catch (e) {
+      console.warn('loadContactsFor failed', e);
+    }
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[c]));
+  }
+
+  if (accountSelect) {
+    accountSelect.addEventListener('change', () => loadContactsFor(accountSelect.value));
+  }
+
+  if (newAccountBtn) {
+    newAccountBtn.addEventListener('click', () => {
+      openPopup('/accounts/new?popup=1', 'pms-new-account');
+    });
+  }
+
+  if (newContactBtn) {
+    newContactBtn.addEventListener('click', () => {
+      const accountId = accountSelect && accountSelect.value;
+      if (!accountId) {
+        alert('Pick an account first, then add a contact on that account.');
+        return;
+      }
+      openPopup('/accounts/' + encodeURIComponent(accountId) + '/contacts/new?popup=1', 'pms-new-contact');
+    });
+  }
+
+  window.addEventListener('message', (ev) => {
+    if (!ev.data || typeof ev.data !== 'object') return;
+    if (ev.data.type === 'pms.account.created' && ev.data.account) {
+      const { id, name } = ev.data.account;
+      if (accountSelect && !accountSelect.querySelector('option[value="' + id + '"]')) {
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = name;
+        accountSelect.appendChild(opt);
+      }
+      if (accountSelect) {
+        accountSelect.value = id;
+        loadContactsFor(id);
+      }
+    }
+    if (ev.data.type === 'pms.contact.created' && ev.data.contact) {
+      const { id, first_name, last_name, title } = ev.data.contact;
+      if (authoritySelect) {
+        const opt = document.createElement('option');
+        opt.value = id;
+        const name = [first_name, last_name].filter(Boolean).join(' ') || '(no name)';
+        opt.textContent = name + (title ? ' — ' + title : '');
+        authoritySelect.appendChild(opt);
+        authoritySelect.value = id;
+      }
+    }
+  });
+})();
+`;
+}
+

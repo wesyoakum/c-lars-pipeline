@@ -9,7 +9,7 @@ import { one, stmt, batch } from '../../../lib/db.js';
 import { auditStmt } from '../../../lib/audit.js';
 import { validateContact } from '../../../lib/validators.js';
 import { uuid, now } from '../../../lib/ids.js';
-import { redirectWithFlash, formBody } from '../../../lib/http.js';
+import { redirectWithFlash, formBody, isPopupMode, popupCloseResponse } from '../../../lib/http.js';
 import { layout, htmlResponse } from '../../../lib/layout.js';
 
 export async function onRequestPost(context) {
@@ -92,6 +92,17 @@ export async function onRequestPost(context) {
   );
 
   await batch(env.DB, statements);
+
+  if (isPopupMode(request, input)) {
+    return popupCloseResponse('pms.contact.created', {
+      contact: {
+        id,
+        first_name: value.first_name,
+        last_name: value.last_name,
+        title: value.title,
+      },
+    });
+  }
 
   return redirectWithFlash(
     `/accounts/${accountId}`,

@@ -8,7 +8,14 @@ import { auditStmt } from '../lib/audit.js';
 import { validateAccount } from '../lib/validators.js';
 import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { uuid, now } from '../lib/ids.js';
-import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
+import {
+  redirectWithFlash,
+  formBody,
+  readFlash,
+  isPopupMode,
+  popupCloseResponse,
+} from '../lib/http.js';
+import { parseAddressForm, buildAddressStatements } from '../lib/address_editor.js';
 
 /**
  * GET /accounts — list accounts with optional ?q= search.
@@ -108,17 +115,33 @@ export async function onRequestPost(context) {
   const user = data?.user;
   const input = await formBody(request);
   const { ok, value, errors } = validateAccount(input);
+  const submittedAddresses = parseAddressForm(input);
 
   if (!ok) {
-    // Re-render the new form with the errors inline.
+    // Re-render the new form with the errors inline. Hand back the parsed
+    // address rows so the user doesn't lose them.
     const { renderNewForm } = await import('./new.js');
-    return renderNewForm(context, { values: input, errors });
+    return renderNewForm(context, {
+      values: input,
+      errors,
+      addresses: submittedAddresses,
+    });
   }
 
   const id = uuid();
   const ts = now();
 
-  await batch(env.DB, [
+  // Denormalized convenience columns on accounts: pick the first default
+  // billing / physical (or just the first of each kind) so legacy readers
+  // that still hit accounts.address_billing / address_physical keep working.
+  const firstBilling =
+    submittedAddresses.find((a) => a.kind === 'billing' && a.is_default) ||
+    submittedAddresses.find((a) => a.kind === 'billing');
+  const firstPhysical =
+    submittedAddresses.find((a) => a.kind === 'physical' && a.is_default) ||
+    submittedAddresses.find((a) => a.kind === 'physical');
+
+  const statements = [
     stmt(
       env.DB,
       `INSERT INTO accounts
@@ -130,8 +153,8 @@ export async function onRequestPost(context) {
         id,
         value.name,
         value.segment,
-        value.address_billing,
-        value.address_physical,
+        firstBilling?.address ?? null,
+        firstPhysical?.address ?? null,
         value.phone,
         value.website,
         value.notes,
@@ -141,15 +164,36 @@ export async function onRequestPost(context) {
         user?.id ?? null,
       ]
     ),
+  ];
+
+  // Insert the normalized address rows (no existing rows on create).
+  const { statements: addrStmts } = buildAddressStatements(
+    env.DB,
+    id,
+    submittedAddresses,
+    [],
+    user
+  );
+  statements.push(...addrStmts);
+
+  statements.push(
     auditStmt(env.DB, {
       entityType: 'account',
       entityId: id,
       eventType: 'created',
       user,
       summary: `Created account "${value.name}"`,
-      changes: value,
-    }),
-  ]);
+      changes: { ...value, address_count: submittedAddresses.length },
+    })
+  );
+
+  await batch(env.DB, statements);
+
+  if (isPopupMode(request, input)) {
+    return popupCloseResponse('pms.account.created', {
+      account: { id, name: value.name },
+    });
+  }
 
   return redirectWithFlash(`/accounts/${id}`, `Account "${value.name}" created.`);
 }

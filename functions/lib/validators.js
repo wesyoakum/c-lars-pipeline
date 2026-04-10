@@ -68,6 +68,10 @@ export function validateOpportunity(input) {
   } else {
     value.bant_budget = input.bant_budget;
   }
+  // Authority is now a contact reference (bant_authority_contact_id).
+  // The old free-text bant_authority column is kept as a fallback for
+  // cases where the user hasn't yet picked / created a contact.
+  value.bant_authority_contact_id = trim(input.bant_authority_contact_id) || null;
   value.bant_authority = trim(input.bant_authority) || null;
   value.bant_need = trim(input.bant_need) || null;
   value.bant_timeline = trim(input.bant_timeline) || null;

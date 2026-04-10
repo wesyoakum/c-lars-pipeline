@@ -6,22 +6,27 @@
 
 import { one } from '../../../lib/db.js';
 import { layout, htmlResponse, html, escape } from '../../../lib/layout.js';
+import { isPopupMode } from '../../../lib/http.js';
 
 export function renderNewContactForm(context, opts = {}) {
-  const { data } = context;
+  const { data, request } = context;
   const user = data?.user;
   const account = opts.account;
   const values = opts.values ?? {};
   const errors = opts.errors ?? {};
+  const popup = isPopupMode(request, values);
 
   const body = html`
     <section class="card">
       <h1>New contact</h1>
       <p class="muted">
-        Adding a contact to <a href="/accounts/${escape(account.id)}">${account.name}</a>.
+        Adding a contact to ${popup
+          ? html`${account.name}`
+          : html`<a href="/accounts/${escape(account.id)}">${account.name}</a>`}.
       </p>
 
-      <form method="post" action="/accounts/${escape(account.id)}/contacts" class="stacked">
+      <form method="post" action="/accounts/${escape(account.id)}/contacts${popup ? '?popup=1' : ''}" class="stacked">
+        ${popup ? html`<input type="hidden" name="popup" value="1">` : ''}
         <div class="row">
           <label style="flex:1">
             <span>First name</span>
@@ -62,7 +67,9 @@ export function renderNewContactForm(context, opts = {}) {
 
         <div class="form-actions">
           <button type="submit" class="btn primary">Create contact</button>
-          <a href="/accounts/${escape(account.id)}" class="btn">Cancel</a>
+          ${popup
+            ? html`<button type="button" class="btn" onclick="window.close()">Cancel</button>`
+            : html`<a href="/accounts/${escape(account.id)}" class="btn">Cancel</a>`}
         </div>
       </form>
     </section>

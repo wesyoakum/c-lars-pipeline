@@ -5,9 +5,15 @@
 // The POST target for this form is /accounts (handled by accounts/index.js),
 // which will re-render this page with inline errors on validation failure
 // by importing renderNewForm() below.
+//
+// Also supports popup mode (?popup=1). When the user opens this form from
+// the opportunity form via the "+ New account" button we open it in a
+// popup window; on successful create the opener gets a postMessage with
+// the new account's id + name and the popup auto-closes.
 
-import { layout, htmlResponse, html, escape } from '../lib/layout.js';
-import { readFlash } from '../lib/http.js';
+import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
+import { readFlash, isPopupMode } from '../lib/http.js';
+import { renderAddressEditor, addressEditorScript } from '../lib/address_editor.js';
 
 const SEGMENTS = ['WROV', 'Research', 'Defense', 'Commercial', 'Other'];
 
@@ -17,6 +23,12 @@ export function renderNewForm(context, opts = {}) {
   const url = new URL(request.url);
   const values = opts.values ?? {};
   const errors = opts.errors ?? {};
+  const popup = isPopupMode(request, values);
+
+  // On validation re-render we need to echo back whatever addresses the
+  // user had entered. opts.addresses (supplied by the POST handler on
+  // failure) wins over values.addresses_json so the user doesn't lose work.
+  const initialAddresses = opts.addresses ?? [];
 
   const body = html`
     <section class="card">
@@ -26,7 +38,8 @@ export function renderNewForm(context, opts = {}) {
         must be attached after creation.
       </p>
 
-      <form method="post" action="/accounts" class="stacked">
+      <form method="post" action="/accounts${popup ? '?popup=1' : ''}" class="stacked">
+        ${popup ? html`<input type="hidden" name="popup" value="1">` : ''}
         <label>
           <span>Name <em>*</em></span>
           <input type="text" name="name" required value="${escape(values.name ?? '')}">
@@ -54,15 +67,7 @@ export function renderNewForm(context, opts = {}) {
                  placeholder="https://example.com">
         </label>
 
-        <label>
-          <span>Billing address</span>
-          <textarea name="address_billing" rows="3">${escape(values.address_billing ?? '')}</textarea>
-        </label>
-
-        <label>
-          <span>Physical address (if different)</span>
-          <textarea name="address_physical" rows="3">${escape(values.address_physical ?? '')}</textarea>
-        </label>
+        ${renderAddressEditor(initialAddresses)}
 
         <label>
           <span>Notes</span>
@@ -71,10 +76,13 @@ export function renderNewForm(context, opts = {}) {
 
         <div class="form-actions">
           <button type="submit" class="btn primary">Create account</button>
-          <a href="/accounts" class="btn">Cancel</a>
+          ${popup
+            ? html`<button type="button" class="btn" onclick="window.close()">Cancel</button>`
+            : html`<a href="/accounts" class="btn">Cancel</a>`}
         </div>
       </form>
     </section>
+    <script>${raw(addressEditorScript())}</script>
   `;
 
   return htmlResponse(

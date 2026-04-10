@@ -387,3 +387,362 @@ ul.activity li:last-child { border-bottom: 0; }
 }
 .activity-when { margin-left: auto; }
 .activity-changes { margin-top: 0.25rem; }
+
+/* ---------- Opportunity detail header value ---------- */
+
+.header-value {
+  display: inline-block;
+  margin-left: 0.75rem;
+  font-size: 0.7em;
+  font-weight: 500;
+  color: var(--fg-muted);
+  vertical-align: middle;
+  padding: 0.1em 0.6em;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+/* ---------- Stage picker button strip ---------- */
+
+.stage-picker {
+  margin: 1rem 0;
+}
+.stage-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+.stage-btn {
+  padding: 0.35rem 0.7rem;
+  font-size: 0.85em;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.stage-btn:hover { background: var(--bg-alt); }
+.stage-btn[disabled] { cursor: default; }
+
+.stage-btn-current {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.stage-btn-current:hover { background: var(--accent); }
+
+.stage-btn-upstream {
+  background: var(--bg-alt);
+  color: var(--fg-muted);
+  opacity: 0.7;
+}
+.stage-btn-upstream:hover { opacity: 1; }
+
+.stage-btn-next {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.stage-btn-won {
+  background: #dafbe1;
+  border-color: #4ac26b;
+  color: #1a7f37;
+}
+.stage-btn-won:hover { background: #b4e6c0; }
+
+.stage-btn-loss {
+  background: #ffebe9;
+  border-color: #ff8182;
+  color: #cf222e;
+}
+.stage-btn-loss:hover { background: #ffd0cc; }
+
+.stage-reason {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85em;
+  color: var(--fg-muted);
+}
+.stage-reason input {
+  font: inherit;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  max-width: 500px;
+}
+
+/* ---------- Picker row (dropdown + "new" button) ---------- */
+
+.picker-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+.picker-row select {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---------- Qualification fieldset ---------- */
+
+fieldset.qualification-box {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem 1rem;
+  margin: 0;
+}
+fieldset.qualification-box legend {
+  padding: 0 0.4rem;
+  color: var(--fg);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+fieldset.qualification-box .row {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+fieldset.qualification-box label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+  color: var(--fg-muted);
+}
+fieldset.qualification-box input,
+fieldset.qualification-box select {
+  font: inherit;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+/* ---------- Address editor (Alpine-powered) ---------- */
+
+.address-editor {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  background: var(--bg-alt);
+}
+.address-editor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+.address-editor-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+.address-row {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem;
+  margin-top: 0.5rem;
+  border-left-width: 4px;
+}
+.address-row-billing  { border-left-color: #54aeff; }
+.address-row-physical { border-left-color: #4ac26b; }
+.address-row-head {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 0.4rem;
+}
+.address-row-kind {
+  font: inherit;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+.address-row-label {
+  font: inherit;
+  flex: 1;
+  min-width: 180px;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.address-row-default {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85em;
+  color: var(--fg-muted);
+}
+.address-row-text {
+  width: 100%;
+  font: inherit;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  resize: vertical;
+}
+
+/* Read-only address view on account detail */
+.address-view {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.address-view-group strong { display: block; margin-bottom: 0.3rem; }
+.address-view-row {
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px dashed var(--border);
+}
+.address-view-row:last-child { border-bottom: 0; }
+.address-view-head {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.2rem;
+  font-size: 0.85em;
+  color: var(--fg-muted);
+}
+.address-view-label { font-weight: 600; color: var(--fg); }
+.address-view pre.addr {
+  font-family: var(--font);
+  font-size: 0.95em;
+  background: var(--bg-alt);
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* ---------- Opportunities list (Alpine advanced table) ---------- */
+
+.opp-list { margin-top: 1rem; }
+.opp-list-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+.opp-list-quicksearch {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+}
+.opp-list-quicksearch input[type="search"] {
+  font: inherit;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  min-width: 260px;
+}
+
+.opp-list-columns { position: relative; }
+.opp-list-columns summary {
+  list-style: none;
+  cursor: pointer;
+}
+.opp-list-columns summary::-webkit-details-marker { display: none; }
+.opp-list-columns[open] .opp-list-columns-menu { display: block; }
+.opp-list-columns-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.25rem);
+  z-index: 10;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  min-width: 220px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+}
+.opp-list-column-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+}
+.opp-list-column-row label {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  color: var(--fg);
+  font-size: 0.9em;
+}
+.opp-list-column-move { display: flex; gap: 0.2rem; }
+.opp-list-columns-actions {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn.btn-xs {
+  padding: 0.1rem 0.4rem;
+  font-size: 0.75em;
+}
+
+.opp-list-table thead th { padding: 0; }
+.opp-list-table .col-sort {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 0.3rem;
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+}
+.opp-list-table .col-sort:hover { background: var(--bg-alt); }
+.sort-indicator {
+  font-size: 0.75em;
+  color: var(--accent);
+  min-width: 0.8em;
+  display: inline-block;
+  text-align: right;
+}
+
+.opp-list-filter-row th {
+  background: var(--bg);
+  padding: 0.3rem 0.5rem;
+  border-bottom: 2px solid var(--border);
+}
+.opp-list-filter-row input,
+.opp-list-filter-row select {
+  font: inherit;
+  width: 100%;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-size: 0.85em;
+}
+.filter-range {
+  display: flex;
+  gap: 0.2rem;
+}
+.filter-range input { width: 50%; }

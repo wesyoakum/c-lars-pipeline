@@ -6,8 +6,9 @@
 // That handler re-renders this form via renderEditForm() on validation failure.
 
 import { one } from '../../lib/db.js';
-import { layout, htmlResponse, html, escape } from '../../lib/layout.js';
+import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
 import { readFlash } from '../../lib/http.js';
+import { loadAddresses, renderAddressEditor, addressEditorScript } from '../../lib/address_editor.js';
 
 const SEGMENTS = ['WROV', 'Research', 'Defense', 'Commercial', 'Other'];
 
@@ -17,6 +18,9 @@ export function renderEditForm(context, opts = {}) {
   const url = new URL(request.url);
   const account = opts.account;
   const errors = opts.errors ?? {};
+  // opts.addresses takes precedence (re-render path, user edits in progress);
+  // otherwise use the DB-loaded list passed in by the GET handler.
+  const addresses = opts.addresses ?? account.addresses ?? [];
 
   const body = html`
     <section class="card">
@@ -49,15 +53,7 @@ export function renderEditForm(context, opts = {}) {
           <input type="text" name="website" value="${escape(account.website ?? '')}">
         </label>
 
-        <label>
-          <span>Billing address</span>
-          <textarea name="address_billing" rows="3">${escape(account.address_billing ?? '')}</textarea>
-        </label>
-
-        <label>
-          <span>Physical address (if different)</span>
-          <textarea name="address_physical" rows="3">${escape(account.address_physical ?? '')}</textarea>
-        </label>
+        ${renderAddressEditor(addresses)}
 
         <label>
           <span>Notes</span>
@@ -70,6 +66,7 @@ export function renderEditForm(context, opts = {}) {
         </div>
       </form>
     </section>
+    <script>${raw(addressEditorScript())}</script>
   `;
 
   return htmlResponse(
@@ -100,5 +97,6 @@ export async function onRequestGet(context) {
       { status: 404 }
     );
   }
-  return renderEditForm(context, { account });
+  const addresses = await loadAddresses(env.DB, params.id);
+  return renderEditForm(context, { account: { ...account, addresses } });
 }

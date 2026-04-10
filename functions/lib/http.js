@@ -70,3 +70,57 @@ export function readFlash(url) {
     kind: url.searchParams.get('flash_kind') || 'info',
   };
 }
+
+/**
+ * Response body for a popup window that has just completed an on-the-fly
+ * create (e.g. new account, new contact). Posts a message back to the
+ * window.opener with the created entity payload and auto-closes.
+ *
+ * `type` should be a string like 'pms.account.created'. `payload` is a
+ * plain object the opener script knows how to interpret. Safe-serializes
+ * via JSON.stringify and escapes the </script> attack vector.
+ */
+export function popupCloseResponse(type, payload) {
+  const json = JSON.stringify({ type, ...payload });
+  const escaped = json
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+  const body = `<!doctype html>
+<html><head><meta charset="utf-8"><title>Saved</title>
+<style>body{font-family:system-ui,sans-serif;padding:2rem;color:#333}</style>
+</head><body>
+  <p>Saved. Returning to the opportunity…</p>
+  <script>
+    (function() {
+      try {
+        if (window.opener && !window.opener.closed) {
+          window.opener.postMessage(${escaped}, '*');
+        }
+      } catch (e) { console.warn(e); }
+      setTimeout(function(){ window.close(); }, 150);
+    })();
+  </script>
+</body></html>`;
+  return new Response(body, {
+    status: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+  });
+}
+
+/**
+ * Returns true if this request is running in popup mode — determined by
+ * either ?popup=1 on the URL or popup=1 in the parsed form body. Route
+ * handlers use this to decide between a normal redirect and a
+ * popupCloseResponse() back to window.opener.
+ */
+export function isPopupMode(request, formValues = null) {
+  try {
+    const url = new URL(request.url);
+    if (url.searchParams.get('popup') === '1') return true;
+  } catch {}
+  if (formValues && formValues.popup === '1') return true;
+  return false;
+}

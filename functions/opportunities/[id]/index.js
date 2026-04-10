@@ -26,6 +26,7 @@ const UPDATE_FIELDS = [
   'expected_close_date',
   'bant_budget',
   'bant_authority',
+  'bant_authority_contact_id',
   'bant_need',
   'bant_timeline',
   'owner_user_id',
@@ -63,13 +64,16 @@ export async function onRequestGet(context) {
     `SELECT o.*, a.name AS account_name,
             c.first_name AS contact_first, c.last_name AS contact_last,
             c.email AS contact_email, c.phone AS contact_phone,
+            auth.first_name AS auth_first, auth.last_name AS auth_last,
+            auth.email AS auth_email, auth.title AS auth_title,
             ou.display_name AS owner_name, ou.email AS owner_email,
             sp.display_name AS sp_name, sp.email AS sp_email
        FROM opportunities o
-       LEFT JOIN accounts  a  ON a.id  = o.account_id
-       LEFT JOIN contacts  c  ON c.id  = o.primary_contact_id
-       LEFT JOIN users     ou ON ou.id = o.owner_user_id
-       LEFT JOIN users     sp ON sp.id = o.salesperson_user_id
+       LEFT JOIN accounts  a    ON a.id    = o.account_id
+       LEFT JOIN contacts  c    ON c.id    = o.primary_contact_id
+       LEFT JOIN contacts  auth ON auth.id = o.bant_authority_contact_id
+       LEFT JOIN users     ou   ON ou.id   = o.owner_user_id
+       LEFT JOIN users     sp   ON sp.id   = o.salesperson_user_id
       WHERE o.id = ?`,
     [oppId]
   );
@@ -78,6 +82,7 @@ export async function onRequestGet(context) {
   const catalog = await loadStageCatalog(env.DB);
   const typeStages = catalog.get(opp.transaction_type) ?? [];
   const currentStage = typeStages.find((s) => s.stage_key === opp.stage);
+  const currentSort = currentStage?.sort_order ?? 0;
 
   // Account contacts for the primary-contact dropdown in edit, and also
   // to render the contact strip under the header.
@@ -106,23 +111,47 @@ export async function onRequestGet(context) {
   );
 
   const primaryContactName = [opp.contact_first, opp.contact_last].filter(Boolean).join(' ');
+  const authorityName = [opp.auth_first, opp.auth_last].filter(Boolean).join(' ');
   const ownerLabel = opp.owner_name ?? opp.owner_email ?? '—';
   const salespersonLabel = opp.sp_name ?? opp.sp_email ?? '—';
 
-  // Build the stage transition <select>: every stage for this transaction_type
-  // except the current one. Gate rules are displayed as hints but not enforced
-  // yet (that's M7).
-  const stageOptions = typeStages
-    .filter((s) => s.stage_key !== opp.stage)
-    .map(
-      (s) => html`<option value="${s.stage_key}">${s.label}${s.is_terminal ? ' (terminal)' : ''}</option>`
-    );
+  // Build the stage picker as a button strip. Every stage for this
+  // transaction_type is rendered in order — upstream (already-passed)
+  // stages are selectable but rendered muted, the current stage is
+  // highlighted and disabled, downstream/terminal stages are primary
+  // buttons. Clicking a button submits the single stage-move form
+  // with that stage as `to_stage` (each <button> uses name=to_stage value=...).
+  const stageButtons = typeStages.map((s) => {
+    const isCurrent = s.stage_key === opp.stage;
+    const isUpstream = s.sort_order < currentSort;
+    const isTerminalLoss = s.stage_key === 'closed_lost' || s.stage_key === 'closed_died';
+    let cls = 'btn stage-btn';
+    if (isCurrent) cls += ' stage-btn-current';
+    else if (isUpstream) cls += ' stage-btn-upstream';
+    else if (isTerminalLoss) cls += ' stage-btn-loss';
+    else if (s.is_won) cls += ' stage-btn-won';
+    else cls += ' stage-btn-next';
+    return html`
+      <button type="submit" name="to_stage" value="${s.stage_key}"
+              class="${cls}" ${isCurrent ? 'disabled aria-current="step"' : ''}>
+        ${s.label}
+      </button>`;
+  });
+
+  const estValueDisplay = opp.estimated_value_usd != null
+    ? `$${formatMoney(opp.estimated_value_usd)}`
+    : null;
 
   const overviewTab = html`
     <section class="card">
       <div class="card-header">
         <div>
-          <h1>${opp.title}</h1>
+          <h1>
+            ${opp.title}
+            ${estValueDisplay
+              ? html` <span class="header-value">${estValueDisplay}</span>`
+              : ''}
+          </h1>
           <p class="muted">
             <code>${escape(opp.number)}</code>
             · <a href="/accounts/${escape(opp.account_id)}">${escape(opp.account_name ?? '—')}</a>
@@ -136,18 +165,15 @@ export async function onRequestGet(context) {
         </div>
       </div>
 
-      <form method="post" action="/opportunities/${escape(opp.id)}/stage" class="inline-form"
-            style="margin: 0.5rem 0 1rem;">
-        <label style="margin:0">
-          <span class="muted" style="font-size: 0.85rem;">Advance / move stage:</span>
+      <form method="post" action="/opportunities/${escape(opp.id)}/stage" class="stage-picker">
+        <div class="stage-strip">
+          ${stageButtons}
+        </div>
+        <label class="stage-reason">
+          <span class="muted" style="font-size: 0.85rem;">Override reason (optional, recorded in audit)</span>
+          <input type="text" name="override_reason"
+                 placeholder="e.g. Client escalated to verbal; paperwork pending">
         </label>
-        <select name="to_stage" required>
-          <option value="">— Select target stage —</option>
-          ${stageOptions}
-        </select>
-        <input type="text" name="override_reason" placeholder="Reason (optional)"
-               style="flex:1; max-width: 280px;">
-        <button type="submit" class="btn primary">Move stage</button>
       </form>
 
       <div class="addr-grid">
@@ -195,10 +221,17 @@ export async function onRequestGet(context) {
         : ''}
 
       <div style="margin-top: 1rem;">
-        <strong>BANT-lite</strong>
+        <strong>Qualification</strong>
         <ul class="plain">
           <li><strong>Budget:</strong> ${escape(opp.bant_budget ?? '—')}</li>
-          <li><strong>Authority:</strong> ${escape(opp.bant_authority ?? '—')}</li>
+          <li>
+            <strong>Authority:</strong>
+            ${authorityName
+              ? html`${escape(authorityName)}${opp.auth_title ? html` <span class="muted">(${escape(opp.auth_title)})</span>` : ''}${opp.auth_email ? html` · <a href="mailto:${escape(opp.auth_email)}">${escape(opp.auth_email)}</a>` : ''}`
+              : opp.bant_authority
+                ? html`<span class="muted">${escape(opp.bant_authority)}</span>`
+                : '—'}
+          </li>
           <li><strong>Need:</strong> ${escape(opp.bant_need ?? '—')}</li>
           <li><strong>Timeline:</strong> ${escape(opp.bant_timeline ?? '—')}</li>
         </ul>
@@ -325,7 +358,8 @@ export async function onRequestPost(context) {
           SET title = ?, account_id = ?, primary_contact_id = ?, description = ?,
               transaction_type = ?, rfq_format = ?,
               estimated_value_usd = ?, expected_close_date = ?,
-              bant_budget = ?, bant_authority = ?, bant_need = ?, bant_timeline = ?,
+              bant_budget = ?, bant_authority = ?, bant_authority_contact_id = ?,
+              bant_need = ?, bant_timeline = ?,
               owner_user_id = ?, salesperson_user_id = ?,
               updated_at = ?
         WHERE id = ?`,
@@ -340,6 +374,7 @@ export async function onRequestPost(context) {
         value.expected_close_date,
         value.bant_budget,
         value.bant_authority,
+        value.bant_authority_contact_id,
         value.bant_need,
         value.bant_timeline,
         value.owner_user_id,

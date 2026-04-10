@@ -7,8 +7,9 @@
 // by importing renderEditForm() below.
 
 import { one, all } from '../../lib/db.js';
-import { layout, htmlResponse, html, escape } from '../../lib/layout.js';
+import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
 import { readFlash } from '../../lib/http.js';
+import { oppPickerScript } from '../new.js';
 
 const TYPE_OPTIONS = [
   { value: 'spares', label: 'Spares' },
@@ -50,7 +51,7 @@ export async function renderEditForm(context, opts = {}) {
     all(env.DB, 'SELECT id, name FROM accounts ORDER BY name'),
     all(
       env.DB,
-      `SELECT id, first_name, last_name FROM contacts WHERE account_id = ?
+      `SELECT id, first_name, last_name, title FROM contacts WHERE account_id = ?
         ORDER BY is_primary DESC, last_name, first_name`,
       [opp.account_id]
     ),
@@ -72,7 +73,8 @@ export async function renderEditForm(context, opts = {}) {
         </div>
       </div>
 
-      <form method="post" action="/opportunities/${escape(opp.id)}" class="stacked">
+      <form method="post" action="/opportunities/${escape(opp.id)}" class="stacked opp-form"
+            data-initial-account="${escape(opp.account_id ?? '')}">
         <label>
           <span>Title <em>*</em></span>
           <input type="text" name="title" required value="${escape(opp.title ?? '')}">
@@ -82,13 +84,16 @@ export async function renderEditForm(context, opts = {}) {
         <div class="row">
           <label style="flex:1">
             <span>Account <em>*</em></span>
-            <select name="account_id" required>
-              <option value="">— Select account —</option>
-              ${accounts.map(
-                (a) =>
-                  html`<option value="${escape(a.id)}" ${opp.account_id === a.id ? 'selected' : ''}>${a.name}</option>`
-              )}
-            </select>
+            <div class="picker-row">
+              <select name="account_id" required data-role="account-select">
+                <option value="">— Select account —</option>
+                ${accounts.map(
+                  (a) =>
+                    html`<option value="${escape(a.id)}" ${opp.account_id === a.id ? 'selected' : ''}>${a.name}</option>`
+                )}
+              </select>
+              <button type="button" class="btn btn-sm" data-action="new-account">+ New account</button>
+            </div>
             ${errors.account_id ? html`<small class="field-error">${errors.account_id}</small>` : ''}
           </label>
 
@@ -107,13 +112,16 @@ export async function renderEditForm(context, opts = {}) {
 
         <label>
           <span>Primary contact</span>
-          <select name="primary_contact_id">
-            <option value="">— None —</option>
-            ${contacts.map((c) => {
-              const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
-              return html`<option value="${escape(c.id)}" ${opp.primary_contact_id === c.id ? 'selected' : ''}>${name}</option>`;
-            })}
-          </select>
+          <div class="picker-row">
+            <select name="primary_contact_id" data-role="primary-contact-select">
+              <option value="">— None —</option>
+              ${contacts.map((c) => {
+                const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
+                return html`<option value="${escape(c.id)}" ${opp.primary_contact_id === c.id ? 'selected' : ''}>${name}</option>`;
+              })}
+            </select>
+            <button type="button" class="btn btn-sm" data-action="new-contact" data-target="primary-contact-select">+ New contact</button>
+          </div>
         </label>
 
         <label>
@@ -169,8 +177,8 @@ export async function renderEditForm(context, opts = {}) {
           </label>
         </div>
 
-        <fieldset style="border:1px solid var(--border); border-radius: var(--radius); padding: 0.75rem 1rem;">
-          <legend style="font-size: 0.85rem; color: var(--fg-muted);">BANT-lite</legend>
+        <fieldset class="qualification-box">
+          <legend>Qualification</legend>
           <div class="row">
             <label style="flex:1">
               <span>Budget</span>
@@ -182,8 +190,19 @@ export async function renderEditForm(context, opts = {}) {
               </select>
             </label>
             <label style="flex:1">
-              <span>Authority</span>
-              <input type="text" name="bant_authority" value="${escape(opp.bant_authority ?? '')}">
+              <span>Authority (contact)</span>
+              <div class="picker-row">
+                <select name="bant_authority_contact_id" data-role="authority-select">
+                  <option value="">— None —</option>
+                  ${contacts.map((c) => {
+                    const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
+                    const titleSuffix = c.title ? ` — ${c.title}` : '';
+                    return html`<option value="${escape(c.id)}" ${opp.bant_authority_contact_id === c.id ? 'selected' : ''}>${name}${titleSuffix}</option>`;
+                  })}
+                </select>
+                <button type="button" class="btn btn-sm" data-action="new-contact" data-target="authority-select">+ New contact</button>
+              </div>
+              <input type="hidden" name="bant_authority" value="${escape(opp.bant_authority ?? '')}">
             </label>
           </div>
           <div class="row">
@@ -204,6 +223,8 @@ export async function renderEditForm(context, opts = {}) {
         </div>
       </form>
     </section>
+
+    <script>${raw(oppPickerScript())}</script>
   `;
 
   return htmlResponse(

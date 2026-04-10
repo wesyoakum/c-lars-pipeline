@@ -12,6 +12,12 @@ import { validateAccount } from '../../lib/validators.js';
 import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
+import {
+  loadAddresses,
+  renderAddressView,
+  parseAddressForm,
+  buildAddressStatements,
+} from '../../lib/address_editor.js';
 
 const UPDATE_FIELDS = [
   'name',
@@ -44,6 +50,8 @@ export async function onRequestGet(context) {
       ORDER BY is_primary DESC, last_name, first_name`,
     [accountId]
   );
+
+  const addresses = await loadAddresses(env.DB, accountId);
 
   const events = await all(
     env.DB,
@@ -82,17 +90,7 @@ export async function onRequestGet(context) {
         </div>
       </div>
 
-      ${account.address_billing || account.address_physical
-        ? html`
-          <div class="addr-grid">
-            ${account.address_billing
-              ? html`<div><strong>Billing</strong><pre class="addr">${escape(account.address_billing)}</pre></div>`
-              : ''}
-            ${account.address_physical
-              ? html`<div><strong>Physical</strong><pre class="addr">${escape(account.address_physical)}</pre></div>`
-              : ''}
-          </div>`
-        : ''}
+      ${renderAddressView(addresses)}
 
       ${account.notes
         ? html`<p class="notes">${escape(account.notes)}</p>`
@@ -201,17 +199,47 @@ export async function onRequestPost(context) {
 
   const input = await formBody(request);
   const { ok, value, errors } = validateAccount(input);
+  const submittedAddresses = parseAddressForm(input);
+
   if (!ok) {
-    // Re-render the edit form with errors.
+    // Re-render the edit form with errors, preserving the user's in-flight
+    // address edits.
     const { renderEditForm } = await import('./edit.js');
-    return renderEditForm(context, { account: { ...before, ...input }, errors });
+    return renderEditForm(context, {
+      account: { ...before, ...input },
+      errors,
+      addresses: submittedAddresses,
+    });
   }
 
+  const existingAddresses = await loadAddresses(env.DB, accountId);
+
+  // Keep the denormalized convenience columns on accounts in sync with the
+  // submitted list (first default-or-first wins per kind).
+  const firstBilling =
+    submittedAddresses.find((a) => a.kind === 'billing' && a.is_default) ||
+    submittedAddresses.find((a) => a.kind === 'billing');
+  const firstPhysical =
+    submittedAddresses.find((a) => a.kind === 'physical' && a.is_default) ||
+    submittedAddresses.find((a) => a.kind === 'physical');
+
   const ts = now();
-  const after = { ...value };
+  const after = {
+    ...value,
+    address_billing: firstBilling?.address ?? null,
+    address_physical: firstPhysical?.address ?? null,
+  };
   const changes = diff(before, after, UPDATE_FIELDS);
 
-  await batch(env.DB, [
+  const { statements: addrStmts, changes: addrChanges } = buildAddressStatements(
+    env.DB,
+    accountId,
+    submittedAddresses,
+    existingAddresses,
+    user
+  );
+
+  const statements = [
     stmt(
       env.DB,
       `UPDATE accounts
@@ -224,22 +252,37 @@ export async function onRequestPost(context) {
         value.segment,
         value.phone,
         value.website,
-        value.address_billing,
-        value.address_physical,
+        after.address_billing,
+        after.address_physical,
         value.notes,
         ts,
         accountId,
       ]
     ),
-    auditStmt(env.DB, {
-      entityType: 'account',
-      entityId: accountId,
-      eventType: 'updated',
-      user,
-      summary: `Updated account "${value.name}"`,
-      changes,
-    }),
-  ]);
+    ...addrStmts,
+  ];
+
+  // Only write an audit event if something actually changed, so that a
+  // plain re-save doesn't pollute the timeline.
+  const addressesDirty =
+    addrChanges.inserted > 0 || addrChanges.updated > 0 || addrChanges.deleted > 0;
+  if (changes || addressesDirty) {
+    statements.push(
+      auditStmt(env.DB, {
+        entityType: 'account',
+        entityId: accountId,
+        eventType: 'updated',
+        user,
+        summary: `Updated account "${value.name}"`,
+        changes: {
+          ...(changes || {}),
+          ...(addressesDirty ? { addresses: addrChanges } : {}),
+        },
+      })
+    );
+  }
+
+  await batch(env.DB, statements);
 
   return redirectWithFlash(`/accounts/${accountId}`, `Saved.`);
 }
