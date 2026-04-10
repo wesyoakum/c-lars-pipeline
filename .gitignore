@@ -1,0 +1,15 @@
+# SharePoint / OneDrive sync artifacts
+~$*
+*.tmp
+.tmp
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Office lock files
+~*.docx
+~*.xlsx
+~*.pptx
+
+# Claude Code local state
+.claude/
