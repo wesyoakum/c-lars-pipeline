@@ -43,7 +43,12 @@ export function html(strings, ...values) {
       out += renderValue(values[i]);
     }
   }
-  return out;
+  // Return a raw-marked object (not a plain string) so that nested
+  // interpolations like  html`<ul>${html`<li>x</li>`}</ul>`  don't get
+  // their inner HTML escaped by the outer template's renderValue(). The
+  // toString() shim keeps plain template-literal usage working — e.g.
+  // layout() interpolates `${body}` into a regular backtick string.
+  return { __raw: out, toString() { return out; } };
 }
 
 /**
@@ -51,7 +56,8 @@ export function html(strings, ...values) {
  * via the `html` tagged template.
  */
 export function raw(value) {
-  return { __raw: String(value ?? '') };
+  const s = String(value ?? '');
+  return { __raw: s, toString() { return s; } };
 }
 
 function renderValue(value) {
