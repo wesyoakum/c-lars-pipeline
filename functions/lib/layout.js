@@ -15,15 +15,29 @@
 /**
  * Escape a string for safe interpolation into HTML content or
  * attribute values. Handles null/undefined.
+ *
+ * Returns a raw-marked object (not a plain string) so the html tagged
+ * template's renderValue() recognizes it as already-escaped and does
+ * NOT escape it a second time. The toString() shim keeps it usable
+ * inside plain template literals (`${escape(x)}` in a regular backtick
+ * string) and any other place that coerces to string.
+ *
+ * Without this, JSON serialized into a data-* attribute via
+ *   data-foo="${escape(JSON.stringify(obj))}"
+ * gets the `&` in `&quot;` re-escaped to `&amp;quot;`, and the browser
+ * decodes that back to literal text `&quot;` — which is not valid JSON.
  */
 export function escape(value) {
-  if (value === null || value === undefined) return '';
-  return String(value)
+  if (value === null || value === undefined) {
+    return { __raw: '', toString() { return ''; } };
+  }
+  const escaped = String(value)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+  return { __raw: escaped, toString() { return escaped; } };
 }
 
 /**
