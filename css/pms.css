@@ -233,3 +233,147 @@ form.stacked textarea {
   color: #fff;
   border-color: var(--danger);
 }
+.btn.btn-sm {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.85em;
+}
+
+form.stacked textarea {
+  font: inherit;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  resize: vertical;
+}
+form.stacked .row {
+  display: flex;
+  gap: 1rem;
+}
+form.stacked .field-error {
+  color: var(--danger);
+  margin-top: 0.2rem;
+}
+form.stacked .form-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+form.stacked label.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--fg);
+}
+form.stacked label em {
+  color: var(--danger);
+  font-style: normal;
+}
+
+.inline-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 1rem 0;
+}
+.inline-form input[type="search"] {
+  flex: 1;
+  max-width: 400px;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  background: var(--bg);
+}
+
+/* ---------- Card header (title + action buttons) ---------- */
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.card-header h1,
+.card-header h2 { margin: 0 0 0.25rem 0; }
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+/* ---------- Pills (inline status/segment badges) ---------- */
+
+.pill {
+  display: inline-block;
+  padding: 0.1em 0.6em;
+  font-size: 0.8em;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg-muted);
+}
+.pill-success {
+  background: #dafbe1;
+  border-color: #4ac26b;
+  color: #1a7f37;
+}
+
+/* ---------- Address grid on account detail ---------- */
+
+.addr-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.addr-grid pre.addr {
+  font-family: var(--font);
+  font-size: 0.95em;
+  background: var(--bg-alt);
+  padding: 0.5rem 0.7rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  margin: 0.25rem 0 0 0;
+  white-space: pre-wrap;
+}
+.notes {
+  background: var(--bg-alt);
+  padding: 0.75rem 1rem;
+  border-left: 3px solid var(--border);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  margin-top: 1rem;
+  white-space: pre-wrap;
+}
+
+/* ---------- Activity feed ---------- */
+
+ul.activity {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+ul.activity li {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+ul.activity li:last-child { border-bottom: 0; }
+.activity-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.9em;
+}
+.activity-type {
+  display: inline-block;
+  padding: 0.1em 0.5em;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--fg-muted);
+}
+.activity-when { margin-left: auto; }
+.activity-changes { margin-top: 0.25rem; }
