@@ -1,0 +1,22 @@
+{
+  "name": "c-lars-pms",
+  "version": "0.0.1",
+  "private": true,
+  "description": "C-LARS Pipeline Management System — custom CRM built on Cloudflare Pages + D1 + R2 + Access",
+  "scripts": {
+    "dev": "wrangler pages dev . --d1=DB=c-lars-pms-db --r2=DOCS=c-lars-pms-docs --compatibility-date=2026-04-10",
+    "deploy": "wrangler pages deploy . --project-name=c-lars-pms",
+    "migrate:local": "wrangler d1 migrations apply c-lars-pms-db --local",
+    "migrate:remote": "wrangler d1 migrations apply c-lars-pms-db --remote",
+    "db:console": "wrangler d1 execute c-lars-pms-db --remote --command",
+    "import:wfm:dry": "node scripts/wfm-import.mjs --dry-run",
+    "import:wfm:commit": "node scripts/wfm-import.mjs --commit"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  },
+  "dependencies": {
+    "papaparse": "^5.4.1",
+    "xlsx": "^0.18.5"
+  }
+}

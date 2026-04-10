@@ -13,3 +13,8 @@ desktop.ini
 
 # Claude Code local state
 .claude/
+
+# Node / wrangler
+node_modules/
+.wrangler/
+.dev.vars

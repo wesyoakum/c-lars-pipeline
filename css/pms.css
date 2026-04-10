@@ -1,0 +1,235 @@
+/* =====================================================================
+   C-LARS PMS — base stylesheet
+   =====================================================================
+   Single stylesheet, no build step. Keep it small and boring — the point
+   of PMS is to be fast, reliable, and easy to read, not to look pretty.
+   Color palette is restrained; generous whitespace; system fonts.
+   ===================================================================== */
+
+:root {
+  --fg:       #1f2328;
+  --fg-muted: #656d76;
+  --bg:       #ffffff;
+  --bg-alt:   #f6f8fa;
+  --border:   #d0d7de;
+  --accent:   #0969da;
+  --accent-hover: #0550ae;
+  --danger:   #cf222e;
+  --success:  #1a7f37;
+  --warning:  #bf8700;
+  --maxw:     1100px;
+  --radius:   6px;
+  --font:     -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--fg);
+  background: var(--bg-alt);
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--bg-alt);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+}
+
+/* ---------- Header / nav ---------- */
+
+.site-header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.brand a { color: var(--fg); }
+.brand a:hover { text-decoration: none; }
+
+.env-badge {
+  font-size: 0.7rem;
+  padding: 0.1em 0.5em;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+}
+.env-badge.env-dev        { background: #fff8c5; color: #7a5200; border-color: #d4a72c; }
+.env-badge.env-preview    { background: #ddf4ff; color: #0550ae; border-color: #54aeff; }
+.env-badge.env-production { background: #dafbe1; color: #1a7f37; border-color: #4ac26b; }
+
+.site-nav {
+  flex: 1;
+  display: flex;
+  gap: 0.25rem;
+}
+.nav-link {
+  color: var(--fg);
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius);
+}
+.nav-link:hover  { background: var(--bg-alt); text-decoration: none; }
+.nav-link.active { background: var(--bg-alt); font-weight: 600; }
+
+.user-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-size: 0.85rem;
+}
+.user-name { font-weight: 600; }
+.user-role { color: var(--fg-muted); text-transform: lowercase; }
+
+/* ---------- Main content ---------- */
+
+.site-main {
+  max-width: var(--maxw);
+  margin: 2rem auto;
+  padding: 0 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.site-footer {
+  max-width: var(--maxw);
+  margin: 2rem auto;
+  padding: 1rem 1.5rem;
+  color: var(--fg-muted);
+  text-align: center;
+}
+
+/* ---------- Cards ---------- */
+
+.card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.5rem;
+}
+.card h1, .card h2, .card h3 { margin-top: 0; }
+.card .muted { color: var(--fg-muted); }
+
+/* ---------- Flash messages ---------- */
+
+.flash {
+  max-width: var(--maxw);
+  margin: 1rem auto 0;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+.flash-info    { background: #ddf4ff; border-color: #54aeff; color: #0550ae; }
+.flash-success { background: #dafbe1; border-color: #4ac26b; color: #1a7f37; }
+.flash-warning { background: #fff8c5; border-color: #d4a72c; color: #7a5200; }
+.flash-error   { background: #ffebe9; border-color: #ff8182; color: #cf222e; }
+
+/* ---------- Tables ---------- */
+
+.data {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.5rem;
+}
+.data th, .data td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.data thead th {
+  background: var(--bg-alt);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.data tr:last-child td { border-bottom: 0; }
+
+/* ---------- Lists ---------- */
+
+ul.plain {
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
+}
+ul.plain li {
+  padding: 0.3rem 0;
+  border-bottom: 1px dashed var(--border);
+}
+ul.plain li:last-child { border-bottom: 0; }
+
+/* ---------- Forms (stubs for M2+) ---------- */
+
+form.stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 640px;
+}
+form.stacked label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.9rem;
+  color: var(--fg-muted);
+}
+form.stacked input[type="text"],
+form.stacked input[type="email"],
+form.stacked input[type="number"],
+form.stacked input[type="date"],
+form.stacked select,
+form.stacked textarea {
+  font: inherit;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.btn {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.btn:hover { background: var(--bg-alt); }
+.btn.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.btn.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+.btn.danger  {
+  background: var(--danger);
+  color: #fff;
+  border-color: var(--danger);
+}

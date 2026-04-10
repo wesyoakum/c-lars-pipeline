@@ -1,0 +1,30 @@
+{
+  // C-LARS Pipeline Management System (PMS)
+  // Cloudflare Pages project wired to D1 + R2.
+  // Auth is handled entirely by Cloudflare Access in front of pms.c-lars.com —
+  // middleware decodes the JWT and upserts the user in the D1 users table.
+  "name": "c-lars-pms",
+  "pages_build_output_dir": ".",
+  "compatibility_date": "2026-04-10",
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "c-lars-pms-db",
+      "database_id": "50f45535-8f4d-4428-8da1-d4ce4bd24d6e"
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "DOCS",
+      "bucket_name": "c-lars-pms-docs"
+    }
+  ],
+
+  "vars": {
+    "PMS_ENV": "production",
+    "CF_ACCESS_TEAM_DOMAIN": "c-lars.cloudflareaccess.com",
+    "CF_ACCESS_AUD": ""
+  }
+}
