@@ -21,6 +21,11 @@ import {
   fmtDollar,
   fmtPct,
 } from '../../lib/pricing.js';
+import {
+  QUOTE_TYPE_LABELS,
+  QUOTE_STATUS_LABELS,
+  allowedQuoteTypes,
+} from '../../lib/validators.js';
 
 const UPDATE_FIELDS = [
   'number',
@@ -139,6 +144,26 @@ export async function onRequestGet(context) {
         const result = computeFromBundle(bundle, settings);
         costBuildRows.push({ row: cb, result });
       }
+    }
+  }
+
+  // Quotes for this opportunity — the badge count is always needed for
+  // the tab strip; the detail list is only needed on the Quotes tab.
+  let quoteRows = [];
+  let quoteBadgeCount = 0;
+  {
+    const rows = await all(
+      env.DB,
+      `SELECT id, number, revision, quote_type, status, title, total_price,
+              valid_until, submitted_at, updated_at, supersedes_quote_id
+         FROM quotes
+        WHERE opportunity_id = ?
+        ORDER BY created_at DESC`,
+      [oppId]
+    );
+    quoteBadgeCount = rows.length;
+    if (tab === 'quotes') {
+      quoteRows = rows;
     }
   }
 
@@ -437,6 +462,78 @@ export async function onRequestGet(context) {
     </section>
   `;
 
+  const quoteTypeOptions = allowedQuoteTypes(opp.transaction_type);
+  const quotesTab = html`
+    <section class="card">
+      <div class="card-header">
+        <h2>Quotes</h2>
+        <form method="post" action="/opportunities/${escape(opp.id)}/quotes" class="inline-form quotes-new-form">
+          <select name="quote_type" required>
+            <option value="">Quote type…</option>
+            ${quoteTypeOptions.map((qt) => html`
+              <option value="${escape(qt)}">${escape(QUOTE_TYPE_LABELS[qt] ?? qt)}</option>
+            `)}
+          </select>
+          <button class="btn primary" type="submit">+ New quote</button>
+        </form>
+      </div>
+      <p class="muted">
+        Each quote represents one customer-facing revision. Create Rev A
+        here, then use “Create new revision” on the quote detail page for
+        subsequent revs (B, C, …). Submitting a quote snapshots the active
+        governance document revisions (T&amp;Cs, warranty, rate schedule,
+        refurb SOP) onto the quote row.
+      </p>
+
+      ${quoteRows.length === 0
+        ? html`<p class="muted">No quotes yet. Pick a quote type above and create the first revision.</p>`
+        : html`
+          <table class="data">
+            <thead>
+              <tr>
+                <th>Number</th>
+                <th>Rev</th>
+                <th>Type</th>
+                <th>Title</th>
+                <th>Status</th>
+                <th class="num">Total</th>
+                <th>Valid until</th>
+                <th>Updated</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${quoteRows.map((q) => {
+                const statusClass = quoteStatusPillClass(q.status);
+                return html`
+                  <tr>
+                    <td><code>${escape(q.number)}</code></td>
+                    <td>${escape(q.revision)}</td>
+                    <td>${escape(QUOTE_TYPE_LABELS[q.quote_type] ?? q.quote_type)}</td>
+                    <td>
+                      <a href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">
+                        ${escape(q.title || '(no title)')}
+                      </a>
+                    </td>
+                    <td>
+                      <span class="pill ${statusClass}">
+                        ${escape(QUOTE_STATUS_LABELS[q.status] ?? q.status)}
+                      </span>
+                    </td>
+                    <td class="num">${fmtDollar(q.total_price)}</td>
+                    <td><small class="muted">${escape(q.valid_until ?? '—')}</small></td>
+                    <td><small class="muted">${escape((q.updated_at ?? '').slice(0, 10))}</small></td>
+                    <td class="row-actions">
+                      <a class="btn small" href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">Open</a>
+                    </td>
+                  </tr>`;
+              })}
+            </tbody>
+          </table>
+        `}
+    </section>
+  `;
+
   const activityTab = html`
     <section class="card">
       <h2>Activity</h2>
@@ -474,6 +571,7 @@ export async function onRequestGet(context) {
     <nav class="card" style="padding: 0.5rem 1rem;">
       <a class="nav-link ${tab === 'overview' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}">Overview</a>
       <a class="nav-link ${tab === 'cost' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=cost">Cost builds (${costBuildBadgeCount})</a>
+      <a class="nav-link ${tab === 'quotes' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=quotes">Quotes (${quoteBadgeCount})</a>
       <a class="nav-link ${tab === 'activity' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=activity">Activity (${events.length})</a>
     </nav>
   `;
@@ -481,6 +579,7 @@ export async function onRequestGet(context) {
   const body = html`${tabs}${
     tab === 'activity' ? activityTab :
     tab === 'cost' ? costTab :
+    tab === 'quotes' ? quotesTab :
     overviewTab
   }`;
 
@@ -594,6 +693,20 @@ function isUniqueNumberError(e) {
 
 function formatMoney(n) {
   return Math.round(Number(n)).toLocaleString('en-US');
+}
+
+function quoteStatusPillClass(status) {
+  switch (status) {
+    case 'draft':             return '';
+    case 'internal_review':   return 'pill-warn';
+    case 'approved_internal': return 'pill-warn';
+    case 'submitted':         return 'pill-success';
+    case 'accepted':          return 'pill-success';
+    case 'rejected':          return 'pill-locked';
+    case 'superseded':        return 'pill-locked';
+    case 'expired':           return 'pill-locked';
+    default:                  return '';
+  }
 }
 
 function formatTimestamp(iso) {

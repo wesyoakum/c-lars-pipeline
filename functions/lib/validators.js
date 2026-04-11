@@ -407,6 +407,177 @@ export function validateWorkcenterEntries(hoursMap, rateMap, workcenters) {
   return { ok: true, value };
 }
 
+// ---------------------------------------------------------------------
+// Quote validators (M5)
+// ---------------------------------------------------------------------
+
+// Allowed quote_type values per opportunity transaction_type. A plain
+// Spares/EPS/Service deal has a single matching type; Refurb is the
+// polymorphic one — the governance doc allows baseline, modified, and
+// supplemental quotes on the same opportunity.
+const QUOTE_TYPES_BY_TRANSACTION = {
+  spares:  ['spares'],
+  eps:     ['eps'],
+  service: ['service'],
+  refurb:  ['refurb_baseline', 'refurb_modified', 'refurb_supplemental'],
+};
+const ALL_QUOTE_TYPES = new Set(
+  Object.values(QUOTE_TYPES_BY_TRANSACTION).flat()
+);
+
+const QUOTE_STATUSES = new Set([
+  'draft',
+  'internal_review',
+  'approved_internal',
+  'submitted',
+  'accepted',
+  'rejected',
+  'superseded',
+  'expired',
+]);
+
+const QUOTE_LINE_ITEM_TYPES = new Set(['product', 'service', 'labor', 'misc']);
+
+/**
+ * Return the allowed quote_type values for a given opportunity
+ * transaction_type. Used by the quote create form to render the picker.
+ */
+export function allowedQuoteTypes(transactionType) {
+  return QUOTE_TYPES_BY_TRANSACTION[transactionType] ?? [];
+}
+
+/**
+ * Human-readable labels for quote_type keys.
+ */
+export const QUOTE_TYPE_LABELS = {
+  spares:               'Spares',
+  eps:                  'Engineered Product (EPS)',
+  refurb_baseline:      'Refurb — baseline',
+  refurb_modified:      'Refurb — modified',
+  refurb_supplemental:  'Refurb — supplemental',
+  service:              'Service',
+};
+
+/**
+ * Human-readable labels for quote status keys.
+ */
+export const QUOTE_STATUS_LABELS = {
+  draft:             'Draft',
+  internal_review:   'Internal review',
+  approved_internal: 'Approved (internal)',
+  submitted:         'Submitted',
+  accepted:          'Accepted',
+  rejected:          'Rejected',
+  superseded:        'Superseded',
+  expired:           'Expired',
+};
+
+/**
+ * Validate a quote create/update payload. `transactionType` is the
+ * parent opportunity's transaction_type — it constrains the allowed
+ * quote_type values. Pass `null` on update to skip the constraint check
+ * (the DB already stores a valid value).
+ *
+ * Lines are validated separately via validateQuoteLine().
+ */
+export function validateQuote(input, { transactionType = null, requireType = true } = {}) {
+  const errors = {};
+  const value = {};
+
+  value.title = trim(input.title) || null;
+  value.description = trim(input.description) || null;
+
+  // quote_type is required at create time (we need to know which flavor
+  // of quote we're minting) but immutable on update — the route handler
+  // drops it from the update payload, so on update we pass requireType=false.
+  if (requireType) {
+    const qt = trim(input.quote_type);
+    if (!nonEmpty(qt)) {
+      errors.quote_type = 'Quote type is required';
+      value.quote_type = null;
+    } else if (!ALL_QUOTE_TYPES.has(qt)) {
+      errors.quote_type = 'Unknown quote type';
+      value.quote_type = null;
+    } else if (transactionType && !allowedQuoteTypes(transactionType).includes(qt)) {
+      errors.quote_type = `Not valid for a ${transactionType} opportunity`;
+      value.quote_type = null;
+    } else {
+      value.quote_type = qt;
+    }
+  }
+
+  // Validity / terms / delivery — all optional free-text or ISO-date.
+  const validUntil = trim(input.valid_until);
+  if (!validUntil) {
+    value.valid_until = null;
+  } else if (!/^\d{4}-\d{2}-\d{2}$/.test(validUntil)) {
+    errors.valid_until = 'Use YYYY-MM-DD';
+    value.valid_until = null;
+  } else {
+    value.valid_until = validUntil;
+  }
+
+  value.incoterms         = trim(input.incoterms) || null;
+  value.payment_terms     = trim(input.payment_terms) || null;
+  value.delivery_terms    = trim(input.delivery_terms) || null;
+  value.delivery_estimate = trim(input.delivery_estimate) || null;
+
+  value.notes_internal = trim(input.notes_internal) || null;
+  value.notes_customer = trim(input.notes_customer) || null;
+
+  // Tax amount (optional — defaults to 0 on save). Subtotal and total
+  // are derived from the lines server-side, never accepted from the form.
+  const { value: tax, error: taxErr } = parseOptionalMoney(input.tax_amount);
+  if (taxErr) errors.tax_amount = taxErr;
+  value.tax_amount = tax === null ? 0 : tax;
+
+  // Optional link to a cost build. Stored as-is; the route handler
+  // should verify it belongs to the same opportunity.
+  value.cost_build_id = trim(input.cost_build_id) || null;
+
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, value };
+}
+
+/**
+ * Validate a single quote_line create/update payload. Line totals are
+ * computed server-side as quantity * unit_price.
+ */
+export function validateQuoteLine(input) {
+  const errors = {};
+  const value = {};
+
+  value.description = trim(input.description) || '';
+  if (!nonEmpty(value.description)) {
+    errors.description = 'Description is required';
+  }
+
+  const itemType = trim(input.item_type) || 'misc';
+  if (!QUOTE_LINE_ITEM_TYPES.has(itemType)) {
+    errors.item_type = 'Unknown item type';
+    value.item_type = 'misc';
+  } else {
+    value.item_type = itemType;
+  }
+
+  // Quantity: optional, defaults to 1.
+  const { value: qty, error: qtyErr } = parseOptionalNumber(input.quantity);
+  if (qtyErr) errors.quantity = qtyErr;
+  value.quantity = qty === null ? 1 : qty;
+
+  value.unit = trim(input.unit) || null;
+
+  // Unit price: optional, defaults to 0.
+  const { value: price, error: priceErr } = parseOptionalMoney(input.unit_price);
+  if (priceErr) errors.unit_price = priceErr;
+  value.unit_price = price === null ? 0 : price;
+
+  value.notes = trim(input.notes) || null;
+
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, value };
+}
+
 export const ENUMS = {
   TRANSACTION_TYPES,
   RFQ_FORMATS,
@@ -415,4 +586,8 @@ export const ENUMS = {
   COST_BUILD_STATUSES,
   DEFAULT_WORKCENTERS,
   DATE_FIELDS,
+  QUOTE_STATUSES,
+  QUOTE_LINE_ITEM_TYPES,
+  QUOTE_TYPES_BY_TRANSACTION,
+  ALL_QUOTE_TYPES,
 };
