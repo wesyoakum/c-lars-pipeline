@@ -1,57 +1,454 @@
 // functions/lib/pricing.js
 //
-// Cost-build total / margin / price math. Supports the three modes
-// from plan §2.3:
-//   - bottom_up: lines → total_cost (auto) → target_price via margin
-//   - top_down:  target_price → back-solve implied margin
-//   - mixed:     anything in between (manual total, partial lines, etc.)
+// Server-side port of the C-LARS calculators pricing engine
+// (calculatePricing() from ../calculators/index.html).
 //
-// Rules (implemented in M4):
-//   * total_cost_source='lines'  → total_cost = sum(cost_lines.extended_cost)
-//   * total_cost_source='manual' → total_cost is user-entered, lines informational
-//   * target_price editable directly; recompute target_margin_pct as hint
-//   * target_margin_pct editable directly; recompute target_price as hint
-//   * extended_cost = quantity * unit_cost (server-computed on line write)
+// Model (migration 0005):
+//   Fixed 4-category cost structure with target percentages:
+//     DM    target 30%
+//     DL    target 25%
+//     IMOH  target 16%
+//     Other target 0.5%
+//     --------------------
+//     Total cost 71.5%  → 28.5% target margin
+//
+//   Target Price = Total Cost / 0.715
+//   Margin       = Quote Price - Total Cost
+//   Margin pct   = Margin / Quote Price
+//   "Good" if marginPct > 0.284 (28.4%)
+//
+//   Any of DM/DL/IMOH/Other can be user-set; blanks auto-fill from the
+//   effective quote × target %. Quote itself can auto-fill from DM (and
+//   DL) when user hasn't typed one.
+//
+//   DM can alternatively be linked to the dm_items library (sum of
+//   selected items). DL can alternatively be linked to the labor_items
+//   library plus a per-cost-build "Current Project" workcenter breakdown.
+//
+// All functions here are pure — no HTML/DOM, no D1 side effects except in
+// the loaders at the bottom (which are thin wrappers over one/all).
+
+import { one, all } from './db.js';
+
+// =====================================================================
+// 1. Pricing settings loader
+// =====================================================================
+
+const DEFAULT_SETTINGS = {
+  targetPct: { dm: 0.30, dl: 0.25, imoh: 0.16, other: 0.005 },
+  defaultLaborRate: 23,
+  marginThresholdGood: 0.284,
+  workcenters: ['Fab', 'Paint', 'Mechanical', 'Electrical', 'Hydraulic', 'Testing', 'Engineering'],
+};
 
 /**
- * Recompute extended_cost for a line.
+ * Load pricing_settings (key/value) from D1 into a typed object.
+ * Falls back to DEFAULT_SETTINGS for any missing keys so callers never
+ * crash on a partially-seeded table.
  */
-export function extendedCost(quantity, unitCost) {
-  const q = Number(quantity) || 0;
-  const c = Number(unitCost) || 0;
-  return round2(q * c);
+export async function loadPricingSettings(db) {
+  const rows = await all(db, 'SELECT key, value FROM pricing_settings');
+  const map = {};
+  for (const r of rows) map[r.key] = r.value;
+
+  const num = (k, d) => {
+    const v = map[k];
+    if (v === undefined || v === null || v === '') return d;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : d;
+  };
+
+  let workcenters = DEFAULT_SETTINGS.workcenters;
+  if (map.workcenters) {
+    try {
+      const parsed = JSON.parse(map.workcenters);
+      if (Array.isArray(parsed) && parsed.length > 0) workcenters = parsed;
+    } catch (_) { /* keep default */ }
+  }
+
+  return {
+    targetPct: {
+      dm:    num('target_pct_dm',    DEFAULT_SETTINGS.targetPct.dm),
+      dl:    num('target_pct_dl',    DEFAULT_SETTINGS.targetPct.dl),
+      imoh:  num('target_pct_imoh',  DEFAULT_SETTINGS.targetPct.imoh),
+      other: num('target_pct_other', DEFAULT_SETTINGS.targetPct.other),
+    },
+    defaultLaborRate:    num('default_labor_rate',    DEFAULT_SETTINGS.defaultLaborRate),
+    marginThresholdGood: num('margin_threshold_good', DEFAULT_SETTINGS.marginThresholdGood),
+    workcenters,
+  };
+}
+
+export { DEFAULT_SETTINGS };
+
+// =====================================================================
+// 2. Labor cost helpers
+// =====================================================================
+
+/**
+ * Cost of a single (hours, rate) workcenter entry. null/missing rate
+ * falls back to the default labor rate from settings.
+ */
+export function workcenterEntryCost(hours, rate, settings) {
+  const h = Number(hours) || 0;
+  if (h === 0) return 0;
+  const defaultRate = settings?.defaultLaborRate ?? DEFAULT_SETTINGS.defaultLaborRate;
+  const r = (rate === null || rate === undefined || rate === '')
+    ? defaultRate
+    : (Number(rate) || defaultRate);
+  return h * r;
 }
 
 /**
- * Sum the extended_cost field across an array of cost_lines.
+ * Sum an array of workcenter entries ({workcenter, hours, rate}) into a
+ * total cost.
  */
-export function sumLinesExtended(lines) {
-  return round2((lines ?? []).reduce((acc, l) => acc + (Number(l.extended_cost) || 0), 0));
+export function sumWorkcenterEntries(entries, settings) {
+  if (!Array.isArray(entries)) return 0;
+  let total = 0;
+  for (const e of entries) {
+    total += workcenterEntryCost(e?.hours, e?.rate, settings);
+  }
+  return total;
 }
 
 /**
- * Given total_cost and target_price, compute margin pct.
- * Returns null if target_price is zero/null.
+ * Compute the cost of a single labor library item given its workcenter
+ * entries. Same shape as sumWorkcenterEntries.
  */
-export function marginFromPrice(totalCost, targetPrice) {
-  const c = Number(totalCost) || 0;
-  const p = Number(targetPrice);
-  if (!p || p === 0) return null;
-  return round2(((p - c) / p) * 100);
+export function computeLaborItemCost(entries, settings) {
+  return sumWorkcenterEntries(entries, settings);
+}
+
+// =====================================================================
+// 3. Core pricing calculator (pure port of calculatePricing)
+// =====================================================================
+
+/**
+ * Normalize a user input to number-or-null. null means "user has not
+ * typed anything for this field" (it will be auto-filled).
+ *   null/undefined/''  → null
+ *   number/numeric str → Number
+ */
+function normNum(v) {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  const s = String(v).trim();
+  if (s === '') return null;
+  const n = Number(s.replace(/[$,\s]/g, ''));
+  return Number.isFinite(n) ? n : null;
 }
 
 /**
- * Given total_cost and target_margin_pct, compute target price.
- * Returns null if the margin is 100% (division by zero).
+ * computePricing(inputs, settings) — the heart of the engine.
+ *
+ * inputs shape:
+ *   {
+ *     dmUser, dlUser, imohUser, otherUser, quoteUser,   // nullable user values
+ *     dmLibraryTotal,                                   // null if not linked
+ *     laborCalcTotal,                                   // null if not linked
+ *   }
+ *
+ * Any user value that is null is treated as "not typed" and will be
+ * auto-filled from the effective quote × target %.
+ *
+ * dmLibraryTotal and laborCalcTotal override dmUser / dlUser when set
+ * (i.e. library/labor-calc linkage wins over manual entry).
+ *
+ * Returns:
+ *   {
+ *     effective: { dm, dl, imoh, other, quote, totalCost, targetPrice },
+ *     auto:      { dm, dl, imoh, other, quote },   // what was auto-filled
+ *     notes:     { dm, dl, imoh, other, quote },   // tooltip strings
+ *     margin:    { amount, pct, status, threshold },
+ *     references:{
+ *       fromQuote: { dm, dl, imoh, other },
+ *       fromDm:    { price, dl, imoh, other },
+ *       fromDmDl:  { price, imoh, other },
+ *     },
+ *     targetPct,   // echoed for display
+ *     linked:    { dm: bool, labor: bool },
+ *   }
+ *
+ * NOTE: The `fromDm.other` reference reproduces a quirk from the
+ * calculators app where Other is divided by pDl instead of pDm. It's
+ * preserved here for parity with the existing tool; if the user wants
+ * to "fix" it later it's a one-line change.
  */
-export function priceFromMargin(totalCost, targetMarginPct) {
-  const c = Number(totalCost) || 0;
-  const m = Number(targetMarginPct);
-  if (m === null || m === undefined || Number.isNaN(m)) return null;
-  if (m >= 100) return null;
-  return round2(c / (1 - m / 100));
+export function computePricing(inputs, settings) {
+  const s = settings || DEFAULT_SETTINGS;
+  const pDm    = s.targetPct.dm;
+  const pDl    = s.targetPct.dl;
+  const pImoh  = s.targetPct.imoh;
+  const pOther = s.targetPct.other;
+  const pDmDl  = pDm + pDl;
+  const totalTargetPct = pDm + pDl + pImoh + pOther;
+
+  const dmLink    = normNum(inputs?.dmLibraryTotal);
+  const laborLink = normNum(inputs?.laborCalcTotal);
+  const useDmLib    = dmLink    !== null;
+  const useLaborLib = laborLink !== null;
+
+  // Effective user-side values. Library/labor-calc linkage trumps manual
+  // user entry; otherwise fall back to what the user typed.
+  const dmUser    = useDmLib    ? dmLink    : normNum(inputs?.dmUser);
+  const dlUser    = useLaborLib ? laborLink : normNum(inputs?.dlUser);
+  const imohUser  = normNum(inputs?.imohUser);
+  const otherUser = normNum(inputs?.otherUser);
+  const quoteUser = normNum(inputs?.quoteUser);
+
+  // --- Auto-fill pass ---
+  let dmAuto = null, dlAuto = null, imohAuto = null, otherAuto = null, quoteAuto = null;
+
+  // Quote auto-fill from DM (and DL) when quote is blank.
+  if (quoteUser === null && dmUser !== null) {
+    if (dlUser !== null) {
+      quoteAuto = (dmUser + dlUser) / pDmDl;
+    } else {
+      quoteAuto = dmUser / pDm;
+    }
+  }
+
+  // Effective quote drives all remaining auto-fills.
+  const effQuote = quoteUser !== null ? quoteUser : quoteAuto;
+
+  if (effQuote !== null && dmUser === null) {
+    dmAuto = effQuote * pDm;
+  }
+  if (effQuote !== null && dlUser === null && !useLaborLib) {
+    dlAuto = effQuote * pDl;
+  }
+  if (effQuote !== null && imohUser === null) {
+    imohAuto = effQuote * pImoh;
+  }
+  if (effQuote !== null && otherUser === null) {
+    otherAuto = effQuote * pOther;
+  }
+
+  // Effective (final) values per category.
+  const dm    = dmUser    !== null ? dmUser    : dmAuto;
+  const dl    = dlUser    !== null ? dlUser    : dlAuto;
+  const imoh  = imohUser  !== null ? imohUser  : imohAuto;
+  const other = otherUser !== null ? otherUser : otherAuto;
+  const quote = quoteUser !== null ? quoteUser : quoteAuto;
+
+  // Total cost: null when literally nothing is known. Otherwise treat
+  // unknown categories as 0 (same as calculator).
+  const anyCostKnown = (dm !== null) || (dl !== null) || (imoh !== null) || (other !== null);
+  const totalCost = anyCostKnown
+    ? ((dm || 0) + (dl || 0) + (imoh || 0) + (other || 0))
+    : null;
+
+  const targetPrice = (totalCost !== null && totalCost > 0)
+    ? totalCost / totalTargetPct
+    : null;
+
+  // --- Margin ---
+  let margin = { amount: null, pct: null, status: null, threshold: s.marginThresholdGood };
+  if (quote !== null && totalCost !== null && quote > 0) {
+    const amt = quote - totalCost;
+    const pct = amt / quote;
+    margin = {
+      amount: amt,
+      pct,
+      status: pct > s.marginThresholdGood ? 'good' : 'low',
+      threshold: s.marginThresholdGood,
+    };
+  }
+
+  // --- Reference estimates (shown as helper panels in the UI) ---
+  const fromQuote = {
+    dm:    quote !== null ? quote * pDm    : null,
+    dl:    quote !== null ? quote * pDl    : null,
+    imoh:  quote !== null ? quote * pImoh  : null,
+    other: quote !== null ? quote * pOther : null,
+  };
+
+  const fromDm = {
+    price: dm !== null ? dm / pDm                 : null,
+    dl:    dm !== null ? (dm * pDl)    / pDm      : null,
+    imoh:  dm !== null ? (dm * pImoh)  / pDm      : null,
+    // NB: calculator divides Other by pDl (not pDm). Preserved for parity.
+    other: dm !== null ? (dm * pOther) / pDl      : null,
+  };
+
+  const dmDlPrice = (dm !== null && dl !== null) ? (dm + dl) / pDmDl : null;
+  const fromDmDl = {
+    price: dmDlPrice,
+    imoh:  dmDlPrice !== null ? dmDlPrice * pImoh  : null,
+    other: dmDlPrice !== null ? dmDlPrice * pOther : null,
+  };
+
+  // --- Note/label helpers (parity with calculator UI phrasing) ---
+  let estSrc = '';
+  if (quoteUser !== null) estSrc = 'Estimated from Quote Price';
+  else if (dmUser !== null && dlUser !== null) estSrc = 'Estimated from DM + DL';
+  else if (dmUser !== null) estSrc = 'Estimated from DM';
+
+  const notes = {
+    dm:    useDmLib
+             ? 'Linked to Direct Material library'
+             : (dmAuto !== null ? 'Estimated from Quote Price' : ''),
+    dl:    useLaborLib
+             ? 'Linked to Labor Cost calculator'
+             : (dlAuto !== null ? estSrc : ''),
+    imoh:  imohAuto  !== null ? estSrc : '',
+    other: otherAuto !== null ? estSrc : '',
+    quote: quoteAuto !== null
+             ? ((dlUser !== null) ? 'Estimated from DM + DL' : 'Estimated from DM')
+             : '',
+  };
+
+  return {
+    effective: { dm, dl, imoh, other, quote, totalCost, targetPrice },
+    auto:      { dm: dmAuto, dl: dlAuto, imoh: imohAuto, other: otherAuto, quote: quoteAuto },
+    notes,
+    margin,
+    references: { fromQuote, fromDm, fromDmDl },
+    targetPct: { dm: pDm, dl: pDl, imoh: pImoh, other: pOther, total: totalTargetPct },
+    linked: { dm: useDmLib, labor: useLaborLib },
+  };
 }
 
-function round2(n) {
-  return Math.round(n * 100) / 100;
+// =====================================================================
+// 4. Display formatters
+// =====================================================================
+
+/**
+ * Format a number as USD. Null/undefined → '-'. Matches the calculator's
+ * whole-dollar display ($12,345).
+ */
+export function fmtDollar(n, { showNull = '-' } = {}) {
+  if (n === null || n === undefined || Number.isNaN(n)) return showNull;
+  const rounded = Math.round(Number(n));
+  return '$' + rounded.toLocaleString('en-US');
+}
+
+/**
+ * Format a ratio 0..1 as a percentage string. Default 1 decimal.
+ */
+export function fmtPct(n, decimals = 1, { showNull = '-' } = {}) {
+  if (n === null || n === undefined || Number.isNaN(n)) return showNull;
+  return (Number(n) * 100).toFixed(decimals) + '%';
+}
+
+/**
+ * Render a known-or-dash dollar cell.
+ */
+export function fmtKnown(v) {
+  return v !== null && v !== undefined ? fmtDollar(v) : '-';
+}
+
+// =====================================================================
+// 5. Cost-build bundle loader (DB → pure inputs for computePricing)
+// =====================================================================
+
+/**
+ * Load everything needed to compute a cost build's pricing in one go:
+ *   - the cost_builds row
+ *   - cost_build_labor (this build's workcenter hours/rate)
+ *   - cost_build_dm_selections + joined dm_items (descriptions + cost)
+ *   - cost_build_labor_selections + joined labor_items + labor_item_entries
+ *
+ * Caller can then call computeFromBundle(bundle, settings) to run the
+ * pricing engine against this bundle.
+ */
+export async function loadCostBuildBundle(db, costBuildId) {
+  const build = await one(
+    db,
+    'SELECT * FROM cost_builds WHERE id = ?',
+    [costBuildId]
+  );
+  if (!build) return null;
+
+  const currentLabor = await all(
+    db,
+    'SELECT workcenter, hours, rate FROM cost_build_labor WHERE cost_build_id = ?',
+    [costBuildId]
+  );
+
+  const dmSelections = await all(
+    db,
+    `SELECT dm.id, dm.description, dm.cost
+       FROM cost_build_dm_selections sel
+       JOIN dm_items dm ON dm.id = sel.dm_item_id
+      WHERE sel.cost_build_id = ?
+      ORDER BY dm.description`,
+    [costBuildId]
+  );
+
+  const laborSelectionRows = await all(
+    db,
+    `SELECT li.id, li.description
+       FROM cost_build_labor_selections sel
+       JOIN labor_items li ON li.id = sel.labor_item_id
+      WHERE sel.cost_build_id = ?
+      ORDER BY li.description`,
+    [costBuildId]
+  );
+
+  // Hydrate each selected labor item with its workcenter entries.
+  const laborSelections = [];
+  for (const li of laborSelectionRows) {
+    const entries = await all(
+      db,
+      'SELECT workcenter, hours, rate FROM labor_item_entries WHERE labor_item_id = ?',
+      [li.id]
+    );
+    laborSelections.push({ ...li, entries });
+  }
+
+  return { build, currentLabor, dmSelections, laborSelections };
+}
+
+/**
+ * Run the pricing engine against a bundle (from loadCostBuildBundle).
+ * Returns { pricing, totals } where totals exposes the intermediate
+ * library/labor sums so the UI can show them independently.
+ */
+export function computeFromBundle(bundle, settings) {
+  const s = settings || DEFAULT_SETTINGS;
+  const b = bundle.build;
+
+  // DM library total (null if linkage is off)
+  const dmLibTotal = b.use_dm_library
+    ? (bundle.dmSelections || []).reduce((acc, it) => acc + (Number(it.cost) || 0), 0)
+    : null;
+
+  // Labor: current-project workcenter entries
+  const currentLaborTotal = sumWorkcenterEntries(bundle.currentLabor || [], s);
+
+  // Labor library selections total
+  const laborLibTotal = (bundle.laborSelections || [])
+    .reduce((acc, li) => acc + sumWorkcenterEntries(li.entries || [], s), 0);
+
+  // DL linkage total when use_labor_library is on:
+  //   current project hours + labor library selections (matches calculator
+  //   behavior of summing both into laborTotal)
+  const laborCalcTotal = b.use_labor_library
+    ? (currentLaborTotal + laborLibTotal)
+    : null;
+
+  const pricing = computePricing(
+    {
+      dmUser:    b.dm_user_cost,
+      dlUser:    b.dl_user_cost,
+      imohUser:  b.imoh_user_cost,
+      otherUser: b.other_user_cost,
+      quoteUser: b.quote_price_user,
+      dmLibraryTotal: dmLibTotal,
+      laborCalcTotal,
+    },
+    s
+  );
+
+  return {
+    pricing,
+    totals: {
+      dmLibTotal,
+      currentLaborTotal,
+      laborLibTotal,
+      laborCalcTotal,
+    },
+  };
 }

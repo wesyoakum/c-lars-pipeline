@@ -19,8 +19,15 @@ const RFQ_FORMATS = new Set([
 ]);
 const SOURCES = new Set(['inbound', 'outreach', 'referral', 'existing', 'other']);
 const BANT_BUDGET = new Set(['known', 'estimated', 'unknown']);
-const PRICING_METHODS = new Set(['bottom_up', 'top_down', 'mixed']);
-const TOTAL_COST_SOURCES = new Set(['lines', 'manual']);
+// Cost-build statuses (migration 0005 — calculator-model cost builds).
+const COST_BUILD_STATUSES = new Set(['draft', 'locked']);
+
+// Workcenters for labor entries. Mirrors the seed value in
+// pricing_settings.workcenters; kept as a JS-side fallback so validators
+// don't need to hit D1 just to sanity-check a form field.
+const DEFAULT_WORKCENTERS = new Set([
+  'Fab', 'Paint', 'Mechanical', 'Electrical', 'Hydraulic', 'Testing', 'Engineering',
+]);
 
 // All four pipeline date fields the opportunity form exposes. Stored as
 // ISO YYYY-MM-DD strings; null means "not yet set".
@@ -240,12 +247,172 @@ export function validateContact(input) {
   return { ok: true, value };
 }
 
+// ---------------------------------------------------------------------
+// Cost-build / library validators (M4 — calculator-model pricing)
+// ---------------------------------------------------------------------
+
+/**
+ * Parse an optional dollar-ish input into a number-or-null. Accepts
+ * '', null, undefined, '$12,345.67', '12345.67' etc. Returns
+ *   { value: number|null, error: string|null }.
+ * Empty means "user hasn't typed anything" (null, which is meaningful
+ * for the auto-fill engine — it triggers the estimate).
+ */
+function parseOptionalMoney(raw) {
+  if (raw === undefined || raw === null) return { value: null, error: null };
+  const s = String(raw).trim();
+  if (s === '') return { value: null, error: null };
+  const cleaned = s.replace(/[$,\s]/g, '');
+  const n = Number(cleaned);
+  if (!Number.isFinite(n)) return { value: null, error: 'Must be a number' };
+  if (n < 0) return { value: null, error: 'Must be zero or positive' };
+  return { value: n, error: null };
+}
+
+/**
+ * Parse an optional non-negative number (hours, rate, etc.).
+ */
+function parseOptionalNumber(raw) {
+  if (raw === undefined || raw === null) return { value: null, error: null };
+  const s = String(raw).trim();
+  if (s === '') return { value: null, error: null };
+  const n = Number(s.replace(/[$,\s]/g, ''));
+  if (!Number.isFinite(n)) return { value: null, error: 'Must be a number' };
+  if (n < 0) return { value: null, error: 'Must be zero or positive' };
+  return { value: n, error: null };
+}
+
+/**
+ * Validate a cost_builds create/update payload. All four cost inputs
+ * and the quote price are *optional* — nullable means "user has not set
+ * a value" which is meaningful to the pricing engine (it auto-fills).
+ *
+ * Library linkage toggles (use_dm_library / use_labor_library) are
+ * booleans represented as 0/1 in the DB.
+ */
+export function validateCostBuild(input) {
+  const errors = {};
+  const value = {};
+
+  value.label = trim(input.label) || null;
+  value.notes = trim(input.notes) || null;
+
+  // Four cost categories
+  for (const [field, key] of [
+    ['dm_user_cost',    'dm_user_cost'],
+    ['dl_user_cost',    'dl_user_cost'],
+    ['imoh_user_cost',  'imoh_user_cost'],
+    ['other_user_cost', 'other_user_cost'],
+    ['quote_price_user','quote_price_user'],
+  ]) {
+    const { value: n, error } = parseOptionalMoney(input[field]);
+    if (error) errors[key] = error;
+    value[key] = n;
+  }
+
+  // Library linkage toggles — checkboxes arrive as 'on' or undefined.
+  value.use_dm_library    = input.use_dm_library    ? 1 : 0;
+  value.use_labor_library = input.use_labor_library ? 1 : 0;
+
+  // Status is not user-editable through this validator — lock/unlock
+  // endpoints set it directly. We leave it out of `value` so a caller
+  // running an UPDATE won't accidentally clobber it.
+
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, value };
+}
+
+/**
+ * Validate a dm_items (library) create/update payload.
+ */
+export function validateDmItem(input) {
+  const errors = {};
+  const value = {};
+
+  value.description = trim(input.description) || '';
+  if (!nonEmpty(value.description)) {
+    errors.description = 'Description is required';
+  }
+
+  const { value: cost, error: costErr } = parseOptionalMoney(input.cost);
+  if (costErr) errors.cost = costErr;
+  // dm_items.cost NOT NULL DEFAULT 0 — coerce null to 0 on save.
+  value.cost = cost === null ? 0 : cost;
+
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, value };
+}
+
+/**
+ * Validate a labor_items (library) create/update payload. This only
+ * covers the header row (description). The per-workcenter hours/rate
+ * entries are validated separately via validateWorkcenterEntries().
+ */
+export function validateLaborItem(input) {
+  const errors = {};
+  const value = {};
+
+  value.description = trim(input.description) || '';
+  if (!nonEmpty(value.description)) {
+    errors.description = 'Description is required';
+  }
+
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, value };
+}
+
+/**
+ * Validate a set of workcenter entries posted as parallel form fields:
+ *   hours[Fab], hours[Paint], ...   rate[Fab], rate[Paint], ...
+ *
+ * Returns:
+ *   { ok: true, value: [{ workcenter, hours, rate }] }
+ * Workcenters with hours===null AND rate===null are dropped (meaning
+ * "leave blank" / "delete this row"). Workcenters with hours=0 are kept
+ * only if rate is non-null (so users can pre-populate a rate). Rows
+ * where only the rate is set are dropped — they have no labor cost
+ * impact on their own.
+ *
+ * `workcenters` is the authoritative list from pricing_settings; any
+ * key outside this list is silently ignored (defense against injected
+ * form fields).
+ */
+export function validateWorkcenterEntries(hoursMap, rateMap, workcenters) {
+  const errors = {};
+  const value = [];
+  const allowed = new Set(workcenters || Array.from(DEFAULT_WORKCENTERS));
+
+  for (const wc of allowed) {
+    const hoursRaw = hoursMap ? hoursMap[wc] : undefined;
+    const rateRaw  = rateMap  ? rateMap[wc]  : undefined;
+
+    const hRes = parseOptionalNumber(hoursRaw);
+    const rRes = parseOptionalNumber(rateRaw);
+
+    if (hRes.error) errors[`hours_${wc}`] = hRes.error;
+    if (rRes.error) errors[`rate_${wc}`]  = rRes.error;
+
+    // Drop rows with no hours — pricing engine treats missing
+    // workcenters as zero anyway, and we don't want orphaned rate-only
+    // rows polluting cost_build_labor.
+    if (hRes.value === null) continue;
+    value.push({
+      workcenter: wc,
+      hours: hRes.value,
+      rate:  rRes.value,   // null → use default rate at compute time
+    });
+  }
+
+  if (Object.keys(errors).length) return { ok: false, errors };
+  return { ok: true, value };
+}
+
 export const ENUMS = {
   TRANSACTION_TYPES,
   RFQ_FORMATS,
   SOURCES,
   BANT_BUDGET,
-  PRICING_METHODS,
-  TOTAL_COST_SOURCES,
+  COST_BUILD_STATUSES,
+  DEFAULT_WORKCENTERS,
   DATE_FIELDS,
 };
