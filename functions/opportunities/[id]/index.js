@@ -195,9 +195,26 @@ export async function onRequestGet(context) {
     taskRows = rows;
   }
 
-  // Activity feed — this opportunity's own audit events. Later we'll
-  // widen this to include child entities (cost builds, quotes, documents,
-  // job events) via entity_id IN (...) unions.
+  // Documents attached to this opportunity
+  let docRows = [];
+  let docBadgeCount = 0;
+  {
+    const rows = await all(
+      env.DB,
+      `SELECT d.id, d.kind, d.title, d.mime_type, d.size_bytes,
+              d.notes, d.uploaded_at,
+              u.display_name AS uploaded_by_name, u.email AS uploaded_by_email
+         FROM documents d
+         LEFT JOIN users u ON u.id = d.uploaded_by_user_id
+        WHERE d.opportunity_id = ?
+        ORDER BY d.uploaded_at DESC`,
+      [oppId]
+    );
+    docBadgeCount = rows.length;
+    docRows = rows;
+  }
+
+  // Activity feed — this opportunity's own audit events.
   const events = await all(
     env.DB,
     `SELECT ae.event_type, ae.at, ae.summary, ae.changes_json, ae.override_reason,
@@ -645,6 +662,96 @@ export async function onRequestGet(context) {
     </section>
   `;
 
+  const DOC_KIND_LABELS = {
+    rfq: 'RFQ', rfi: 'RFI', quote_pdf: 'Quote PDF', po: 'PO',
+    oc_pdf: 'OC PDF', ntp_pdf: 'NTP PDF', drawing: 'Drawing',
+    specification: 'Specification', supplier_quote: 'Supplier Quote', other: 'Other',
+  };
+
+  const docsTab = html`
+    <section class="card">
+      <div class="card-header">
+        <h2>Documents</h2>
+      </div>
+
+      <div style="margin-bottom:1rem; padding:0.75rem; background:var(--bg-muted,#f6f8fa); border-radius:var(--radius);">
+        <form method="post" action="/documents" enctype="multipart/form-data">
+          <input type="hidden" name="opportunity_id" value="${escape(opp.id)}">
+          <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}?tab=docs">
+          <div style="display:grid; grid-template-columns:1fr auto auto; gap:0.5rem; align-items:end;">
+            <div>
+              <label class="field-label">File</label>
+              <input type="file" name="file" required style="font-size:0.85em">
+            </div>
+            <div>
+              <label class="field-label">Kind</label>
+              <select name="kind" style="font-size:0.85em">
+                ${Object.entries(DOC_KIND_LABELS).map(([k, v]) => html`
+                  <option value="${k}">${v}</option>
+                `)}
+              </select>
+            </div>
+            <div>
+              <button class="btn btn-sm primary" type="submit">Upload</button>
+            </div>
+          </div>
+          <div style="margin-top:0.4rem; display:grid; grid-template-columns:1fr 1fr; gap:0.5rem;">
+            <div>
+              <input type="text" name="title" placeholder="Title (defaults to filename)" style="width:100%; font-size:0.85em">
+            </div>
+            <div>
+              <input type="text" name="notes" placeholder="Notes (optional)" style="width:100%; font-size:0.85em">
+            </div>
+          </div>
+        </form>
+      </div>
+
+      ${docRows.length === 0
+        ? html`<p class="muted">No documents uploaded yet.</p>`
+        : html`
+          <table class="data compact">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Kind</th>
+                <th>Size</th>
+                <th>Uploaded</th>
+                <th>By</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${docRows.map(d => {
+                const uploaderLabel = d.uploaded_by_name ?? d.uploaded_by_email ?? '—';
+                return html`
+                  <tr>
+                    <td>
+                      <a href="/documents/${escape(d.id)}/download">
+                        <strong>${escape(d.title)}</strong>
+                      </a>
+                      ${d.notes ? html`<br><small class="muted">${escape(d.notes)}</small>` : ''}
+                    </td>
+                    <td><span class="pill">${escape(DOC_KIND_LABELS[d.kind] ?? d.kind)}</span></td>
+                    <td><small>${escape(fmtSize(d.size_bytes))}</small></td>
+                    <td><small class="muted">${escape((d.uploaded_at ?? '').slice(0, 10))}</small></td>
+                    <td><small>${escape(uploaderLabel)}</small></td>
+                    <td class="row-actions">
+                      <a class="btn small" href="/documents/${escape(d.id)}/download">Download</a>
+                      <form method="post" action="/documents/${escape(d.id)}/delete" style="display:inline"
+                            onsubmit="return confirm('Delete this document?')">
+                        <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}?tab=docs">
+                        <button class="btn small danger" type="submit">Delete</button>
+                      </form>
+                    </td>
+                  </tr>
+                `;
+              })}
+            </tbody>
+          </table>
+        `}
+    </section>
+  `;
+
   const activityTab = html`
     <section class="card">
       <h2>Activity</h2>
@@ -684,6 +791,7 @@ export async function onRequestGet(context) {
       <a class="nav-link ${tab === 'cost' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=cost">Price builds (${priceBuildBadgeCount})</a>
       <a class="nav-link ${tab === 'quotes' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=quotes">Quotes (${quoteBadgeCount})</a>
       <a class="nav-link ${tab === 'tasks' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=tasks">Tasks${taskBadgeCount > 0 ? ` (${taskBadgeCount})` : ''}</a>
+      <a class="nav-link ${tab === 'docs' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=docs">Docs${docBadgeCount > 0 ? ` (${docBadgeCount})` : ''}</a>
       <a class="nav-link ${tab === 'activity' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=activity">Activity (${events.length})</a>
     </nav>
   `;
@@ -691,6 +799,7 @@ export async function onRequestGet(context) {
   const body = html`${tabs}${
     tab === 'activity' ? activityTab :
     tab === 'tasks' ? tasksTab :
+    tab === 'docs' ? docsTab :
     tab === 'cost' ? costTab :
     tab === 'quotes' ? quotesTab :
     overviewTab
@@ -807,6 +916,13 @@ function isUniqueNumberError(e) {
 }
 
 // -- helpers ---------------------------------------------------------------
+
+function fmtSize(bytes) {
+  if (bytes == null) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 function formatMoney(n) {
   return Math.round(Number(n)).toLocaleString('en-US');

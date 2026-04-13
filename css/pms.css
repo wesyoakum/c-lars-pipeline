@@ -1372,6 +1372,17 @@ tr.line-option td:first-child {
   font-weight: 600;
 }
 
+/* -- Documents --------------------------------------------------------- */
+
+.btn.danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.btn.danger:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
 .pill-task    { background: #ddf4ff; color: #0550ae; }
 .pill-note    { background: #f6f8fa; color: #656d76; }
 .pill-email   { background: #fff8c5; color: #7a6400; }
