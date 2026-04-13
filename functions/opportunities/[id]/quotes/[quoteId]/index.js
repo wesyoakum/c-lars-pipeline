@@ -1,18 +1,17 @@
 // functions/opportunities/[id]/quotes/[quoteId]/index.js
 //
 // GET  /opportunities/:id/quotes/:quoteId  — quote detail / editor
-// POST /opportunities/:id/quotes/:quoteId  — update header fields
+// POST /opportunities/:id/quotes/:quoteId  — update header fields (form fallback)
 //
-// Layout mirrors the C-LARS Word quotation template:
-//   1. Header card — quote number, status pill, total, transition actions,
-//      revision strip, governance snapshot
-//   2. Banner card — "QUOTATION" + quote type left, C-LARS logo right
-//   3. Details card — account/address left, quote meta right, description
-//   4. Line items card — item table with notes row per line
-//   5. Footer card — customer notes, terms
+// Layout (5 cards):
+//   1. Header — quote#, status pill, total, contextual action buttons
+//   2. Banner — "QUOTATION" + type, logo
+//   3. Details — address selector left, quote meta right, description
+//   4. Line items — table with item notes
+//   5. Footer — customer notes, terms, internal notes
 //
-// Status transitions live in sibling files.
-// Quotes in a terminal status are read-only.
+// Auto-save: all fields save via fetch POST to ./patch on change.
+// No "Save" button. Header shows contextual actions based on status.
 
 import { one, all, stmt, batch } from '../../../../lib/db.js';
 import { auditStmt, diff } from '../../../../lib/audit.js';
@@ -28,26 +27,13 @@ import {
 import { fmtDollar } from '../../../../lib/pricing.js';
 
 const READ_ONLY_STATUSES = new Set([
-  'issued',
-  'revision_issued',
-  'accepted',
-  'rejected',
-  'expired',
-  'dead',
+  'issued', 'revision_issued', 'accepted', 'rejected', 'expired', 'dead',
 ]);
 
 const UPDATE_FIELDS = [
-  'quote_type',
-  'title',
-  'description',
-  'valid_until',
-  'incoterms',
-  'payment_terms',
-  'delivery_terms',
-  'delivery_estimate',
-  'tax_amount',
-  'notes_internal',
-  'notes_customer',
+  'quote_type', 'title', 'description', 'valid_until', 'incoterms',
+  'payment_terms', 'delivery_terms', 'delivery_estimate',
+  'tax_amount', 'notes_internal', 'notes_customer',
 ];
 
 export async function onRequestGet(context) {
@@ -62,34 +48,33 @@ export async function onRequestGet(context) {
     `SELECT q.*, o.number AS opp_number, o.title AS opp_title,
             o.transaction_type AS opp_transaction_type,
             o.account_id,
-            a.name AS account_name, a.phone AS account_phone,
+            a.name AS account_name,
             c.first_name AS contact_first, c.last_name AS contact_last,
             c.email AS contact_email, c.phone AS contact_phone, c.title AS contact_title,
             sup.number AS supersedes_number, sup.revision AS supersedes_revision,
-            cb.label AS cost_build_label, cb.status AS cost_build_status,
             subu.display_name AS submitted_by_name, subu.email AS submitted_by_email
        FROM quotes q
        LEFT JOIN opportunities o ON o.id = q.opportunity_id
        LEFT JOIN accounts a      ON a.id = o.account_id
        LEFT JOIN contacts c      ON c.id = o.primary_contact_id
        LEFT JOIN quotes sup      ON sup.id = q.supersedes_quote_id
-       LEFT JOIN cost_builds cb  ON cb.id = q.cost_build_id
        LEFT JOIN users subu      ON subu.id = q.submitted_by_user_id
       WHERE q.id = ?`,
     [quoteId]
   );
   if (!quote || quote.opportunity_id !== oppId) return notFound(context);
 
-  // Primary billing address from account_addresses
-  const primaryAddr = quote.account_id
-    ? await one(
+  // All addresses for the account (for the selector)
+  const addresses = quote.account_id
+    ? await all(
         env.DB,
-        `SELECT address FROM account_addresses
-          WHERE account_id = ? AND kind = 'billing' AND is_default = 1
-          LIMIT 1`,
+        `SELECT id, kind, label, address, is_default
+           FROM account_addresses
+          WHERE account_id = ?
+          ORDER BY kind, is_default DESC, label`,
         [quote.account_id]
       )
-    : null;
+    : [];
 
   const lines = await all(
     env.DB,
@@ -112,15 +97,20 @@ export async function onRequestGet(context) {
   );
 
   const readOnly = READ_ONLY_STATUSES.has(quote.status);
-
   const subtotal = lines.reduce((a, l) => a + Number(l.extended_price ?? 0), 0);
   const total = subtotal + Number(quote.tax_amount ?? 0);
-
   const flash = readFlash(url);
 
   const isDraft = quote.status === 'draft' || quote.status === 'revision_draft';
   const isIssued = quote.status === 'issued' || quote.status === 'revision_issued';
-  const typeOptions = allowedQuoteTypes(quote.opp_transaction_type);
+
+  const patchUrl = `/opportunities/${oppId}/quotes/${quoteId}/patch`;
+
+  // Pick the default address to show
+  const defaultAddr = addresses.find(a => a.kind === 'billing' && a.is_default)
+    || addresses.find(a => a.is_default)
+    || addresses[0]
+    || null;
 
   // ── 1. Header card ─────────────────────────────────────────────────
   const headerSection = html`
@@ -148,6 +138,9 @@ export async function onRequestGet(context) {
             </form>
           ` : ''}
           ${isIssued ? html`
+            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
+              <button class="btn" type="submit">Revise</button>
+            </form>
             <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/accept" class="inline-form">
               <button class="btn primary" type="submit">Accept</button>
             </form>
@@ -155,12 +148,7 @@ export async function onRequestGet(context) {
               <button class="btn" type="submit">Reject</button>
             </form>
             <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/expire" class="inline-form">
-              <button class="btn" type="submit">Expire</button>
-            </form>
-          ` : ''}
-          ${isDraft || isIssued ? html`
-            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
-              <button class="btn" type="submit">Revise</button>
+              <button class="btn danger" type="submit">Cancel</button>
             </form>
           ` : ''}
           ${quote.status === 'accepted' || quote.status === 'rejected' || quote.status === 'expired' ? html`
@@ -168,7 +156,7 @@ export async function onRequestGet(context) {
               <button class="btn primary" type="submit">New revision</button>
             </form>
           ` : ''}
-          ${isDraft || isIssued ? html`
+          ${isDraft ? html`
             <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/delete"
                   class="inline-form"
                   onsubmit="return confirm('Delete this quote? This cannot be undone.');">
@@ -224,90 +212,119 @@ export async function onRequestGet(context) {
 
   // ── 3. Details card ────────────────────────────────────────────────
   const contactName = [quote.contact_first, quote.contact_last].filter(Boolean).join(' ');
-  const addressText = primaryAddr?.address ?? '';
+  const addressesJson = JSON.stringify(addresses);
 
   const detailsSection = html`
-    <section class="card">
+    <section class="card" x-data="quoteDetails()" x-init="init()">
       ${readOnly
         ? html`<p class="muted" style="margin:0 0 0.5rem"><em>This quote is ${escape(quote.status)}. Create a new revision to make changes.</em></p>`
         : ''}
-      <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}" class="stack-form" id="quote-form">
-        <fieldset ${readOnly ? 'disabled' : ''}>
-          <div class="quote-meta-grid">
-            <div class="quote-meta-left">
-              <div class="client-info">
-                ${quote.account_name
-                  ? html`<p style="margin:0"><strong><a href="/accounts/${escape(quote.account_id)}">${escape(quote.account_name)}</a></strong></p>`
-                  : html`<p class="muted" style="margin:0">No account linked</p>`}
-                ${contactName
-                  ? html`<p style="margin:0">${escape(contactName)}${quote.contact_title ? html`, ${escape(quote.contact_title)}` : ''}</p>`
-                  : ''}
-                ${quote.contact_email
-                  ? html`<p style="margin:0"><a href="mailto:${escape(quote.contact_email)}">${escape(quote.contact_email)}</a></p>`
-                  : ''}
-                ${quote.contact_phone
-                  ? html`<p style="margin:0">${escape(quote.contact_phone)}</p>`
-                  : ''}
-                ${addressText
-                  ? html`<pre class="addr" style="margin:0.4rem 0 0">${escape(addressText)}</pre>`
-                  : ''}
+      <div class="quote-meta-grid quote-meta-equal">
+        <div class="quote-meta-left">
+          <div class="client-info">
+            ${quote.account_name
+              ? html`<p style="margin:0"><strong><a href="/accounts/${escape(quote.account_id)}">${escape(quote.account_name)}</a></strong></p>`
+              : html`<p class="muted" style="margin:0">No account linked</p>`}
+            ${contactName
+              ? html`<p style="margin:0">${escape(contactName)}${quote.contact_title ? html`, ${escape(quote.contact_title)}` : ''}</p>`
+              : ''}
+            ${quote.contact_email
+              ? html`<p style="margin:0"><a href="mailto:${escape(quote.contact_email)}">${escape(quote.contact_email)}</a></p>`
+              : ''}
+            ${quote.contact_phone
+              ? html`<p style="margin:0">${escape(quote.contact_phone)}</p>`
+              : ''}
+
+            <!-- Address selector -->
+            <div style="margin-top:0.5rem" ${readOnly ? '' : ''}>
+              <div x-show="!editingAddr" style="cursor:pointer" @click="${readOnly ? '' : 'editingAddr = true'}">
+                <pre class="addr" style="margin:0" x-text="selectedAddrText || 'Click to select address'"
+                     :class="{ 'muted': !selectedAddrText }"></pre>
+              </div>
+              <div x-show="editingAddr" x-cloak>
+                <select class="meta-input" @change="selectAddress($event.target.value)" x-ref="addrSelect" style="width:100%;margin-bottom:0.3rem">
+                  <option value="">-- Select address --</option>
+                  ${addresses.map(a => html`
+                    <option value="${escape(a.id)}" ${a.id === defaultAddr?.id ? 'selected' : ''}>
+                      ${escape(a.label || a.kind)} ${a.is_default ? '(default)' : ''} — ${escape((a.address || '').split('\n')[0])}
+                    </option>
+                  `)}
+                  <option value="__new__">+ Add new address</option>
+                </select>
+                <div x-show="addingNew" x-cloak>
+                  <select class="meta-input" x-model="newAddrKind" style="width:100%;margin-bottom:0.3rem">
+                    <option value="billing">Billing</option>
+                    <option value="physical">Physical</option>
+                  </select>
+                  <input type="text" class="meta-input" x-model="newAddrLabel" placeholder="Label (e.g. HQ, Shop)" style="width:100%;margin-bottom:0.3rem">
+                  <textarea class="meta-input" x-model="newAddrText" placeholder="Full address" rows="3" style="width:100%;margin-bottom:0.3rem"></textarea>
+                  <button class="btn primary small" @click="saveNewAddress()">Save address</button>
+                  <button class="btn small" @click="addingNew = false; editingAddr = false">Cancel</button>
+                </div>
               </div>
             </div>
-            <div class="quote-meta-right">
-              <table class="quote-meta-table">
-                <tr>
-                  <td class="meta-label">Quote No:</td>
-                  <td><strong>${escape(quote.number)}</strong></td>
-                </tr>
-                <tr>
-                  <td class="meta-label">Date:</td>
-                  <td>${quote.submitted_at ? escape(formatTimestamp(quote.submitted_at).slice(0, 10)) : html`<span class="muted">Not yet issued</span>`}</td>
-                </tr>
-                <tr>
-                  <td class="meta-label">Expiration:</td>
-                  <td>
-                    <input type="date" name="valid_until" value="${escape(quote.valid_until ?? '')}" class="meta-input">
-                  </td>
-                </tr>
-                <tr>
-                  <td class="meta-label">Delivery:</td>
-                  <td>
-                    <input type="text" name="delivery_estimate" value="${escape(quote.delivery_estimate ?? '')}" placeholder="14-16 weeks ARO" class="meta-input">
-                  </td>
-                </tr>
-              </table>
-            </div>
           </div>
+        </div>
+        <div class="quote-meta-right">
+          <table class="quote-meta-table">
+            <tr>
+              <td class="meta-label">Quote No:</td>
+              <td><strong>${escape(quote.number)}</strong></td>
+            </tr>
+            <tr>
+              <td class="meta-label">Date:</td>
+              <td>${quote.submitted_at ? escape(formatTimestamp(quote.submitted_at).slice(0, 10)) : html`<span class="muted">Not yet issued</span>`}</td>
+            </tr>
+            <tr>
+              <td class="meta-label">Expiration:</td>
+              <td>
+                <div x-data="expirationPicker('${escape(quote.valid_until ?? '')}')">
+                  <input type="date" x-model="dateVal" @change="save()" class="meta-input" ${readOnly ? 'disabled' : ''} style="margin-bottom:0.2rem">
+                  ${!readOnly ? html`
+                    <div class="quick-dates">
+                      <button type="button" class="btn-link" @click="setDays(0)">Today</button>
+                      <button type="button" class="btn-link" @click="setDays(14)">14d</button>
+                      <button type="button" class="btn-link" @click="setDays(30)">30d</button>
+                      <button type="button" class="btn-link" @click="setDays(60)">60d</button>
+                      <button type="button" class="btn-link" @click="setDays(90)">90d</button>
+                    </div>
+                  ` : ''}
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td class="meta-label">Delivery:</td>
+              <td>
+                <div x-data="deliveryPicker('${escape(quote.delivery_estimate ?? '')}')">
+                  <input type="text" x-model="textVal" @change="save()" class="meta-input" ${readOnly ? 'disabled' : ''} placeholder="14-16 weeks ARO" style="margin-bottom:0.2rem">
+                  ${!readOnly ? html`
+                    <div class="quick-dates">
+                      <input type="date" @change="setDate($event.target.value); $event.target.value=''" class="btn-link-date" title="Pick a date">
+                      <button type="button" class="btn-link" @click="setWeeks(4)">4wk</button>
+                      <button type="button" class="btn-link" @click="setWeeks(8)">8wk</button>
+                      <button type="button" class="btn-link" @click="setWeeks(12)">12wk</button>
+                      <button type="button" class="btn-link" @click="setWeeks(16)">16wk</button>
+                      <button type="button" class="btn-link" @click="setWeeks(20)">20wk</button>
+                    </div>
+                  ` : ''}
+                </div>
+              </td>
+            </tr>
+          </table>
+        </div>
+      </div>
 
-          <label class="desc-label">
-            Description
-            <textarea name="description" placeholder="Scope description for the customer" class="desc-textarea">${escape(quote.description ?? '')}</textarea>
-          </label>
-
-          ${typeOptions.length > 1 ? html`
-            <input type="hidden" name="quote_type" value="${escape(quote.quote_type)}">
-          ` : html`
-            <input type="hidden" name="quote_type" value="${escape(quote.quote_type)}">
-          `}
-          <input type="hidden" name="title" value="${escape(quote.title ?? '')}">
-          <input type="hidden" name="tax_amount" value="${quote.tax_amount != null ? escape(Number(quote.tax_amount).toFixed(2)) : '0'}">
-          <input type="hidden" name="incoterms" value="${escape(quote.incoterms ?? '')}">
-          <input type="hidden" name="payment_terms" value="${escape(quote.payment_terms ?? '')}">
-          <input type="hidden" name="delivery_terms" value="${escape(quote.delivery_terms ?? '')}">
-          <input type="hidden" name="notes_internal" value="${escape(quote.notes_internal ?? '')}">
-          <input type="hidden" name="notes_customer" value="${escape(quote.notes_customer ?? '')}">
-        </fieldset>
-
-        ${!readOnly
-          ? html`<div class="form-actions"><button type="submit" class="btn primary">Save quote</button></div>`
-          : ''}
-      </form>
+      <label class="desc-label">
+        Description
+        <textarea name="description" placeholder="Scope description for the customer" class="desc-textarea"
+                  ${readOnly ? 'disabled' : ''}
+                  @change="patchField('description', $event.target.value)">${escape(quote.description ?? '')}</textarea>
+      </label>
     </section>
   `;
 
   // ── 4. Line items card ─────────────────────────────────────────────
   const pbUrl = (lineId) => `/opportunities/${oppId}/quotes/${quoteId}/lines/${lineId}/price-build`;
-
   const optionSubtotal = lines.filter(l => l.is_option).reduce((a, l) => a + Number(l.extended_price ?? 0), 0);
   const includedSubtotal = subtotal - optionSubtotal;
 
@@ -428,49 +445,145 @@ export async function onRequestGet(context) {
   // ── 5. Footer card ─────────────────────────────────────────────────
   const footerSection = html`
     <section class="card">
-      <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}" class="stack-form" id="quote-footer-form">
-        <fieldset ${readOnly ? 'disabled' : ''}>
-          <label>
-            <strong>Quote notes</strong>
-            <textarea name="notes_customer" class="desc-textarea" placeholder="Notes to the customer (appears on the issued quote)">${escape(quote.notes_customer ?? '')}</textarea>
-          </label>
-          <label style="margin-top:0.75rem">
-            <strong>Terms</strong>
-            <textarea name="payment_terms" class="desc-textarea" placeholder="Payment terms, delivery terms, conditions...">${escape(quote.payment_terms ?? '')}</textarea>
-          </label>
-          <label style="margin-top:0.75rem">
-            <strong>Delivery terms</strong>
-            <textarea name="delivery_terms" class="desc-textarea" placeholder="EXW, FCA, FOB, DAP...">${escape(quote.delivery_terms ?? '')}</textarea>
-          </label>
+      <label>
+        <strong>Quote notes</strong>
+        <textarea class="desc-textarea" placeholder="Notes to the customer"
+                  ${readOnly ? 'disabled' : ''}
+                  @change="window._qPatch('notes_customer', $event.target.value)">${escape(quote.notes_customer ?? '')}</textarea>
+      </label>
+      <label style="margin-top:0.75rem">
+        <strong>Terms</strong>
+        <textarea class="desc-textarea" placeholder="Payment terms, conditions..."
+                  ${readOnly ? 'disabled' : ''}
+                  @change="window._qPatch('payment_terms', $event.target.value)">${escape(quote.payment_terms ?? '')}</textarea>
+      </label>
+      <label style="margin-top:0.75rem">
+        <strong>Delivery terms</strong>
+        <textarea class="desc-textarea" placeholder="EXW, FCA, FOB, DAP..."
+                  ${readOnly ? 'disabled' : ''}
+                  @change="window._qPatch('delivery_terms', $event.target.value)">${escape(quote.delivery_terms ?? '')}</textarea>
+      </label>
 
-          <!-- Carry forward all required hidden fields for the save -->
-          <input type="hidden" name="quote_type" value="${escape(quote.quote_type)}">
-          <input type="hidden" name="title" value="${escape(quote.title ?? '')}">
-          <input type="hidden" name="description" value="${escape(quote.description ?? '')}">
-          <input type="hidden" name="valid_until" value="${escape(quote.valid_until ?? '')}">
-          <input type="hidden" name="incoterms" value="${escape(quote.incoterms ?? '')}">
-          <input type="hidden" name="delivery_estimate" value="${escape(quote.delivery_estimate ?? '')}">
-          <input type="hidden" name="tax_amount" value="${quote.tax_amount != null ? escape(Number(quote.tax_amount).toFixed(2)) : '0'}">
-          <input type="hidden" name="notes_internal" value="${escape(quote.notes_internal ?? '')}">
-        </fieldset>
-
-        ${!readOnly
-          ? html`<div class="form-actions"><button type="submit" class="btn primary">Save</button></div>`
-          : ''}
-      </form>
-
-      ${quote.notes_internal ? html`
+      ${quote.notes_internal || !readOnly ? html`
         <div style="margin-top:0.75rem;padding:0.5rem 0.7rem;background:#fff8c5;border:1px solid #d4a72c;border-radius:var(--radius)">
-          <strong style="font-size:0.85em">Internal notes (not visible to customer):</strong>
-          <p style="margin:0.25rem 0 0;font-size:0.9em;white-space:pre-wrap">${escape(quote.notes_internal)}</p>
+          <label>
+            <strong style="font-size:0.85em">Internal notes (C-LARS only, not on customer quote)</strong>
+            <textarea class="desc-textarea" style="background:#fffdf0"
+                      ${readOnly ? 'disabled' : ''}
+                      @change="window._qPatch('notes_internal', $event.target.value)">${escape(quote.notes_internal ?? '')}</textarea>
+          </label>
         </div>
       ` : ''}
     </section>
   `;
 
-  // ── Auto-save script ───────────────────────────────────────────────
-  const autoSaveScript = !readOnly ? html`
+  // ── Scripts ────────────────────────────────────────────────────────
+  const scripts = html`
     <script>
+    // Global patch helper — auto-saves quote fields via fetch
+    window._qPatch = function(field, value) {
+      var body = {};
+      body[field] = value;
+      fetch('${raw(patchUrl)}', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(function(r) { return r.json(); }).then(function(d) {
+        if (!d.ok) console.error('Patch failed:', d.error);
+      });
+    };
+
+    // Expiration date picker with quick-select buttons
+    document.addEventListener('alpine:init', function() {
+      Alpine.data('expirationPicker', function(initial) {
+        return {
+          dateVal: initial || '',
+          setDays: function(n) {
+            var d = new Date();
+            d.setDate(d.getDate() + n);
+            this.dateVal = d.toISOString().slice(0, 10);
+            this.save();
+          },
+          save: function() {
+            window._qPatch('valid_until', this.dateVal);
+          },
+        };
+      });
+
+      // Delivery picker with text, calendar, and weeks buttons
+      Alpine.data('deliveryPicker', function(initial) {
+        return {
+          textVal: initial || '',
+          setWeeks: function(n) {
+            var d = new Date();
+            d.setDate(d.getDate() + (n * 7));
+            var dateStr = d.toISOString().slice(0, 10);
+            this.textVal = n + ' weeks (' + dateStr + ')';
+            this.save();
+          },
+          setDate: function(dateStr) {
+            if (!dateStr) return;
+            this.textVal = dateStr;
+            this.save();
+          },
+          save: function() {
+            window._qPatch('delivery_estimate', this.textVal);
+          },
+        };
+      });
+
+      // Details card: address selector + description auto-save
+      Alpine.data('quoteDetails', function() {
+        return {
+          editingAddr: false,
+          addingNew: false,
+          selectedAddrText: ${raw(JSON.stringify(defaultAddr?.address || ''))},
+          addresses: ${raw(addressesJson)},
+          newAddrKind: 'billing',
+          newAddrLabel: '',
+          newAddrText: '',
+          accountId: ${raw(JSON.stringify(quote.account_id || ''))},
+          init: function() {},
+          selectAddress: function(val) {
+            if (val === '__new__') {
+              this.addingNew = true;
+              return;
+            }
+            this.addingNew = false;
+            var addr = this.addresses.find(function(a) { return a.id === val; });
+            this.selectedAddrText = addr ? addr.address : '';
+            this.editingAddr = false;
+          },
+          saveNewAddress: function() {
+            var self = this;
+            if (!self.newAddrText.trim()) return;
+            fetch('/api/accounts/' + self.accountId + '/addresses', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                kind: self.newAddrKind,
+                label: self.newAddrLabel,
+                address: self.newAddrText,
+              }),
+            }).then(function(r) { return r.json(); }).then(function(d) {
+              if (d.id) {
+                self.addresses.push(d);
+                self.selectedAddrText = self.newAddrText;
+                self.addingNew = false;
+                self.editingAddr = false;
+                self.newAddrLabel = '';
+                self.newAddrText = '';
+              }
+            });
+          },
+          patchField: function(field, value) {
+            window._qPatch(field, value);
+          },
+        };
+      });
+    });
+
+    // Auto-save line items on change (debounced)
     (function() {
       var timers = {};
       document.querySelectorAll('[data-autosave]').forEach(function(input) {
@@ -495,9 +608,9 @@ export async function onRequestGet(context) {
       }
     })();
     </script>
-  ` : '';
+  `;
 
-  const body = html`${headerSection}${bannerCard}${detailsSection}${linesSection}${footerSection}${autoSaveScript}`;
+  const body = html`${headerSection}${bannerCard}${detailsSection}${linesSection}${footerSection}${scripts}`;
 
   return htmlResponse(
     layout(
@@ -518,6 +631,8 @@ export async function onRequestGet(context) {
   );
 }
 
+// Keep the POST handler as fallback for the form-based line item saves
+// and for any non-JS clients.
 export async function onRequestPost(context) {
   const { env, data, request, params } = context;
   const user = data?.user;
@@ -590,21 +705,10 @@ export async function onRequestPost(context) {
               updated_at = ?
         WHERE id = ?`,
       [
-        value.quote_type,
-        value.title,
-        value.description,
-        value.valid_until,
-        value.incoterms,
-        value.payment_terms,
-        value.delivery_terms,
-        value.delivery_estimate,
-        value.tax_amount,
-        subtotal,
-        total,
-        value.notes_internal,
-        value.notes_customer,
-        ts,
-        quoteId,
+        value.quote_type, value.title, value.description, value.valid_until,
+        value.incoterms, value.payment_terms, value.delivery_terms,
+        value.delivery_estimate, value.tax_amount, subtotal, total,
+        value.notes_internal, value.notes_customer, ts, quoteId,
       ]
     ),
     auditStmt(env.DB, {
