@@ -1,15 +1,16 @@
 // functions/opportunities/[id]/quotes/[quoteId]/lines/[lineId]/index.js
 //
 // POST /opportunities/:id/quotes/:quoteId/lines/:lineId — update a line
-// item. Recomputes the parent quote's subtotal_price and total_price
-// in the same batch.
+// item. If a cost_build_id is set, the unit_price is auto-set from the
+// cost build's computed quote price. Recomputes the parent quote's
+// subtotal_price and total_price in the same batch.
 
 import { one, stmt, batch } from '../../../../../../lib/db.js';
 import { auditStmt, diff } from '../../../../../../lib/audit.js';
 import { now } from '../../../../../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../../../../../lib/http.js';
 import { validateQuoteLine } from '../../../../../../lib/validators.js';
-import { resolveCostRef } from '../../../../../../lib/quote-cost-ref.js';
+import { loadCostBuildBundle, loadPricingSettings, computeFromBundle } from '../../../../../../lib/pricing.js';
 
 const READ_ONLY_STATUSES = new Set([
   'accepted',
@@ -26,9 +27,7 @@ const LINE_FIELDS = [
   'unit_price',
   'extended_price',
   'notes',
-  'cost_ref_type',
-  'cost_ref_id',
-  'cost_ref_amount',
+  'cost_build_id',
 ];
 
 export async function onRequestPost(context) {
@@ -74,19 +73,23 @@ export async function onRequestPost(context) {
     );
   }
 
+  // If a cost build is linked to this line, auto-set unit_price.
+  const lineCbId = input.cost_build_id || null;
+  if (lineCbId) {
+    const cbPrice = await getCostBuildPrice(env.DB, lineCbId);
+    if (cbPrice != null) {
+      value.unit_price = cbPrice;
+    }
+  }
+
   const ts = now();
   const extended = Number(value.quantity) * Number(value.unit_price);
-
-  // Resolve cost reference (if a cost build item was selected).
-  const costRef = await resolveCostRef(env.DB, input.cost_ref);
 
   const after = {
     ...before,
     ...value,
     extended_price: extended,
-    cost_ref_type: costRef.cost_ref_type,
-    cost_ref_id: costRef.cost_ref_id,
-    cost_ref_amount: costRef.cost_ref_amount,
+    cost_build_id: lineCbId,
   };
   const changes = diff(before, after, LINE_FIELDS);
 
@@ -101,9 +104,7 @@ export async function onRequestPost(context) {
               unit_price = ?,
               extended_price = ?,
               notes = ?,
-              cost_ref_type = ?,
-              cost_ref_id = ?,
-              cost_ref_amount = ?,
+              cost_build_id = ?,
               updated_at = ?
         WHERE id = ? AND quote_id = ?`,
       [
@@ -114,9 +115,7 @@ export async function onRequestPost(context) {
         value.unit_price,
         extended,
         value.notes,
-        costRef.cost_ref_type,
-        costRef.cost_ref_id,
-        costRef.cost_ref_amount,
+        lineCbId,
         ts,
         lineId,
         quoteId,
@@ -145,4 +144,15 @@ export async function onRequestPost(context) {
     `/opportunities/${oppId}/quotes/${quoteId}`,
     'Line saved.'
   );
+}
+
+/**
+ * Compute the quote price from a cost build using the pricing engine.
+ */
+async function getCostBuildPrice(db, costBuildId) {
+  const bundle = await loadCostBuildBundle(db, costBuildId);
+  if (!bundle) return null;
+  const settings = await loadPricingSettings(db);
+  const { pricing } = computeFromBundle(bundle, settings);
+  return pricing.effective.quote ?? null;
 }

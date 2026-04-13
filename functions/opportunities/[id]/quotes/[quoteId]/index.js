@@ -29,7 +29,7 @@ import {
   QUOTE_TYPE_LABELS,
   QUOTE_STATUS_LABELS,
 } from '../../../../lib/validators.js';
-import { fmtDollar, loadPricingSettings } from '../../../../lib/pricing.js';
+import { fmtDollar } from '../../../../lib/pricing.js';
 
 // Status values that put the quote into read-only mode. Once a quote is
 // accepted/rejected/superseded/expired, its fields and lines can't be
@@ -97,51 +97,8 @@ export async function onRequestGet(context) {
     [oppId]
   );
 
-  // Load DM and labor items from ALL cost builds on this opportunity so
-  // each quote line can independently reference any cost item. Items are
-  // grouped by cost build label for the dropdown optgroups.
-  let costBuildItems = [];
-  if (costBuilds.length) {
-    const cbIds = costBuilds.map((cb) => cb.id);
-    const cbLabelMap = Object.fromEntries(costBuilds.map((cb) => [cb.id, cb.label || '(unlabeled)']));
-    const placeholders = cbIds.map(() => '?').join(',');
-
-    const dmItems = await all(
-      env.DB,
-      `SELECT dm.id, dm.description, dm.cost, 'dm' AS ref_type, sel.cost_build_id
-         FROM cost_build_dm_selections sel
-         JOIN dm_items dm ON dm.id = sel.dm_item_id
-        WHERE sel.cost_build_id IN (${placeholders})
-        ORDER BY dm.description`,
-      cbIds
-    );
-    for (const it of dmItems) it.cb_label = cbLabelMap[it.cost_build_id];
-
-    const laborItems = await all(
-      env.DB,
-      `SELECT li.id, li.description, 'labor' AS ref_type, sel.cost_build_id
-         FROM cost_build_labor_selections sel
-         JOIN labor_items li ON li.id = sel.labor_item_id
-        WHERE sel.cost_build_id IN (${placeholders})
-        ORDER BY li.description`,
-      cbIds
-    );
-    const settings = await loadPricingSettings(env.DB);
-    const defaultRate = Number(settings.defaultLaborRate) || 0;
-    for (const li of laborItems) {
-      li.cb_label = cbLabelMap[li.cost_build_id];
-      const entries = await all(
-        env.DB,
-        'SELECT hours, rate FROM labor_item_entries WHERE labor_item_id = ?',
-        [li.id]
-      );
-      li.cost = entries.reduce((acc, e) => {
-        const rate = e.rate != null ? Number(e.rate) : defaultRate;
-        return acc + (Number(e.hours) || 0) * rate;
-      }, 0);
-    }
-    costBuildItems = [...dmItems, ...laborItems];
-  }
+  // Cost build labels map — used for the per-line cost build dropdown.
+  const hasCostBuilds = costBuilds.length > 0;
 
   // Revision history: all quotes on this opportunity with the same
   // quote_type, ordered by created_at. Used to render a "Rev A/B/C"
@@ -163,29 +120,14 @@ export async function onRequestGet(context) {
 
   const flash = readFlash(url);
 
-  // Group cost build items by cost build for <optgroup> rendering.
-  const costRefGroups = [];
-  if (costBuildItems.length) {
-    const groupMap = new Map();
-    for (const ci of costBuildItems) {
-      const key = ci.cost_build_id;
-      if (!groupMap.has(key)) groupMap.set(key, { label: ci.cb_label, items: [] });
-      groupMap.get(key).items.push(ci);
-    }
-    for (const [, g] of groupMap) costRefGroups.push(g);
-  }
-  function renderCostRefOptions(selectedType, selectedId) {
+  // Helper: render cost build options for the per-line dropdown.
+  function renderCbOptions(selectedId) {
     return html`
       <option value="">—</option>
-      ${costRefGroups.map((g) => html`
-        <optgroup label="${escape(g.label)}">
-          ${g.items.map((ci) => html`
-            <option value="${escape(ci.ref_type)}:${escape(ci.id)}"
-              ${selectedType === ci.ref_type && selectedId === ci.id ? 'selected' : ''}>
-              ${escape(ci.description)} (${fmtDollar(ci.cost)})
-            </option>
-          `)}
-        </optgroup>
+      ${costBuilds.map((cb) => html`
+        <option value="${escape(cb.id)}" ${selectedId === cb.id ? 'selected' : ''}>
+          ${escape(cb.label || '(unlabeled)')} ${cb.status === 'locked' ? '[locked]' : ''}
+        </option>
       `)}
     `;
   }
@@ -410,7 +352,7 @@ export async function onRequestGet(context) {
           <tr>
             <th>#</th>
             <th>Description</th>
-            ${costBuildItems.length ? html`<th>Cost item</th><th class="num">Cost</th>` : ''}
+            ${hasCostBuilds ? html`<th>Cost build</th>` : ''}
             <th class="num">Qty</th>
             <th>Unit</th>
             <th class="num">Unit price</th>
@@ -427,13 +369,12 @@ export async function onRequestGet(context) {
                   <input type="text" name="description" value="${escape(l.description ?? '')}" ${readOnly ? 'disabled' : ''} style="width: 100%;">
                 </form>
               </td>
-              ${costBuildItems.length ? html`
+              ${hasCostBuilds ? html`
                 <td>
-                  <select name="cost_ref" form="line-form-${escape(l.id)}" ${readOnly ? 'disabled' : ''}>
-                    ${renderCostRefOptions(l.cost_ref_type, l.cost_ref_id)}
+                  <select name="cost_build_id" form="line-form-${escape(l.id)}" ${readOnly ? 'disabled' : ''}>
+                    ${renderCbOptions(l.cost_build_id)}
                   </select>
                 </td>
-                <td class="num muted">${l.cost_ref_amount != null ? fmtDollar(l.cost_ref_amount) : ''}</td>
               ` : ''}
               <td class="num">
                 <input type="text" name="quantity" form="line-form-${escape(l.id)}" value="${escape(l.quantity ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input">
@@ -464,13 +405,12 @@ export async function onRequestGet(context) {
                     <input type="text" name="description" placeholder="New line item…" style="width: 100%;">
                   </form>
                 </td>
-                ${costBuildItems.length ? html`
+                ${hasCostBuilds ? html`
                   <td>
-                    <select name="cost_ref" form="new-line-form">
-                      ${renderCostRefOptions(null, null)}
+                    <select name="cost_build_id" form="new-line-form">
+                      ${renderCbOptions(null)}
                     </select>
                   </td>
-                  <td class="num muted"></td>
                 ` : ''}
                 <td class="num">
                   <input type="text" name="quantity" form="new-line-form" value="1" class="num-input">
@@ -489,17 +429,17 @@ export async function onRequestGet(context) {
             `
             : ''}
           <tr class="totals-row">
-            <td colspan="${costBuildItems.length ? 7 : 5}" class="num"><strong>Subtotal</strong></td>
+            <td colspan="${hasCostBuilds ? 6 : 5}" class="num"><strong>Subtotal</strong></td>
             <td class="num" id="q-subtotal"><strong>${fmtDollar(subtotal)}</strong></td>
             <td></td>
           </tr>
           <tr class="totals-row">
-            <td colspan="${costBuildItems.length ? 7 : 5}" class="num">Tax</td>
+            <td colspan="${hasCostBuilds ? 6 : 5}" class="num">Tax</td>
             <td class="num">${fmtDollar(Number(quote.tax_amount ?? 0))}</td>
             <td></td>
           </tr>
           <tr class="totals-row">
-            <td colspan="${costBuildItems.length ? 7 : 5}" class="num"><strong>Total</strong></td>
+            <td colspan="${hasCostBuilds ? 6 : 5}" class="num"><strong>Total</strong></td>
             <td class="num" id="q-total"><strong>${fmtDollar(total)}</strong></td>
             <td></td>
           </tr>
