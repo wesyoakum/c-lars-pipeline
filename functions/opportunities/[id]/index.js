@@ -345,7 +345,9 @@ export async function onRequestGet(context) {
       <!-- Stage carousel -->
       <form method="post" action="/opportunities/${escape(opp.id)}/stage"
             x-data="stageCarousel(${effectiveIdx}, ${carouselStages.length})"
+            x-ref="stageForm"
             class="stage-carousel" style="margin:0.5rem 0">
+        <input type="hidden" name="to_stage" x-ref="toStage" value="">
         <div class="stage-carousel-row">
           <button type="button" class="stage-arrow" @click="prev()" :disabled="idx <= 0">&lsaquo;</button>
           <div class="stage-carousel-window">
@@ -357,12 +359,13 @@ export async function onRequestGet(context) {
               else if (isLoss) cls += ' stage-pill-loss';
               else if (s.sort_order < (currentStage?.sort_order ?? 0)) cls += ' stage-pill-past';
               return html`
-                <button type="${isLoss && !isCurrent ? 'button' : 'submit'}"
-                        ${!isLoss ? `name="to_stage"` : ''} value="${s.stage_key}"
+                <button type="button"
                         class="${cls}" data-idx="${i}"
                         x-show="Math.abs(${i} - idx) <= 1"
                         ${isCurrent ? 'disabled' : ''}
-                        ${isLoss && !isCurrent ? `@click="showCloseReason('${s.stage_key}')"` : ''}>
+                        @click="${isLoss && !isCurrent
+                          ? `showCloseReason('${s.stage_key}')`
+                          : `$refs.toStage.value='${s.stage_key}'; $refs.stageForm.submit()`}">
                   ${s.label}
                 </button>`;
             })}
@@ -373,11 +376,11 @@ export async function onRequestGet(context) {
         <!-- Close reason (shown when clicking a loss stage) -->
         <template x-if="closingStage">
           <div class="stage-close-reason">
-            <input type="hidden" name="to_stage" :value="closingStage">
             <input type="text" name="override_reason" x-ref="closeReasonInput"
                    placeholder="Close reason (required)" required
                    style="font-size:0.85em; flex:1; min-width:200px; max-width:400px;">
-            <button type="submit" class="btn btn-sm danger">Confirm</button>
+            <button type="button" class="btn btn-sm danger"
+                    @click="$refs.toStage.value = closingStage; $refs.stageForm.submit()">Confirm</button>
             <button type="button" class="btn btn-sm" @click="closingStage = ''">Cancel</button>
           </div>
         </template>
