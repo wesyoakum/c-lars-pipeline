@@ -303,7 +303,7 @@ export async function renderEditForm(context, opts = {}) {
   return htmlResponse(
     layout(`Edit ${opp.number ?? 'opportunity'}`, body, {
       user,
-      env: data?.env,
+      env: data?.env, commitSha: data?.commitSha,
       activeNav: '/opportunities',
       flash: readFlash(url),
     }),

@@ -206,7 +206,7 @@ async function renderEditor(context, { values = null, errors = {} } = {}) {
   return htmlResponse(
     layout(`${build.label || 'Cost build'} — ${opp.number}`, body, {
       user,
-      env: data?.env,
+      env: data?.env, commitSha: data?.commitSha,
       activeNav: '/opportunities',
       flash: readFlash(url),
     })

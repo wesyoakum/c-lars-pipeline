@@ -86,8 +86,9 @@ function renderValue(value) {
  * Vendored HTMX + Alpine from /js so Access + CSP don't fight CDN cross-origin.
  */
 export function layout(title, body, opts = {}) {
-  const { user, flash, activeNav } = opts;
+  const { user, flash, activeNav, commitSha } = opts;
   const pageTitle = title ? `${escape(title)} — C-LARS PMS` : 'C-LARS PMS';
+  const versionTag = commitSha ? `v${escape(String(commitSha).slice(0, 7))}` : '';
 
   return `<!doctype html>
 <html lang="en">
@@ -126,6 +127,7 @@ ${body}
   <footer class="site-footer">
     <small>C-LARS PMS P0 · <a href="https://github.com/wesyoakum/pms">source</a></small>
   </footer>
+  ${versionTag ? `<div class="version-badge">${versionTag}</div>` : ''}
 </body>
 </html>`;
 }

@@ -1080,3 +1080,17 @@ table.data.compact td select {
 table.data.compact td input.num-input {
   width: 6rem;
 }
+
+/* ---------- Version badge (bottom-right corner) ---------- */
+.version-badge {
+  position: fixed;
+  bottom: 0.4rem;
+  right: 0.5rem;
+  font-size: 0.65rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--fg-muted, #999);
+  opacity: 0.6;
+  pointer-events: none;
+  user-select: none;
+  z-index: 9999;
+}

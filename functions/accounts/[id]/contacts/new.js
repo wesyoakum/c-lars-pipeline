@@ -83,7 +83,7 @@ export function renderNewContactForm(context, opts = {}) {
   return htmlResponse(
     layout(`New contact — ${account.name}`, body, {
       user,
-      env: data?.env,
+      env: data?.env, commitSha: data?.commitSha,
       activeNav: '/accounts',
     }),
     { status: opts.errors ? 422 : 200 }

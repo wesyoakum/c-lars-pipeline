@@ -160,7 +160,7 @@ async function renderEdit(context, { values = null, entriesOverride = null, erro
   return htmlResponse(
     layout('Edit labor item', body, {
       user,
-      env: data?.env,
+      env: data?.env, commitSha: data?.commitSha,
       activeNav: '/library',
       flash: readFlash(url),
     })

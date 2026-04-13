@@ -186,7 +186,7 @@ export async function onRequestGet(context) {
   return htmlResponse(
     layout(account.name, body, {
       user,
-      env: data?.env,
+      env: data?.env, commitSha: data?.commitSha,
       activeNav: '/accounts',
       flash: readFlash(url),
     })
@@ -340,7 +340,7 @@ function notFound(context) {
         <h1>Account not found</h1>
         <p><a href="/accounts">Back to accounts</a></p>
       </section>`,
-      { user: data?.user, env: data?.env, activeNav: '/accounts' }
+      { user: data?.user, env: data?.env, commitSha: data?.commitSha, activeNav: '/accounts' }
     ),
     { status: 404 }
   );

@@ -25,7 +25,7 @@ export async function onRequestPost(context) {
   if (!account) {
     return htmlResponse(
       layout('Not found', '<section class="card"><h1>Account not found</h1></section>', {
-        user, env: data?.env, activeNav: '/accounts',
+        user, env: data?.env, commitSha: data?.commitSha, activeNav: '/accounts',
       }),
       { status: 404 }
     );

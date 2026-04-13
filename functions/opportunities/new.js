@@ -273,7 +273,7 @@ export async function renderNewForm(context, opts = {}) {
   return htmlResponse(
     layout('New opportunity', body, {
       user,
-      env: data?.env,
+      env: data?.env, commitSha: data?.commitSha,
       activeNav: '/opportunities',
       flash: readFlash(url),
     }),

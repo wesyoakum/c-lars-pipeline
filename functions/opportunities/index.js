@@ -218,7 +218,7 @@ export async function onRequestGet(context) {
   return htmlResponse(
     layout('Opportunities', body, {
       user,
-      env: data?.env,
+      env: data?.env, commitSha: data?.commitSha,
       activeNav: '/opportunities',
       flash: readFlash(url),
     })

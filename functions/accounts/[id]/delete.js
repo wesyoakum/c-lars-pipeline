@@ -33,7 +33,7 @@ export async function onRequestPost(context) {
       layout(
         'Not found',
         `<section class="card"><h1>Account not found</h1><p><a href="/accounts">Back</a></p></section>`,
-        { user, env: data?.env, activeNav: '/accounts' }
+        { user, env: data?.env, commitSha: data?.commitSha, activeNav: '/accounts' }
       ),
       { status: 404 }
     );

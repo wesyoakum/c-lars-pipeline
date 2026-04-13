@@ -149,7 +149,7 @@ export async function onRequestGet(context) {
   // No activeNav on the dashboard — the home link in the brand is the
   // implicit "you're here" affordance, and we don't want navLink's
   // startsWith('/') match to light up every link in the top nav.
-  return htmlResponse(layout('Dashboard', body, { user, env: data?.env }));
+  return htmlResponse(layout('Dashboard', body, { user, env: data?.env, commitSha: data?.commitSha }));
 }
 
 function formatMoney(n) {
