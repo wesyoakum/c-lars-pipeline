@@ -120,7 +120,7 @@ const CHECKS = {
   },
 
   async has_governance_revisions_snapshotted(ctx) {
-    const hasIt = ctx.quotes.some(q => q.gov_rev_tandc);
+    const hasIt = ctx.quotes.some(q => q.tc_revision);
     if (hasIt) return { passed: true };
     if (ctx.quotes.length === 0) return { passed: false, message: 'No quote exists' };
     return { passed: false, message: 'No quote has governance revisions snapshotted (submit the quote first)' };
@@ -150,11 +150,11 @@ const CHECKS = {
  */
 export async function loadGateContext(db, opportunity) {
   const [contacts, quotes, costBuilds] = await Promise.all([
+    opportunity.account_id
+      ? all(db, 'SELECT id FROM contacts WHERE account_id = ?', [opportunity.account_id])
+      : [],
     all(db,
-      'SELECT id FROM contacts WHERE account_id = ?',
-      [opportunity.account_id]),
-    all(db,
-      `SELECT id, status, valid_until, delivery_terms, payment_terms, gov_rev_tandc
+      `SELECT id, status, valid_until, delivery_terms, payment_terms, tc_revision
          FROM quotes WHERE opportunity_id = ?`,
       [opportunity.id]),
     all(db,
