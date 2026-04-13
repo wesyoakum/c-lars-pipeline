@@ -12,7 +12,7 @@
 import { one, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
 import { validateStageTransition } from '../../lib/validators.js';
-import { now } from '../../lib/ids.js';
+import { uuid, now, nextNumber, currentYear } from '../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../lib/http.js';
 import { stageDef, stagesFor, evaluateGate, loadGateContext, GATE_MODE } from '../../lib/stages.js';
 
@@ -141,8 +141,41 @@ export async function onRequestPost(context) {
 
   await batch(env.DB, statements);
 
+  // Auto-create Job when closing as won
+  let jobNumber = null;
+  if (targetDef.is_won) {
+    // Check if a job already exists for this opportunity
+    const existingJob = await one(env.DB,
+      'SELECT id FROM jobs WHERE opportunity_id = ? AND status != ?',
+      [oppId, 'cancelled']);
+    if (!existingJob) {
+      const jobId = uuid();
+      jobNumber = await nextNumber(env.DB, `JOB-${currentYear()}`);
+      const isEps = opp.transaction_type === 'eps';
+      await batch(env.DB, [
+        stmt(env.DB,
+          `INSERT INTO jobs
+             (id, number, opportunity_id, job_type, status, title,
+              customer_po_number, ntp_required, created_at, updated_at,
+              created_by_user_id)
+           VALUES (?, ?, ?, ?, 'created', ?, ?, ?, ?, ?, ?)`,
+          [jobId, jobNumber, oppId, opp.transaction_type,
+           opp.title, opp.customer_po_number || null,
+           isEps ? 1 : 0, ts, ts, user?.id]),
+        auditStmt(env.DB, {
+          entityType: 'job',
+          entityId: jobId,
+          eventType: 'created',
+          user,
+          summary: `Job ${jobNumber} auto-created from opportunity ${opp.number} (${opp.transaction_type})`,
+        }),
+      ]);
+    }
+  }
+
   // Flash: show the success + any warnings
   let flashMsg = `Moved to ${targetDef.label}.`;
+  if (jobNumber) flashMsg += ` Job ${jobNumber} created.`;
   if (warningMessages.length > 0) {
     flashMsg += ` ⚠ ${warningMessages.join(' · ')}`;
   }
