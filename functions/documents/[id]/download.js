@@ -12,7 +12,7 @@ export async function onRequestGet(context) {
   const docId = params.id;
 
   const doc = await one(env.DB,
-    'SELECT id, r2_key, title, mime_type FROM documents WHERE id = ?',
+    'SELECT id, r2_key, title, original_filename, mime_type FROM documents WHERE id = ?',
     [docId]);
 
   if (!doc) {
@@ -36,7 +36,7 @@ export async function onRequestGet(context) {
 
   // Set content-disposition so the browser downloads with the original name
   const headers = new Headers(response.headers);
-  const safeName = (doc.title || 'file').replace(/[^\w.\-]/g, '_');
+  const safeName = (doc.original_filename || doc.title || 'file').replace(/[^\w.\-]/g, '_');
   headers.set('content-disposition', `attachment; filename="${safeName}"`);
   if (doc.mime_type) {
     headers.set('content-type', doc.mime_type);
