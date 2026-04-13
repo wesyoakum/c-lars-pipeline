@@ -121,15 +121,15 @@ export function layout(title, body, opts = {}) {
   <header class="site-header">
     <div class="brand">
       <a href="/"><img src="/img/logo-120.png" alt="C-LARS" class="brand-logo"><strong>PMS</strong></a>
-      <span class="env-badge env-${escape(opts.env ?? 'prod')}">${escape(opts.env ?? 'prod')}</span>
     </div>
     <nav class="site-nav">
       ${navLink('/opportunities', 'Opportunities', activeNav)}
+      ${navLink('/quotes', 'Quotes', activeNav)}
+      ${navLink('/activities', 'Tasks', activeNav)}
+      ${navLink('/library', 'Library', activeNav)}
+      ${navLink('/reports', 'Reports', activeNav)}
       ${navLink('/accounts', 'Accounts', activeNav)}
       ${navLink('/jobs', 'Jobs', activeNav)}
-      ${navLink('/library', 'Library', activeNav)}
-      ${navLink('/activities', 'Tasks', activeNav)}
-      ${navLink('/reports', 'Reports', activeNav)}
     </nav>
     <div class="header-right">
       <a href="/settings" class="settings-gear" title="Settings">

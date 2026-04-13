@@ -103,16 +103,14 @@ export async function renderEditForm(context, opts = {}) {
         <div class="row">
           <label style="flex:1">
             <span>Account <em>*</em></span>
-            <div class="picker-row">
-              <select name="account_id" required data-role="account-select">
-                <option value="">— Select account —</option>
-                ${accounts.map(
-                  (a) =>
-                    html`<option value="${escape(a.id)}" ${opp.account_id === a.id ? 'selected' : ''}>${a.name}</option>`
-                )}
-              </select>
-              <button type="button" class="btn btn-sm" data-action="new-account">+ New account</button>
-            </div>
+            <select name="account_id" required data-role="account-select">
+              <option value="">— Select account —</option>
+              ${accounts.map(
+                (a) =>
+                  html`<option value="${escape(a.id)}" ${opp.account_id === a.id ? 'selected' : ''}>${a.name}</option>`
+              )}
+              <option value="__new__">+ Add new account</option>
+            </select>
             ${errors.account_id ? html`<small class="field-error">${errors.account_id}</small>` : ''}
           </label>
 

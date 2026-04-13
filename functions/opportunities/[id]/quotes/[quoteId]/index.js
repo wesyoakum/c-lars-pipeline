@@ -316,6 +316,14 @@ export async function onRequestGet(context) {
       </div>
 
       <label class="desc-label">
+        Title
+        <input type="text" name="title" value="${escape(quote.title ?? '')}"
+               placeholder="Quote title / project name"
+               class="desc-input"
+               ${readOnly ? 'disabled' : ''}
+               @change="patchField('title', $event.target.value)">
+      </label>
+      <label class="desc-label" style="margin-top:0.5rem">
         Description
         <textarea name="description" placeholder="Scope description for the customer" class="desc-textarea"
                   ${readOnly ? 'disabled' : ''}

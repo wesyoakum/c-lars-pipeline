@@ -106,16 +106,14 @@ export async function renderNewForm(context, opts = {}) {
         <div class="row">
           <label style="flex:1">
             <span>Account <em>*</em></span>
-            <div class="picker-row">
-              <select name="account_id" required data-role="account-select">
-                <option value="">— Select account —</option>
-                ${accounts.map(
-                  (a) =>
-                    html`<option value="${escape(a.id)}" ${preselectAccount === a.id ? 'selected' : ''}>${a.name}</option>`
-                )}
-              </select>
-              <button type="button" class="btn btn-sm" data-action="new-account">+ New account</button>
-            </div>
+            <select name="account_id" required data-role="account-select">
+              <option value="">— Select account —</option>
+              ${accounts.map(
+                (a) =>
+                  html`<option value="${escape(a.id)}" ${preselectAccount === a.id ? 'selected' : ''}>${a.name}</option>`
+              )}
+              <option value="__new__">+ Add new account</option>
+            </select>
             ${errors.account_id ? html`<small class="field-error">${errors.account_id}</small>` : ''}
           </label>
 
@@ -340,7 +338,6 @@ export function oppPickerScript() {
   if (!form) return;
   const accountSelect = form.querySelector('select[data-role="account-select"]');
   const authoritySelect = form.querySelector('select[data-role="authority-select"]');
-  const newAccountBtn = form.querySelector('button[data-action="new-account"]');
   const newContactBtn = form.querySelector('button[data-action="new-contact"]');
 
   function openPopup(url, name) {
@@ -376,12 +373,13 @@ export function oppPickerScript() {
   }
 
   if (accountSelect) {
-    accountSelect.addEventListener('change', () => loadContactsFor(accountSelect.value));
-  }
-
-  if (newAccountBtn) {
-    newAccountBtn.addEventListener('click', () => {
-      openPopup('/accounts/new?popup=1', 'pms-new-account');
+    accountSelect.addEventListener('change', () => {
+      if (accountSelect.value === '__new__') {
+        accountSelect.value = '';
+        openPopup('/accounts/new?popup=1', 'pms-new-account');
+      } else {
+        loadContactsFor(accountSelect.value);
+      }
     });
   }
 
@@ -404,7 +402,9 @@ export function oppPickerScript() {
         const opt = document.createElement('option');
         opt.value = id;
         opt.textContent = name;
-        accountSelect.appendChild(opt);
+        const newEntry = accountSelect.querySelector('option[value="__new__"]');
+        if (newEntry) accountSelect.insertBefore(opt, newEntry);
+        else accountSelect.appendChild(opt);
       }
       if (accountSelect) {
         accountSelect.value = id;
