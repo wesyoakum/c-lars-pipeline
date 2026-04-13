@@ -309,6 +309,7 @@ export async function onRequestGet(context) {
       value: c.id,
       label: [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)',
     })),
+    { value: '__new__', label: '+ Add new contact...' },
   ];
   const userOptions = [
     { value: '', label: '— None —' },
@@ -325,7 +326,7 @@ export async function onRequestGet(context) {
 
   // ---- Overview tab ------------------------------------------------------
   const overviewTab = html`
-    <section class="card" x-data="oppInline('${escape(opp.id)}')">
+    <section class="card" x-data="oppInline('${escape(opp.id)}', '${escape(opp.account_id)}')">
       <div class="card-header">
         <div>
           <h1 class="page-title">
@@ -949,7 +950,7 @@ function stageCarousel(startIdx, count) {
 }
 
 // Inline-edit controller
-function oppInline(oppId) {
+function oppInline(oppId, accountId) {
   const patchUrl = '/opportunities/' + oppId + '/patch';
   return {
     saving: false,
@@ -978,8 +979,20 @@ function oppInline(oppId) {
           if (o.value === (currentValue || '')) opt.selected = true;
           input.appendChild(opt);
         });
-        input.addEventListener('change', () => this.save(el, input));
-        input.addEventListener('blur', () => this.deactivate(el, input));
+        input.addEventListener('change', () => {
+          if (input.value === '__new__') {
+            this.showNewContactForm(el, input);
+          } else {
+            this.save(el, input);
+          }
+        });
+        input.addEventListener('blur', (e) => {
+          // Don't deactivate if focus moved to the new-contact form
+          if (e.relatedTarget && el.contains(e.relatedTarget)) return;
+          setTimeout(() => {
+            if (!el.querySelector('.ie-new-contact')) this.deactivate(el, input);
+          }, 150);
+        });
       } else if (type === 'textarea') {
         input = document.createElement('textarea');
         input.className = 'ie-input';
@@ -1055,8 +1068,66 @@ function oppInline(oppId) {
         el.classList.remove('ie-saving');
       }
     },
+    showNewContactForm(el, selectInput) {
+      if (el.querySelector('.ie-new-contact')) return;
+      selectInput.style.display = 'none';
+      const form = document.createElement('div');
+      form.className = 'ie-new-contact';
+      form.innerHTML = '<div style="display:flex;gap:0.3rem;align-items:center;flex-wrap:wrap;margin-top:0.3rem">'
+        + '<input type="text" class="ie-input" placeholder="First name" style="flex:1;min-width:80px" data-nc="first">'
+        + '<input type="text" class="ie-input" placeholder="Last name" style="flex:1;min-width:80px" data-nc="last">'
+        + '<button type="button" class="btn btn-sm primary" data-nc="save">Save</button>'
+        + '<button type="button" class="btn btn-sm" data-nc="cancel">Cancel</button>'
+        + '</div>';
+      el.appendChild(form);
+      form.querySelector('[data-nc="first"]').focus();
+      form.querySelector('[data-nc="cancel"]').addEventListener('click', () => {
+        form.remove();
+        this.deactivate(el, selectInput);
+      });
+      form.querySelector('[data-nc="save"]').addEventListener('click', async () => {
+        const firstName = form.querySelector('[data-nc="first"]').value.trim();
+        const lastName = form.querySelector('[data-nc="last"]').value.trim();
+        if (!firstName && !lastName) return;
+        try {
+          const res = await fetch('/api/accounts/' + accountId + '/contacts-create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ first_name: firstName, last_name: lastName }),
+          });
+          const data = await res.json();
+          if (!data.ok) { alert(data.error || 'Failed'); return; }
+          const newId = data.contact.id;
+          const newLabel = [firstName, lastName].filter(Boolean).join(' ');
+          form.remove();
+          selectInput.style.display = '';
+          const newOpt = document.createElement('option');
+          newOpt.value = newId;
+          newOpt.textContent = newLabel;
+          const newEntry = selectInput.querySelector('option[value="__new__"]');
+          if (newEntry) selectInput.insertBefore(newOpt, newEntry);
+          else selectInput.appendChild(newOpt);
+          selectInput.value = newId;
+          // Update options data for future opens
+          const opts = JSON.parse(el.dataset.options || '[]');
+          opts.splice(opts.length - 1, 0, { value: newId, label: newLabel });
+          el.dataset.options = JSON.stringify(opts);
+          // Sync other contact selects on the page
+          this.$el.querySelectorAll('.ie[data-field="primary_contact_id"], .ie[data-field="bant_authority_contact_id"]').forEach(otherEl => {
+            if (otherEl === el) return;
+            const otherOpts = JSON.parse(otherEl.dataset.options || '[]');
+            otherOpts.splice(otherOpts.length - 1, 0, { value: newId, label: newLabel });
+            otherEl.dataset.options = JSON.stringify(otherOpts);
+          });
+          this.save(el, selectInput);
+        } catch (err) {
+          alert('Error creating contact');
+        }
+      });
+    },
     deactivate(el, input) {
       if (input && input.parentNode === el) el.removeChild(input);
+      el.querySelectorAll('.ie-new-contact').forEach(f => f.remove());
       const display = el.querySelector('.ie-display');
       if (display) display.style.display = '';
     },

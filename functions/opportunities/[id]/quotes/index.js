@@ -52,6 +52,7 @@ export async function onRequestPost(context) {
   }
 
   // Validate cost_build_id belongs to this opportunity (if supplied).
+  value.cost_build_id = (input.cost_build_id || '').trim() || null;
   if (value.cost_build_id) {
     const cb = await one(
       env.DB,
