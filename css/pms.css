@@ -244,7 +244,9 @@ form.stacked textarea {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
-  resize: vertical;
+  field-sizing: content;
+  min-height: 2.5rem;
+  resize: none;
 }
 form.stacked .row {
   display: flex;
@@ -588,7 +590,9 @@ fieldset.qualification-box select {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
-  resize: vertical;
+  field-sizing: content;
+  min-height: 2.5rem;
+  resize: none;
 }
 
 /* Read-only address view on account detail */
@@ -995,7 +999,9 @@ table.data.compact td {
 }
 .form-grid label textarea,
 .stack-form textarea {
-  resize: vertical;
+  field-sizing: content;
+  min-height: 2.5rem;
+  resize: none;
 }
 
 /* Quotes tab: the "+ New quote" inline create form (type picker + button). */
