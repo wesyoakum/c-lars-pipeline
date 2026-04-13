@@ -98,6 +98,7 @@ export function layout(title, body, opts = {}) {
   <link rel="stylesheet" href="/css/pms.css">
   <script defer src="/js/htmx.min.js"></script>
   <script defer src="/js/alpine.min.js"></script>
+  <script defer src="/js/live-calc.js"></script>
 </head>
 <body>
   <header class="site-header">

@@ -174,6 +174,12 @@ async function renderEditor(context, { values = null, errors = {} } = {}) {
     ${subNav}
     <form method="post" action="/opportunities/${escape(oppId)}/cost-builds/${escape(buildId)}" class="cost-build-form">
       <input type="hidden" name="sub" value="${escape(sub)}">
+      <script type="application/json" id="cb-pricing-data">${raw(JSON.stringify({
+        targetPct: settings.targetPct,
+        totalTargetPct: settings.targetPct.dm + settings.targetPct.dl + settings.targetPct.imoh + settings.targetPct.other,
+        marginThresholdGood: settings.marginThresholdGood,
+        defaultLaborRate: settings.defaultLaborRate,
+      }))}</script>
       <div class="field">
         <label>Label</label>
         <input type="text" name="label" value="${build.label ?? ''}" ${locked ? 'disabled' : ''}>
@@ -272,7 +278,7 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
         <tfoot>
           <tr>
             <th>Total cost</th>
-            <th class="num">${fmtDollar(eff.totalCost)}</th>
+            <th class="num" id="cb-total-cost">${fmtDollar(eff.totalCost)}</th>
           </tr>
         </tfoot>
       </table>
@@ -292,22 +298,21 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
         </div>
         <div class="pricing-box">
           <div class="muted">Target price (cost ÷ ${fmtPct(targetPct.total, 1)})</div>
-          <div class="pricing-value">${fmtDollar(eff.targetPrice)}</div>
+          <div class="pricing-value" id="cb-target-price">${fmtDollar(eff.targetPrice)}</div>
         </div>
-        <div class="pricing-box ${marg.status === 'good' ? 'margin-good' : marg.status === 'low' ? 'margin-low' : ''}">
+        <div class="pricing-box ${marg.status === 'good' ? 'margin-good' : marg.status === 'low' ? 'margin-low' : ''}" id="cb-margin-box">
           <div class="muted">Margin</div>
-          <div class="pricing-value">
+          <div class="pricing-value" id="cb-margin-value">
             ${marg.amount !== null
               ? html`${fmtDollar(marg.amount)} (${fmtPct(marg.pct)})`
               : '—'}
           </div>
+          <div class="muted" id="cb-margin-status" style="font-size:0.75rem">
           ${marg.status
-            ? html`<div class="muted" style="font-size:0.75rem">
-                ${marg.status === 'good'
+            ? (marg.status === 'good'
                   ? `Good (> ${fmtPct(marg.threshold)})`
-                  : `Too low (≤ ${fmtPct(marg.threshold)})`}
-              </div>`
-            : ''}
+                  : `Too low (≤ ${fmtPct(marg.threshold)})`)
+            : ''}</div>
         </div>
       </div>
 
@@ -317,27 +322,27 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
           <div>
             <strong>From Quote Price</strong>
             <ul class="plain">
-              <li>DM (${fmtPct(targetPct.dm, 1)}): ${fmtDollar(refs.fromQuote.dm)}</li>
-              <li>DL (${fmtPct(targetPct.dl, 1)}): ${fmtDollar(refs.fromQuote.dl)}</li>
-              <li>IMOH (${fmtPct(targetPct.imoh, 1)}): ${fmtDollar(refs.fromQuote.imoh)}</li>
-              <li>Other (${fmtPct(targetPct.other, 1)}): ${fmtDollar(refs.fromQuote.other)}</li>
+              <li>DM (${fmtPct(targetPct.dm, 1)}): <span id="cb-ref-fq-dm">${fmtDollar(refs.fromQuote.dm)}</span></li>
+              <li>DL (${fmtPct(targetPct.dl, 1)}): <span id="cb-ref-fq-dl">${fmtDollar(refs.fromQuote.dl)}</span></li>
+              <li>IMOH (${fmtPct(targetPct.imoh, 1)}): <span id="cb-ref-fq-imoh">${fmtDollar(refs.fromQuote.imoh)}</span></li>
+              <li>Other (${fmtPct(targetPct.other, 1)}): <span id="cb-ref-fq-other">${fmtDollar(refs.fromQuote.other)}</span></li>
             </ul>
           </div>
           <div>
             <strong>From DM</strong>
             <ul class="plain">
-              <li>Implied price: ${fmtDollar(refs.fromDm.price)}</li>
-              <li>Implied DL: ${fmtDollar(refs.fromDm.dl)}</li>
-              <li>Implied IMOH: ${fmtDollar(refs.fromDm.imoh)}</li>
-              <li>Implied Other: ${fmtDollar(refs.fromDm.other)}</li>
+              <li>Implied price: <span id="cb-ref-fdm-price">${fmtDollar(refs.fromDm.price)}</span></li>
+              <li>Implied DL: <span id="cb-ref-fdm-dl">${fmtDollar(refs.fromDm.dl)}</span></li>
+              <li>Implied IMOH: <span id="cb-ref-fdm-imoh">${fmtDollar(refs.fromDm.imoh)}</span></li>
+              <li>Implied Other: <span id="cb-ref-fdm-other">${fmtDollar(refs.fromDm.other)}</span></li>
             </ul>
           </div>
           <div>
             <strong>From DM + DL</strong>
             <ul class="plain">
-              <li>Implied price: ${fmtDollar(refs.fromDmDl.price)}</li>
-              <li>Implied IMOH: ${fmtDollar(refs.fromDmDl.imoh)}</li>
-              <li>Implied Other: ${fmtDollar(refs.fromDmDl.other)}</li>
+              <li>Implied price: <span id="cb-ref-fdmdl-price">${fmtDollar(refs.fromDmDl.price)}</span></li>
+              <li>Implied IMOH: <span id="cb-ref-fdmdl-imoh">${fmtDollar(refs.fromDmDl.imoh)}</span></li>
+              <li>Implied Other: <span id="cb-ref-fdmdl-other">${fmtDollar(refs.fromDmDl.other)}</span></li>
             </ul>
           </div>
         </div>
@@ -359,7 +364,7 @@ function renderLaborSubtab({
       ? workcenterEntryCost(entry.hours, entry.rate, settings)
       : 0;
     return html`
-      <tr>
+      <tr data-labor-wc="${escape(wc)}">
         <td>${escape(wc)}</td>
         <td class="num">
           <input type="text" name="current_hours[${escape(wc)}]"
@@ -374,7 +379,7 @@ function renderLaborSubtab({
                  placeholder="${settings.defaultLaborRate}">
           ${errText(`rate_${wc}`)}
         </td>
-        <td class="num">${cost ? fmtDollar(cost) : '—'}</td>
+        <td class="num" data-labor-cost>${cost ? fmtDollar(cost) : '—'}</td>
       </tr>
     `;
   });
@@ -402,7 +407,7 @@ function renderLaborSubtab({
         <tfoot>
           <tr>
             <th colspan="3">Current project total</th>
-            <th class="num">${fmtDollar(currentLaborTotal)}</th>
+            <th class="num" id="cb-labor-total">${fmtDollar(currentLaborTotal)}</th>
           </tr>
         </tfoot>
       </table>
@@ -436,6 +441,7 @@ function renderLaborSubtab({
                   <tr>
                     <td>
                       <input type="checkbox" name="labor_item_ids" value="${escape(li.id)}"
+                             data-cost="${cost}"
                              ${checked ? 'checked' : ''} ${locked ? 'disabled' : ''}>
                     </td>
                     <td>${escape(li.description)}</td>
@@ -446,12 +452,12 @@ function renderLaborSubtab({
             <tfoot>
               <tr>
                 <th colspan="2">Selected library total</th>
-                <th class="num">${fmtDollar(laborLibTotal)}</th>
+                <th class="num" id="cb-labor-selected-total">${fmtDollar(laborLibTotal)}</th>
               </tr>
               ${useLaborLibrary
                 ? html`<tr>
                   <th colspan="2">DL linked total (current + library)</th>
-                  <th class="num">${fmtDollar(laborCalcTotal ?? (currentLaborTotal + laborLibTotal))}</th>
+                  <th class="num" id="cb-labor-linked-total">${fmtDollar(laborCalcTotal ?? (currentLaborTotal + laborLibTotal))}</th>
                 </tr>`
                 : ''}
             </tfoot>
@@ -495,6 +501,7 @@ function renderDmSubtab({ allDmItems, dmSelectedIds, dmLibTotal, useDmLibrary, l
                   <tr>
                     <td>
                       <input type="checkbox" name="dm_item_ids" value="${escape(it.id)}"
+                             data-cost="${it.cost ?? 0}"
                              ${checked ? 'checked' : ''} ${locked ? 'disabled' : ''}>
                     </td>
                     <td>${escape(it.description)}</td>
@@ -505,7 +512,7 @@ function renderDmSubtab({ allDmItems, dmSelectedIds, dmLibTotal, useDmLibrary, l
             <tfoot>
               <tr>
                 <th colspan="2">Selected total</th>
-                <th class="num">${fmtDollar(dmLibTotal ?? 0)}</th>
+                <th class="num" id="cb-dm-selected-total">${fmtDollar(dmLibTotal ?? 0)}</th>
               </tr>
             </tfoot>
           </table>

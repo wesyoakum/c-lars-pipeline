@@ -128,7 +128,7 @@ export async function onRequestGet(context) {
         <div>
           <h1>
             ${escape(quote.title || quote.number)}
-            <span class="header-value">${fmtDollar(total)}</span>
+            <span class="header-value" id="q-header-total">${fmtDollar(total)}</span>
           </h1>
           <p class="muted">
             <code>${escape(quote.number)}</code>
@@ -325,13 +325,13 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h2>Line items</h2>
-        <span class="header-value">${fmtDollar(subtotal)} subtotal</span>
+        <span class="header-value" id="q-lines-subtotal">${fmtDollar(subtotal)} subtotal</span>
       </div>
 
       ${lines.length === 0
         ? html`<p class="muted">No line items yet.</p>`
         : html`
-          <table class="data compact">
+          <table class="data compact" data-live-calc="quote-lines">
             <thead>
               <tr>
                 <th style="width: 5%">#</th>
@@ -346,7 +346,7 @@ export async function onRequestGet(context) {
             </thead>
             <tbody>
               ${lines.map((l, i) => html`
-                <tr>
+                <tr data-line-row>
                   <td>${i + 1}</td>
                   <td>
                     <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}" class="inline-form" id="line-form-${escape(l.id)}">
@@ -370,7 +370,7 @@ export async function onRequestGet(context) {
                   <td class="num">
                     <input type="text" name="unit_price" form="line-form-${escape(l.id)}" value="${escape(l.unit_price ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input">
                   </td>
-                  <td class="num">${fmtDollar(l.extended_price)}</td>
+                  <td class="num" data-line-extended>${fmtDollar(l.extended_price)}</td>
                   <td class="row-actions">
                     ${!readOnly ? html`
                       <button class="btn small" type="submit" form="line-form-${escape(l.id)}">Save</button>
@@ -383,7 +383,7 @@ export async function onRequestGet(context) {
               `)}
               <tr class="totals-row">
                 <td colspan="6" class="num"><strong>Subtotal</strong></td>
-                <td class="num"><strong>${fmtDollar(subtotal)}</strong></td>
+                <td class="num" id="q-subtotal"><strong>${fmtDollar(subtotal)}</strong></td>
                 <td></td>
               </tr>
               <tr class="totals-row">
@@ -393,7 +393,7 @@ export async function onRequestGet(context) {
               </tr>
               <tr class="totals-row">
                 <td colspan="6" class="num"><strong>Total</strong></td>
-                <td class="num"><strong>${fmtDollar(total)}</strong></td>
+                <td class="num" id="q-total"><strong>${fmtDollar(total)}</strong></td>
                 <td></td>
               </tr>
             </tbody>
@@ -433,6 +433,7 @@ export async function onRequestGet(context) {
             </div>
             <div class="form-actions">
               <button class="btn primary" type="submit">+ Add line</button>
+              <span class="muted" data-add-preview style="margin-left:0.5rem">$0</span>
             </div>
           </form>
         `
