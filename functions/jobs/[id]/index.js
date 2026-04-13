@@ -46,7 +46,11 @@ export async function onRequestGet(context) {
             oc_user.display_name AS oc_issued_by_name,
             ntp_user.display_name AS ntp_issued_by_name,
             ho_user.display_name AS handed_off_by_name,
-            creator.display_name AS created_by_name
+            creator.display_name AS created_by_name,
+            (SELECT q.number FROM quotes q
+              WHERE q.opportunity_id = j.opportunity_id
+                AND q.status NOT IN ('superseded','expired','rejected')
+              ORDER BY q.created_at DESC LIMIT 1) AS latest_quote_number
        FROM jobs j
        LEFT JOIN opportunities o ON o.id = j.opportunity_id
        LEFT JOIN accounts a ON a.id = o.account_id
@@ -79,8 +83,10 @@ export async function onRequestGet(context) {
   const canRecordAuth = isEps && job.status === 'awaiting_authorization';
   const canIssueNtp = isEps && job.status === 'awaiting_ntp';
   const canAmendOc = isRefurb && job.status === 'handed_off';
-  const canCancel = job.status !== 'handed_off' && job.status !== 'cancelled';
+  const canClose = job.status !== 'handed_off' && job.status !== 'cancelled';
   const isActive = job.status !== 'handed_off' && job.status !== 'cancelled';
+  const defaultOcNumber = job.latest_quote_number ? `OC-${job.latest_quote_number}` : '';
+  const defaultNtpNumber = job.latest_quote_number ? `NTP-${job.latest_quote_number}` : '';
 
   const body = html`
     <section class="card">
@@ -118,6 +124,10 @@ export async function onRequestGet(context) {
           <div class="detail-pair">
             <span class="detail-label">Authorization</span>
             <span class="detail-value">${job.authorization_received_at ? escape(job.authorization_received_at.slice(0, 10)) : '—'}</span>
+          </div>
+          <div class="detail-pair">
+            <span class="detail-label">NTP Number</span>
+            <span class="detail-value">${escape(job.ntp_number || '—')}</span>
           </div>
           <div class="detail-pair">
             <span class="detail-label">NTP Issued</span>
@@ -167,7 +177,7 @@ export async function onRequestGet(context) {
             <fieldset>
               <legend>Issue Order Confirmation</legend>
               <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem;">
-                <div><label class="field-label">OC Number *</label><input type="text" name="oc_number" required></div>
+                <div><label class="field-label">OC Number *</label><input type="text" name="oc_number" value="${escape(defaultOcNumber)}" required></div>
                 <div><label class="field-label">Customer PO #</label><input type="text" name="customer_po_number" value="${escape(job.customer_po_number || job.opp_po_number || '')}"></div>
               </div>
               <button class="btn primary" type="submit" style="margin-top:0.5rem">Issue OC</button>
@@ -191,8 +201,9 @@ export async function onRequestGet(context) {
           <form method="post" action="/jobs/${escape(job.id)}/issue-ntp" class="action-form">
             <fieldset>
               <legend>Issue Notice to Proceed</legend>
-              <p class="muted" style="margin:0 0 0.4rem; font-size:0.85em">This will mark the job as handed off.</p>
-              <button class="btn primary" type="submit">Issue NTP</button>
+              <div><label class="field-label">NTP Number</label><input type="text" name="ntp_number" value="${escape(defaultNtpNumber)}"></div>
+              <p class="muted" style="margin:0.4rem 0; font-size:0.85em">This will mark the job as handed off.</p>
+              <button class="btn primary" type="submit" style="margin-top:0.5rem">Issue NTP</button>
             </fieldset>
           </form>` : ''}
 
@@ -220,13 +231,13 @@ export async function onRequestGet(context) {
           </fieldset>
         </form>
 
-        ${canCancel ? html`
-          <form method="post" action="/jobs/${escape(job.id)}/cancel"
-                onsubmit="return confirm('Cancel this job?')" class="action-form">
+        ${canClose ? html`
+          <form method="post" action="/jobs/${escape(job.id)}/close"
+                onsubmit="return confirm('Close this job?')" class="action-form">
             <fieldset>
-              <legend>Cancel Job</legend>
-              <div><label class="field-label">Reason</label><input type="text" name="reason" placeholder="Reason for cancellation"></div>
-              <button class="btn danger" type="submit" style="margin-top:0.5rem">Cancel Job</button>
+              <legend>Close Job</legend>
+              <div><label class="field-label">Reason</label><input type="text" name="reason" placeholder="Reason for closing"></div>
+              <button class="btn danger" type="submit" style="margin-top:0.5rem">Close Job</button>
             </fieldset>
           </form>` : ''}
 

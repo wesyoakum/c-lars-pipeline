@@ -1,6 +1,6 @@
-// functions/jobs/[id]/cancel.js
+// functions/jobs/[id]/close.js
 //
-// POST /jobs/:id/cancel — Cancel a job.
+// POST /jobs/:id/close — Close a job.
 
 import { one, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
@@ -16,7 +16,7 @@ export async function onRequestPost(context) {
   if (!job) return redirectWithFlash('/jobs', 'Job not found.', 'error');
 
   if (job.status === 'handed_off' || job.status === 'cancelled') {
-    return redirectWithFlash(`/jobs/${jobId}`, 'Cannot cancel a job that is already handed off or cancelled.', 'error');
+    return redirectWithFlash(`/jobs/${jobId}`, 'Cannot close a job that is already handed off or closed.', 'error');
   }
 
   const input = await formBody(request);
@@ -30,14 +30,14 @@ export async function onRequestPost(context) {
     auditStmt(env.DB, {
       entityType: 'job',
       entityId: jobId,
-      eventType: 'cancelled',
+      eventType: 'closed',
       user,
-      summary: `Job cancelled${reason ? `: ${reason}` : ''}`,
+      summary: `Job closed${reason ? `: ${reason}` : ''}`,
       changes: {
         status: { from: job.status, to: 'cancelled' },
       },
     }),
   ]);
 
-  return redirectWithFlash(`/jobs/${jobId}`, 'Job cancelled.');
+  return redirectWithFlash(`/jobs/${jobId}`, 'Job closed.');
 }

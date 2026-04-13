@@ -23,28 +23,31 @@ export async function onRequestPost(context) {
     return redirectWithFlash(`/jobs/${jobId}`, 'Job is not awaiting NTP.', 'error');
   }
 
+  const input = await formBody(request);
   const ts = now();
+  const ntpNumber = (input.ntp_number || '').trim() || null;
 
   await batch(env.DB, [
     stmt(env.DB,
       `UPDATE jobs
-          SET ntp_issued_at = ?, ntp_issued_by_user_id = ?,
+          SET ntp_number = ?, ntp_issued_at = ?, ntp_issued_by_user_id = ?,
               status = 'handed_off',
               handed_off_at = ?, handed_off_by_user_id = ?,
               updated_at = ?
         WHERE id = ?`,
-      [ts, user?.id, ts, user?.id, ts, jobId]),
+      [ntpNumber, ts, user?.id, ts, user?.id, ts, jobId]),
     auditStmt(env.DB, {
       entityType: 'job',
       entityId: jobId,
       eventType: 'ntp_issued',
       user,
-      summary: `NTP issued — job handed off`,
+      summary: `NTP issued${ntpNumber ? `: ${ntpNumber}` : ''} — job handed off`,
       changes: {
         status: { from: 'awaiting_ntp', to: 'handed_off' },
+        ntp_number: { from: null, to: ntpNumber },
       },
     }),
   ]);
 
-  return redirectWithFlash(`/jobs/${jobId}`, 'NTP issued — job handed off.');
+  return redirectWithFlash(`/jobs/${jobId}`, `NTP${ntpNumber ? ` ${ntpNumber}` : ''} issued — job handed off.`);
 }
