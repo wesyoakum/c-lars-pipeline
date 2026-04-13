@@ -1216,6 +1216,26 @@ table.data.compact td input.num-input {
   flex-wrap: wrap;
 }
 
+/* ---------- Drop-zone file upload ---------- */
+
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.drop-zone:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.drop-zone-active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.drop-zone-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-size: 0.88em;
+}
+
 /* ---------- Inline-edit fields ---------- */
 
 .ie {

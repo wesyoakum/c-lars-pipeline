@@ -627,19 +627,32 @@ export async function onRequestGet(context) {
   const docsTab = html`
     <section class="card">
       <div class="card-header"><h2>Documents</h2></div>
-      <div style="margin-bottom:1rem; padding:0.75rem; background:var(--bg-muted,#f6f8fa); border-radius:var(--radius);">
-        <form method="post" action="/documents" enctype="multipart/form-data">
+      <div x-data="dropUpload()" style="margin-bottom:1rem;">
+        <form method="post" action="/documents" enctype="multipart/form-data" x-ref="uploadForm">
           <input type="hidden" name="opportunity_id" value="${escape(opp.id)}">
           <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}?tab=docs">
-          <div style="display:grid; grid-template-columns:1fr auto auto; gap:0.5rem; align-items:end;">
-            <div><label class="field-label">File</label><input type="file" name="file" required style="font-size:0.85em"></div>
+          <div class="drop-zone" :class="{ 'drop-zone-active': dragging }"
+               @dragover.prevent="dragging = true"
+               @dragleave.prevent="dragging = false"
+               @drop.prevent="handleDrop($event)"
+               @click="$refs.fileInput.click()">
+            <input type="file" name="file" required x-ref="fileInput" hidden @change="fileSelected($event)">
+            <div class="drop-zone-content">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.4">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              <span x-show="!fileName" class="muted">Drop file here or click to browse</span>
+              <span x-show="fileName" x-text="fileName" style="font-weight:500"></span>
+            </div>
+          </div>
+          <div style="margin-top:0.4rem; display:grid; grid-template-columns:auto 1fr 1fr auto; gap:0.5rem; align-items:end;">
             <div><label class="field-label">Kind</label>
               <select name="kind" style="font-size:0.85em">${Object.entries(DOC_KIND_LABELS).map(([k, v]) => html`<option value="${k}">${v}</option>`)}</select></div>
+            <div><input type="text" name="title" placeholder="Title (defaults to filename)" style="width:100%; font-size:0.85em"></div>
+            <div><input type="text" name="notes" placeholder="Notes (optional)" style="width:100%; font-size:0.85em"></div>
             <div><button class="btn btn-sm primary" type="submit">Upload</button></div>
-          </div>
-          <div style="margin-top:0.4rem; display:grid; grid-template-columns:1fr 1fr; gap:0.5rem;">
-            <input type="text" name="title" placeholder="Title (defaults to filename)" style="width:100%; font-size:0.85em">
-            <input type="text" name="notes" placeholder="Notes (optional)" style="width:100%; font-size:0.85em">
           </div>
         </form>
       </div>
@@ -718,7 +731,7 @@ export async function onRequestGet(context) {
   }`;
 
   // Inline-edit + carousel scripts
-  const scripts = tab === 'overview' ? html`<script>${raw(inlineEditScript())}</script>` : '';
+  const scripts = (tab === 'overview' || tab === 'docs') ? html`<script>${raw(inlineEditScript())}</script>` : '';
 
   return htmlResponse(
     layout(`${opp.number} — ${opp.title}`, html`${body}${scripts}`, {
@@ -1000,6 +1013,26 @@ function oppInline(oppId) {
       if (input && input.parentNode === el) el.removeChild(input);
       const display = el.querySelector('.ie-display');
       if (display) display.style.display = '';
+    },
+  };
+}
+
+// Drop-zone file upload
+function dropUpload() {
+  return {
+    dragging: false,
+    fileName: '',
+    handleDrop(e) {
+      this.dragging = false;
+      const files = e.dataTransfer?.files;
+      if (files?.length) {
+        this.$refs.fileInput.files = files;
+        this.fileName = files[0].name;
+      }
+    },
+    fileSelected(e) {
+      const f = e.target.files?.[0];
+      this.fileName = f ? f.name : '';
     },
   };
 }
