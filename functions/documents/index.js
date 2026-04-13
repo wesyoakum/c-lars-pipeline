@@ -43,8 +43,11 @@ export async function onRequestPost(context) {
 
   const docId = uuid();
   const ts = now();
-  const fileName = title || file.name || 'file';
-  const r2Key = buildR2Key(opportunityId || 'general', fileName);
+  const originalFilename = file.name || 'file';
+  // Title defaults to filename without extension, capitalized
+  const derivedTitle = originalFilename.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ');
+  const displayTitle = title || derivedTitle;
+  const r2Key = buildR2Key(opportunityId || 'general', originalFilename);
 
   // Upload to R2
   await uploadToR2(env.DOCS, r2Key, file, {
@@ -58,21 +61,22 @@ export async function onRequestPost(context) {
     stmt(env.DB,
       `INSERT INTO documents
          (id, opportunity_id, quote_id, job_id, account_id, kind, title,
-          r2_key, mime_type, size_bytes, notes, uploaded_at, uploaded_by_user_id)
-       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [docId, opportunityId, quoteId, accountId, kind, fileName,
-       r2Key, file.type || 'application/octet-stream', file.size,
-       notes, ts, user?.id]),
+          original_filename, r2_key, mime_type, size_bytes, notes,
+          uploaded_at, uploaded_by_user_id)
+       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [docId, opportunityId, quoteId, accountId, kind, displayTitle,
+       originalFilename, r2Key, file.type || 'application/octet-stream',
+       file.size, notes, ts, user?.id]),
     auditStmt(env.DB, {
       entityType: 'document',
       entityId: docId,
       eventType: 'uploaded',
       user,
-      summary: `Uploaded ${kind}: ${fileName} (${formatSize(file.size)})`,
+      summary: `Uploaded ${kind}: ${displayTitle} (${formatSize(file.size)})`,
     }),
   ]);
 
-  return redirectWithFlash(returnTo, `Uploaded: ${fileName}`);
+  return redirectWithFlash(returnTo, `Uploaded: ${displayTitle}`);
 }
 
 function formatSize(bytes) {

@@ -258,8 +258,8 @@ export async function onRequestGet(context) {
   {
     const rows = await all(
       env.DB,
-      `SELECT d.id, d.kind, d.title, d.mime_type, d.size_bytes,
-              d.notes, d.uploaded_at,
+      `SELECT d.id, d.kind, d.title, d.original_filename, d.mime_type,
+              d.size_bytes, d.notes, d.uploaded_at,
               u.display_name AS uploaded_by_name, u.email AS uploaded_by_email
          FROM documents d
          LEFT JOIN users u ON u.id = d.uploaded_by_user_id
@@ -663,14 +663,20 @@ export async function onRequestGet(context) {
             <thead><tr><th>Title</th><th>Kind</th><th>Size</th><th>Uploaded</th><th>By</th><th></th></tr></thead>
             <tbody>
               ${docRows.map(d => html`<tr>
-                <td><a href="/documents/${escape(d.id)}/download"><strong>${escape(d.title)}</strong></a>
-                  ${d.notes ? html`<br><small class="muted">${escape(d.notes)}</small>` : ''}</td>
+                <td>
+                  <a href="/documents/${escape(d.id)}/download"><strong>${escape(d.title)}</strong></a>
+                  ${d.original_filename ? html`<br><small class="muted">${escape(d.original_filename)}</small>` : ''}
+                </td>
                 <td><span class="pill">${escape(DOC_KIND_LABELS[d.kind] ?? d.kind)}</span></td>
                 <td><small>${escape(fmtSize(d.size_bytes))}</small></td>
                 <td><small class="muted">${escape((d.uploaded_at ?? '').slice(0, 10))}</small></td>
                 <td><small>${escape(d.uploaded_by_name ?? d.uploaded_by_email ?? '—')}</small></td>
                 <td class="row-actions">
                   <a class="btn small" href="/documents/${escape(d.id)}/download">Download</a>
+                  <form method="post" action="/documents/${escape(d.id)}/replace" style="display:inline" enctype="multipart/form-data">
+                    <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}?tab=docs">
+                    <label class="btn small" style="cursor:pointer">Replace<input type="file" name="file" hidden onchange="this.form.submit()"></label>
+                  </form>
                   <form method="post" action="/documents/${escape(d.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this document?')">
                     <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}?tab=docs">
                     <button class="btn small danger" type="submit">Delete</button>

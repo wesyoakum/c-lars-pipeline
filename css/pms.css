@@ -248,6 +248,9 @@ form.stacked textarea {
   color: #fff;
   border-color: var(--danger);
 }
+.btn.danger:hover {
+  background: color-mix(in srgb, var(--danger) 85%, black);
+}
 .btn.btn-sm {
   padding: 0.25rem 0.6rem;
   font-size: 0.85em;
@@ -801,13 +804,6 @@ fieldset.qualification-box select {
 .btn.small {
   padding: 0.2rem 0.5rem;
   font-size: 0.8em;
-}
-.btn.danger {
-  color: #b4252f;
-  border-color: #dfa6a9;
-}
-.btn.danger:hover {
-  background: #fdecee;
 }
 .row-actions {
   display: flex;
@@ -1512,15 +1508,6 @@ tr.line-option td:first-child {
 }
 
 /* -- Documents --------------------------------------------------------- */
-
-.btn.danger {
-  color: var(--danger);
-  border-color: var(--danger);
-}
-.btn.danger:hover {
-  background: var(--danger);
-  color: #fff;
-}
 
 .pill-task    { background: #ddf4ff; color: #0550ae; }
 .pill-note    { background: #f6f8fa; color: #656d76; }
