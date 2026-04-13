@@ -97,32 +97,39 @@ export async function onRequestGet(context) {
     [oppId]
   );
 
-  // If a cost build is linked, load the DM and labor items selected in
-  // that cost build so the user can link individual quote lines to them.
+  // Load DM and labor items from ALL cost builds on this opportunity so
+  // each quote line can independently reference any cost item. Items are
+  // grouped by cost build label for the dropdown optgroups.
   let costBuildItems = [];
-  if (quote.cost_build_id) {
+  if (costBuilds.length) {
+    const cbIds = costBuilds.map((cb) => cb.id);
+    const cbLabelMap = Object.fromEntries(costBuilds.map((cb) => [cb.id, cb.label || '(unlabeled)']));
+    const placeholders = cbIds.map(() => '?').join(',');
+
     const dmItems = await all(
       env.DB,
-      `SELECT dm.id, dm.description, dm.cost, 'dm' AS ref_type
+      `SELECT dm.id, dm.description, dm.cost, 'dm' AS ref_type, sel.cost_build_id
          FROM cost_build_dm_selections sel
          JOIN dm_items dm ON dm.id = sel.dm_item_id
-        WHERE sel.cost_build_id = ?
+        WHERE sel.cost_build_id IN (${placeholders})
         ORDER BY dm.description`,
-      [quote.cost_build_id]
+      cbIds
     );
+    for (const it of dmItems) it.cb_label = cbLabelMap[it.cost_build_id];
+
     const laborItems = await all(
       env.DB,
-      `SELECT li.id, li.description, 'labor' AS ref_type
+      `SELECT li.id, li.description, 'labor' AS ref_type, sel.cost_build_id
          FROM cost_build_labor_selections sel
          JOIN labor_items li ON li.id = sel.labor_item_id
-        WHERE sel.cost_build_id = ?
+        WHERE sel.cost_build_id IN (${placeholders})
         ORDER BY li.description`,
-      [quote.cost_build_id]
+      cbIds
     );
-    // For labor items, compute total cost from entries.
     const settings = await loadPricingSettings(env.DB);
     const defaultRate = Number(settings.defaultLaborRate) || 0;
     for (const li of laborItems) {
+      li.cb_label = cbLabelMap[li.cost_build_id];
       const entries = await all(
         env.DB,
         'SELECT hours, rate FROM labor_item_entries WHERE labor_item_id = ?',
@@ -155,6 +162,33 @@ export async function onRequestGet(context) {
   const total = subtotal + Number(quote.tax_amount ?? 0);
 
   const flash = readFlash(url);
+
+  // Group cost build items by cost build for <optgroup> rendering.
+  const costRefGroups = [];
+  if (costBuildItems.length) {
+    const groupMap = new Map();
+    for (const ci of costBuildItems) {
+      const key = ci.cost_build_id;
+      if (!groupMap.has(key)) groupMap.set(key, { label: ci.cb_label, items: [] });
+      groupMap.get(key).items.push(ci);
+    }
+    for (const [, g] of groupMap) costRefGroups.push(g);
+  }
+  function renderCostRefOptions(selectedType, selectedId) {
+    return html`
+      <option value="">—</option>
+      ${costRefGroups.map((g) => html`
+        <optgroup label="${escape(g.label)}">
+          ${g.items.map((ci) => html`
+            <option value="${escape(ci.ref_type)}:${escape(ci.id)}"
+              ${selectedType === ci.ref_type && selectedId === ci.id ? 'selected' : ''}>
+              ${escape(ci.description)} (${fmtDollar(ci.cost)})
+            </option>
+          `)}
+        </optgroup>
+      `)}
+    `;
+  }
 
   // --- Header section -----------------------------------------------------
   const headerSection = html`
@@ -396,13 +430,7 @@ export async function onRequestGet(context) {
               ${costBuildItems.length ? html`
                 <td>
                   <select name="cost_ref" form="line-form-${escape(l.id)}" ${readOnly ? 'disabled' : ''}>
-                    <option value="">—</option>
-                    ${costBuildItems.map((ci) => html`
-                      <option value="${escape(ci.ref_type)}:${escape(ci.id)}"
-                        ${l.cost_ref_type === ci.ref_type && l.cost_ref_id === ci.id ? 'selected' : ''}>
-                        ${escape(ci.description)}
-                      </option>
-                    `)}
+                    ${renderCostRefOptions(l.cost_ref_type, l.cost_ref_id)}
                   </select>
                 </td>
                 <td class="num muted">${l.cost_ref_amount != null ? fmtDollar(l.cost_ref_amount) : ''}</td>
@@ -439,10 +467,7 @@ export async function onRequestGet(context) {
                 ${costBuildItems.length ? html`
                   <td>
                     <select name="cost_ref" form="new-line-form">
-                      <option value="">—</option>
-                      ${costBuildItems.map((ci) => html`
-                        <option value="${escape(ci.ref_type)}:${escape(ci.id)}">${escape(ci.description)}</option>
-                      `)}
+                      ${renderCostRefOptions(null, null)}
                     </select>
                   </td>
                   <td class="num muted"></td>
