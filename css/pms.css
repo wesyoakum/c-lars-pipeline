@@ -1034,6 +1034,25 @@ table.data.compact td {
   resize: none;
 }
 
+/* Two-column explicit grid (used on quote detail for terms/dates). */
+.form-grid-2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+/* Quote detail: client info (left) + meta fields (right). */
+.quote-meta-grid {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+}
+.quote-meta-left h3 { font-size: 0.95em; color: var(--fg-muted); }
+.client-info p { font-size: 0.92em; line-height: 1.4; }
+
+@media (max-width: 700px) {
+  .quote-meta-grid { grid-template-columns: 1fr; }
+}
+
 /* Quotes tab: the "+ New quote" inline create form (type picker + button). */
 .quotes-new-form {
   display: flex;
@@ -1068,13 +1087,14 @@ table.data.compact td {
 }
 .transition-row form { margin: 0; }
 
-/* Governance snapshot card at the bottom of the status section. */
+/* Governance snapshot — compact inline strip in the header card. */
 .governance-snapshot {
-  margin-top: 1rem;
-  padding: 0.8rem 1rem;
+  margin-top: 0.5rem;
+  padding: 0.4rem 0.7rem;
   background: #f7faf7;
   border: 1px solid #cfe4cf;
   border-radius: var(--radius);
+  font-size: 0.85em;
 }
 .governance-snapshot h3 {
   margin: 0 0 0.3rem;

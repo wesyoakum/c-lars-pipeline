@@ -3,37 +3,31 @@
 // GET  /opportunities/:id/quotes/:quoteId  — quote detail / editor
 // POST /opportunities/:id/quotes/:quoteId  — update header fields
 //
-// The quote editor renders in three sections:
-//   1. Header — title, description, validity, terms, cost_build link
-//   2. Lines  — tabular line items (add row + per-row update/delete
-//               is handled via dedicated /lines routes to keep this
-//               handler simple)
-//   3. Status + governance snapshots — read-only strip showing the
-//               snapshotted tc/warranty/rate/sop revisions once the
-//               quote has been submitted
+// Layout mirrors the C-LARS Word quotation template:
+//   1. Header card — quote number, status pill, transition actions,
+//      revision strip, governance snapshot (all in one card)
+//   2. Two-column grid — client info (left) + quote metadata (right)
+//   3. Line items table with price build links
 //
 // Status transitions (submit, revise, accept, reject, supersede,
-// expire) live in sibling files:
-//   submit.js, revise.js, accept.js, reject.js, supersede.js, expire.js
+// expire) live in sibling files.
 //
-// Quotes in a terminal status (accepted, rejected, superseded, expired)
+// Quotes in a terminal status (accepted, rejected, expired, dead)
 // are read-only — the header form and line routes refuse updates.
 
 import { one, all, stmt, batch } from '../../../../lib/db.js';
 import { auditStmt, diff } from '../../../../lib/audit.js';
 import { now } from '../../../../lib/ids.js';
-import { layout, htmlResponse, html, escape } from '../../../../lib/layout.js';
+import { layout, htmlResponse, html, raw, escape } from '../../../../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../../../../lib/http.js';
 import {
   validateQuote,
+  allowedQuoteTypes,
   QUOTE_TYPE_LABELS,
   QUOTE_STATUS_LABELS,
 } from '../../../../lib/validators.js';
 import { fmtDollar } from '../../../../lib/pricing.js';
 
-// Status values that put the quote into read-only mode. Once a quote is
-// accepted/rejected/superseded/expired, its fields and lines can't be
-// touched — create a new revision instead.
 const READ_ONLY_STATUSES = new Set([
   'issued',
   'revision_issued',
@@ -44,6 +38,7 @@ const READ_ONLY_STATUSES = new Set([
 ]);
 
 const UPDATE_FIELDS = [
+  'quote_type',
   'title',
   'description',
   'valid_until',
@@ -67,11 +62,18 @@ export async function onRequestGet(context) {
     env.DB,
     `SELECT q.*, o.number AS opp_number, o.title AS opp_title,
             o.transaction_type AS opp_transaction_type,
+            o.account_id,
+            a.name AS account_name, a.phone AS account_phone,
+            a.address_billing AS account_address,
+            c.first_name AS contact_first, c.last_name AS contact_last,
+            c.email AS contact_email, c.phone AS contact_phone, c.title AS contact_title,
             sup.number AS supersedes_number, sup.revision AS supersedes_revision,
             cb.label AS cost_build_label, cb.status AS cost_build_status,
             subu.display_name AS submitted_by_name, subu.email AS submitted_by_email
        FROM quotes q
        LEFT JOIN opportunities o ON o.id = q.opportunity_id
+       LEFT JOIN accounts a      ON a.id = o.account_id
+       LEFT JOIN contacts c      ON c.id = o.primary_contact_id
        LEFT JOIN quotes sup      ON sup.id = q.supersedes_quote_id
        LEFT JOIN cost_builds cb  ON cb.id = q.cost_build_id
        LEFT JOIN users subu      ON subu.id = q.submitted_by_user_id
@@ -91,23 +93,18 @@ export async function onRequestGet(context) {
     [quoteId]
   );
 
-  // Items library for the new-line dropdown
   const libraryItems = await all(
     env.DB,
     `SELECT id, name, default_unit, default_price FROM items_library WHERE active = 1 ORDER BY name`
   );
 
-  // Revision history: all quotes on this opportunity with the same
-  // quote_type, ordered by created_at. Used to render a "Rev A/B/C"
-  // breadcrumb at the top of the editor so the user can see related
-  // revisions at a glance.
   const revisionHistory = await all(
     env.DB,
     `SELECT id, number, revision, status, created_at
        FROM quotes
-      WHERE opportunity_id = ? AND quote_type = ?
+      WHERE opportunity_id = ? AND quote_seq = ?
       ORDER BY created_at`,
-    [oppId, quote.quote_type]
+    [oppId, quote.quote_seq]
   );
 
   const readOnly = READ_ONLY_STATUSES.has(quote.status);
@@ -117,21 +114,25 @@ export async function onRequestGet(context) {
 
   const flash = readFlash(url);
 
-  // --- Header section -----------------------------------------------------
+  const isDraft = quote.status === 'draft' || quote.status === 'revision_draft';
+  const isIssued = quote.status === 'issued' || quote.status === 'revision_issued';
+
+  // Allowed quote types for the transaction type (for type selector)
+  const typeOptions = allowedQuoteTypes(quote.opp_transaction_type);
+
+  // --- Header card (title, status, actions, revisions, governance) ---------
   const headerSection = html`
     <section class="card">
       <div class="card-header">
         <div>
           <h1 class="page-title">
             ${escape(quote.number)}
+            <span class="pill ${statusPillClass(quote.status)}">${escape(QUOTE_STATUS_LABELS[quote.status] ?? quote.status)}</span>
             <span class="header-value" id="q-header-total">${fmtDollar(total)}</span>
           </h1>
-          <p class="page-subtitle">
-            Quotation · ${escape(QUOTE_TYPE_LABELS[quote.quote_type] ?? quote.quote_type)}
-          </p>
           <p class="muted" style="margin:0.15rem 0 0;font-size:0.85em">
-            ${escape(quote.revision)}
-            · <span class="pill ${statusPillClass(quote.status)}">${escape(QUOTE_STATUS_LABELS[quote.status] ?? quote.status)}</span>
+            ${escape(QUOTE_TYPE_LABELS[quote.quote_type] ?? quote.quote_type)}
+            · ${escape(quote.revision)}
             ${quote.title ? html` · ${escape(quote.title)}` : ''}
             ${quote.supersedes_quote_id
               ? html` · supersedes <a href="/opportunities/${escape(oppId)}/quotes/${escape(quote.supersedes_quote_id)}">${escape(quote.supersedes_number ?? '')} ${escape(quote.supersedes_revision ?? '')}</a>`
@@ -139,7 +140,40 @@ export async function onRequestGet(context) {
           </p>
         </div>
         <div class="header-actions">
-          <a class="btn btn-sm" href="/opportunities/${escape(oppId)}?tab=quotes">Back to quotes</a>
+          ${isDraft ? html`
+            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/submit" class="inline-form">
+              <button class="btn primary" type="submit">Issue</button>
+            </form>
+          ` : ''}
+          ${isIssued ? html`
+            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/accept" class="inline-form">
+              <button class="btn primary" type="submit">Accept</button>
+            </form>
+            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/reject" class="inline-form">
+              <button class="btn" type="submit">Reject</button>
+            </form>
+            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/expire" class="inline-form">
+              <button class="btn" type="submit">Expire</button>
+            </form>
+          ` : ''}
+          ${isDraft || isIssued ? html`
+            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
+              <button class="btn" type="submit">Revise</button>
+            </form>
+          ` : ''}
+          ${quote.status === 'accepted' || quote.status === 'rejected' || quote.status === 'expired' ? html`
+            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
+              <button class="btn primary" type="submit">New revision</button>
+            </form>
+          ` : ''}
+          ${isDraft || isIssued ? html`
+            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/delete"
+                  class="inline-form"
+                  onsubmit="return confirm('Delete this quote? This cannot be undone.');">
+              <button class="btn danger" type="submit">Delete</button>
+            </form>
+          ` : ''}
+          <a class="btn btn-sm" href="/opportunities/${escape(oppId)}?tab=quotes">Back</a>
         </div>
       </div>
 
@@ -156,141 +190,133 @@ export async function onRequestGet(context) {
             `)}
           </div>`
         : ''}
-    </section>
-  `;
-
-  // --- Status transition strip --------------------------------------------
-  const isDraft = quote.status === 'draft' || quote.status === 'revision_draft';
-  const isIssued = quote.status === 'issued' || quote.status === 'revision_issued';
-
-  const transitionStrip = html`
-    <section class="card">
-      <h2>Status</h2>
-      <p class="muted">Current: <strong>${escape(QUOTE_STATUS_LABELS[quote.status] ?? quote.status)}</strong></p>
-      <div class="transition-row">
-        ${isDraft ? html`
-          <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/submit" class="inline-form">
-            <button class="btn primary" type="submit">Issue to customer</button>
-          </form>
-        ` : ''}
-        ${isIssued ? html`
-          <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/accept" class="inline-form">
-            <button class="btn primary" type="submit">Accept</button>
-          </form>
-          <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/reject" class="inline-form">
-            <button class="btn" type="submit">Reject</button>
-          </form>
-          <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/expire" class="inline-form">
-            <button class="btn" type="submit">Mark expired</button>
-          </form>
-          <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
-            <button class="btn" type="submit">Revise</button>
-          </form>
-        ` : ''}
-        ${quote.status === 'accepted' || quote.status === 'rejected' || quote.status === 'expired' ? html`
-          <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
-            <button class="btn primary" type="submit">Create new revision</button>
-          </form>
-        ` : ''}
-        ${isDraft || isIssued ? html`
-          <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/delete"
-                class="inline-form"
-                onsubmit="return confirm('Delete this quote? This cannot be undone.');">
-            <button class="btn danger" type="submit">Delete</button>
-          </form>
-        ` : ''}
-      </div>
 
       ${quote.submitted_at
         ? html`
           <div class="governance-snapshot">
-            <h3>Governance snapshot (at issuance)</h3>
-            <p class="muted">
+            <p class="muted" style="margin:0 0 0.25rem">
               Issued ${escape(formatTimestamp(quote.submitted_at))}
               by ${escape(quote.submitted_by_name ?? quote.submitted_by_email ?? 'unknown')}
+              · T&amp;Cs ${escape(quote.tc_revision ?? '—')}
+              · Warranty ${escape(quote.warranty_revision ?? '—')}
+              · Rate Sched ${escape(quote.rate_schedule_revision ?? '—')}
+              · SOP ${escape(quote.sop_revision ?? '—')}
             </p>
-            <ul class="plain">
-              <li><strong>T&amp;Cs revision:</strong> ${escape(quote.tc_revision ?? '—')}</li>
-              <li><strong>Warranty revision:</strong> ${escape(quote.warranty_revision ?? '—')}</li>
-              <li><strong>Rate schedule revision:</strong> ${escape(quote.rate_schedule_revision ?? '—')}</li>
-              <li><strong>Refurb SOP revision:</strong> ${escape(quote.sop_revision ?? '—')}</li>
-            </ul>
           </div>`
-        : html`
-          <p class="muted">Governance revisions will be snapshotted when the quote is issued.</p>
-        `}
+        : ''}
     </section>
   `;
 
-  // --- Header-fields edit form --------------------------------------------
-  const editForm = html`
+  // --- Client + quote details (two-column grid) ---------------------------
+  const contactName = [quote.contact_first, quote.contact_last].filter(Boolean).join(' ');
+
+  const detailsSection = html`
     <section class="card">
-      <h2>Quote details</h2>
       ${readOnly
-        ? html`<p class="muted">This quote is ${escape(quote.status)} and cannot be edited. Create a new revision to make changes.</p>`
+        ? html`<p class="muted" style="margin:0 0 0.5rem"><em>This quote is ${escape(quote.status)}. Create a new revision to make changes.</em></p>`
         : ''}
-      <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}" class="stack-form">
+      <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}" class="stack-form" id="quote-form">
         <fieldset ${readOnly ? 'disabled' : ''}>
-          <label>
-            Title
-            <input type="text" name="title" value="${escape(quote.title ?? '')}"
-                   placeholder="Short descriptor for this quote">
-          </label>
+          <div class="quote-meta-grid">
+            <div class="quote-meta-left">
+              <h3 style="margin:0 0 0.5rem">Client</h3>
+              <div class="client-info">
+                ${quote.account_name
+                  ? html`<p style="margin:0"><strong><a href="/accounts/${escape(quote.account_id)}">${escape(quote.account_name)}</a></strong></p>`
+                  : html`<p class="muted" style="margin:0">No account linked</p>`}
+                ${contactName
+                  ? html`<p style="margin:0">${escape(contactName)}${quote.contact_title ? html`, ${escape(quote.contact_title)}` : ''}</p>`
+                  : ''}
+                ${quote.contact_email
+                  ? html`<p style="margin:0"><a href="mailto:${escape(quote.contact_email)}">${escape(quote.contact_email)}</a></p>`
+                  : ''}
+                ${quote.contact_phone
+                  ? html`<p style="margin:0">${escape(quote.contact_phone)}</p>`
+                  : ''}
+                ${quote.account_address
+                  ? html`<p style="margin:0.25rem 0 0" class="muted">${escape(quote.account_address)}</p>`
+                  : ''}
+              </div>
+            </div>
+            <div class="quote-meta-right">
+              <div class="form-grid form-grid-2">
+                ${typeOptions.length > 1 ? html`
+                  <label>
+                    Quote type
+                    <select name="quote_type">
+                      ${typeOptions.map(t => html`
+                        <option value="${escape(t)}" ${quote.quote_type === t ? 'selected' : ''}>
+                          ${escape(QUOTE_TYPE_LABELS[t] ?? t)}
+                        </option>
+                      `)}
+                    </select>
+                  </label>
+                ` : html`
+                  <input type="hidden" name="quote_type" value="${escape(quote.quote_type)}">
+                `}
+                <label>
+                  Title
+                  <input type="text" name="title" value="${escape(quote.title ?? '')}" placeholder="Short descriptor">
+                </label>
+                <label>
+                  Valid until
+                  <input type="date" name="valid_until" value="${escape(quote.valid_until ?? '')}">
+                </label>
+                <label>
+                  Payment terms
+                  <input type="text" name="payment_terms" value="${escape(quote.payment_terms ?? '')}" placeholder="Net 30 / 50% down / ..."
+                         list="payment-terms-list">
+                  <datalist id="payment-terms-list">
+                    <option value="Net 30">
+                    <option value="Net 60">
+                    <option value="Net 90">
+                    <option value="50% down, 50% on delivery">
+                    <option value="COD (Cash on Delivery)">
+                    <option value="CIA (Cash in Advance)">
+                    <option value="Progress payments per milestone">
+                  </datalist>
+                </label>
+                <label>
+                  Delivery terms
+                  <input type="text" name="delivery_terms" value="${escape(quote.delivery_terms ?? '')}"
+                         placeholder="EXW / FCA / DAP / ..."
+                         list="delivery-terms-list">
+                  <datalist id="delivery-terms-list">
+                    <option value="EXW — Ex Works">
+                    <option value="FCA — Free Carrier">
+                    <option value="FOB — Free on Board">
+                    <option value="CIF — Cost, Insurance & Freight">
+                    <option value="DAP — Delivered at Place">
+                    <option value="DDP — Delivered Duty Paid">
+                    <option value="Customer Pickup">
+                  </datalist>
+                </label>
+                <label>
+                  Lead time
+                  <input type="text" name="delivery_estimate" value="${escape(quote.delivery_estimate ?? '')}" placeholder="14-16 weeks ARO">
+                </label>
+              </div>
+            </div>
+          </div>
+
           <label>
             Description
-            <textarea name="description" rows="3">${escape(quote.description ?? '')}</textarea>
+            <textarea name="description" rows="2" placeholder="Scope description for the customer">${escape(quote.description ?? '')}</textarea>
           </label>
 
-          <div class="form-grid">
-            <label>
-              Valid until
-              <input type="date" name="valid_until" value="${escape(quote.valid_until ?? '')}">
-            </label>
-            <label>
-              Payment terms
-              <input type="text" name="payment_terms" value="${escape(quote.payment_terms ?? '')}" placeholder="Net 30 / 50% down / ..."
-                     list="payment-terms-list">
-              <datalist id="payment-terms-list">
-                <option value="Net 30">
-                <option value="Net 60">
-                <option value="Net 90">
-                <option value="50% down, 50% on delivery">
-                <option value="COD (Cash on Delivery)">
-                <option value="CIA (Cash in Advance)">
-                <option value="Progress payments per milestone">
-              </datalist>
-            </label>
-            <label>
-              Delivery / Incoterms
-              <input type="text" name="delivery_terms" value="${escape(quote.delivery_terms ?? '')}"
-                     placeholder="EXW / FCA / DAP / ..."
-                     list="delivery-terms-list">
-              <datalist id="delivery-terms-list">
-                <option value="EXW — Ex Works">
-                <option value="FCA — Free Carrier">
-                <option value="FOB — Free on Board">
-                <option value="CIF — Cost, Insurance & Freight">
-                <option value="DAP — Delivered at Place">
-                <option value="DDP — Delivered Duty Paid">
-                <option value="Customer Pickup">
-              </datalist>
-            </label>
-            <label>
-              Delivery estimate / Lead time
-              <input type="text" name="delivery_estimate" value="${escape(quote.delivery_estimate ?? '')}" placeholder="14–16 weeks ARO">
-            </label>
-          </div>
           <input type="hidden" name="tax_amount" value="${quote.tax_amount != null ? escape(Number(quote.tax_amount).toFixed(2)) : '0'}">
           <input type="hidden" name="incoterms" value="${escape(quote.incoterms ?? '')}">
 
-          <label>
-            Internal notes
-            <textarea name="notes_internal" rows="2" placeholder="Visible to C-LARS only">${escape(quote.notes_internal ?? '')}</textarea>
-          </label>
-          <label>
-            Customer notes
-            <textarea name="notes_customer" rows="2" placeholder="Will appear on the issued quote document">${escape(quote.notes_customer ?? '')}</textarea>
-          </label>
+          <div class="form-grid form-grid-2">
+            <label>
+              Internal notes <span class="muted">(C-LARS only)</span>
+              <textarea name="notes_internal" rows="2">${escape(quote.notes_internal ?? '')}</textarea>
+            </label>
+            <label>
+              Customer notes
+              <textarea name="notes_customer" rows="2">${escape(quote.notes_customer ?? '')}</textarea>
+            </label>
+          </div>
         </fieldset>
 
         ${!readOnly
@@ -300,10 +326,9 @@ export async function onRequestGet(context) {
     </section>
   `;
 
-  // --- Lines section ------------------------------------------------------
+  // --- Lines section -------------------------------------------------------
   const pbUrl = (lineId) => `/opportunities/${oppId}/quotes/${quoteId}/lines/${lineId}/price-build`;
 
-  // Compute option items subtotal (excluded from quote price)
   const optionSubtotal = lines.filter(l => l.is_option).reduce((a, l) => a + Number(l.extended_price ?? 0), 0);
   const includedSubtotal = subtotal - optionSubtotal;
 
@@ -423,7 +448,6 @@ export async function onRequestGet(context) {
 
     ${!readOnly ? html`
       <script>
-      // Auto-save line items when data changes (debounced)
       (function() {
         var timers = {};
         document.querySelectorAll('[data-autosave]').forEach(function(input) {
@@ -437,8 +461,6 @@ export async function onRequestGet(context) {
             }, 800);
           });
         });
-
-        // Auto-submit new line when description is entered
         var newForm = document.getElementById('new-line-form');
         if (newForm) {
           var descInput = newForm.querySelector('[name="description"]');
@@ -446,9 +468,7 @@ export async function onRequestGet(context) {
           var target = descInput || titleInput;
           if (target) {
             target.addEventListener('change', function() {
-              if (target.value.trim()) {
-                newForm.requestSubmit();
-              }
+              if (target.value.trim()) newForm.requestSubmit();
             });
           }
         }
@@ -457,7 +477,7 @@ export async function onRequestGet(context) {
     ` : ''}
   `;
 
-  const body = html`${headerSection}${transitionStrip}${editForm}${linesSection}`;
+  const body = html`${headerSection}${detailsSection}${linesSection}`;
 
   return htmlResponse(
     layout(
@@ -500,9 +520,13 @@ export async function onRequestPost(context) {
     );
   }
 
+  const opp = await one(env.DB, 'SELECT transaction_type FROM opportunities WHERE id = ?', [oppId]);
+
   const input = await formBody(request);
-  // quote_type is immutable after creation — drop from the payload.
-  const { ok, value, errors } = validateQuote(input, { requireType: false });
+  const { ok, value, errors } = validateQuote(input, {
+    transactionType: opp?.transaction_type,
+    requireType: false,
+  });
   if (!ok) {
     const firstErr = Object.values(errors)[0] ?? 'Invalid input.';
     return redirectWithFlash(
@@ -512,11 +536,13 @@ export async function onRequestPost(context) {
     );
   }
 
+  // If quote_type wasn't in the form (single-type transaction), keep existing
+  if (!value.quote_type) value.quote_type = before.quote_type;
+
   const ts = now();
   const after = { ...before, ...value };
   const changes = diff(before, after, UPDATE_FIELDS);
 
-  // Recompute total_price from current lines + the new tax amount.
   const lineTotals = await one(
     env.DB,
     `SELECT COALESCE(SUM(extended_price), 0) AS subtotal FROM quote_lines WHERE quote_id = ?`,
@@ -529,7 +555,8 @@ export async function onRequestPost(context) {
     stmt(
       env.DB,
       `UPDATE quotes
-          SET title = ?,
+          SET quote_type = ?,
+              title = ?,
               description = ?,
               valid_until = ?,
               incoterms = ?,
@@ -544,6 +571,7 @@ export async function onRequestPost(context) {
               updated_at = ?
         WHERE id = ?`,
       [
+        value.quote_type,
         value.title,
         value.description,
         value.valid_until,
