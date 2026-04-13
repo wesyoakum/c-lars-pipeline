@@ -81,14 +81,16 @@ function renderValue(value) {
   return escape(value);
 }
 
+import { VERSION } from './version.js';
+
 /**
  * Full-page HTML shell: includes nav, user badge, and slot for body.
  * Vendored HTMX + Alpine from /js so Access + CSP don't fight CDN cross-origin.
  */
 export function layout(title, body, opts = {}) {
-  const { user, flash, activeNav, commitSha } = opts;
+  const { user, flash, activeNav } = opts;
   const pageTitle = title ? `${escape(title)} — C-LARS PMS` : 'C-LARS PMS';
-  const versionTag = commitSha ? `v${escape(String(commitSha).slice(0, 7))}` : '';
+  const versionTag = VERSION ? `v${escape(VERSION)}` : '';
 
   return `<!doctype html>
 <html lang="en">

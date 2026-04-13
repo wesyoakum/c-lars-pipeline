@@ -1,7 +1,7 @@
 // POST /opportunities/:id/quotes/:quoteId/revise
 //
 // Create a new revision of a quote. The new quote:
-//   - is a fresh row with a new UUID and a new Q-YYYY-NNNN number
+//   - is a fresh row with a new UUID and a Q{opp_number}-{rev} number
 //   - copies header fields (title, description, terms, cost_build_id)
 //     from the source
 //   - copies all line items from the source (new UUIDs, same
@@ -19,7 +19,7 @@
 
 import { one, all, stmt, batch } from '../../../../lib/db.js';
 import { auditStmt } from '../../../../lib/audit.js';
-import { uuid, now, nextNumber, currentYear } from '../../../../lib/ids.js';
+import { uuid, now, nextRevisionLetter } from '../../../../lib/ids.js';
 import { redirectWithFlash } from '../../../../lib/http.js';
 
 const CUSTOMER_FACING = new Set(['submitted', 'accepted', 'rejected', 'expired']);
@@ -39,14 +39,17 @@ export async function onRequestPost(context) {
     return new Response('Quote not found', { status: 404 });
   }
 
-  // Work out the next revision letter. We look at all quotes on this
-  // opportunity with the same quote_type and find the highest revision
-  // letter in use, then increment.
+  // Load the opportunity for its number (used in the quote number).
+  const opp = await one(env.DB, 'SELECT number FROM opportunities WHERE id = ?', [oppId]);
+  if (!opp) return new Response('Opportunity not found', { status: 404 });
+
+  // Work out the next revision letter. We look at ALL quotes on this
+  // opportunity (regardless of quote_type) so that the composite number
+  // Q{opp_number}-{rev} is always unique.
   const siblings = await all(
     env.DB,
-    `SELECT revision FROM quotes
-      WHERE opportunity_id = ? AND quote_type = ?`,
-    [oppId, source.quote_type]
+    'SELECT revision FROM quotes WHERE opportunity_id = ?',
+    [oppId]
   );
   const nextRev = nextRevisionLetter(siblings.map((r) => r.revision));
 
@@ -62,7 +65,7 @@ export async function onRequestPost(context) {
 
   const newId = uuid();
   const ts = now();
-  const number = await nextNumber(env.DB, `Q-${currentYear()}`);
+  const number = `Q${opp.number}-${nextRev}`;
 
   // Build up the batch: insert the new quote header, insert each line,
   // supersede the source if appropriate, and two audit events.
@@ -188,43 +191,3 @@ export async function onRequestPost(context) {
   );
 }
 
-/**
- * Given a set of existing revision letters (e.g. ['A', 'B']), return
- * the next one in sequence ('C'). Handles single-letter revisions for
- * the common case; falls back to appending numbers ('Z' → 'AA' →
- * 'AB' ...) which the governance doc doesn't actually contemplate but
- * this keeps the function total.
- */
-function nextRevisionLetter(existing) {
-  if (!existing || existing.length === 0) return 'A';
-
-  // Filter to the clean A..Z patterns + compare by pure length then code.
-  const sorted = [...existing].sort((a, b) => {
-    if (a.length !== b.length) return a.length - b.length;
-    return a < b ? -1 : a > b ? 1 : 0;
-  });
-  const highest = sorted[sorted.length - 1] ?? 'A';
-
-  // Simple case: single letter A..Y → next letter.
-  if (highest.length === 1) {
-    const code = highest.charCodeAt(0);
-    if (code >= 65 && code < 90) {
-      return String.fromCharCode(code + 1);
-    }
-    if (highest === 'Z') return 'AA';
-  }
-
-  // Multi-letter fallback: increment last char, carrying if needed.
-  const chars = highest.split('');
-  let i = chars.length - 1;
-  while (i >= 0) {
-    if (chars[i] === 'Z') {
-      chars[i] = 'A';
-      i--;
-    } else {
-      chars[i] = String.fromCharCode(chars[i].charCodeAt(0) + 1);
-      return chars.join('');
-    }
-  }
-  return 'A' + chars.join('');
-}

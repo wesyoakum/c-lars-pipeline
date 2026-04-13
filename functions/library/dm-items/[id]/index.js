@@ -79,7 +79,7 @@ async function renderEdit(context, { values = null, errors = {} } = {}) {
   return htmlResponse(
     layout('Edit DM item', body, {
       user,
-      env: data?.env, commitSha: data?.commitSha,
+      env: data?.env,
       activeNav: '/library',
       flash: readFlash(url),
     })

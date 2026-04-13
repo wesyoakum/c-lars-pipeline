@@ -9,9 +9,9 @@
 // other fields (validity, payment terms, lines, cost_build_id) get
 // filled in on the editor page.
 
-import { one, stmt, batch } from '../../../lib/db.js';
+import { one, all, stmt, batch } from '../../../lib/db.js';
 import { auditStmt } from '../../../lib/audit.js';
-import { uuid, now, nextNumber, currentYear } from '../../../lib/ids.js';
+import { uuid, now, nextRevisionLetter } from '../../../lib/ids.js';
 import { redirectWithFlash } from '../../../lib/http.js';
 import { validateQuote, allowedQuoteTypes } from '../../../lib/validators.js';
 import { formBody } from '../../../lib/http.js';
@@ -64,10 +64,17 @@ export async function onRequestPost(context) {
 
   const id = uuid();
   const ts = now();
-  const year = currentYear();
-  const number = await nextNumber(env.DB, `Q-${year}`);
 
-  const revision = 'A';
+  // Revision letter: pick the next available letter across ALL quotes on
+  // this opportunity (not scoped by quote_type) so the composite number
+  // Q{opp_number}-{rev} is always unique.
+  const siblings = await all(
+    env.DB,
+    'SELECT revision FROM quotes WHERE opportunity_id = ?',
+    [oppId]
+  );
+  const revision = nextRevisionLetter(siblings.map((r) => r.revision));
+  const number = `Q${opp.number}-${revision}`;
   const title = value.title || `${number} (${value.quote_type})`;
 
   await batch(env.DB, [

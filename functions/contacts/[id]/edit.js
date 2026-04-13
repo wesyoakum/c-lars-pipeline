@@ -104,7 +104,7 @@ export async function renderEditForm(context, opts = {}) {
   return htmlResponse(
     layout(`Edit ${displayName}`, body, {
       user,
-      env: data?.env, commitSha: data?.commitSha,
+      env: data?.env,
       activeNav: '/accounts',
       flash: readFlash(url),
     }),

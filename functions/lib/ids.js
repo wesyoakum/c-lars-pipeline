@@ -77,3 +77,38 @@ export async function nextNumber(db, scope) {
 export function currentYear() {
   return String(new Date().getUTCFullYear());
 }
+
+/**
+ * Given a set of existing revision letters (e.g. ['A', 'B']), return
+ * the next one in sequence ('C'). Handles single-letter revisions for
+ * the common case; falls back to multi-letter ('Z' → 'AA' → 'AB' ...)
+ * which is unlikely but keeps the function total.
+ */
+export function nextRevisionLetter(existing) {
+  if (!existing || existing.length === 0) return 'A';
+
+  const sorted = [...existing].sort((a, b) => {
+    if (a.length !== b.length) return a.length - b.length;
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+  const highest = sorted[sorted.length - 1] ?? 'A';
+
+  if (highest.length === 1) {
+    const code = highest.charCodeAt(0);
+    if (code >= 65 && code < 90) return String.fromCharCode(code + 1);
+    if (highest === 'Z') return 'AA';
+  }
+
+  const chars = highest.split('');
+  let i = chars.length - 1;
+  while (i >= 0) {
+    if (chars[i] === 'Z') {
+      chars[i] = 'A';
+      i--;
+    } else {
+      chars[i] = String.fromCharCode(chars[i].charCodeAt(0) + 1);
+      return chars.join('');
+    }
+  }
+  return 'A' + chars.join('');
+}

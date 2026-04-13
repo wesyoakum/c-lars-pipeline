@@ -48,7 +48,7 @@ export async function onRequestGet(context) {
   return htmlResponse(
     layout('Library', body, {
       user,
-      env: data?.env, commitSha: data?.commitSha,
+      env: data?.env,
       activeNav: '/library',
       flash: readFlash(url),
     })

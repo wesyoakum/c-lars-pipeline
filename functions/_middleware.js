@@ -42,7 +42,6 @@ export async function onRequest(context) {
   context.data = context.data ?? {};
   context.data.user = user;
   context.data.env = env.PMS_ENV ?? 'production';
-  context.data.commitSha = env.CF_PAGES_COMMIT_SHA ?? null;
 
   return next();
 }

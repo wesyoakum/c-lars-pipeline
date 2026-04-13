@@ -127,7 +127,7 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
   return htmlResponse(
     layout('Labor library', body, {
       user,
-      env: data?.env, commitSha: data?.commitSha,
+      env: data?.env,
       activeNav: '/library',
       flash: readFlash(url),
     })

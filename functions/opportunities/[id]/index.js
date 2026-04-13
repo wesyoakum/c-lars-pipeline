@@ -586,7 +586,7 @@ export async function onRequestGet(context) {
   return htmlResponse(
     layout(`${opp.number} — ${opp.title}`, body, {
       user,
-      env: data?.env, commitSha: data?.commitSha,
+      env: data?.env,
       activeNav: '/opportunities',
       flash: readFlash(url),
     })
@@ -737,7 +737,7 @@ function notFound(context) {
         <h1>Opportunity not found</h1>
         <p><a href="/opportunities">Back to opportunities</a></p>
       </section>`,
-      { user: data?.user, env: data?.env, commitSha: data?.commitSha, activeNav: '/opportunities' }
+      { user: data?.user, env: data?.env, activeNav: '/opportunities' }
     ),
     { status: 404 }
   );

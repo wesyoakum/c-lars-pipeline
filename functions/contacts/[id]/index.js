@@ -38,7 +38,7 @@ export async function onRequestPost(context) {
   if (!before) {
     return htmlResponse(
       layout('Not found', '<section class="card"><h1>Contact not found</h1></section>', {
-        user, env: data?.env, commitSha: data?.commitSha, activeNav: '/accounts',
+        user, env: data?.env, activeNav: '/accounts',
       }),
       { status: 404 }
     );

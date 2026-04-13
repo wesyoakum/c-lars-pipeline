@@ -105,7 +105,7 @@ export async function renderNewForm(context, opts = {}) {
   return htmlResponse(
     layout('New account', body, {
       user,
-      env: data?.env, commitSha: data?.commitSha,
+      env: data?.env,
       activeNav: '/accounts',
       flash: readFlash(url),
     }),

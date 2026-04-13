@@ -100,7 +100,7 @@ export async function onRequestGet(context) {
   return htmlResponse(
     layout('Accounts', body, {
       user,
-      env: data?.env, commitSha: data?.commitSha,
+      env: data?.env,
       activeNav: '/accounts',
       flash: readFlash(url),
     })

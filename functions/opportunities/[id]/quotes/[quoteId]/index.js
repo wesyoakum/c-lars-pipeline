@@ -439,7 +439,7 @@ export async function onRequestGet(context) {
       body,
       {
         user,
-        env: data?.env, commitSha: data?.commitSha,
+        env: data?.env,
         activeNav: '/opportunities',
         flash,
       }
@@ -593,7 +593,7 @@ function notFound(context) {
         <h1>Quote not found</h1>
         <p><a href="/opportunities">Back to opportunities</a></p>
       </section>`,
-      { user: data?.user, env: data?.env, commitSha: data?.commitSha, activeNav: '/opportunities' }
+      { user: data?.user, env: data?.env, activeNav: '/opportunities' }
     ),
     { status: 404 }
   );
