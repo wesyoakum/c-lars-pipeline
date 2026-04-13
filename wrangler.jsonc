@@ -5,9 +5,6 @@
   // middleware decodes the JWT and upserts the user in the D1 users table.
   "name": "c-lars-pms",
   "pages_build_output_dir": ".",
-  "build": {
-    "command": "npm install"
-  },
   "compatibility_date": "2026-04-10",
 
   "d1_databases": [
