@@ -338,7 +338,6 @@ export async function onRequestGet(context) {
             <code>${escape(opp.number)}</code>
             · <a href="/accounts/${escape(opp.account_id)}">${escape(opp.account_name ?? '—')}</a>
             · ${inlineSelect('transaction_type', opp.transaction_type, TYPE_OPTIONS)}
-            · <span class="pill">${escape(currentStage?.label ?? opp.stage)}</span>
           </p>
         </div>
       </div>
