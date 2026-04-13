@@ -163,7 +163,7 @@ export async function onRequestGet(context) {
               <button class="btn danger" type="submit">Delete</button>
             </form>
           ` : ''}
-          <a class="btn btn-sm" href="/opportunities/${escape(oppId)}?tab=quotes">Back</a>
+          <a class="btn btn-sm" href="/opportunities/${escape(quote.opportunity_id)}?tab=quotes">\u2190 Quotes</a>
         </div>
       </div>
 
@@ -199,7 +199,7 @@ export async function onRequestGet(context) {
 
   // ── 2. Banner card ─────────────────────────────────────────────────
   const bannerCard = html`
-    <section class="card quote-banner">
+    <section class="card quote-doc-card quote-doc-first quote-banner">
       <div class="quote-banner-inner">
         <div>
           <h2 class="quote-banner-title">QUOTATION</h2>
@@ -211,11 +211,10 @@ export async function onRequestGet(context) {
   `;
 
   // ── 3. Details card ────────────────────────────────────────────────
-  const contactName = [quote.contact_first, quote.contact_last].filter(Boolean).join(' ');
   const addressesJson = JSON.stringify(addresses);
 
   const detailsSection = html`
-    <section class="card" x-data="quoteDetails()" x-init="init()">
+    <section class="card quote-doc-card" x-data="quoteDetails()" x-init="init()">
       ${readOnly
         ? html`<p class="muted" style="margin:0 0 0.5rem"><em>This quote is ${escape(quote.status)}. Create a new revision to make changes.</em></p>`
         : ''}
@@ -225,18 +224,9 @@ export async function onRequestGet(context) {
             ${quote.account_name
               ? html`<p style="margin:0"><strong><a href="/accounts/${escape(quote.account_id)}">${escape(quote.account_name)}</a></strong></p>`
               : html`<p class="muted" style="margin:0">No account linked</p>`}
-            ${contactName
-              ? html`<p style="margin:0">${escape(contactName)}${quote.contact_title ? html`, ${escape(quote.contact_title)}` : ''}</p>`
-              : ''}
-            ${quote.contact_email
-              ? html`<p style="margin:0"><a href="mailto:${escape(quote.contact_email)}">${escape(quote.contact_email)}</a></p>`
-              : ''}
-            ${quote.contact_phone
-              ? html`<p style="margin:0">${escape(quote.contact_phone)}</p>`
-              : ''}
 
             <!-- Address selector -->
-            <div style="margin-top:0.5rem" ${readOnly ? '' : ''}>
+            <div style="margin-top:0.35rem">
               <div x-show="!editingAddr" style="cursor:pointer" @click="${readOnly ? '' : 'editingAddr = true'}">
                 <pre class="addr" style="margin:0" x-text="selectedAddrText || 'Click to select address'"
                      :class="{ 'muted': !selectedAddrText }"></pre>
@@ -329,7 +319,7 @@ export async function onRequestGet(context) {
   const includedSubtotal = subtotal - optionSubtotal;
 
   const linesSection = html`
-    <section class="card">
+    <section class="card quote-doc-card">
       <div class="card-header">
         <h2>Line items</h2>
         <div class="header-actions">
@@ -444,7 +434,7 @@ export async function onRequestGet(context) {
 
   // ── 5. Footer card ─────────────────────────────────────────────────
   const footerSection = html`
-    <section class="card">
+    <section class="card quote-doc-card quote-doc-last">
       <label>
         <strong>Quote notes</strong>
         <textarea class="desc-textarea" placeholder="Notes to the customer"
@@ -610,7 +600,7 @@ export async function onRequestGet(context) {
     </script>
   `;
 
-  const body = html`${headerSection}${bannerCard}${detailsSection}${linesSection}${footerSection}${scripts}`;
+  const body = html`${headerSection}<div class="quote-doc">${bannerCard}${detailsSection}${linesSection}${footerSection}</div>${scripts}`;
 
   return htmlResponse(
     layout(

@@ -31,6 +31,7 @@ export async function onRequestPost(context) {
   const opportunityId = formData.get('opportunity_id') || null;
   const quoteId = formData.get('quote_id') || null;
   const accountId = formData.get('account_id') || null;
+  const costBuildId = formData.get('cost_build_id') || null;
   const returnTo = formData.get('return_to') || '/';
 
   if (!file || typeof file === 'string' || file.size === 0) {
@@ -60,11 +61,11 @@ export async function onRequestPost(context) {
   await batch(env.DB, [
     stmt(env.DB,
       `INSERT INTO documents
-         (id, opportunity_id, quote_id, job_id, account_id, kind, title,
+         (id, opportunity_id, quote_id, job_id, account_id, cost_build_id, kind, title,
           original_filename, r2_key, mime_type, size_bytes, notes,
           uploaded_at, uploaded_by_user_id)
-       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [docId, opportunityId, quoteId, accountId, kind, displayTitle,
+       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [docId, opportunityId, quoteId, accountId, costBuildId, kind, displayTitle,
        originalFilename, r2Key, file.type || 'application/octet-stream',
        file.size, notes, ts, user?.id]),
     auditStmt(env.DB, {

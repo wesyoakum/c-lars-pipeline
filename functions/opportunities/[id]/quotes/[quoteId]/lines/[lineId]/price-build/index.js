@@ -155,6 +155,18 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
   const bundle = await loadCostBuildBundle(env.DB, buildId);
   if (!bundle) return new Response('Price build not found', { status: 404 });
 
+  // Documents linked to this price build
+  const docs = await all(
+    env.DB,
+    `SELECT d.id, d.title, d.kind, d.mime_type, d.size_bytes, d.original_filename,
+            d.uploaded_at, u.display_name AS uploaded_by_name, u.email AS uploaded_by_email
+       FROM documents d
+       LEFT JOIN users u ON u.id = d.uploaded_by_user_id
+      WHERE d.cost_build_id = ?
+      ORDER BY d.uploaded_at DESC`,
+    [buildId]
+  );
+
   const settings = await loadPricingSettings(env.DB);
   const { pricing, totals } = computeFromBundle(bundle, settings);
   const workcenters = settings.workcenters;
@@ -239,6 +251,75 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
     </section>
   `;
 
+  // Document upload + list for reference files
+  const docsSection = html`
+    <section class="card">
+      <div class="card-header">
+        <h2>Reference documents</h2>
+      </div>
+
+      <div x-data="dropUpload()" style="margin-bottom:0.75rem;">
+        <form method="post" action="/documents" enctype="multipart/form-data" x-ref="uploadForm">
+          <input type="hidden" name="opportunity_id" value="${escape(oppId)}">
+          <input type="hidden" name="cost_build_id" value="${escape(buildId)}">
+          <input type="hidden" name="kind" value="supplier_quote">
+          <input type="hidden" name="return_to" value="${base}?sub=${escape(sub)}">
+          <div class="drop-zone" :class="{ 'drop-zone-active': dragging }"
+               @dragover.prevent="dragging = true"
+               @dragleave.prevent="dragging = false"
+               @drop.prevent="handleDrop($event)"
+               @click="$refs.fileInput.click()">
+            <input type="file" name="file" required x-ref="fileInput" hidden @change="fileSelected($event)">
+            <div class="drop-zone-content">
+              <span x-show="!fileName" class="muted">Drop vendor quote, spreadsheet, email, etc. or click to browse</span>
+              <span x-show="fileName" x-text="fileName" x-cloak></span>
+            </div>
+          </div>
+          <div x-show="fileName" x-cloak style="margin-top:0.4rem;display:flex;gap:0.5rem;align-items:center">
+            <select name="kind" style="padding:0.3rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius);font:inherit;background:var(--bg)">
+              <option value="supplier_quote">Vendor quote</option>
+              <option value="specification">Spreadsheet / spec</option>
+              <option value="other">Email / other</option>
+            </select>
+            <button class="btn primary small" type="submit">Upload</button>
+            <button class="btn small" type="button" @click="clear()">Cancel</button>
+          </div>
+        </form>
+      </div>
+
+      ${docs.length > 0 ? html`
+        <table class="data compact">
+          <thead>
+            <tr>
+              <th>Document</th>
+              <th>Type</th>
+              <th>Size</th>
+              <th>Uploaded</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${docs.map(d => html`
+              <tr>
+                <td><a href="/documents/${escape(d.id)}/download">${escape(d.title || d.original_filename)}</a></td>
+                <td><span class="pill" style="font-size:0.8em">${escape(d.kind)}</span></td>
+                <td class="muted">${formatSize(d.size_bytes)}</td>
+                <td class="muted"><small>${escape((d.uploaded_at || '').slice(0, 10))}</small></td>
+                <td class="row-actions">
+                  <form method="post" action="/documents/${escape(d.id)}/delete" style="display:inline"
+                        onsubmit="return confirm('Delete this document?')">
+                    <input type="hidden" name="return_to" value="${base}?sub=${escape(sub)}">
+                    <button class="btn small danger" type="submit">\u00d7</button>
+                  </form>
+                </td>
+              </tr>
+            `)}
+          </tbody>
+        </table>
+      ` : html`<p class="muted">No reference documents uploaded yet.</p>`}
+    </section>
+  `;
+
   const body = html`
     ${header}
     ${subNav}
@@ -272,6 +353,31 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
             <a class="btn" href="${quoteUrl(oppId, quoteId)}">Back</a>
           </div>`}
     </form>
+    ${docsSection}
+    <script>
+    function dropUpload() {
+      return {
+        dragging: false,
+        fileName: '',
+        handleDrop: function(e) {
+          this.dragging = false;
+          var files = e.dataTransfer && e.dataTransfer.files;
+          if (files && files.length) {
+            this.$refs.fileInput.files = files;
+            this.fileName = files[0].name;
+          }
+        },
+        fileSelected: function(e) {
+          var f = e.target.files && e.target.files[0];
+          this.fileName = f ? f.name : '';
+        },
+        clear: function() {
+          this.$refs.fileInput.value = '';
+          this.fileName = '';
+        },
+      };
+    }
+    </script>
   `;
 
   return htmlResponse(
@@ -748,4 +854,11 @@ async function handleSave(context, ctx, input) {
     : `${baseUrl(oppId, quoteId, lineId)}?sub=${encodeURIComponent(sub)}`;
 
   return redirectWithFlash(target, 'Saved.');
+}
+
+function formatSize(bytes) {
+  if (!bytes) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

@@ -1056,6 +1056,31 @@ table.data.compact td {
   .quote-meta-grid { grid-template-columns: 1fr; }
 }
 
+/* Seamless quote document — wrapper removes gap between doc cards. */
+.quote-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Seamless quote document cards — banner, details, lines, footer
+   appear as one continuous surface with divider lines between them. */
+.quote-doc-card {
+  border-radius: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  border-top: none;
+  border-bottom: 1px solid var(--border);
+}
+.quote-doc-first {
+  border-radius: var(--radius) var(--radius) 0 0;
+  border-top: 1px solid var(--border);
+}
+.quote-doc-last {
+  border-radius: 0 0 var(--radius) var(--radius);
+  border-bottom: 1px solid var(--border);
+}
+
 /* Quote banner card — "QUOTATION" + type left, logo right. */
 .quote-banner { padding: 1rem 1.2rem; }
 .quote-banner-inner {
