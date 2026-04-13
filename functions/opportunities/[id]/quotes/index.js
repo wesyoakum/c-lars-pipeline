@@ -11,7 +11,7 @@
 
 import { one, all, stmt, batch } from '../../../lib/db.js';
 import { auditStmt } from '../../../lib/audit.js';
-import { uuid, now, nextRevisionLetter } from '../../../lib/ids.js';
+import { uuid, now } from '../../../lib/ids.js';
 import { redirectWithFlash } from '../../../lib/http.js';
 import { validateQuote, allowedQuoteTypes } from '../../../lib/validators.js';
 import { formBody } from '../../../lib/http.js';
@@ -65,30 +65,34 @@ export async function onRequestPost(context) {
   const id = uuid();
   const ts = now();
 
-  // Revision letter: pick the next available letter across ALL quotes on
-  // this opportunity (not scoped by quote_type) so the composite number
-  // Q{opp_number}-{rev} is always unique.
+  // New numbering: Q{opp_number}-{seq} where seq is 1, 2, 3...
+  // Each quote gets a unique seq within the opportunity.
+  // Revisions are tracked as v1, v2, v3... within the same seq.
   const siblings = await all(
     env.DB,
-    'SELECT revision FROM quotes WHERE opportunity_id = ?',
+    'SELECT quote_seq, revision FROM quotes WHERE opportunity_id = ? ORDER BY quote_seq DESC, revision DESC',
     [oppId]
   );
-  const revision = nextRevisionLetter(siblings.map((r) => r.revision));
-  const number = `Q${opp.number}-${revision}`;
-  const title = value.title || `${number} (${value.quote_type})`;
+
+  // Find the next sequence number (for a brand new quote, not a revision)
+  const maxSeq = siblings.reduce((max, s) => Math.max(max, Number(s.quote_seq ?? 0)), 0);
+  const quoteSeq = maxSeq + 1;
+  const revision = 'v1';
+  const number = `Q${opp.number}-${quoteSeq}`;
+  const title = value.title || '';
 
   await batch(env.DB, [
     stmt(
       env.DB,
       `INSERT INTO quotes
-         (id, number, opportunity_id, revision, quote_type, status,
+         (id, number, opportunity_id, revision, quote_seq, quote_type, status,
           title, description, valid_until, currency,
           subtotal_price, tax_amount, total_price,
           incoterms, payment_terms, delivery_terms, delivery_estimate,
           cost_build_id,
           notes_internal, notes_customer,
           created_at, updated_at, created_by_user_id)
-       VALUES (?, ?, ?, ?, ?, 'draft',
+       VALUES (?, ?, ?, ?, ?, ?, 'draft',
                ?, ?, ?, 'USD',
                0, ?, 0,
                ?, ?, ?, ?,
@@ -100,6 +104,7 @@ export async function onRequestPost(context) {
         number,
         oppId,
         revision,
+        quoteSeq,
         value.quote_type,
         title,
         value.description,

@@ -119,23 +119,24 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <div>
-          <h1>
-            ${escape(quote.title || quote.number)}
+          <h1 class="page-title">
+            ${escape(quote.number)}
             <span class="header-value" id="q-header-total">${fmtDollar(total)}</span>
           </h1>
-          <p class="muted">
-            <code>${escape(quote.number)}</code>
-            · Rev ${escape(quote.revision)}
-            · ${escape(QUOTE_TYPE_LABELS[quote.quote_type] ?? quote.quote_type)}
+          <p class="page-subtitle">
+            Quotation · ${escape(QUOTE_TYPE_LABELS[quote.quote_type] ?? quote.quote_type)}
+          </p>
+          <p class="muted" style="margin:0.15rem 0 0;font-size:0.85em">
+            ${escape(quote.revision)}
             · <span class="pill ${statusPillClass(quote.status)}">${escape(QUOTE_STATUS_LABELS[quote.status] ?? quote.status)}</span>
-            · opportunity <a href="/opportunities/${escape(oppId)}">${escape(quote.opp_number)}</a>
+            ${quote.title ? html` · ${escape(quote.title)}` : ''}
             ${quote.supersedes_quote_id
-              ? html` · supersedes <a href="/opportunities/${escape(oppId)}/quotes/${escape(quote.supersedes_quote_id)}">${escape(quote.supersedes_number ?? '')} Rev ${escape(quote.supersedes_revision ?? '')}</a>`
+              ? html` · supersedes <a href="/opportunities/${escape(oppId)}/quotes/${escape(quote.supersedes_quote_id)}">${escape(quote.supersedes_number ?? '')} ${escape(quote.supersedes_revision ?? '')}</a>`
               : ''}
           </p>
         </div>
         <div class="header-actions">
-          <a class="btn" href="/opportunities/${escape(oppId)}?tab=quotes">Back to quotes</a>
+          <a class="btn btn-sm" href="/opportunities/${escape(oppId)}?tab=quotes">Back to quotes</a>
         </div>
       </div>
 
@@ -146,8 +147,8 @@ export async function onRequestGet(context) {
             ${revisionHistory.map((r, i) => html`
               ${i > 0 ? ' · ' : ''}
               ${r.id === quote.id
-                ? html`<strong>Rev ${escape(r.revision)}</strong>`
-                : html`<a href="/opportunities/${escape(oppId)}/quotes/${escape(r.id)}">Rev ${escape(r.revision)}</a>`}
+                ? html`<strong>${escape(r.revision)}</strong>`
+                : html`<a href="/opportunities/${escape(oppId)}/quotes/${escape(r.id)}">${escape(r.revision)}</a>`}
               <span class="muted">(${escape(QUOTE_STATUS_LABELS[r.status] ?? r.status)})</span>
             `)}
           </div>`
@@ -251,7 +252,7 @@ export async function onRequestGet(context) {
           <label>
             Title
             <input type="text" name="title" value="${escape(quote.title ?? '')}"
-                   placeholder="${escape(quote.number)} — short descriptor">
+                   placeholder="Short descriptor for this quote">
           </label>
           <label>
             Description
@@ -264,26 +265,41 @@ export async function onRequestGet(context) {
               <input type="date" name="valid_until" value="${escape(quote.valid_until ?? '')}">
             </label>
             <label>
-              Incoterms
-              <input type="text" name="incoterms" value="${escape(quote.incoterms ?? '')}" placeholder="EXW / FCA / DAP / ...">
-            </label>
-            <label>
               Payment terms
-              <input type="text" name="payment_terms" value="${escape(quote.payment_terms ?? '')}" placeholder="Net 30 / 50% down / ...">
+              <input type="text" name="payment_terms" value="${escape(quote.payment_terms ?? '')}" placeholder="Net 30 / 50% down / ..."
+                     list="payment-terms-list">
+              <datalist id="payment-terms-list">
+                <option value="Net 30">
+                <option value="Net 60">
+                <option value="Net 90">
+                <option value="50% down, 50% on delivery">
+                <option value="COD (Cash on Delivery)">
+                <option value="CIA (Cash in Advance)">
+                <option value="Progress payments per milestone">
+              </datalist>
             </label>
             <label>
-              Delivery terms
-              <input type="text" name="delivery_terms" value="${escape(quote.delivery_terms ?? '')}">
+              Delivery / Incoterms
+              <input type="text" name="delivery_terms" value="${escape(quote.delivery_terms ?? '')}"
+                     placeholder="EXW / FCA / DAP / ..."
+                     list="delivery-terms-list">
+              <datalist id="delivery-terms-list">
+                <option value="EXW — Ex Works">
+                <option value="FCA — Free Carrier">
+                <option value="FOB — Free on Board">
+                <option value="CIF — Cost, Insurance & Freight">
+                <option value="DAP — Delivered at Place">
+                <option value="DDP — Delivered Duty Paid">
+                <option value="Customer Pickup">
+              </datalist>
             </label>
             <label>
-              Delivery estimate
+              Delivery estimate / Lead time
               <input type="text" name="delivery_estimate" value="${escape(quote.delivery_estimate ?? '')}" placeholder="14–16 weeks ARO">
             </label>
-            <label>
-              Tax amount ($)
-              <input type="text" name="tax_amount" value="${quote.tax_amount != null ? escape(Number(quote.tax_amount).toFixed(2)) : ''}">
-            </label>
           </div>
+          <input type="hidden" name="tax_amount" value="${quote.tax_amount != null ? escape(Number(quote.tax_amount).toFixed(2)) : '0'}">
+          <input type="hidden" name="incoterms" value="${escape(quote.incoterms ?? '')}">
 
           <label>
             Internal notes
@@ -305,45 +321,55 @@ export async function onRequestGet(context) {
   // --- Lines section ------------------------------------------------------
   const pbUrl = (lineId) => `/opportunities/${oppId}/quotes/${quoteId}/lines/${lineId}/price-build`;
 
+  // Compute option items subtotal (excluded from quote price)
+  const optionSubtotal = lines.filter(l => l.is_option).reduce((a, l) => a + Number(l.extended_price ?? 0), 0);
+  const includedSubtotal = subtotal - optionSubtotal;
+
   const linesSection = html`
     <section class="card">
       <div class="card-header">
         <h2>Line items</h2>
         <div class="header-actions">
-          <span class="header-value" id="q-lines-subtotal">${fmtDollar(subtotal)} subtotal</span>
+          <span class="header-value" id="q-lines-subtotal">${fmtDollar(includedSubtotal)} subtotal</span>
         </div>
       </div>
 
-      <table class="data compact" data-live-calc="quote-lines">
+      <table class="data compact" data-live-calc="quote-lines" id="quote-lines-table">
         <thead>
           <tr>
             <th>#</th>
+            <th>Title / Part #</th>
             <th>Description</th>
             <th class="num">Qty</th>
             <th>Unit</th>
             <th class="num">Unit price</th>
             <th class="num">Extended</th>
-            <th>Price build</th>
+            <th>Build</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           ${lines.map((l, i) => html`
-            <tr data-line-row>
-              <td>${i + 1}</td>
+            <tr data-line-row data-line-id="${escape(l.id)}" class="${l.is_option ? 'line-option' : ''}">
+              <td>${i + 1}${l.is_option ? html`<br><span class="pill" style="font-size:0.7em">OPT</span>` : ''}</td>
               <td>
                 <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}" class="inline-form" id="line-form-${escape(l.id)}">
-                  <input type="text" name="description" value="${escape(l.description ?? '')}" ${readOnly ? 'disabled' : ''} style="width: 100%;">
+                  <input type="text" name="title" value="${escape(l.title ?? '')}" ${readOnly ? 'disabled' : ''}
+                         placeholder="Title / Part #" style="width: 100%;" data-autosave>
+                  <input type="hidden" name="is_option" value="${l.is_option ? '1' : '0'}">
                 </form>
               </td>
+              <td>
+                <input type="text" name="description" form="line-form-${escape(l.id)}" value="${escape(l.description ?? '')}" ${readOnly ? 'disabled' : ''} style="width: 100%;" data-autosave>
+              </td>
               <td class="num">
-                <input type="text" name="quantity" form="line-form-${escape(l.id)}" value="${escape(l.quantity ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input">
+                <input type="text" name="quantity" form="line-form-${escape(l.id)}" value="${escape(l.quantity ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input" data-autosave>
               </td>
               <td>
-                <input type="text" name="unit" form="line-form-${escape(l.id)}" value="${escape(l.unit ?? '')}" ${readOnly ? 'disabled' : ''} style="width: 100%;">
+                <input type="text" name="unit" form="line-form-${escape(l.id)}" value="${escape(l.unit ?? '')}" ${readOnly ? 'disabled' : ''} style="width: 4rem;" data-autosave>
               </td>
               <td class="num">
-                <input type="text" name="unit_price" form="line-form-${escape(l.id)}" value="${escape(l.unit_price ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input">
+                <input type="text" name="unit_price" form="line-form-${escape(l.id)}" value="${escape(l.unit_price ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input" data-autosave>
               </td>
               <td class="num" data-line-extended>${fmtDollar(l.extended_price)}</td>
               <td>
@@ -353,9 +379,8 @@ export async function onRequestGet(context) {
               </td>
               <td class="row-actions">
                 ${!readOnly ? html`
-                  <button class="btn small" type="submit" form="line-form-${escape(l.id)}">Save</button>
                   <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}/delete" class="inline-form">
-                    <button class="btn small danger" type="submit">\u00d7</button>
+                    <button class="btn small danger" type="submit" title="Delete line">\u00d7</button>
                   </form>
                 ` : ''}
               </td>
@@ -367,44 +392,82 @@ export async function onRequestGet(context) {
                 <td class="muted">${lines.length + 1}</td>
                 <td>
                   <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines" class="inline-form" id="new-line-form">
-                    <input type="text" name="description" placeholder="New line item\u2026" style="width: 100%;">
+                    <input type="text" name="title" placeholder="Title / Part #" style="width: 100%;">
                   </form>
+                </td>
+                <td>
+                  <input type="text" name="description" form="new-line-form" placeholder="Description" style="width: 100%;">
                 </td>
                 <td class="num">
                   <input type="text" name="quantity" form="new-line-form" value="1" class="num-input">
                 </td>
                 <td>
-                  <input type="text" name="unit" form="new-line-form" value="ea" style="width: 100%;">
+                  <input type="text" name="unit" form="new-line-form" value="ea" style="width: 4rem;">
                 </td>
                 <td class="num">
                   <input type="text" name="unit_price" form="new-line-form" class="num-input" placeholder="0">
                 </td>
                 <td class="num" data-line-extended>\u2014</td>
                 <td></td>
-                <td class="row-actions">
-                  <button class="btn small primary" type="submit" form="new-line-form">+</button>
-                </td>
+                <td></td>
               </tr>
             `
             : ''}
           <tr class="totals-row">
-            <td colspan="5" class="num"><strong>Subtotal</strong></td>
-            <td class="num" id="q-subtotal"><strong>${fmtDollar(subtotal)}</strong></td>
+            <td colspan="6" class="num"><strong>Subtotal</strong></td>
+            <td class="num" id="q-subtotal"><strong>${fmtDollar(includedSubtotal)}</strong></td>
             <td colspan="2"></td>
           </tr>
+          ${optionSubtotal > 0 ? html`
+            <tr class="totals-row">
+              <td colspan="6" class="num"><em>Options (not included)</em></td>
+              <td class="num"><em>${fmtDollar(optionSubtotal)}</em></td>
+              <td colspan="2"></td>
+            </tr>
+          ` : ''}
           <tr class="totals-row">
-            <td colspan="5" class="num">Tax</td>
-            <td class="num">${fmtDollar(Number(quote.tax_amount ?? 0))}</td>
-            <td colspan="2"></td>
-          </tr>
-          <tr class="totals-row">
-            <td colspan="5" class="num"><strong>Total</strong></td>
+            <td colspan="6" class="num"><strong>Total</strong></td>
             <td class="num" id="q-total"><strong>${fmtDollar(total)}</strong></td>
             <td colspan="2"></td>
           </tr>
         </tbody>
       </table>
     </section>
+
+    ${!readOnly ? html`
+      <script>
+      // Auto-save line items when data changes (debounced)
+      (function() {
+        var timers = {};
+        document.querySelectorAll('[data-autosave]').forEach(function(input) {
+          input.addEventListener('change', function() {
+            var form = input.form || document.getElementById(input.getAttribute('form'));
+            if (!form) return;
+            var formId = form.id;
+            if (timers[formId]) clearTimeout(timers[formId]);
+            timers[formId] = setTimeout(function() {
+              form.requestSubmit();
+            }, 800);
+          });
+        });
+
+        // Auto-submit new line when description is entered
+        var newForm = document.getElementById('new-line-form');
+        if (newForm) {
+          var descInput = newForm.querySelector('[name="description"]');
+          var titleInput = newForm.querySelector('[name="title"]');
+          var target = descInput || titleInput;
+          if (target) {
+            target.addEventListener('change', function() {
+              if (target.value.trim()) {
+                newForm.requestSubmit();
+              }
+            });
+          }
+        }
+      })();
+      </script>
+    ` : ''}
   `;
 
   const body = html`${headerSection}${transitionStrip}${editForm}${linesSection}`;
@@ -418,6 +481,11 @@ export async function onRequestGet(context) {
         env: data?.env,
         activeNav: '/opportunities',
         flash,
+        breadcrumbs: [
+          { label: 'Opportunities', href: '/opportunities' },
+          { label: `${quote.opp_number} — ${quote.opp_title || ''}`, href: `/opportunities/${oppId}` },
+          { label: `${quote.number} Rev ${quote.revision}` },
+        ],
       }
     )
   );

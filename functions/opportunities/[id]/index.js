@@ -216,141 +216,142 @@ export async function onRequestGet(context) {
     ? `$${formatMoney(opp.estimated_value_usd)}`
     : null;
 
+  // Pipeline dates — only show those that have values (except created/updated always shown)
+  const pipelineDatePairs = [
+    { label: 'Created', value: (opp.created_at ?? '').slice(0, 10) || null },
+    { label: 'Updated', value: (opp.updated_at ?? '').slice(0, 10) || null },
+  ];
+  // Optional dates — only shown if a value exists
+  const optionalDates = [
+    { label: 'RFQ received', value: opp.rfq_received_date },
+    { label: 'RFQ due', value: opp.rfq_due_date },
+    { label: 'RFI due', value: opp.rfi_due_date },
+    { label: 'Quoted', value: opp.quoted_date },
+    { label: 'Expected close', value: opp.expected_close_date },
+  ];
+  for (const d of optionalDates) {
+    if (d.value) pipelineDatePairs.push(d);
+  }
+
   const overviewTab = html`
     <section class="card">
       <div class="card-header">
         <div>
-          <h1>
+          <h1 class="page-title">
             ${opp.title}
             ${estValueDisplay
               ? html` <span class="header-value">${estValueDisplay}</span>`
               : ''}
           </h1>
-          <p class="muted">
+          <p class="muted" style="margin:0.15rem 0 0">
             <code>${escape(opp.number)}</code>
             · <a href="/accounts/${escape(opp.account_id)}">${escape(opp.account_name ?? '—')}</a>
             · ${escape(TYPE_LABELS[opp.transaction_type] ?? opp.transaction_type)}
             · <span class="pill">${escape(currentStage?.label ?? opp.stage)}</span>
-            ${opp.probability != null ? html` · ${opp.probability}%` : ''}
           </p>
         </div>
         <div class="header-actions">
-          <a class="btn" href="/opportunities/${escape(opp.id)}/edit">Edit</a>
+          <a class="btn btn-sm" href="/opportunities/${escape(opp.id)}/edit">Edit</a>
         </div>
       </div>
 
-      <form method="post" action="/opportunities/${escape(opp.id)}/stage" class="stage-picker">
-        <div class="stage-strip">
+      <form method="post" action="/opportunities/${escape(opp.id)}/stage" class="stage-picker" style="margin:0.5rem 0" x-data="{ showReason: false }">
+        <div class="stage-strip-compact">
           ${stageButtons}
+          <button type="button" class="btn btn-sm" style="margin-left:0.5rem;font-size:0.75em"
+                  @click="showReason = !showReason"
+                  x-text="showReason ? 'Hide reason' : 'Add reason'"></button>
         </div>
-        <label class="stage-reason">
-          <span class="muted" style="font-size: 0.85rem;">Override reason (optional, recorded in audit)</span>
+        <div x-show="showReason" x-cloak style="margin-top:0.3rem">
           <input type="text" name="override_reason"
-                 placeholder="e.g. Client escalated to verbal; paperwork pending">
-        </label>
+                 placeholder="Override reason (optional, recorded in audit)"
+                 style="font-size:0.85em; padding:0.25rem 0.5rem; border:1px solid var(--border); border-radius:var(--radius); width:100%; max-width:500px;">
+        </div>
       </form>
 
-      <div class="addr-grid">
-        <div>
-          <strong>Estimated value</strong>
-          <p class="muted" style="margin: 0.2rem 0 0">
-            ${opp.estimated_value_usd != null
-              ? `$${formatMoney(opp.estimated_value_usd)} ${escape(opp.currency ?? 'USD')}`
-              : '—'}
-          </p>
+      <div class="detail-grid">
+        <div class="detail-pair">
+          <span class="detail-label">Estimated value</span>
+          <span class="detail-value">${opp.estimated_value_usd != null ? `$${formatMoney(opp.estimated_value_usd)}` : '—'}</span>
         </div>
-        <div>
-          <strong>Probability</strong>
-          <p class="muted" style="margin: 0.2rem 0 0">
-            ${opp.probability != null ? `${opp.probability}%` : '—'}
-          </p>
-        </div>
-        <div>
-          <strong>RFQ format</strong>
-          <p class="muted" style="margin: 0.2rem 0 0">
-            ${escape(RFQ_FORMAT_LABELS[opp.rfq_format] ?? (opp.rfq_format ?? '—'))}
-          </p>
-        </div>
-        <div>
-          <strong>Source</strong>
-          <p class="muted" style="margin: 0.2rem 0 0">
-            ${escape(SOURCE_LABELS[opp.source] ?? (opp.source ?? '—'))}
-          </p>
-        </div>
-        <div>
-          <strong>Owner</strong>
-          <p class="muted" style="margin: 0.2rem 0 0">${escape(ownerLabel)}</p>
-        </div>
-        <div>
-          <strong>Salesperson</strong>
-          <p class="muted" style="margin: 0.2rem 0 0">${escape(salespersonLabel)}</p>
-        </div>
-        <div>
-          <strong>Primary contact</strong>
-          <p class="muted" style="margin: 0.2rem 0 0">
+        <div class="detail-pair">
+          <span class="detail-label">Primary contact</span>
+          <span class="detail-value">
             ${primaryContactName ? escape(primaryContactName) : '—'}
-            ${opp.contact_email ? html` · <a href="mailto:${escape(opp.contact_email)}">${opp.contact_email}</a>` : ''}
-          </p>
+            ${opp.contact_email ? html` · <a href="mailto:${escape(opp.contact_email)}">${escape(opp.contact_email)}</a>` : ''}
+          </span>
         </div>
       </div>
 
-      <div style="margin-top: 1rem;">
-        <strong>Pipeline dates</strong>
-        <div class="addr-grid">
-          <div>
-            <strong>RFQ received</strong>
-            <p class="muted" style="margin: 0.2rem 0 0">${escape(opp.rfq_received_date ?? '—')}</p>
+      <div class="detail-grid" style="margin-top:0.25rem;">
+        ${pipelineDatePairs.map((d) => html`
+          <div class="detail-pair">
+            <span class="detail-label">${d.label}</span>
+            <span class="detail-value">${escape(d.value ?? '—')}</span>
           </div>
-          <div>
-            <strong>RFQ due</strong>
-            <p class="muted" style="margin: 0.2rem 0 0">${escape(opp.rfq_due_date ?? '—')}</p>
-          </div>
-          <div>
-            <strong>RFI due</strong>
-            <p class="muted" style="margin: 0.2rem 0 0">${escape(opp.rfi_due_date ?? '—')}</p>
-          </div>
-          <div>
-            <strong>Quoted</strong>
-            <p class="muted" style="margin: 0.2rem 0 0">${escape(opp.quoted_date ?? '—')}</p>
-          </div>
-          <div>
-            <strong>Expected close</strong>
-            <p class="muted" style="margin: 0.2rem 0 0">${escape(opp.expected_close_date ?? '—')}</p>
-          </div>
-          <div>
-            <strong>Created</strong>
-            <p class="muted" style="margin: 0.2rem 0 0">${escape((opp.created_at ?? '').slice(0, 10) || '—')}</p>
-          </div>
-          <div>
-            <strong>Updated</strong>
-            <p class="muted" style="margin: 0.2rem 0 0">${escape((opp.updated_at ?? '').slice(0, 10) || '—')}</p>
-          </div>
-        </div>
+        `)}
       </div>
 
       ${opp.description
-        ? html`
-          <div style="margin-top: 1rem;">
-            <strong>Description</strong>
-            <p class="notes">${escape(opp.description)}</p>
-          </div>`
+        ? html`<p class="notes" style="margin-top:0.75rem">${escape(opp.description)}</p>`
         : ''}
 
-      <div style="margin-top: 1rem;">
-        <strong>Qualification</strong>
-        <ul class="plain">
-          <li><strong>Budget:</strong> ${escape(opp.bant_budget ?? '—')}</li>
-          <li>
-            <strong>Authority:</strong>
-            ${authorityName
-              ? html`${escape(authorityName)}${opp.auth_title ? html` <span class="muted">(${escape(opp.auth_title)})</span>` : ''}${opp.auth_email ? html` · <a href="mailto:${escape(opp.auth_email)}">${escape(opp.auth_email)}</a>` : ''}`
-              : opp.bant_authority
-                ? html`<span class="muted">${escape(opp.bant_authority)}</span>`
-                : '—'}
-          </li>
-          <li><strong>Need:</strong> ${escape(opp.bant_need ?? '—')}</li>
-          <li><strong>Timeline:</strong> ${escape(opp.bant_timeline ?? '—')}</li>
-        </ul>
+      <div x-data="{ showMore: false }" style="margin-top: 0.75rem;">
+        <button class="show-more-toggle" @click="showMore = !showMore">
+          <span x-text="showMore ? '▾ Hide details' : '▸ More details'"></span>
+        </button>
+        <div class="show-more-content" x-show="showMore" x-cloak>
+          <div class="detail-grid">
+            <div class="detail-pair">
+              <span class="detail-label">Probability</span>
+              <span class="detail-value">${opp.probability != null ? `${opp.probability}%` : '—'}</span>
+            </div>
+            <div class="detail-pair">
+              <span class="detail-label">RFQ format</span>
+              <span class="detail-value">${escape(RFQ_FORMAT_LABELS[opp.rfq_format] ?? (opp.rfq_format ?? '—'))}</span>
+            </div>
+            <div class="detail-pair">
+              <span class="detail-label">Source</span>
+              <span class="detail-value">${escape(SOURCE_LABELS[opp.source] ?? (opp.source ?? '—'))}</span>
+            </div>
+            <div class="detail-pair">
+              <span class="detail-label">Owner</span>
+              <span class="detail-value">${escape(ownerLabel)}</span>
+            </div>
+            <div class="detail-pair">
+              <span class="detail-label">Salesperson</span>
+              <span class="detail-value">${escape(salespersonLabel)}</span>
+            </div>
+          </div>
+
+          <div style="margin-top: 0.75rem;">
+            <strong style="font-size:0.9em">Qualification (BANT)</strong>
+            <div class="detail-grid" style="margin-top:0.25rem">
+              <div class="detail-pair">
+                <span class="detail-label">Budget</span>
+                <span class="detail-value">${escape(opp.bant_budget ?? '—')}</span>
+              </div>
+              <div class="detail-pair">
+                <span class="detail-label">Authority</span>
+                <span class="detail-value">
+                  ${authorityName
+                    ? html`${escape(authorityName)}${opp.auth_title ? html` <span class="muted">(${escape(opp.auth_title)})</span>` : ''}`
+                    : opp.bant_authority
+                      ? html`${escape(opp.bant_authority)}`
+                      : '—'}
+                </span>
+              </div>
+              <div class="detail-pair">
+                <span class="detail-label">Need</span>
+                <span class="detail-value">${escape(opp.bant_need ?? '—')}</span>
+              </div>
+              <div class="detail-pair">
+                <span class="detail-label">Timeline</span>
+                <span class="detail-value">${escape(opp.bant_timeline ?? '—')}</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
@@ -359,16 +360,16 @@ export async function onRequestGet(context) {
         <section class="card">
           <div class="card-header">
             <h2>Contacts on ${escape(opp.account_name ?? 'this account')}</h2>
-            <a class="btn" href="/accounts/${escape(opp.account_id)}/contacts/new">Add contact</a>
+            <a class="btn btn-sm" href="/accounts/${escape(opp.account_id)}/contacts/new">Add contact</a>
           </div>
-          <table class="data">
+          <table class="data compact">
             <thead>
               <tr>
                 <th>Name</th>
                 <th>Title</th>
                 <th>Email</th>
                 <th>Phone</th>
-                <th>Primary</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -581,6 +582,10 @@ export async function onRequestGet(context) {
       env: data?.env,
       activeNav: '/opportunities',
       flash: readFlash(url),
+      breadcrumbs: [
+        { label: 'Opportunities', href: '/opportunities' },
+        { label: `${opp.number} — ${opp.title}` },
+      ],
     })
   );
 }

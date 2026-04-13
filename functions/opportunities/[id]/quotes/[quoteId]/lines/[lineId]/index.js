@@ -18,12 +18,16 @@ const READ_ONLY_STATUSES = new Set([
 
 const LINE_FIELDS = [
   'item_type',
+  'title',
+  'part_number',
   'description',
   'quantity',
   'unit',
   'unit_price',
   'extended_price',
   'notes',
+  'line_notes',
+  'is_option',
 ];
 
 export async function onRequestPost(context) {
@@ -84,22 +88,30 @@ export async function onRequestPost(context) {
       env.DB,
       `UPDATE quote_lines
           SET item_type = ?,
+              title = ?,
+              part_number = ?,
               description = ?,
               quantity = ?,
               unit = ?,
               unit_price = ?,
               extended_price = ?,
               notes = ?,
+              line_notes = ?,
+              is_option = ?,
               updated_at = ?
         WHERE id = ? AND quote_id = ?`,
       [
         value.item_type,
+        value.title,
+        value.part_number,
         value.description,
         value.quantity,
         value.unit,
         value.unit_price,
         extended,
         value.notes,
+        value.line_notes,
+        value.is_option ?? 0,
         ts,
         lineId,
         quoteId,

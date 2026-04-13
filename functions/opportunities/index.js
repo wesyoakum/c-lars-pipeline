@@ -94,8 +94,25 @@ export async function onRequestGet(context) {
   const body = html`
     <section class="card">
       <div class="card-header">
-        <h1>Opportunities</h1>
-        <a class="btn primary" href="/opportunities/new">New opportunity</a>
+        <h1 class="page-title">Opportunities</h1>
+        <div class="toolbar-right">
+          <div class="search-expand">
+            <label class="search-icon" for="opp-quicksearch">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8.5" cy="8.5" r="5.5"/><line x1="13" y1="13" x2="18" y2="18"/></svg>
+            </label>
+            <input type="search" id="opp-quicksearch" data-role="quicksearch"
+                   placeholder="Search...">
+          </div>
+          <span class="muted" data-role="count" style="font-size:0.8em;white-space:nowrap">${rows.length}</span>
+          <details class="opp-list-columns" data-role="columns-menu" style="display:inline-block">
+            <summary class="icon-btn" title="Columns">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="4" x2="17" y2="4"/><line x1="3" y1="10" x2="17" y2="10"/><line x1="3" y1="16" x2="17" y2="16"/></svg>
+            </summary>
+          </details>
+          <a class="icon-btn primary" href="/opportunities/new" title="New opportunity">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="10" y1="4" x2="10" y2="16"/><line x1="4" y1="10" x2="16" y2="10"/></svg>
+          </a>
+        </div>
       </div>
 
       ${rows.length === 0
@@ -105,14 +122,10 @@ export async function onRequestGet(context) {
           </p>`
         : html`
           <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
-            <div class="opp-list-toolbar">
+            <div class="opp-list-toolbar" style="display:none">
               <div class="opp-list-quicksearch">
-                <input type="search" data-role="quicksearch"
-                       placeholder="Quick search (all visible text columns)">
-                <span class="muted" data-role="count">${rows.length} opportunities</span>
               </div>
-              <details class="opp-list-columns" data-role="columns-menu">
-                <summary class="btn btn-sm">Columns</summary>
+              <details class="opp-list-columns" data-role="columns-menu-hidden">
                 <div class="opp-list-columns-menu" data-role="columns-list">
                   ${columns.map(
                     (c, idx) => html`
@@ -151,7 +164,7 @@ export async function onRequestGet(context) {
                       </th>`
                   )}
                 </tr>
-                <tr class="opp-list-filter-row" data-role="filter-row">
+                <tr class="opp-list-filter-row filters-hidden" data-role="filter-row">
                   ${columns.map((c) => {
                     if (c.filter === 'text') {
                       return html`<th class="col-${c.key}" data-col="${c.key}"><input type="text" data-filter="${c.key}" data-filter-type="text" placeholder="Filter…"></th>`;
@@ -186,7 +199,7 @@ export async function onRequestGet(context) {
                         data-rfq_due="${escape(r.rfq_due)}"
                         data-rfi_due="${escape(r.rfi_due)}"
                         data-quoted="${escape(r.quoted)}">
-                      <td class="col-number" data-col="number"><code>${escape(r.number)}</code></td>
+                      <td class="col-number" data-col="number"><a href="/opportunities/${escape(r.id)}"><code>${escape(r.number)}</code></a></td>
                       <td class="col-title" data-col="title">
                         <a href="/opportunities/${escape(r.id)}"><strong>${escape(r.title)}</strong></a>
                       </td>
@@ -221,6 +234,9 @@ export async function onRequestGet(context) {
       env: data?.env,
       activeNav: '/opportunities',
       flash: readFlash(url),
+      breadcrumbs: [
+        { label: 'Opportunities' },
+      ],
     })
   );
 }
@@ -394,7 +410,7 @@ export function oppListScript() {
     var allRows = Array.prototype.slice.call(tbody.querySelectorAll('tr[data-row-id]'));
     var totalRows = allRows.length;
     var countEl = host.querySelector('[data-role="count"]');
-    var quickSearchInput = host.querySelector('[data-role="quicksearch"]');
+    var quickSearchInput = document.querySelector('#opp-quicksearch') || host.querySelector('[data-role="quicksearch"]');
 
     // State: column visibility + order + sort. The columns menu and
     // filter inputs are server-rendered; we just read from / write to
@@ -569,19 +585,41 @@ export function oppListScript() {
 
     function updateSortIndicators() {
       host.querySelectorAll('[data-role="sort-indicator"]').forEach(function(el) {
-        el.textContent = '';
+        el.textContent = state.sort.key === el.closest('[data-sort]')?.dataset.sort
+          ? (state.sort.dir === 'asc' ? '\\u25B2' : '\\u25BC')
+          : '\\u25B2';
+        el.classList.toggle('active', state.sort.key === el.closest('[data-sort]')?.dataset.sort);
       });
-      var btn = host.querySelector('[data-sort="' + state.sort.key + '"]');
-      if (btn) {
-        var ind = btn.querySelector('[data-role="sort-indicator"]');
-        if (ind) ind.textContent = state.sort.dir === 'asc' ? '\\u25B2' : '\\u25BC';
-      }
+    }
+
+    // Toggle filter row for a specific column
+    function showFilterForColumn(key) {
+      var filterRow = host.querySelector('[data-role="filter-row"]');
+      if (!filterRow) return;
+      filterRow.classList.remove('filters-hidden');
+      // Focus the filter input
+      var input = filterRow.querySelector('[data-filter="' + key + '"]');
+      if (input) setTimeout(function() { input.focus(); }, 50);
     }
 
     // -- Wire it all up -------------------------------------------------
 
     host.querySelectorAll('[data-sort]').forEach(function(btn) {
-      btn.addEventListener('click', function() {
+      // Split: clicking the sort indicator sorts; clicking the label text shows filter
+      var indicator = btn.querySelector('[data-role="sort-indicator"]');
+      var labelSpan = btn.querySelector('span:not([data-role])');
+
+      if (labelSpan) {
+        labelSpan.style.cursor = 'pointer';
+        labelSpan.addEventListener('click', function(e) {
+          e.stopPropagation();
+          showFilterForColumn(btn.dataset.sort);
+        });
+      }
+
+      btn.addEventListener('click', function(e) {
+        // If click was on label, don't sort
+        if (e.target === labelSpan || (labelSpan && labelSpan.contains(e.target))) return;
         var key = btn.dataset.sort;
         if (state.sort.key === key) {
           state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc';

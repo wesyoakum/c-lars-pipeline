@@ -90,6 +90,11 @@ export async function renderEditForm(context, opts = {}) {
       env: data?.env,
       activeNav: '/accounts',
       flash: readFlash(url),
+      breadcrumbs: [
+        { label: 'Accounts', href: '/accounts' },
+        { label: escape(account.name), href: '/accounts/' + escape(account.id) },
+        { label: 'Edit' },
+      ],
     }),
     { status: opts.errors ? 422 : 200 }
   );

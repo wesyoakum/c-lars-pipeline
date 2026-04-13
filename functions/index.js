@@ -66,10 +66,8 @@ export async function onRequestGet(context) {
 
   const body = html`
     <section class="card">
-      <h1>Hello, ${escape(user?.display_name ?? user?.email ?? 'friend')}</h1>
+      <h1 class="page-title">Dashboard</h1>
       <p class="muted">
-        Signed in as <code>${escape(user?.email)}</code> ·
-        role <strong>${escape(user?.role)}</strong> ·
         <strong>${oppCount?.n ?? 0}</strong> opportunities ·
         <strong>${acctCount?.n ?? 0}</strong> accounts
       </p>

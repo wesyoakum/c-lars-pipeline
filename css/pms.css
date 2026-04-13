@@ -24,6 +24,7 @@
 }
 
 * { box-sizing: border-box; }
+[x-cloak] { display: none !important; }
 
 html, body {
   margin: 0;
@@ -92,6 +93,20 @@ code {
 .nav-link:hover  { background: var(--bg-alt); text-decoration: none; }
 .nav-link.active { background: var(--bg-alt); font-weight: 600; }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.settings-gear {
+  color: var(--fg-muted);
+  display: flex;
+  align-items: center;
+  padding: 0.3rem;
+  border-radius: var(--radius);
+}
+.settings-gear:hover { color: var(--fg); background: var(--bg-alt); text-decoration: none; }
+
 .user-badge {
   display: flex;
   flex-direction: column;
@@ -99,7 +114,7 @@ code {
   font-size: 0.85rem;
 }
 .user-name { font-weight: 600; }
-.user-role { color: var(--fg-muted); text-transform: lowercase; }
+.user-role { color: var(--fg-muted); text-transform: lowercase; font-size: 0.75rem; }
 
 /* ---------- Main content ---------- */
 
@@ -1085,6 +1100,203 @@ table.data.compact td select {
 }
 table.data.compact td input.num-input {
   width: 6rem;
+}
+
+/* ---------- Breadcrumbs ---------- */
+
+.breadcrumbs {
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  padding: 0;
+  margin: -0.5rem 0 0.5rem 0;
+}
+.breadcrumbs a { color: var(--fg-muted); }
+.breadcrumbs a:hover { color: var(--accent); }
+.bc-sep { margin: 0 0.4rem; color: var(--border); }
+.bc-current { color: var(--fg); font-weight: 500; }
+
+/* ---------- Compact stage strip ---------- */
+
+.stage-strip-compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  align-items: center;
+}
+.stage-strip-compact .stage-btn {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.78em;
+  border-radius: 4px;
+}
+
+/* ---------- Detail pairs (side-by-side key-value) ---------- */
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem 1.5rem;
+  margin: 0.5rem 0;
+}
+.detail-pair {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.2rem 0;
+  font-size: 0.92em;
+}
+.detail-pair .detail-label {
+  color: var(--fg-muted);
+  font-size: 0.85em;
+  white-space: nowrap;
+  min-width: 6rem;
+}
+.detail-pair .detail-value {
+  color: var(--fg);
+  font-weight: 500;
+}
+
+/* ---------- Show/hide more toggle ---------- */
+
+.show-more-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85em;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0.3rem 0;
+  border: none;
+  background: none;
+  font: inherit;
+}
+.show-more-toggle:hover { text-decoration: underline; }
+.show-more-content { margin-top: 0.5rem; }
+
+/* ---------- Opp list toolbar icons ---------- */
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+}
+.icon-btn:hover { background: var(--bg-alt); }
+.icon-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.icon-btn.primary:hover { background: var(--accent-hover); }
+.icon-btn svg { display: block; }
+
+.toolbar-right {
+  display: flex;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+/* ---------- Search expand in header ---------- */
+
+.search-expand {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.search-expand input[type="search"] {
+  width: 0;
+  padding: 0;
+  border: none;
+  opacity: 0;
+  transition: width 0.2s, opacity 0.2s, padding 0.2s;
+  font: inherit;
+  font-size: 0.9em;
+  background: var(--bg);
+  border-radius: var(--radius);
+}
+.search-expand:hover input[type="search"],
+.search-expand:focus-within input[type="search"] {
+  width: 200px;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  opacity: 1;
+}
+.search-expand .search-icon {
+  display: flex;
+  align-items: center;
+  color: var(--fg-muted);
+  padding: 0.3rem;
+  cursor: pointer;
+}
+.search-expand .search-icon:hover { color: var(--fg); }
+
+/* ---------- Override reason popup ---------- */
+
+.override-popup {
+  position: relative;
+  display: inline-block;
+}
+.override-popup-content {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  min-width: 300px;
+  margin-top: 0.25rem;
+}
+
+/* ---------- Filters hidden by default on opp list ---------- */
+
+.opp-list-filter-row.filters-hidden th {
+  padding: 0;
+  border: 0;
+  height: 0;
+  overflow: hidden;
+}
+.opp-list-filter-row.filters-hidden input,
+.opp-list-filter-row.filters-hidden select {
+  display: none;
+}
+
+/* ---------- Column header sort arrow on hover ---------- */
+
+.opp-list-table .col-sort .sort-indicator {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.opp-list-table .col-sort:hover .sort-indicator,
+.opp-list-table .col-sort .sort-indicator.active {
+  opacity: 1;
+}
+
+/* ---------- Option line items (excluded from quote price) ---------- */
+
+tr.line-option td {
+  background: #fefce8;
+  opacity: 0.85;
+}
+tr.line-option td:first-child {
+  border-left: 3px solid #eab308;
+}
+
+/* ---------- Page title styling ---------- */
+
+.page-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin: 0;
+}
+.page-subtitle {
+  color: var(--fg-muted);
+  font-size: 0.9em;
+  margin-top: 0.15rem;
 }
 
 /* ---------- Version badge (bottom-right corner) ---------- */

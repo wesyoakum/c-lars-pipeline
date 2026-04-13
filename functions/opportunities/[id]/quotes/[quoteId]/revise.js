@@ -1,25 +1,21 @@
 // POST /opportunities/:id/quotes/:quoteId/revise
 //
 // Create a new revision of a quote. The new quote:
-//   - is a fresh row with a new UUID and a Q{opp_number}-{rev} number
-//   - copies header fields (title, description, terms, cost_build_id)
-//     from the source
-//   - copies all line items from the source (new UUIDs, same
-//     sort_order/description/quantity/etc)
+//   - is a fresh row with a new UUID
+//   - uses the same quote_seq as the source but increments the version
+//     e.g. Q25012-1-v1 → Q25012-1-v2
+//   - copies header fields (title, description, terms)
+//   - copies all line items (new UUIDs, same sort_order/description/etc)
 //   - sets supersedes_quote_id to the source
-//   - revision letter is the next in sequence (A → B → C, wrapping
-//     from Z to AA is unlikely to ever happen but handled)
 //   - starts in 'draft' status
 //
 // The source quote is marked 'superseded' IF it was in a customer-
 // facing status (submitted/accepted/rejected/expired). If the source
-// was still in draft/internal_review/approved_internal, it's left
-// alone — the user is probably just experimenting with a parallel
-// version and will delete one later.
+// was still in draft/internal_review/approved_internal, it's left alone.
 
 import { one, all, stmt, batch } from '../../../../lib/db.js';
 import { auditStmt } from '../../../../lib/audit.js';
-import { uuid, now, nextRevisionLetter } from '../../../../lib/ids.js';
+import { uuid, now } from '../../../../lib/ids.js';
 import { redirectWithFlash } from '../../../../lib/http.js';
 
 const CUSTOMER_FACING = new Set(['submitted', 'accepted', 'rejected', 'expired']);
@@ -39,24 +35,39 @@ export async function onRequestPost(context) {
     return new Response('Quote not found', { status: 404 });
   }
 
-  // Load the opportunity for its number (used in the quote number).
   const opp = await one(env.DB, 'SELECT number FROM opportunities WHERE id = ?', [oppId]);
   if (!opp) return new Response('Opportunity not found', { status: 404 });
 
-  // Work out the next revision letter. We look at ALL quotes on this
-  // opportunity (regardless of quote_type) so that the composite number
-  // Q{opp_number}-{rev} is always unique.
-  const siblings = await all(
+  // Find the next version number for this quote_seq.
+  // If the source has quote_seq, use it. Otherwise fall back to counting siblings.
+  const quoteSeq = source.quote_seq ?? 1;
+
+  // Find highest version for this seq
+  const sameSeqQuotes = await all(
     env.DB,
-    'SELECT revision FROM quotes WHERE opportunity_id = ?',
-    [oppId]
+    `SELECT revision FROM quotes WHERE opportunity_id = ? AND quote_seq = ?`,
+    [oppId, quoteSeq]
   );
-  const nextRev = nextRevisionLetter(siblings.map((r) => r.revision));
+
+  // Parse version numbers from revisions like 'v1', 'v2', or old-style 'A', 'B'
+  let maxVersion = 0;
+  for (const q of sameSeqQuotes) {
+    const match = String(q.revision ?? '').match(/^v(\d+)$/i);
+    if (match) {
+      maxVersion = Math.max(maxVersion, Number(match[1]));
+    } else {
+      // Old-style letter revision — count as version 1
+      maxVersion = Math.max(maxVersion, 1);
+    }
+  }
+  const nextVersion = maxVersion + 1;
+  const nextRev = `v${nextVersion}`;
+  const number = `Q${opp.number}-${quoteSeq}-${nextRev}`;
 
   const sourceLines = await all(
     env.DB,
-    `SELECT sort_order, item_type, description, quantity, unit,
-            unit_price, extended_price, notes
+    `SELECT sort_order, item_type, title, part_number, description, quantity, unit,
+            unit_price, extended_price, notes, line_notes, is_option
        FROM quote_lines
       WHERE quote_id = ?
       ORDER BY sort_order, id`,
@@ -65,24 +76,21 @@ export async function onRequestPost(context) {
 
   const newId = uuid();
   const ts = now();
-  const number = `Q${opp.number}-${nextRev}`;
 
-  // Build up the batch: insert the new quote header, insert each line,
-  // supersede the source if appropriate, and two audit events.
   const statements = [];
 
   statements.push(
     stmt(
       env.DB,
       `INSERT INTO quotes
-         (id, number, opportunity_id, revision, quote_type, status,
+         (id, number, opportunity_id, revision, quote_seq, quote_type, status,
           title, description, valid_until, currency,
           subtotal_price, tax_amount, total_price,
           incoterms, payment_terms, delivery_terms, delivery_estimate,
           cost_build_id, supersedes_quote_id,
           notes_internal, notes_customer,
           created_at, updated_at, created_by_user_id)
-       VALUES (?, ?, ?, ?, ?, 'draft',
+       VALUES (?, ?, ?, ?, ?, ?, 'draft',
                ?, ?, ?, ?,
                ?, ?, ?,
                ?, ?, ?, ?,
@@ -94,6 +102,7 @@ export async function onRequestPost(context) {
         number,
         oppId,
         nextRev,
+        quoteSeq,
         source.quote_type,
         source.title,
         source.description,
@@ -122,20 +131,25 @@ export async function onRequestPost(context) {
       stmt(
         env.DB,
         `INSERT INTO quote_lines
-           (id, quote_id, sort_order, item_type, description, quantity, unit,
-            unit_price, extended_price, notes, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, quote_id, sort_order, item_type, title, part_number, description,
+            quantity, unit, unit_price, extended_price, notes, line_notes, is_option,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           uuid(),
           newId,
           l.sort_order,
           l.item_type,
+          l.title,
+          l.part_number,
           l.description,
           l.quantity,
           l.unit,
           l.unit_price,
           l.extended_price,
           l.notes,
+          l.line_notes,
+          l.is_option ?? 0,
           ts,
           ts,
         ]
@@ -158,7 +172,7 @@ export async function onRequestPost(context) {
         entityId: source.id,
         eventType: 'superseded',
         user,
-        summary: `${source.number} Rev ${source.revision} superseded by ${number} Rev ${nextRev}`,
+        summary: `${source.number} ${source.revision} superseded by ${number} ${nextRev}`,
         changes: {
           status: { from: source.status, to: 'superseded' },
           superseded_by: newId,
@@ -173,7 +187,7 @@ export async function onRequestPost(context) {
       entityId: newId,
       eventType: 'created',
       user,
-      summary: `Created ${number} Rev ${nextRev} as revision of ${source.number} Rev ${source.revision}`,
+      summary: `Created ${number} ${nextRev} as revision of ${source.number} ${source.revision}`,
       changes: {
         opportunity_id: oppId,
         quote_type: source.quote_type,
@@ -187,7 +201,6 @@ export async function onRequestPost(context) {
 
   return redirectWithFlash(
     `/opportunities/${oppId}/quotes/${newId}`,
-    `Created ${number} Rev ${nextRev}.`
+    `Created ${number} ${nextRev}.`
   );
 }
-

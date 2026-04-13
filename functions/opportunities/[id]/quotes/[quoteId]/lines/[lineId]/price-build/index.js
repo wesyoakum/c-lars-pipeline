@@ -133,6 +133,12 @@ async function renderCreatePrompt(context, ctx) {
       env: data?.env,
       activeNav: '/opportunities',
       flash: readFlash(url),
+      breadcrumbs: [
+        { label: 'Opportunities', href: '/opportunities' },
+        { label: ctx.line.opp_number, href: `/opportunities/${oppId}` },
+        { label: `${ctx.line.quote_number} ${ctx.line.revision}`, href: quoteUrl(oppId, quoteId) },
+        { label: `Price build — ${line.description || line.title || 'Line'}` },
+      ],
     })
   );
 }
@@ -254,9 +260,9 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
       <div style="display: ${sub === 'labor' ? 'block' : 'none'}">${laborTabBody}</div>
       <div style="display: ${sub === 'dm' ? 'block' : 'none'}">${dmTabBody}</div>
 
-      <div class="field">
+      <div class="field" style="width:100%">
         <label>Notes</label>
-        <textarea name="notes" rows="3" ${locked ? 'disabled' : ''}>${escape(build.notes ?? '')}</textarea>
+        <textarea name="notes" ${locked ? 'disabled' : ''} style="width:100%; field-sizing:content; min-height:2.5rem; resize:none; padding:0.4rem 0.55rem; border:1px solid var(--border); border-radius:var(--radius); font:inherit; background:var(--bg);">${escape(build.notes ?? '')}</textarea>
       </div>
 
       ${locked
@@ -274,6 +280,12 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
       env: data?.env,
       activeNav: '/opportunities',
       flash: readFlash(url),
+      breadcrumbs: [
+        { label: 'Opportunities', href: '/opportunities' },
+        { label: ctx.line.opp_number, href: `/opportunities/${oppId}` },
+        { label: `${ctx.line.quote_number} ${ctx.line.revision}`, href: quoteUrl(oppId, quoteId) },
+        { label: `Price build — ${line.description || line.title || 'Line'}` },
+      ],
     })
   );
 }

@@ -306,6 +306,11 @@ export async function renderEditForm(context, opts = {}) {
       env: data?.env,
       activeNav: '/opportunities',
       flash: readFlash(url),
+      breadcrumbs: [
+        { label: 'Opportunities', href: '/opportunities' },
+        { label: escape(opp.number ?? 'opportunity'), href: '/opportunities/' + escape(opp.id) },
+        { label: 'Edit' },
+      ],
     }),
     { status: opts.errors ? 422 : 200 }
   );

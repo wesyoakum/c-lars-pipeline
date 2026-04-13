@@ -108,6 +108,10 @@ export async function renderNewForm(context, opts = {}) {
       env: data?.env,
       activeNav: '/accounts',
       flash: readFlash(url),
+      breadcrumbs: [
+        { label: 'Accounts', href: '/accounts' },
+        { label: 'New account' },
+      ],
     }),
     {
       // If we're re-rendering due to errors, return 422 so the browser

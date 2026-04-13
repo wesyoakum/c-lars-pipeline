@@ -63,6 +63,7 @@ export async function onRequestGet(context) {
       env: data?.env,
       activeNav: '/library',
       flash: readFlash(url),
+      breadcrumbs: [{ label: 'Library' }],
     })
   );
 }

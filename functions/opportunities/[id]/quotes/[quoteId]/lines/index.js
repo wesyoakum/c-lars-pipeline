@@ -64,22 +64,25 @@ export async function onRequestPost(context) {
     stmt(
       env.DB,
       `INSERT INTO quote_lines
-         (id, quote_id, sort_order, item_type, description, quantity, unit,
-          unit_price, extended_price, notes,
+         (id, quote_id, sort_order, item_type, title, part_number, description,
+          quantity, unit, unit_price, extended_price, notes, line_notes, is_option,
           created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-               ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         quoteId,
         sortOrder,
         value.item_type,
+        value.title,
+        value.part_number,
         value.description,
         value.quantity,
         value.unit,
         value.unit_price,
         extended,
         value.notes,
+        value.line_notes,
+        value.is_option ?? 0,
         ts,
         ts,
       ]

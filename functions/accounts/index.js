@@ -103,6 +103,7 @@ export async function onRequestGet(context) {
       env: data?.env,
       activeNav: '/accounts',
       flash: readFlash(url),
+      breadcrumbs: [{ label: 'Accounts' }],
     })
   );
 }

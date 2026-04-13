@@ -125,6 +125,10 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
       env: data?.env,
       activeNav: '/library',
       flash: readFlash(url),
+      breadcrumbs: [
+        { label: 'Library', href: '/library' },
+        { label: 'Items' },
+      ],
     })
   );
 }

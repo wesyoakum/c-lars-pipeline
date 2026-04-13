@@ -276,6 +276,10 @@ export async function renderNewForm(context, opts = {}) {
       env: data?.env,
       activeNav: '/opportunities',
       flash: readFlash(url),
+      breadcrumbs: [
+        { label: 'Opportunities', href: '/opportunities' },
+        { label: 'New opportunity' },
+      ],
     }),
     { status: opts.errors ? 422 : 200 }
   );

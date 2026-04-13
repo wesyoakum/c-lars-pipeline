@@ -543,9 +543,14 @@ export function validateQuoteLine(input) {
   const errors = {};
   const value = {};
 
+  // Title/part number (new field) — optional
+  value.title = trim(input.title) || null;
+  value.part_number = trim(input.part_number) || null;
+
   value.description = trim(input.description) || '';
-  if (!nonEmpty(value.description)) {
-    errors.description = 'Description is required';
+  // Description is no longer required if title is provided
+  if (!nonEmpty(value.description) && !nonEmpty(value.title)) {
+    errors.description = 'Description or title is required';
   }
 
   const itemType = trim(input.item_type) || 'product';
@@ -569,6 +574,10 @@ export function validateQuoteLine(input) {
   value.unit_price = price === null ? 0 : price;
 
   value.notes = trim(input.notes) || null;
+  value.line_notes = trim(input.line_notes) || null;
+
+  // Option flag: line item priced but not included in quote total
+  value.is_option = input.is_option === '1' || input.is_option === 'on' ? 1 : 0;
 
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, value };

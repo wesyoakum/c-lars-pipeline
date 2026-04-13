@@ -86,11 +86,22 @@ import { VERSION } from './version.js';
 /**
  * Full-page HTML shell: includes nav, user badge, and slot for body.
  * Vendored HTMX + Alpine from /js so Access + CSP don't fight CDN cross-origin.
+ *
+ * opts.breadcrumbs — optional array of { label, href? } for the breadcrumb trail.
  */
 export function layout(title, body, opts = {}) {
-  const { user, flash, activeNav } = opts;
+  const { user, flash, activeNav, breadcrumbs } = opts;
   const pageTitle = title ? `${escape(title)} — C-LARS PMS` : 'C-LARS PMS';
   const versionTag = VERSION ? `v${escape(VERSION)}` : '';
+
+  const breadcrumbHtml = breadcrumbs && breadcrumbs.length
+    ? `<nav class="breadcrumbs" aria-label="breadcrumb">${breadcrumbs.map((b, i) => {
+        const sep = i > 0 ? '<span class="bc-sep">/</span>' : '';
+        return b.href
+          ? `${sep}<a href="${escape(b.href)}">${escape(b.label)}</a>`
+          : `${sep}<span class="bc-current">${escape(b.label)}</span>`;
+      }).join('')}</nav>`
+    : '';
 
   return `<!doctype html>
 <html lang="en">
@@ -115,15 +126,23 @@ export function layout(title, body, opts = {}) {
       ${navLink('/jobs', 'Jobs', activeNav)}
       ${navLink('/library', 'Library', activeNav)}
       ${navLink('/activities', 'Tasks', activeNav)}
-      ${navLink('/settings', 'Settings', activeNav)}
     </nav>
-    <div class="user-badge">
-      ${user ? `<span class="user-name">${escape(user.display_name ?? user.email)}</span>
-                 <span class="user-role">${escape(user.role)}</span>` : '<span>Not signed in</span>'}
+    <div class="header-right">
+      <a href="/settings" class="settings-gear" title="Settings">
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="10" cy="10" r="3"/>
+          <path d="M10 1.5v2M10 16.5v2M3.5 3.5l1.4 1.4M15.1 15.1l1.4 1.4M1.5 10h2M16.5 10h2M3.5 16.5l1.4-1.4M15.1 4.9l1.4-1.4"/>
+        </svg>
+      </a>
+      <div class="user-badge">
+        ${user ? `<span class="user-name">${escape(user.display_name ?? user.email)}</span>
+                   <span class="user-role">${escape(user.email ?? '')} · ${escape(user.role)}</span>` : '<span>Not signed in</span>'}
+      </div>
     </div>
   </header>
   ${flash ? `<div class="flash flash-${escape(flash.kind ?? 'info')}">${escape(flash.message)}</div>` : ''}
   <main class="site-main">
+${breadcrumbHtml}
 ${body}
   </main>
   <footer class="site-footer">
