@@ -1119,14 +1119,28 @@ table.data.compact td input.num-input {
 
 .stage-strip-compact {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.2rem;
   align-items: center;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  padding-bottom: 0.2rem;
+}
+.stage-strip-compact::-webkit-scrollbar {
+  height: 4px;
+}
+.stage-strip-compact::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
 }
 .stage-strip-compact .stage-btn {
   padding: 0.2rem 0.5rem;
   font-size: 0.78em;
   border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* ---------- Detail pairs (side-by-side key-value) ---------- */
