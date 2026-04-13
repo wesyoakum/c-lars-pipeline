@@ -1339,6 +1339,45 @@ tr.line-option td:first-child {
 }
 
 /* ---------- Version badge (bottom-right corner) ---------- */
+/* -- Tasks / activities ------------------------------------------------ */
+
+.check-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: var(--fg-muted);
+  line-height: 1;
+  transition: color 0.15s;
+}
+.check-btn:hover {
+  color: var(--success);
+}
+
+.completed-text {
+  text-decoration: line-through;
+  color: var(--fg-muted);
+}
+
+.row-muted td {
+  opacity: 0.55;
+}
+
+.row-overdue td {
+  /* subtle warm background for overdue rows */
+}
+
+.overdue-text {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.pill-task    { background: #ddf4ff; color: #0550ae; }
+.pill-note    { background: #f6f8fa; color: #656d76; }
+.pill-email   { background: #fff8c5; color: #7a6400; }
+.pill-call    { background: #dafbe1; color: #116329; }
+.pill-meeting { background: #fbefff; color: #8250df; }
+
 .version-badge {
   position: fixed;
   bottom: 0.4rem;

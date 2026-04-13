@@ -1,0 +1,295 @@
+// functions/activities/index.js
+//
+// GET  /activities  — Task/activity list (defaults to "my open tasks")
+// POST /activities  — Create a new activity/task
+
+import { all, one, stmt, batch } from '../lib/db.js';
+import { auditStmt } from '../lib/audit.js';
+import { layout, htmlResponse, html, escape } from '../lib/layout.js';
+import { uuid, now } from '../lib/ids.js';
+import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
+
+const TYPE_LABELS = {
+  task: 'Task',
+  note: 'Note',
+  email: 'Email',
+  call: 'Call',
+  meeting: 'Meeting',
+};
+
+const STATUS_LABELS = {
+  pending: 'Pending',
+  completed: 'Completed',
+  cancelled: 'Cancelled',
+};
+
+export async function onRequestGet(context) {
+  const { env, data, request } = context;
+  const user = data?.user;
+  const url = new URL(request.url);
+  const flash = readFlash(url);
+
+  const filter = url.searchParams.get('filter') || 'mine';
+  const showCompleted = url.searchParams.get('completed') === '1';
+  const typeFilter = url.searchParams.get('type') || '';
+
+  // Build WHERE clause
+  const conditions = [];
+  const params = [];
+
+  if (filter === 'mine' && user?.id) {
+    conditions.push('a.assigned_user_id = ?');
+    params.push(user.id);
+  }
+  // 'all' shows everything
+
+  if (!showCompleted) {
+    conditions.push("a.status = 'pending'");
+  }
+
+  if (typeFilter) {
+    conditions.push('a.type = ?');
+    params.push(typeFilter);
+  }
+
+  const where = conditions.length > 0
+    ? 'WHERE ' + conditions.join(' AND ')
+    : '';
+
+  const activities = await all(env.DB,
+    `SELECT a.*,
+            o.number AS opp_number, o.title AS opp_title,
+            u.display_name AS assigned_name, u.email AS assigned_email,
+            cu.display_name AS created_by_name, cu.email AS created_by_email
+       FROM activities a
+       LEFT JOIN opportunities o ON o.id = a.opportunity_id
+       LEFT JOIN users u ON u.id = a.assigned_user_id
+       LEFT JOIN users cu ON cu.id = a.created_by_user_id
+     ${where}
+     ORDER BY
+       CASE WHEN a.status = 'pending' THEN 0 ELSE 1 END,
+       CASE WHEN a.due_at IS NOT NULL THEN 0 ELSE 1 END,
+       a.due_at ASC,
+       a.created_at DESC
+     LIMIT 200`,
+    params);
+
+  // Load opportunities and users for the create form
+  const opportunities = await all(env.DB,
+    `SELECT id, number, title FROM opportunities
+      WHERE stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
+      ORDER BY updated_at DESC LIMIT 100`);
+
+  const users = await all(env.DB,
+    `SELECT id, display_name, email FROM users WHERE active = 1 ORDER BY display_name, email`);
+
+  const overdueTasks = activities.filter(a =>
+    a.status === 'pending' && a.due_at && a.due_at < new Date().toISOString().slice(0, 10)
+  ).length;
+
+  const body = html`
+    <section class="card">
+      <div class="card-header">
+        <h1 class="page-title">Tasks & Activities</h1>
+      </div>
+    </section>
+
+    <nav class="card" style="padding: 0.5rem 1rem; display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
+      <a class="nav-link ${filter === 'mine' ? 'active' : ''}" href="/activities?filter=mine${showCompleted ? '&completed=1' : ''}">My tasks</a>
+      <a class="nav-link ${filter === 'all' ? 'active' : ''}" href="/activities?filter=all${showCompleted ? '&completed=1' : ''}">All tasks</a>
+      <span style="flex:1"></span>
+      <label style="font-size:0.85em; display:flex; align-items:center; gap:0.3rem;">
+        <input type="checkbox" onchange="window.location.href='/activities?filter=${escape(filter)}'+(this.checked?'&completed=1':'')" ${showCompleted ? 'checked' : ''}>
+        Show completed
+      </label>
+      <select onchange="if(this.value)window.location.href='/activities?filter=${escape(filter)}${showCompleted ? '&completed=1' : ''}&type='+this.value; else window.location.href='/activities?filter=${escape(filter)}${showCompleted ? '&completed=1' : ''}';" style="font-size:0.85em; padding:0.2rem 0.4rem;">
+        <option value="">All types</option>
+        ${Object.entries(TYPE_LABELS).map(([k, v]) => html`
+          <option value="${k}" ${typeFilter === k ? 'selected' : ''}>${v}</option>
+        `)}
+      </select>
+    </nav>
+
+    ${overdueTasks > 0 ? html`
+      <div class="flash flash-warn">${overdueTasks} overdue task${overdueTasks > 1 ? 's' : ''}</div>
+    ` : ''}
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Activities <span class="muted">(${activities.length})</span></h2>
+        <button class="btn btn-sm primary" onclick="document.getElementById('new-activity-form').style.display = document.getElementById('new-activity-form').style.display === 'none' ? 'block' : 'none'">+ New</button>
+      </div>
+
+      <div id="new-activity-form" style="display:none; margin-bottom:1rem; padding:1rem; background:var(--bg-muted,#f6f8fa); border-radius:var(--radius);">
+        <form method="post" action="/activities">
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem;">
+            <div>
+              <label class="field-label">Type</label>
+              <select name="type" required style="width:100%">
+                ${Object.entries(TYPE_LABELS).map(([k, v]) => html`
+                  <option value="${k}" ${k === 'task' ? 'selected' : ''}>${v}</option>
+                `)}
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Opportunity</label>
+              <select name="opportunity_id" style="width:100%">
+                <option value="">— none —</option>
+                ${opportunities.map(o => html`
+                  <option value="${o.id}">${escape(o.number)} — ${escape(o.title)}</option>
+                `)}
+              </select>
+            </div>
+            <div style="grid-column:1/-1">
+              <label class="field-label">Subject</label>
+              <input type="text" name="subject" required style="width:100%">
+            </div>
+            <div style="grid-column:1/-1">
+              <label class="field-label">Details</label>
+              <textarea name="body" rows="2" style="width:100%; field-sizing:content; min-height:2.5rem;"></textarea>
+            </div>
+            <div>
+              <label class="field-label">Assigned to</label>
+              <select name="assigned_user_id" style="width:100%">
+                ${users.map(u => html`
+                  <option value="${u.id}" ${u.id === user?.id ? 'selected' : ''}>${escape(u.display_name ?? u.email)}</option>
+                `)}
+              </select>
+            </div>
+            <div>
+              <label class="field-label">Due date</label>
+              <input type="date" name="due_at" style="width:100%">
+            </div>
+            <div>
+              <label class="field-label">Direction</label>
+              <select name="direction" style="width:100%">
+                <option value="">—</option>
+                <option value="inbound">Inbound</option>
+                <option value="outbound">Outbound</option>
+              </select>
+            </div>
+          </div>
+          <div style="margin-top:0.75rem; display:flex; gap:0.5rem;">
+            <button class="btn primary" type="submit">Create</button>
+            <button class="btn" type="button" onclick="document.getElementById('new-activity-form').style.display='none'">Cancel</button>
+          </div>
+        </form>
+      </div>
+
+      ${activities.length === 0
+        ? html`<p class="muted">No activities found.</p>`
+        : html`
+          <table class="data compact">
+            <thead>
+              <tr>
+                <th style="width:2rem"></th>
+                <th>Subject</th>
+                <th>Type</th>
+                <th>Opportunity</th>
+                <th>Assigned to</th>
+                <th>Due</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${activities.map(a => {
+                const isOverdue = a.status === 'pending' && a.due_at && a.due_at < new Date().toISOString().slice(0, 10);
+                const assignedLabel = a.assigned_name ?? a.assigned_email ?? '—';
+                return html`
+                  <tr class="${a.status === 'completed' ? 'row-muted' : ''} ${isOverdue ? 'row-overdue' : ''}">
+                    <td>
+                      ${a.status === 'pending' ? html`
+                        <form method="post" action="/activities/${escape(a.id)}/complete" style="display:inline">
+                          <button type="submit" class="check-btn" title="Mark complete">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                              <circle cx="8" cy="8" r="6"/>
+                            </svg>
+                          </button>
+                        </form>
+                      ` : html`
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--green,#1a7f37)" stroke-width="2">
+                          <circle cx="8" cy="8" r="6"/>
+                          <path d="M5 8l2 2 4-4"/>
+                        </svg>
+                      `}
+                    </td>
+                    <td>
+                      <a href="/activities/${escape(a.id)}" class="${a.status === 'completed' ? 'completed-text' : ''}">
+                        <strong>${escape(a.subject || '(no subject)')}</strong>
+                      </a>
+                      ${a.body ? html`<br><small class="muted">${escape(a.body.length > 80 ? a.body.slice(0, 80) + '...' : a.body)}</small>` : ''}
+                    </td>
+                    <td><span class="pill pill-${a.type}">${escape(TYPE_LABELS[a.type] ?? a.type)}</span></td>
+                    <td>${a.opportunity_id
+                      ? html`<a href="/opportunities/${escape(a.opportunity_id)}"><code>${escape(a.opp_number ?? '')}</code></a>`
+                      : html`<span class="muted">—</span>`}
+                    </td>
+                    <td>${escape(assignedLabel)}</td>
+                    <td class="${isOverdue ? 'overdue-text' : ''}">
+                      ${a.due_at ? escape(a.due_at.slice(0, 10)) : html`<span class="muted">—</span>`}
+                    </td>
+                    <td><span class="pill ${a.status === 'completed' ? 'pill-success' : a.status === 'cancelled' ? 'pill-locked' : ''}">${escape(STATUS_LABELS[a.status] ?? a.status ?? '—')}</span></td>
+                    <td class="row-actions">
+                      <a class="btn small" href="/activities/${escape(a.id)}">Open</a>
+                    </td>
+                  </tr>
+                `;
+              })}
+            </tbody>
+          </table>
+        `}
+    </section>
+  `;
+
+  return htmlResponse(layout('Tasks & Activities', body, {
+    user,
+    env: data?.env,
+    activeNav: '/activities',
+    flash,
+    breadcrumbs: [{ label: 'Tasks & Activities' }],
+  }));
+}
+
+export async function onRequestPost(context) {
+  const { env, data, request } = context;
+  const user = data?.user;
+  const input = await formBody(request);
+
+  const id = uuid();
+  const ts = now();
+  const type = input.type || 'task';
+  const subject = (input.subject || '').trim();
+  const body = (input.body || '').trim() || null;
+  const oppId = input.opportunity_id || null;
+  const assignedUserId = input.assigned_user_id || user?.id || null;
+  const dueAt = input.due_at || null;
+  const direction = input.direction || null;
+  const status = (type === 'task') ? 'pending' : 'completed';
+
+  if (!subject) {
+    return redirectWithFlash('/activities', 'Subject is required.', 'error');
+  }
+
+  // If created from an opportunity page, redirect back there
+  const returnTo = input.return_to || null;
+
+  await batch(env.DB, [
+    stmt(env.DB,
+      `INSERT INTO activities (id, opportunity_id, type, subject, body, direction, status, due_at, assigned_user_id, created_at, updated_at, created_by_user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, oppId, type, subject, body, direction, status, dueAt, assignedUserId, ts, ts, user?.id]),
+    auditStmt(env.DB, {
+      entityType: 'activity',
+      entityId: id,
+      eventType: 'created',
+      user,
+      summary: `Created ${type}: ${subject}`,
+    }),
+  ]);
+
+  if (returnTo) {
+    return redirectWithFlash(returnTo, `Created ${TYPE_LABELS[type] ?? type}: ${subject}`);
+  }
+  return redirectWithFlash('/activities', `Created ${TYPE_LABELS[type] ?? type}: ${subject}`);
+}

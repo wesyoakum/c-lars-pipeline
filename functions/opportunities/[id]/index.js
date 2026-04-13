@@ -169,6 +169,32 @@ export async function onRequestGet(context) {
     }
   }
 
+  // Tasks/activities tied to this opportunity
+  let taskRows = [];
+  let taskBadgeCount = 0;
+  {
+    const rows = await all(
+      env.DB,
+      `SELECT a.id, a.type, a.subject, a.body, a.status, a.due_at,
+              a.completed_at, a.direction, a.created_at,
+              u.display_name AS assigned_name, u.email AS assigned_email,
+              cu.display_name AS created_by_name, cu.email AS created_by_email
+         FROM activities a
+         LEFT JOIN users u ON u.id = a.assigned_user_id
+         LEFT JOIN users cu ON cu.id = a.created_by_user_id
+        WHERE a.opportunity_id = ?
+        ORDER BY
+          CASE WHEN a.status = 'pending' THEN 0 ELSE 1 END,
+          CASE WHEN a.due_at IS NOT NULL THEN 0 ELSE 1 END,
+          a.due_at ASC,
+          a.created_at DESC
+        LIMIT 100`,
+      [oppId]
+    );
+    taskBadgeCount = rows.filter(r => r.status === 'pending').length;
+    taskRows = rows;
+  }
+
   // Activity feed — this opportunity's own audit events. Later we'll
   // widen this to include child entities (cost builds, quotes, documents,
   // job events) via entity_id IN (...) unions.
@@ -527,6 +553,98 @@ export async function onRequestGet(context) {
     </section>
   `;
 
+  const TASK_TYPE_LABELS = {
+    task: 'Task', note: 'Note', email: 'Email', call: 'Call', meeting: 'Meeting',
+  };
+
+  const tasksTab = html`
+    <section class="card">
+      <div class="card-header">
+        <h2>Tasks & Activities</h2>
+      </div>
+
+      <div style="margin-bottom:1rem; padding:0.75rem; background:var(--bg-muted,#f6f8fa); border-radius:var(--radius);">
+        <form method="post" action="/activities">
+          <input type="hidden" name="opportunity_id" value="${escape(opp.id)}">
+          <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}?tab=tasks">
+          <div style="display:grid; grid-template-columns:auto 1fr auto auto; gap:0.5rem; align-items:end;">
+            <div>
+              <select name="type" style="font-size:0.85em">
+                <option value="task">Task</option>
+                <option value="note">Note</option>
+                <option value="email">Email</option>
+                <option value="call">Call</option>
+                <option value="meeting">Meeting</option>
+              </select>
+            </div>
+            <div>
+              <input type="text" name="subject" placeholder="Subject..." required style="width:100%; font-size:0.85em">
+            </div>
+            <div>
+              <input type="date" name="due_at" style="font-size:0.85em">
+            </div>
+            <div>
+              <button class="btn btn-sm primary" type="submit">Add</button>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      ${taskRows.length === 0
+        ? html`<p class="muted">No tasks or activities on this opportunity yet.</p>`
+        : html`
+          <table class="data compact">
+            <thead>
+              <tr>
+                <th style="width:2rem"></th>
+                <th>Subject</th>
+                <th>Type</th>
+                <th>Assigned</th>
+                <th>Due</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${taskRows.map(a => {
+                const isOverdue = a.status === 'pending' && a.due_at && a.due_at < new Date().toISOString().slice(0, 10);
+                const assignedLabel = a.assigned_name ?? a.assigned_email ?? '—';
+                return html`
+                  <tr class="${a.status === 'completed' ? 'row-muted' : ''} ${isOverdue ? 'row-overdue' : ''}">
+                    <td>
+                      ${a.status === 'pending' ? html`
+                        <form method="post" action="/activities/${escape(a.id)}/complete" style="display:inline">
+                          <button type="submit" class="check-btn" title="Mark complete">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                              <circle cx="8" cy="8" r="6"/>
+                            </svg>
+                          </button>
+                        </form>
+                      ` : html`
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--green,#1a7f37)" stroke-width="2">
+                          <circle cx="8" cy="8" r="6"/>
+                          <path d="M5 8l2 2 4-4"/>
+                        </svg>
+                      `}
+                    </td>
+                    <td>
+                      <a href="/activities/${escape(a.id)}">
+                        <strong class="${a.status === 'completed' ? 'completed-text' : ''}">${escape(a.subject || '(no subject)')}</strong>
+                      </a>
+                      ${a.body ? html`<br><small class="muted">${escape(a.body.length > 60 ? a.body.slice(0, 60) + '...' : a.body)}</small>` : ''}
+                    </td>
+                    <td><span class="pill pill-${a.type}">${escape(TASK_TYPE_LABELS[a.type] ?? a.type)}</span></td>
+                    <td>${escape(assignedLabel)}</td>
+                    <td class="${isOverdue ? 'overdue-text' : ''}">${a.due_at ? escape(a.due_at.slice(0, 10)) : html`<span class="muted">—</span>`}</td>
+                    <td><span class="pill ${a.status === 'completed' ? 'pill-success' : ''}">${escape(a.status ?? '—')}</span></td>
+                  </tr>
+                `;
+              })}
+            </tbody>
+          </table>
+        `}
+    </section>
+  `;
+
   const activityTab = html`
     <section class="card">
       <h2>Activity</h2>
@@ -565,12 +683,14 @@ export async function onRequestGet(context) {
       <a class="nav-link ${tab === 'overview' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}">Overview</a>
       <a class="nav-link ${tab === 'cost' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=cost">Price builds (${priceBuildBadgeCount})</a>
       <a class="nav-link ${tab === 'quotes' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=quotes">Quotes (${quoteBadgeCount})</a>
+      <a class="nav-link ${tab === 'tasks' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=tasks">Tasks${taskBadgeCount > 0 ? ` (${taskBadgeCount})` : ''}</a>
       <a class="nav-link ${tab === 'activity' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=activity">Activity (${events.length})</a>
     </nav>
   `;
 
   const body = html`${tabs}${
     tab === 'activity' ? activityTab :
+    tab === 'tasks' ? tasksTab :
     tab === 'cost' ? costTab :
     tab === 'quotes' ? quotesTab :
     overviewTab

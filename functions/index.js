@@ -65,6 +65,25 @@ export async function onRequestGet(context) {
       GROUP BY stage`
   );
 
+  // My open tasks
+  const myTasks = user?.id
+    ? await all(
+        env.DB,
+        `SELECT a.id, a.type, a.subject, a.due_at, a.status,
+                o.id AS opp_id, o.number AS opp_number, o.title AS opp_title
+           FROM activities a
+           LEFT JOIN opportunities o ON o.id = a.opportunity_id
+          WHERE a.status = 'pending'
+            AND a.assigned_user_id = ?
+          ORDER BY
+            CASE WHEN a.due_at IS NOT NULL THEN 0 ELSE 1 END,
+            a.due_at ASC,
+            a.created_at DESC
+          LIMIT 10`,
+        [user.id]
+      )
+    : [];
+
   // Recent quotes
   const recentQuotes = await all(
     env.DB,
@@ -148,6 +167,49 @@ export async function onRequestGet(context) {
         <canvas id="chart-type" height="220"></canvas>
       </section>
     </div>
+
+    ${myTasks.length > 0 ? html`
+      <section class="card">
+        <div class="card-header">
+          <h2>My open tasks <span class="muted">(${myTasks.length})</span></h2>
+          <a class="btn btn-sm" href="/activities">All tasks</a>
+        </div>
+        <table class="data compact">
+          <thead>
+            <tr>
+              <th style="width:2rem"></th>
+              <th>Subject</th>
+              <th>Opportunity</th>
+              <th>Due</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${myTasks.map(t => {
+              const isOverdue = t.due_at && t.due_at < new Date().toISOString().slice(0, 10);
+              return html`
+                <tr class="${isOverdue ? 'row-overdue' : ''}">
+                  <td>
+                    <form method="post" action="/activities/${escape(t.id)}/complete" style="display:inline">
+                      <button type="submit" class="check-btn" title="Mark complete">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                          <circle cx="8" cy="8" r="6"/>
+                        </svg>
+                      </button>
+                    </form>
+                  </td>
+                  <td><a href="/activities/${escape(t.id)}"><strong>${escape(t.subject || '(no subject)')}</strong></a></td>
+                  <td>${t.opp_id
+                    ? html`<a href="/opportunities/${escape(t.opp_id)}"><code>${escape(t.opp_number ?? '')}</code></a>`
+                    : html`<span class="muted">—</span>`}
+                  </td>
+                  <td class="${isOverdue ? 'overdue-text' : ''}">${t.due_at ? escape(t.due_at.slice(0, 10)) : html`<span class="muted">—</span>`}</td>
+                </tr>
+              `;
+            })}
+          </tbody>
+        </table>
+      </section>
+    ` : ''}
 
     <section class="card">
       <div class="card-header">
