@@ -31,7 +31,7 @@
     "CF_ACCESS_TEAM_DOMAIN": "c-lars.cloudflareaccess.com",
     "CF_ACCESS_AUD": "",
     // ConvertAPI secret for .docx → PDF conversion.
-    // For production, set via: wrangler pages secret put CONVERTAPI_SECRET
-    "CONVERTAPI_SECRET": ""
+    // Set via: wrangler pages secret put CONVERTAPI_SECRET
+    // (not listed here to avoid binding name conflict)
   }
 }
