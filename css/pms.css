@@ -991,6 +991,11 @@ table.data.compact td {
   border-radius: var(--radius);
   font: inherit;
   background: var(--bg);
+  box-sizing: border-box;
+}
+.form-grid label textarea,
+.stack-form textarea {
+  resize: vertical;
 }
 
 /* Quotes tab: the "+ New quote" inline create form (type picker + button). */
@@ -1051,17 +1056,15 @@ table.data tr.totals-row:last-child td {
   border-top: 2px solid var(--fg);
 }
 
-/* Add-a-line form under the quote lines table. */
-.add-line-form {
-  margin-top: 1rem;
-  padding: 0.8rem 1rem;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
+/* New-line blank row at the bottom of the quote lines table. Styled
+   slightly differently so the user recognizes it as the "add" row. */
+table.data tr.new-line-row td {
+  background: var(--bg-muted, #fafaf8);
+  border-top: 1px dashed var(--border);
 }
-.add-line-form h3 {
-  margin: 0 0 0.6rem;
-  font-size: 1rem;
+table.data tr.new-line-row input::placeholder,
+table.data tr.new-line-row select {
+  color: var(--fg-muted, #999);
 }
 
 /* Inline line-edit forms: cells hold input directly. Keep them tight

@@ -328,116 +328,106 @@ export async function onRequestGet(context) {
         <span class="header-value" id="q-lines-subtotal">${fmtDollar(subtotal)} subtotal</span>
       </div>
 
-      ${lines.length === 0
-        ? html`<p class="muted">No line items yet.</p>`
-        : html`
-          <table class="data compact" data-live-calc="quote-lines">
-            <thead>
-              <tr>
-                <th style="width: 5%">#</th>
-                <th>Description</th>
-                <th style="width: 10%">Type</th>
-                <th class="num" style="width: 8%">Qty</th>
-                <th style="width: 8%">Unit</th>
-                <th class="num" style="width: 12%">Unit price</th>
-                <th class="num" style="width: 12%">Extended</th>
-                <th style="width: 10%"></th>
-              </tr>
-            </thead>
-            <tbody>
-              ${lines.map((l, i) => html`
-                <tr data-line-row>
-                  <td>${i + 1}</td>
-                  <td>
-                    <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}" class="inline-form" id="line-form-${escape(l.id)}">
-                      <input type="text" name="description" value="${escape(l.description ?? '')}" ${readOnly ? 'disabled' : ''} style="width: 100%;">
-                    </form>
-                  </td>
-                  <td>
-                    <select name="item_type" form="line-form-${escape(l.id)}" ${readOnly ? 'disabled' : ''}>
-                      <option value="misc"    ${l.item_type === 'misc'    ? 'selected' : ''}>Misc</option>
-                      <option value="product" ${l.item_type === 'product' ? 'selected' : ''}>Product</option>
-                      <option value="service" ${l.item_type === 'service' ? 'selected' : ''}>Service</option>
-                      <option value="labor"   ${l.item_type === 'labor'   ? 'selected' : ''}>Labor</option>
-                    </select>
-                  </td>
-                  <td class="num">
-                    <input type="text" name="quantity" form="line-form-${escape(l.id)}" value="${escape(l.quantity ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input">
-                  </td>
-                  <td>
-                    <input type="text" name="unit" form="line-form-${escape(l.id)}" value="${escape(l.unit ?? '')}" ${readOnly ? 'disabled' : ''} style="width: 100%;">
-                  </td>
-                  <td class="num">
-                    <input type="text" name="unit_price" form="line-form-${escape(l.id)}" value="${escape(l.unit_price ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input">
-                  </td>
-                  <td class="num" data-line-extended>${fmtDollar(l.extended_price)}</td>
-                  <td class="row-actions">
-                    ${!readOnly ? html`
-                      <button class="btn small" type="submit" form="line-form-${escape(l.id)}">Save</button>
-                      <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}/delete" class="inline-form">
-                        <button class="btn small danger" type="submit">×</button>
-                      </form>
-                    ` : ''}
-                  </td>
-                </tr>
-              `)}
-              <tr class="totals-row">
-                <td colspan="6" class="num"><strong>Subtotal</strong></td>
-                <td class="num" id="q-subtotal"><strong>${fmtDollar(subtotal)}</strong></td>
-                <td></td>
-              </tr>
-              <tr class="totals-row">
-                <td colspan="6" class="num">Tax</td>
-                <td class="num">${fmtDollar(Number(quote.tax_amount ?? 0))}</td>
-                <td></td>
-              </tr>
-              <tr class="totals-row">
-                <td colspan="6" class="num"><strong>Total</strong></td>
-                <td class="num" id="q-total"><strong>${fmtDollar(total)}</strong></td>
-                <td></td>
-              </tr>
-            </tbody>
-          </table>
-        `}
-
-      ${!readOnly
-        ? html`
-          <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines" class="add-line-form">
-            <h3>Add a line</h3>
-            <div class="form-grid">
-              <label style="grid-column: span 2;">
-                Description
-                <input type="text" name="description" required placeholder="Describe the line item">
-              </label>
-              <label>
-                Type
-                <select name="item_type">
-                  <option value="misc">Misc</option>
-                  <option value="product">Product</option>
-                  <option value="service">Service</option>
-                  <option value="labor">Labor</option>
+      <table class="data compact" data-live-calc="quote-lines">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Description</th>
+            <th>Type</th>
+            <th class="num">Qty</th>
+            <th>Unit</th>
+            <th class="num">Unit price</th>
+            <th class="num">Extended</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${lines.map((l, i) => html`
+            <tr data-line-row>
+              <td>${i + 1}</td>
+              <td>
+                <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}" class="inline-form" id="line-form-${escape(l.id)}">
+                  <input type="text" name="description" value="${escape(l.description ?? '')}" ${readOnly ? 'disabled' : ''} style="width: 100%;">
+                </form>
+              </td>
+              <td>
+                <select name="item_type" form="line-form-${escape(l.id)}" ${readOnly ? 'disabled' : ''}>
+                  <option value="misc"    ${l.item_type === 'misc'    ? 'selected' : ''}>Misc</option>
+                  <option value="product" ${l.item_type === 'product' ? 'selected' : ''}>Product</option>
+                  <option value="service" ${l.item_type === 'service' ? 'selected' : ''}>Service</option>
+                  <option value="labor"   ${l.item_type === 'labor'   ? 'selected' : ''}>Labor</option>
                 </select>
-              </label>
-              <label>
-                Qty
-                <input type="text" name="quantity" value="1" class="num-input">
-              </label>
-              <label>
-                Unit
-                <input type="text" name="unit" placeholder="ea / hr / lot">
-              </label>
-              <label>
-                Unit price ($)
-                <input type="text" name="unit_price" value="0" class="num-input">
-              </label>
-            </div>
-            <div class="form-actions">
-              <button class="btn primary" type="submit">+ Add line</button>
-              <span class="muted" data-add-preview style="margin-left:0.5rem">$0</span>
-            </div>
-          </form>
-        `
-        : ''}
+              </td>
+              <td class="num">
+                <input type="text" name="quantity" form="line-form-${escape(l.id)}" value="${escape(l.quantity ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input">
+              </td>
+              <td>
+                <input type="text" name="unit" form="line-form-${escape(l.id)}" value="${escape(l.unit ?? '')}" ${readOnly ? 'disabled' : ''} style="width: 100%;">
+              </td>
+              <td class="num">
+                <input type="text" name="unit_price" form="line-form-${escape(l.id)}" value="${escape(l.unit_price ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input">
+              </td>
+              <td class="num" data-line-extended>${fmtDollar(l.extended_price)}</td>
+              <td class="row-actions">
+                ${!readOnly ? html`
+                  <button class="btn small" type="submit" form="line-form-${escape(l.id)}">Save</button>
+                  <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}/delete" class="inline-form">
+                    <button class="btn small danger" type="submit">×</button>
+                  </form>
+                ` : ''}
+              </td>
+            </tr>
+          `)}
+          ${!readOnly
+            ? html`
+              <tr class="new-line-row" data-line-row>
+                <td class="muted">${lines.length + 1}</td>
+                <td>
+                  <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines" class="inline-form" id="new-line-form">
+                    <input type="text" name="description" placeholder="New line item…" style="width: 100%;">
+                  </form>
+                </td>
+                <td>
+                  <select name="item_type" form="new-line-form">
+                    <option value="misc">Misc</option>
+                    <option value="product">Product</option>
+                    <option value="service">Service</option>
+                    <option value="labor">Labor</option>
+                  </select>
+                </td>
+                <td class="num">
+                  <input type="text" name="quantity" form="new-line-form" value="1" class="num-input">
+                </td>
+                <td>
+                  <input type="text" name="unit" form="new-line-form" placeholder="ea" style="width: 100%;">
+                </td>
+                <td class="num">
+                  <input type="text" name="unit_price" form="new-line-form" class="num-input" placeholder="0">
+                </td>
+                <td class="num" data-line-extended>\u2014</td>
+                <td class="row-actions">
+                  <button class="btn small primary" type="submit" form="new-line-form">+</button>
+                </td>
+              </tr>
+            `
+            : ''}
+          <tr class="totals-row">
+            <td colspan="6" class="num"><strong>Subtotal</strong></td>
+            <td class="num" id="q-subtotal"><strong>${fmtDollar(subtotal)}</strong></td>
+            <td></td>
+          </tr>
+          <tr class="totals-row">
+            <td colspan="6" class="num">Tax</td>
+            <td class="num">${fmtDollar(Number(quote.tax_amount ?? 0))}</td>
+            <td></td>
+          </tr>
+          <tr class="totals-row">
+            <td colspan="6" class="num"><strong>Total</strong></td>
+            <td class="num" id="q-total"><strong>${fmtDollar(total)}</strong></td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
     </section>
   `;
 
