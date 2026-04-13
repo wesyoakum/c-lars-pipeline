@@ -120,13 +120,12 @@ export async function renderNewForm(context, opts = {}) {
           <fieldset style="flex:1;border:none;padding:0;margin:0">
             <span>Type(s) <em>*</em></span>
             <input type="hidden" name="transaction_type" id="tt-hidden" value="${escape(values.transaction_type ?? '')}">
-            <div class="checkbox-row" x-data="typePicker('${escape(values.transaction_type ?? '')}')">
+            <div class="type-pills-inline" style="padding:0.35rem 0" x-data="typePicker('${escape(values.transaction_type ?? '')}')">
               ${TYPE_OPTIONS.map(
                 (t) =>
-                  html`<label class="check-label">
-                    <input type="checkbox" value="${t.value}" :checked="types.includes('${t.value}')" @change="toggle('${t.value}', $event.target.checked)">
-                    ${t.label}
-                  </label>`
+                  html`<button type="button" class="pill pill-toggle"
+                          :class="{ 'pill-active': types.indexOf('${t.value}') !== -1 }"
+                          @click="toggle('${t.value}')">${t.label}</button>`
               )}
             </div>
             ${errors.transaction_type ? html`<small class="field-error">${errors.transaction_type}</small>` : ''}
@@ -139,127 +138,134 @@ export async function renderNewForm(context, opts = {}) {
                     placeholder="Short summary of what the customer is asking for.">${escape(values.description ?? '')}</textarea>
         </label>
 
-        <div class="row">
-          <label style="flex:1">
-            <span>How did the RFQ arrive?</span>
-            <select name="rfq_format">
-              ${RFQ_FORMAT_OPTIONS.map(
-                (o) =>
-                  html`<option value="${o.value}" ${(values.rfq_format ?? '') === o.value ? 'selected' : ''}>${o.label}</option>`
-              )}
-            </select>
-            ${errors.rfq_format ? html`<small class="field-error">${errors.rfq_format}</small>` : ''}
-          </label>
-          <label style="flex:1">
-            <span>Source</span>
-            <select name="source">
-              ${SOURCE_OPTIONS.map(
-                (o) =>
-                  html`<option value="${o.value}" ${(values.source ?? '') === o.value ? 'selected' : ''}>${o.label}</option>`
-              )}
-            </select>
-            ${errors.source ? html`<small class="field-error">${errors.source}</small>` : ''}
-          </label>
-        </div>
+        <div x-data="{ more: false }">
+          <button type="button" class="btn btn-sm toggle-more" @click="more = !more"
+                  x-text="more ? '− Less details' : '+ More details'"></button>
 
-        <div class="row">
-          <label style="flex:1">
-            <span>Estimated value (USD)</span>
-            <input type="number" name="estimated_value_usd" min="0" step="1"
-                   value="${escape(values.estimated_value_usd ?? '')}">
-            ${errors.estimated_value_usd ? html`<small class="field-error">${errors.estimated_value_usd}</small>` : ''}
-          </label>
-          <label style="flex:1">
-            <span>Probability (%)</span>
-            <input type="number" name="probability" min="0" max="100" step="1"
-                   value="${escape(values.probability ?? '')}"
-                   placeholder="defaults from stage">
-            ${errors.probability ? html`<small class="field-error">${errors.probability}</small>` : ''}
-          </label>
-        </div>
-
-        <fieldset class="qualification-box">
-          <legend>Pipeline dates</legend>
-          <div class="row">
-            <label style="flex:1">
-              <span>RFQ received</span>
-              <input type="date" name="rfq_received_date"
-                     value="${escape(values.rfq_received_date ?? '')}">
-              ${errors.rfq_received_date ? html`<small class="field-error">${errors.rfq_received_date}</small>` : ''}
-            </label>
-            <label style="flex:1">
-              <span>RFQ due</span>
-              <input type="date" name="rfq_due_date"
-                     value="${escape(values.rfq_due_date ?? '')}">
-              ${errors.rfq_due_date ? html`<small class="field-error">${errors.rfq_due_date}</small>` : ''}
-            </label>
-          </div>
-          <div class="row">
-            <label style="flex:1">
-              <span>RFI due</span>
-              <input type="date" name="rfi_due_date"
-                     value="${escape(values.rfi_due_date ?? '')}">
-              ${errors.rfi_due_date ? html`<small class="field-error">${errors.rfi_due_date}</small>` : ''}
-            </label>
-            <label style="flex:1">
-              <span>Quoted</span>
-              <input type="date" name="quoted_date"
-                     value="${escape(values.quoted_date ?? '')}">
-              ${errors.quoted_date ? html`<small class="field-error">${errors.quoted_date}</small>` : ''}
-            </label>
-          </div>
-          <div class="row">
-            <label style="flex:1">
-              <span>Expected close</span>
-              <input type="date" name="expected_close_date"
-                     value="${escape(values.expected_close_date ?? '')}">
-              ${errors.expected_close_date ? html`<small class="field-error">${errors.expected_close_date}</small>` : ''}
-            </label>
-            <div style="flex:1"></div>
-          </div>
-        </fieldset>
-
-        <fieldset class="qualification-box">
-          <legend>Qualification</legend>
-          <div class="row">
-            <label style="flex:1">
-              <span>Budget</span>
-              <select name="bant_budget">
-                ${BANT_BUDGET_OPTIONS.map(
-                  (o) =>
-                    html`<option value="${o.value}" ${(values.bant_budget ?? '') === o.value ? 'selected' : ''}>${o.label}</option>`
-                )}
-              </select>
-            </label>
-            <label style="flex:1">
-              <span>Authority (contact)</span>
-              <div class="picker-row">
-                <select name="bant_authority_contact_id" data-role="authority-select">
-                  <option value="">— None —</option>
-                  ${contacts.map((c) => {
-                    const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
-                    const titleSuffix = c.title ? ` — ${c.title}` : '';
-                    return html`<option value="${escape(c.id)}" ${values.bant_authority_contact_id === c.id ? 'selected' : ''}>${name}${titleSuffix}</option>`;
-                  })}
+          <div x-show="more" x-cloak class="more-details-section">
+            <div class="row">
+              <label style="flex:1">
+                <span>How did the RFQ arrive?</span>
+                <select name="rfq_format">
+                  ${RFQ_FORMAT_OPTIONS.map(
+                    (o) =>
+                      html`<option value="${o.value}" ${(values.rfq_format ?? '') === o.value ? 'selected' : ''}>${o.label}</option>`
+                  )}
                 </select>
-                <button type="button" class="btn btn-sm" data-action="new-contact">+ New contact</button>
+                ${errors.rfq_format ? html`<small class="field-error">${errors.rfq_format}</small>` : ''}
+              </label>
+              <label style="flex:1">
+                <span>Source</span>
+                <select name="source">
+                  ${SOURCE_OPTIONS.map(
+                    (o) =>
+                      html`<option value="${o.value}" ${(values.source ?? '') === o.value ? 'selected' : ''}>${o.label}</option>`
+                  )}
+                </select>
+                ${errors.source ? html`<small class="field-error">${errors.source}</small>` : ''}
+              </label>
+            </div>
+
+            <div class="row">
+              <label style="flex:1">
+                <span>Estimated value (USD)</span>
+                <input type="number" name="estimated_value_usd" min="0" step="1"
+                       value="${escape(values.estimated_value_usd ?? '')}">
+                ${errors.estimated_value_usd ? html`<small class="field-error">${errors.estimated_value_usd}</small>` : ''}
+              </label>
+              <label style="flex:1">
+                <span>Probability (%)</span>
+                <input type="number" name="probability" min="0" max="100" step="1"
+                       value="${escape(values.probability ?? '')}"
+                       placeholder="defaults from stage">
+                ${errors.probability ? html`<small class="field-error">${errors.probability}</small>` : ''}
+              </label>
+            </div>
+
+            <fieldset class="qualification-box">
+              <legend>Pipeline dates</legend>
+              <div class="row">
+                <label style="flex:1">
+                  <span>RFQ received</span>
+                  <input type="date" name="rfq_received_date"
+                         value="${escape(values.rfq_received_date ?? '')}">
+                  ${errors.rfq_received_date ? html`<small class="field-error">${errors.rfq_received_date}</small>` : ''}
+                </label>
+                <label style="flex:1">
+                  <span>RFQ due</span>
+                  <input type="date" name="rfq_due_date"
+                         value="${escape(values.rfq_due_date ?? '')}">
+                  ${errors.rfq_due_date ? html`<small class="field-error">${errors.rfq_due_date}</small>` : ''}
+                </label>
               </div>
-              <input type="hidden" name="bant_authority" value="${escape(values.bant_authority ?? '')}">
-            </label>
+              <div class="row">
+                <label style="flex:1">
+                  <span>RFI due</span>
+                  <input type="date" name="rfi_due_date"
+                         value="${escape(values.rfi_due_date ?? '')}">
+                  ${errors.rfi_due_date ? html`<small class="field-error">${errors.rfi_due_date}</small>` : ''}
+                </label>
+                <label style="flex:1">
+                  <span>Quoted</span>
+                  <input type="date" name="quoted_date"
+                         value="${escape(values.quoted_date ?? '')}">
+                  ${errors.quoted_date ? html`<small class="field-error">${errors.quoted_date}</small>` : ''}
+                </label>
+              </div>
+              <div class="row">
+                <label style="flex:1">
+                  <span>Expected close</span>
+                  <input type="date" name="expected_close_date"
+                         value="${escape(values.expected_close_date ?? '')}">
+                  ${errors.expected_close_date ? html`<small class="field-error">${errors.expected_close_date}</small>` : ''}
+                </label>
+                <div style="flex:1"></div>
+              </div>
+            </fieldset>
+
+            <fieldset class="qualification-box">
+              <legend>Qualification</legend>
+              <div class="row">
+                <label style="flex:1">
+                  <span>Budget</span>
+                  <select name="bant_budget">
+                    ${BANT_BUDGET_OPTIONS.map(
+                      (o) =>
+                        html`<option value="${o.value}" ${(values.bant_budget ?? '') === o.value ? 'selected' : ''}>${o.label}</option>`
+                    )}
+                  </select>
+                </label>
+                <label style="flex:1">
+                  <span>Authority (contact)</span>
+                  <div class="picker-row">
+                    <select name="bant_authority_contact_id" data-role="authority-select">
+                      <option value="">— None —</option>
+                      ${contacts.map((c) => {
+                        const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
+                        const titleSuffix = c.title ? ` — ${c.title}` : '';
+                        return html`<option value="${escape(c.id)}" ${values.bant_authority_contact_id === c.id ? 'selected' : ''}>${name}${titleSuffix}</option>`;
+                      })}
+                    </select>
+                    <button type="button" class="btn btn-sm" data-action="new-contact">+ New contact</button>
+                  </div>
+                  <input type="hidden" name="bant_authority" value="${escape(values.bant_authority ?? '')}">
+                </label>
+              </div>
+              <div class="row">
+                <label style="flex:1">
+                  <span>Need</span>
+                  <input type="text" name="bant_need" value="${escape(values.bant_need ?? '')}"
+                         placeholder="Why now?">
+                </label>
+                <label style="flex:1">
+                  <span>Timeline</span>
+                  <input type="text" name="bant_timeline" value="${escape(values.bant_timeline ?? '')}"
+                         placeholder="e.g. Q3 2026 delivery">
+                </label>
+              </div>
+            </fieldset>
           </div>
-          <div class="row">
-            <label style="flex:1">
-              <span>Need</span>
-              <input type="text" name="bant_need" value="${escape(values.bant_need ?? '')}"
-                     placeholder="Why now?">
-            </label>
-            <label style="flex:1">
-              <span>Timeline</span>
-              <input type="text" name="bant_timeline" value="${escape(values.bant_timeline ?? '')}"
-                     placeholder="e.g. Q3 2026 delivery">
-            </label>
-          </div>
-        </fieldset>
+        </div>
 
         <div class="form-actions">
           <button type="submit" class="btn primary">Create opportunity</button>
@@ -292,8 +298,9 @@ export async function onRequestGet(context) {
 }
 
 /**
- * Alpine component for multi-type checkboxes. Maintains a comma-separated
+ * Alpine component for multi-type toggle pills. Maintains a comma-separated
  * hidden input so the form submits a single `transaction_type` value.
+ * Click toggles on/off; at least one type must remain selected.
  */
 export function typePickerScript() {
   return `
@@ -301,9 +308,10 @@ document.addEventListener('alpine:init', function() {
   Alpine.data('typePicker', function(initial) {
     return {
       types: initial ? initial.split(',').map(function(s){ return s.trim(); }).filter(Boolean) : [],
-      toggle: function(val, checked) {
-        if (checked && this.types.indexOf(val) === -1) this.types.push(val);
-        if (!checked) this.types = this.types.filter(function(t){ return t !== val; });
+      toggle: function(val) {
+        var idx = this.types.indexOf(val);
+        if (idx === -1) this.types.push(val);
+        else if (this.types.length > 1) this.types.splice(idx, 1);
         var hidden = document.getElementById('tt-hidden');
         if (hidden) hidden.value = this.types.join(',');
       },

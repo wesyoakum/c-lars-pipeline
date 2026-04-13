@@ -322,10 +322,6 @@ export async function onRequestGet(context) {
     ...accounts.map(a => ({ value: a.id, label: a.name })),
   ];
 
-  const estValueDisplay = opp.estimated_value_usd != null
-    ? `$${formatMoney(opp.estimated_value_usd)}`
-    : null;
-
   // ---- Overview tab ------------------------------------------------------
   const overviewTab = html`
     <section class="card" x-data="oppInline('${escape(opp.id)}', '${escape(opp.account_id)}')">
@@ -333,9 +329,7 @@ export async function onRequestGet(context) {
         <div>
           <h1 class="page-title">
             ${inlineText('title', opp.title)}
-            ${estValueDisplay
-              ? html` <span class="header-value">${inlineMoney('estimated_value_usd', opp.estimated_value_usd)}</span>`
-              : html` <span class="header-value">${inlineMoney('estimated_value_usd', opp.estimated_value_usd)}</span>`}
+            <span class="header-value">${inlineMoney('estimated_value_usd', opp.estimated_value_usd)}</span>
           </h1>
           <p class="muted" style="margin:0.15rem 0 0">
             <code>${escape(opp.number)}</code>
@@ -409,10 +403,6 @@ export async function onRequestGet(context) {
           <div class="detail-pair">
             <span class="detail-label">Primary contact</span>
             <span class="detail-value">${inlineSelect('primary_contact_id', opp.primary_contact_id, contactOptions)}</span>
-          </div>
-          <div class="detail-pair">
-            <span class="detail-label">Estimated value</span>
-            <span class="detail-value">${inlineMoney('estimated_value_usd', opp.estimated_value_usd)}</span>
           </div>
           <div class="detail-pair">
             <span class="detail-label">Owner</span>
@@ -660,7 +650,8 @@ export async function onRequestGet(context) {
   const DOC_KIND_LABELS = {
     rfq: 'RFQ', rfi: 'RFI', quote_pdf: 'Quote PDF', po: 'PO',
     oc_pdf: 'OC PDF', ntp_pdf: 'NTP PDF', drawing: 'Drawing',
-    specification: 'Specification', supplier_quote: 'Supplier Quote', other: 'Other',
+    specification: 'Specification', supplier_quote: 'Supplier Quote',
+    image: 'Image / Photo', other: 'Other',
   };
   const docsTab = html`
     <section class="card">

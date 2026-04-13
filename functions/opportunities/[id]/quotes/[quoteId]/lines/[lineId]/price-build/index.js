@@ -279,6 +279,7 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
             <select name="kind" style="padding:0.3rem 0.5rem;border:1px solid var(--border);border-radius:var(--radius);font:inherit;background:var(--bg)">
               <option value="supplier_quote">Vendor quote</option>
               <option value="specification">Spreadsheet / spec</option>
+              <option value="image">Image / photo</option>
               <option value="other">Email / other</option>
             </select>
             <button class="btn primary small" type="submit">Upload</button>
@@ -323,9 +324,7 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
   const body = html`
     ${header}
     ${subNav}
-    <form method="post" action="${base}" class="cost-build-form">
-      <input type="hidden" name="sub" value="${escape(sub)}">
-      <input type="hidden" name="_action" value="save">
+    <div class="cost-build-form" id="cb-form" data-patch-url="${base}/patch">
       <script type="application/json" id="cb-pricing-data">${raw(JSON.stringify({
         targetPct: settings.targetPct,
         totalTargetPct: settings.targetPct.dm + settings.targetPct.dl + settings.targetPct.imoh + settings.targetPct.other,
@@ -348,11 +347,10 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
 
       ${locked
         ? html`<p class="muted">This price build is locked. Unlock it to make changes.</p>`
-        : html`<div class="form-actions">
-            <button class="btn primary" type="submit">Save</button>
-            <a class="btn" href="${quoteUrl(oppId, quoteId)}">Back</a>
+        : html`<div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem">
+            <span id="cb-save-status" class="muted" style="font-size:0.8rem"></span>
           </div>`}
-    </form>
+    </div>
     ${docsSection}
     <script>
     function dropUpload() {
@@ -377,6 +375,208 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
         },
       };
     }
+
+    /* ── Pricing engine auto-save ──────────────────────────── */
+    (function() {
+      var form = document.getElementById('cb-form');
+      if (!form) return;
+      var patchUrl = form.dataset.patchUrl;
+      if (!patchUrl) return;
+      var statusEl = document.getElementById('cb-save-status');
+      var timer = null;
+      var saving = false;
+
+      function fmtDollar(n) {
+        if (n === null || n === undefined || isNaN(n)) return '\u2014';
+        return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+      }
+      function fmtPct(n, d) {
+        if (n === null || n === undefined || isNaN(n)) return '\u2014';
+        return Number(n).toFixed(d !== undefined ? d : 1) + '%';
+      }
+
+      function collectPayload() {
+        var data = {};
+        // Scalar fields
+        var labelEl = form.querySelector('input[name="label"]');
+        if (labelEl) data.label = labelEl.value;
+        var notesEl = form.querySelector('textarea[name="notes"]');
+        if (notesEl) data.notes = notesEl.value;
+
+        // Cost categories
+        ['dm_user_cost', 'dl_user_cost', 'imoh_user_cost', 'other_user_cost', 'quote_price_user'].forEach(function(name) {
+          var el = form.querySelector('input[name="' + name + '"]');
+          if (el) data[name] = el.value;
+        });
+
+        // Checkboxes
+        var useDm = form.querySelector('input[name="use_dm_library"]');
+        if (useDm) data.use_dm_library = useDm.checked ? '1' : '';
+        var useLab = form.querySelector('input[name="use_labor_library"]');
+        if (useLab) data.use_labor_library = useLab.checked ? '1' : '';
+
+        // Workcenter hours/rates
+        var hours = {};
+        var rates = {};
+        form.querySelectorAll('input[name^="current_hours["]').forEach(function(el) {
+          var wc = el.name.match(/\[(.+)\]/);
+          if (wc) hours[wc[1]] = el.value;
+        });
+        form.querySelectorAll('input[name^="current_rate["]').forEach(function(el) {
+          var wc = el.name.match(/\[(.+)\]/);
+          if (wc) rates[wc[1]] = el.value;
+        });
+        data.current_hours = hours;
+        data.current_rate = rates;
+
+        // DM item selections
+        var dmIds = [];
+        form.querySelectorAll('input[name="dm_item_ids"]:checked').forEach(function(el) {
+          dmIds.push(el.value);
+        });
+        data.dm_item_ids = dmIds;
+
+        // Labor item selections
+        var laborIds = [];
+        form.querySelectorAll('input[name="labor_item_ids"]:checked').forEach(function(el) {
+          laborIds.push(el.value);
+        });
+        data.labor_item_ids = laborIds;
+
+        return data;
+      }
+
+      function applyResponse(res) {
+        if (!res.pricing) return;
+        var eff = res.pricing.effective;
+        var marg = res.pricing.margin;
+        var refs = res.pricing.references;
+        var totals = res.totals || {};
+
+        // Total cost
+        var tcEl = document.getElementById('cb-total-cost');
+        if (tcEl && eff.totalCost !== undefined) tcEl.textContent = fmtDollar(eff.totalCost);
+
+        // Target price
+        var tpEl = document.getElementById('cb-target-price');
+        if (tpEl && eff.targetPrice !== undefined) tpEl.textContent = fmtDollar(eff.targetPrice);
+
+        // Margin
+        var mvEl = document.getElementById('cb-margin-value');
+        if (mvEl) {
+          if (marg.amount !== null) {
+            mvEl.innerHTML = fmtDollar(marg.amount) + ' (' + fmtPct(marg.pct) + ')';
+          } else {
+            mvEl.textContent = '\u2014';
+          }
+        }
+        var msEl = document.getElementById('cb-margin-status');
+        if (msEl) {
+          if (marg.status === 'good') msEl.textContent = 'Good (> ' + fmtPct(marg.threshold) + ')';
+          else if (marg.status === 'low') msEl.textContent = 'Too low (< ' + fmtPct(marg.threshold) + ')';
+          else msEl.textContent = '';
+        }
+        var mbEl = document.getElementById('cb-margin-box');
+        if (mbEl) {
+          mbEl.classList.remove('margin-good', 'margin-low');
+          if (marg.status === 'good') mbEl.classList.add('margin-good');
+          else if (marg.status === 'low') mbEl.classList.add('margin-low');
+        }
+
+        // Reference estimates
+        if (refs) {
+          var refMap = {
+            'cb-ref-fq-dm': refs.fromQuote && refs.fromQuote.dm,
+            'cb-ref-fq-dl': refs.fromQuote && refs.fromQuote.dl,
+            'cb-ref-fq-imoh': refs.fromQuote && refs.fromQuote.imoh,
+            'cb-ref-fq-other': refs.fromQuote && refs.fromQuote.other,
+            'cb-ref-fdm-price': refs.fromDm && refs.fromDm.price,
+            'cb-ref-fdm-dl': refs.fromDm && refs.fromDm.dl,
+            'cb-ref-fdm-imoh': refs.fromDm && refs.fromDm.imoh,
+            'cb-ref-fdm-other': refs.fromDm && refs.fromDm.other,
+            'cb-ref-fdmdl-price': refs.fromDmDl && refs.fromDmDl.price,
+            'cb-ref-fdmdl-imoh': refs.fromDmDl && refs.fromDmDl.imoh,
+            'cb-ref-fdmdl-other': refs.fromDmDl && refs.fromDmDl.other,
+          };
+          for (var id in refMap) {
+            var el = document.getElementById(id);
+            if (el) el.textContent = fmtDollar(refMap[id]);
+          }
+        }
+
+        // Workcenter costs
+        if (res.wcCosts) {
+          for (var wc in res.wcCosts) {
+            var row = form.querySelector('tr[data-labor-wc="' + wc + '"]');
+            if (row) {
+              var costCell = row.querySelector('[data-labor-cost]');
+              if (costCell) costCell.textContent = res.wcCosts[wc] ? fmtDollar(res.wcCosts[wc]) : '\u2014';
+            }
+          }
+        }
+
+        // Labor totals
+        var ltEl = document.getElementById('cb-labor-total');
+        if (ltEl && totals.currentLaborTotal !== undefined) ltEl.textContent = fmtDollar(totals.currentLaborTotal);
+        var lsEl = document.getElementById('cb-labor-selected-total');
+        if (lsEl && totals.laborLibTotal !== undefined) lsEl.textContent = fmtDollar(totals.laborLibTotal);
+        var llEl = document.getElementById('cb-labor-linked-total');
+        if (llEl && totals.laborCalcTotal !== undefined) llEl.textContent = fmtDollar(totals.laborCalcTotal);
+
+        // DM total
+        var dsEl = document.getElementById('cb-dm-selected-total');
+        if (dsEl && totals.dmLibTotal !== undefined) dsEl.textContent = fmtDollar(totals.dmLibTotal);
+      }
+
+      function setStatus(text, type) {
+        if (!statusEl) return;
+        statusEl.textContent = text;
+        statusEl.style.color = type === 'error' ? 'var(--danger)' : type === 'ok' ? 'var(--success)' : 'var(--fg-muted)';
+      }
+
+      function doSave() {
+        if (saving) { timer = setTimeout(doSave, 300); return; }
+        saving = true;
+        setStatus('Saving\u2026', 'muted');
+        var payload = collectPayload();
+        fetch(patchUrl, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+          .then(function(r) { return r.json(); })
+          .then(function(res) {
+            saving = false;
+            if (res.ok) {
+              setStatus('Saved', 'ok');
+              applyResponse(res);
+            } else {
+              setStatus(res.error || 'Save failed', 'error');
+            }
+          })
+          .catch(function(e) {
+            saving = false;
+            setStatus('Network error', 'error');
+          });
+      }
+
+      function scheduleAutoSave() {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(doSave, 500);
+      }
+
+      // Listen for changes on all inputs, selects, textareas, and checkboxes
+      form.addEventListener('input', function(e) {
+        if (e.target.matches('input:not([type="file"]):not([type="hidden"]), textarea')) {
+          scheduleAutoSave();
+        }
+      });
+      form.addEventListener('change', function(e) {
+        if (e.target.matches('input[type="checkbox"], select')) {
+          scheduleAutoSave();
+        }
+      });
+    })();
     </script>
   `;
 

@@ -1817,3 +1817,22 @@ tr.line-option td:first-child {
   user-select: none;
   z-index: 9999;
 }
+
+/* ── More / Less details toggle ──────────────────────────────── */
+.toggle-more {
+  background: none;
+  border: 1px dashed var(--border);
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0.3rem 0.75rem;
+  font-size: 0.85rem;
+  border-radius: var(--radius);
+  margin: 0.5rem 0;
+}
+.toggle-more:hover {
+  background: var(--bg-alt);
+  border-color: var(--accent);
+}
+.more-details-section {
+  margin-top: 0.5rem;
+}

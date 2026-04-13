@@ -117,13 +117,12 @@ export async function renderEditForm(context, opts = {}) {
           <fieldset style="flex:1;border:none;padding:0;margin:0">
             <span>Type(s) <em>*</em></span>
             <input type="hidden" name="transaction_type" id="tt-hidden" value="${escape(opp.transaction_type ?? '')}">
-            <div class="checkbox-row" x-data="typePicker('${escape(opp.transaction_type ?? '')}')">
+            <div class="type-pills-inline" style="padding:0.35rem 0" x-data="typePicker('${escape(opp.transaction_type ?? '')}')">
               ${TYPE_OPTIONS.map(
                 (t) =>
-                  html`<label class="check-label">
-                    <input type="checkbox" value="${t.value}" :checked="types.includes('${t.value}')" @change="toggle('${t.value}', $event.target.checked)">
-                    ${t.label}
-                  </label>`
+                  html`<button type="button" class="pill pill-toggle"
+                          :class="{ 'pill-active': types.indexOf('${t.value}') !== -1 }"
+                          @click="toggle('${t.value}')">${t.label}</button>`
               )}
             </div>
             ${errors.transaction_type ? html`<small class="field-error">${errors.transaction_type}</small>` : ''}
