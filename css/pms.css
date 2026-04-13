@@ -64,8 +64,9 @@ code {
   align-items: center;
   gap: 0.5rem;
 }
-.brand a { color: var(--fg); }
+.brand a { color: var(--fg); display: flex; align-items: center; gap: 0.4rem; }
 .brand a:hover { text-decoration: none; }
+.brand-logo { height: 28px; width: auto; }
 
 .env-badge {
   font-size: 0.7rem;

@@ -116,7 +116,8 @@ export async function onRequestGet(context) {
           <table class="data">
             <thead>
               <tr>
-                <th>Name</th>
+                <th>First</th>
+                <th>Last</th>
                 <th>Title</th>
                 <th>Email</th>
                 <th>Phone</th>
@@ -125,28 +126,23 @@ export async function onRequestGet(context) {
               </tr>
             </thead>
             <tbody>
-              ${raw(
-                contacts
-                  .map((c) => {
-                    const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
-                    return `<tr>
-                      <td><strong>${escape(name)}</strong></td>
-                      <td>${escape(c.title ?? '')}</td>
-                      <td>${c.email ? `<a href="mailto:${escape(c.email)}">${escape(c.email)}</a>` : ''}</td>
-                      <td>${escape(c.phone ?? c.mobile ?? '')}</td>
-                      <td>${c.is_primary ? '<span class="pill pill-success">primary</span>' : ''}</td>
-                      <td class="row-actions">
-                        <a class="btn btn-sm" href="/contacts/${escape(c.id)}/edit">Edit</a>
-                        <form method="post" action="/contacts/${escape(c.id)}/delete"
-                              onsubmit="return confirm('Delete contact ${escape(name)}?');"
-                              style="display:inline">
-                          <button type="submit" class="btn btn-sm danger">Delete</button>
-                        </form>
-                      </td>
-                    </tr>`;
-                  })
-                  .join('')
-              )}
+              ${contacts.map(c => {
+                const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
+                return html`<tr x-data="contactInline('${escape(c.id)}')">
+                  <td><span class="ie" data-field="first_name" data-type="text" @click="activate($el)"><span class="ie-display">${escape(c.first_name ?? '')}</span></span></td>
+                  <td><span class="ie" data-field="last_name" data-type="text" @click="activate($el)"><span class="ie-display"><strong>${escape(c.last_name ?? '')}</strong></span></span></td>
+                  <td><span class="ie" data-field="title" data-type="text" @click="activate($el)"><span class="ie-display">${escape(c.title ?? '')}</span></span></td>
+                  <td><span class="ie" data-field="email" data-type="text" @click="activate($el)"><span class="ie-display">${c.email ? html`<a href="mailto:${escape(c.email)}" @click.stop>${escape(c.email)}</a>` : html`<span class="muted">—</span>`}</span></span></td>
+                  <td><span class="ie" data-field="phone" data-type="text" @click="activate($el)"><span class="ie-display">${escape(c.phone ?? '')}</span></span></td>
+                  <td>${c.is_primary ? html`<span class="pill pill-success">primary</span>` : ''}</td>
+                  <td class="row-actions">
+                    <form method="post" action="/contacts/${escape(c.id)}/delete"
+                          onsubmit="return confirm('Delete contact ${escape(name)}?');"
+                          style="display:inline">
+                      <button type="submit" class="btn btn-sm danger">Delete</button>
+                    </form>
+                  </td>
+                </tr>`; })}
             </tbody>
           </table>
         `}
@@ -181,6 +177,71 @@ export async function onRequestGet(context) {
           </ul>
         `}
     </section>
+
+    <script>
+    function contactInline(contactId) {
+      const patchUrl = '/contacts/' + contactId + '/patch';
+      return {
+        activate(el) {
+          if (el.querySelector('.ie-input')) return;
+          const field = el.dataset.field;
+          const display = el.querySelector('.ie-display');
+          const currentValue = display.textContent.trim() === '—' ? '' : display.textContent.trim();
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.className = 'ie-input';
+          input.value = currentValue;
+          input.addEventListener('blur', () => this.save(el, input));
+          input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); this.save(el, input); }
+            if (e.key === 'Escape') { this.deactivate(el, input); }
+          });
+          display.style.display = 'none';
+          el.appendChild(input);
+          input.focus();
+          input.select();
+        },
+        async save(el, input) {
+          const field = el.dataset.field;
+          const value = input.value;
+          this.deactivate(el, input);
+          el.classList.add('ie-saving');
+          try {
+            const res = await fetch(patchUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ field, value }),
+            });
+            const data = await res.json();
+            if (!data.ok) {
+              el.classList.add('ie-error');
+              setTimeout(() => el.classList.remove('ie-error'), 2000);
+              return;
+            }
+            const display = el.querySelector('.ie-display');
+            if (field === 'email' && data.value) {
+              display.innerHTML = '<a href="mailto:' + data.value + '">' + data.value + '</a>';
+            } else {
+              display.textContent = data.value || '—';
+              display.classList.toggle('muted', !data.value);
+            }
+            el.classList.add('ie-saved');
+            setTimeout(() => el.classList.remove('ie-saved'), 1200);
+          } catch (err) {
+            el.classList.add('ie-error');
+            setTimeout(() => el.classList.remove('ie-error'), 2000);
+          } finally {
+            el.classList.remove('ie-saving');
+          }
+        },
+        deactivate(el, input) {
+          if (input && input.parentNode === el) el.removeChild(input);
+          const display = el.querySelector('.ie-display');
+          if (display) display.style.display = '';
+        },
+      };
+    }
+    </script>
   `;
 
   return htmlResponse(

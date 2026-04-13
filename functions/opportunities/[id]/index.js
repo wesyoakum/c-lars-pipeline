@@ -575,10 +575,7 @@ export async function onRequestGet(context) {
       <div class="card-header">
         <h2>Quotes</h2>
         <form method="post" action="/opportunities/${escape(opp.id)}/quotes" class="inline-form quotes-new-form">
-          <select name="quote_type" required>
-            <option value="">Type…</option>
-            ${quoteTypeOptions.map(qt => html`<option value="${escape(qt)}">${escape(QUOTE_TYPE_LABELS[qt] ?? qt)}</option>`)}
-          </select>
+          <input type="hidden" name="quote_type" value="${escape(quoteTypeOptions[0] || 'spares')}">
           <button class="btn primary" type="submit">+ New quote</button>
         </form>
       </div>

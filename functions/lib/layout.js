@@ -109,6 +109,8 @@ export function layout(title, body, opts = {}) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${pageTitle}</title>
+  <link rel="icon" type="image/svg+xml" href="/img/logo.svg">
+  <link rel="icon" type="image/png" sizes="120x120" href="/img/logo-120.png">
   <link rel="stylesheet" href="/css/pms.css">
   <script defer src="/js/htmx.min.js"></script>
   <script defer src="/js/alpine.min.js"></script>
@@ -118,7 +120,7 @@ export function layout(title, body, opts = {}) {
 <body>
   <header class="site-header">
     <div class="brand">
-      <a href="/"><strong>C-LARS PMS</strong></a>
+      <a href="/"><img src="/img/logo-120.png" alt="C-LARS" class="brand-logo"><strong>PMS</strong></a>
       <span class="env-badge env-${escape(opts.env ?? 'prod')}">${escape(opts.env ?? 'prod')}</span>
     </div>
     <nav class="site-nav">
