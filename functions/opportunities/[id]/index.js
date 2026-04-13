@@ -271,16 +271,24 @@ export async function onRequestGet(context) {
     docRows = rows;
   }
 
-  // Audit events
+  // Audit events — include opportunity events plus related entity events
+  // (documents, quotes, activities, cost builds tied to this opp)
   const events = await all(
     env.DB,
-    `SELECT ae.event_type, ae.at, ae.summary, ae.changes_json, ae.override_reason,
+    `SELECT ae.event_type, ae.entity_type, ae.at, ae.summary,
+            ae.changes_json, ae.override_reason,
             u.email AS user_email, u.display_name AS user_name
        FROM audit_events ae
        LEFT JOIN users u ON u.id = ae.user_id
-      WHERE ae.entity_type = 'opportunity' AND ae.entity_id = ?
+      WHERE (ae.entity_type = 'opportunity' AND ae.entity_id = ?)
+         OR (ae.entity_type = 'document' AND ae.entity_id IN
+             (SELECT id FROM documents WHERE opportunity_id = ?))
+         OR (ae.entity_type = 'quote' AND ae.entity_id IN
+             (SELECT id FROM quotes WHERE opportunity_id = ?))
+         OR (ae.entity_type = 'activity' AND ae.entity_id IN
+             (SELECT id FROM activities WHERE opportunity_id = ?))
       ORDER BY ae.at DESC LIMIT 200`,
-    [oppId]
+    [oppId, oppId, oppId, oppId]
   );
 
   const primaryContactName = [opp.contact_first, opp.contact_last].filter(Boolean).join(' ');
@@ -662,12 +670,21 @@ export async function onRequestGet(context) {
           <table class="data compact">
             <thead><tr><th>Title</th><th>Kind</th><th>Size</th><th>Uploaded</th><th>By</th><th></th></tr></thead>
             <tbody>
-              ${docRows.map(d => html`<tr>
+              ${docRows.map(d => {
+                const kindOpts = JSON.stringify(Object.entries(DOC_KIND_LABELS).map(([k, v]) => ({ value: k, label: v })));
+                return html`<tr x-data="docInline('${escape(d.id)}')">
                 <td>
-                  <a href="/documents/${escape(d.id)}/download"><strong>${escape(d.title)}</strong></a>
+                  <span class="ie" data-field="title" data-type="text" @click="activate($el)">
+                    <span class="ie-display"><strong>${escape(d.title)}</strong></span>
+                  </span>
                   ${d.original_filename ? html`<br><small class="muted">${escape(d.original_filename)}</small>` : ''}
                 </td>
-                <td><span class="pill">${escape(DOC_KIND_LABELS[d.kind] ?? d.kind)}</span></td>
+                <td>
+                  <span class="ie" data-field="kind" data-type="select" data-options='${escape(kindOpts)}' @click="activate($el)">
+                    <span class="ie-display"><span class="pill">${escape(DOC_KIND_LABELS[d.kind] ?? d.kind)}</span></span>
+                    <span class="ie-raw" hidden>${escape(d.kind)}</span>
+                  </span>
+                </td>`; })
                 <td><small>${escape(fmtSize(d.size_bytes))}</small></td>
                 <td><small class="muted">${escape((d.uploaded_at ?? '').slice(0, 10))}</small></td>
                 <td><small>${escape(d.uploaded_by_name ?? d.uploaded_by_email ?? '—')}</small></td>
@@ -1039,6 +1056,95 @@ function dropUpload() {
     fileSelected(e) {
       const f = e.target.files?.[0];
       this.fileName = f ? f.name : '';
+    },
+  };
+}
+
+// Per-row inline-edit for documents
+function docInline(docId) {
+  const patchUrl = '/documents/' + docId + '/patch';
+  return {
+    activate(el) {
+      if (el.querySelector('.ie-input')) return;
+      const field = el.dataset.field;
+      const type = el.dataset.type;
+      const display = el.querySelector('.ie-display');
+      const rawEl = el.querySelector('.ie-raw');
+      const currentValue = rawEl ? rawEl.textContent : display.textContent.trim();
+
+      let input;
+      if (type === 'select') {
+        input = document.createElement('select');
+        input.className = 'ie-input';
+        const options = JSON.parse(el.dataset.options || '[]');
+        options.forEach(o => {
+          const opt = document.createElement('option');
+          opt.value = o.value;
+          opt.textContent = o.label;
+          if (o.value === (currentValue || '')) opt.selected = true;
+          input.appendChild(opt);
+        });
+        input.addEventListener('change', () => this.save(el, input));
+        input.addEventListener('blur', () => this.deactivate(el, input));
+      } else {
+        input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'ie-input';
+        input.value = currentValue;
+        input.addEventListener('blur', () => this.save(el, input));
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); this.save(el, input); }
+          if (e.key === 'Escape') { this.deactivate(el, input); }
+        });
+      }
+
+      display.style.display = 'none';
+      el.appendChild(input);
+      input.focus();
+      if (input.select) input.select();
+    },
+    async save(el, input) {
+      const field = el.dataset.field;
+      const value = input.value;
+      this.deactivate(el, input);
+      el.classList.add('ie-saving');
+      try {
+        const res = await fetch(patchUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ field, value }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          el.classList.add('ie-error');
+          setTimeout(() => el.classList.remove('ie-error'), 2000);
+          return;
+        }
+        const display = el.querySelector('.ie-display');
+        const rawEl = el.querySelector('.ie-raw');
+        if (el.dataset.type === 'select') {
+          const options = JSON.parse(el.dataset.options || '[]');
+          const opt = options.find(o => o.value === (data.value || ''));
+          const pill = display.querySelector('.pill') || display;
+          pill.textContent = opt ? opt.label : (data.value || '—');
+        } else {
+          const strong = display.querySelector('strong') || display;
+          strong.textContent = data.value || '—';
+        }
+        if (rawEl) rawEl.textContent = data.value ?? '';
+        el.classList.add('ie-saved');
+        setTimeout(() => el.classList.remove('ie-saved'), 1200);
+      } catch (err) {
+        el.classList.add('ie-error');
+        setTimeout(() => el.classList.remove('ie-error'), 2000);
+      } finally {
+        el.classList.remove('ie-saving');
+      }
+    },
+    deactivate(el, input) {
+      if (input && input.parentNode === el) el.removeChild(input);
+      const display = el.querySelector('.ie-display');
+      if (display) display.style.display = '';
     },
   };
 }
