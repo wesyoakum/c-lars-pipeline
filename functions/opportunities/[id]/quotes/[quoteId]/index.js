@@ -164,7 +164,7 @@ export async function onRequestGet(context) {
               <button class="btn danger" type="submit">Delete</button>
             </form>
           ` : ''}
-          <a class="btn btn-sm" href="/opportunities/${escape(quote.opportunity_id)}?tab=quotes">\u2190 Quotes</a>
+          <a class="back-link" href="/opportunities/${escape(quote.opportunity_id)}?tab=quotes">\u2190 Quotes</a>
         </div>
       </div>
 
