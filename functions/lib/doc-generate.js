@@ -199,18 +199,5 @@ export async function convertToPdf(env, docxBuffer) {
     throw new Error(`ConvertAPI failed (${resp.status}): ${text}`);
   }
 
-  const result = await resp.json();
-  // ConvertAPI returns { Files: [{ FileData: base64string }] }
-  const fileData = result?.Files?.[0]?.FileData;
-  if (!fileData) {
-    throw new Error('ConvertAPI returned no file data');
-  }
-
-  // Decode base64 to ArrayBuffer
-  const binary = atob(fileData);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes.buffer;
+  return await resp.arrayBuffer();
 }
