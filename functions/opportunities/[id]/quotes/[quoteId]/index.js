@@ -81,12 +81,7 @@ export async function onRequestGet(context) {
 
   const lines = await all(
     env.DB,
-    `SELECT id, sort_order, item_type, description, quantity, unit,
-            unit_price, extended_price, notes,
-            cost_ref_type, cost_ref_id, cost_ref_amount
-       FROM quote_lines
-      WHERE quote_id = ?
-      ORDER BY sort_order, id`,
+    `SELECT * FROM quote_lines WHERE quote_id = ? ORDER BY sort_order, id`,
     [quoteId]
   );
 
