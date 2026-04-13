@@ -8,6 +8,7 @@ import { layout, htmlResponse, html, escape, raw } from '../lib/layout.js';
 import { loadStageCatalog } from '../lib/stages.js';
 import { fmtDollar } from '../lib/pricing.js';
 import { readFlash } from '../lib/http.js';
+import { parseTransactionTypes } from '../lib/validators.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
@@ -15,6 +16,9 @@ const TYPE_LABELS = {
   refurb: 'Refurb',
   service: 'Service',
 };
+function multiTypeLabel(csv) {
+  return parseTransactionTypes(csv).map(t => TYPE_LABELS[t] ?? t).join(', ') || csv;
+}
 
 export async function onRequestGet(context) {
   const { env, data, request } = context;
@@ -88,7 +92,7 @@ export async function onRequestGet(context) {
     values: pipelineByStage.map(s => Number(s.total_value)),
   });
   const typeChartJSON = JSON.stringify({
-    labels: pipelineByType.map(s => TYPE_LABELS[s.transaction_type] ?? s.transaction_type),
+    labels: pipelineByType.map(s => multiTypeLabel(s.transaction_type)),
     values: pipelineByType.map(s => Number(s.total_value)),
   });
   const ownerChartJSON = JSON.stringify({

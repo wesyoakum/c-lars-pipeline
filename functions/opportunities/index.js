@@ -10,7 +10,7 @@
 
 import { all, one, stmt, batch } from '../lib/db.js';
 import { auditStmt } from '../lib/audit.js';
-import { validateOpportunity } from '../lib/validators.js';
+import { validateOpportunity, parseTransactionTypes } from '../lib/validators.js';
 import { uuid, now, nextSequenceValue } from '../lib/ids.js';
 import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
@@ -77,8 +77,8 @@ export async function onRequestGet(context) {
     title: r.title ?? '',
     account_id: r.account_id ?? '',
     account_name: r.account_name ?? '',
-    type_label: TYPE_LABELS[r.transaction_type] ?? r.transaction_type ?? '',
-    stage_label: stageLabel(catalog, r.transaction_type, r.stage),
+    type_label: parseTransactionTypes(r.transaction_type).map(t => TYPE_LABELS[t] ?? t).join(', ') || '—',
+    stage_label: stageLabel(catalog, parseTransactionTypes(r.transaction_type)[0] ?? 'spares', r.stage),
     value: r.estimated_value_usd == null ? '' : Number(r.estimated_value_usd),
     value_display:
       r.estimated_value_usd != null ? `$${formatMoney(r.estimated_value_usd)}` : '',
@@ -278,7 +278,8 @@ export async function onRequestPost(context) {
   // Default starting stage is 'lead'. Probability defaults from the stage
   // catalog if the user didn't provide an explicit override.
   const catalog = await loadStageCatalog(env.DB);
-  const typeStages = catalog.get(value.transaction_type) ?? [];
+  const primaryType = parseTransactionTypes(value.transaction_type)[0] ?? 'spares';
+  const typeStages = catalog.get(primaryType) ?? [];
   const leadStage = typeStages.find((s) => s.stage_key === 'lead');
   const probability = value.probability != null
     ? value.probability

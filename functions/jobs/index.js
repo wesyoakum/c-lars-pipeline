@@ -8,6 +8,7 @@ import { auditStmt } from '../lib/audit.js';
 import { uuid, now, nextNumber, currentYear } from '../lib/ids.js';
 import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
+import { parseTransactionTypes } from '../lib/validators.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
@@ -61,7 +62,7 @@ export async function onRequestGet(context) {
     account_name: r.account_name ?? '',
     opp_number: r.opp_number ?? '',
     opp_id: r.opp_id ?? '',
-    type_label: TYPE_LABELS[r.job_type] ?? r.job_type ?? '',
+    type_label: parseTransactionTypes(r.job_type).map(t => TYPE_LABELS[t] ?? t).join(', ') || r.job_type || '—',
     status_label: STATUS_LABELS[r.status] ?? r.status ?? '',
     oc_number: r.oc_number ?? '',
     updated: (r.updated_at ?? '').slice(0, 10),

@@ -21,6 +21,7 @@ import { redirectWithFlash, formBody, readFlash } from '../../../../lib/http.js'
 import {
   validateQuote,
   allowedQuoteTypes,
+  parseTransactionTypes,
   QUOTE_TYPE_LABELS,
   QUOTE_STATUS_LABELS,
 } from '../../../../lib/validators.js';
@@ -198,12 +199,22 @@ export async function onRequestGet(context) {
   `;
 
   // ── 2. Banner card ─────────────────────────────────────────────────
+  const quoteTypeOptions = allowedQuoteTypes(quote.opp_transaction_type);
   const bannerCard = html`
     <section class="card quote-doc-card quote-doc-first quote-banner">
       <div class="quote-banner-inner">
         <div>
           <h2 class="quote-banner-title">QUOTATION</h2>
-          <p class="quote-banner-type">${escape(QUOTE_TYPE_LABELS[quote.quote_type] ?? quote.quote_type)}</p>
+          ${readOnly
+            ? html`<p class="quote-banner-type">${escape(QUOTE_TYPE_LABELS[quote.quote_type] ?? quote.quote_type)}</p>`
+            : html`<select class="quote-banner-type-select"
+                           @change="window._qPatch('quote_type', $event.target.value)">
+                ${quoteTypeOptions.map(qt => html`
+                  <option value="${escape(qt)}" ${qt === quote.quote_type ? 'selected' : ''}>
+                    ${escape(QUOTE_TYPE_LABELS[qt] ?? qt)}
+                  </option>
+                `)}
+              </select>`}
         </div>
         <img src="/img/logo-black.png" alt="C-LARS" class="quote-banner-logo">
       </div>

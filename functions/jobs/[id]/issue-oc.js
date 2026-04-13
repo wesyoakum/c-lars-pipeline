@@ -34,7 +34,7 @@ export async function onRequestPost(context) {
 
   // Determine next status based on job type
   let newStatus;
-  if (job.job_type === 'eps') {
+  if ((job.job_type || '').split(',').includes('eps')) {
     newStatus = 'awaiting_authorization';
   } else {
     // spares, refurb, service — OC means handed off

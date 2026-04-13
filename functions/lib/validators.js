@@ -6,6 +6,15 @@
 // { ok: true, value } or { ok: false, errors: { field: 'message' } }.
 
 const TRANSACTION_TYPES = new Set(['spares', 'eps', 'refurb', 'service']);
+
+/**
+ * Parse a (possibly comma-separated) transaction_type string into an
+ * array of individual types.  e.g. "spares,service" → ['spares','service']
+ */
+export function parseTransactionTypes(raw) {
+  if (!raw) return [];
+  return String(raw).split(',').map(t => t.trim()).filter(Boolean);
+}
 const RFQ_FORMATS = new Set([
   'verbal',
   'text',
@@ -84,10 +93,18 @@ export function validateOpportunity(input) {
   value.account_id = trim(input.account_id);
   if (!nonEmpty(value.account_id)) errors.account_id = 'Account is required';
 
-  value.transaction_type = trim(input.transaction_type);
-  if (!TRANSACTION_TYPES.has(value.transaction_type)) {
-    errors.transaction_type = 'Must be one of spares, eps, refurb, service';
+  // transaction_type accepts comma-separated values (e.g. "spares,service")
+  const rawType = trim(input.transaction_type);
+  const types = parseTransactionTypes(rawType);
+  if (types.length === 0) {
+    errors.transaction_type = 'At least one type is required';
+  } else {
+    const invalid = types.filter(t => !TRANSACTION_TYPES.has(t));
+    if (invalid.length > 0) {
+      errors.transaction_type = `Unknown type(s): ${invalid.join(', ')}`;
+    }
   }
+  value.transaction_type = types.length > 0 ? types.join(',') : null;
 
   // Optional: RFQ format. Empty string means "not specified" and we store null.
   if (input.rfq_format === undefined || input.rfq_format === '' || input.rfq_format === null) {
@@ -443,10 +460,20 @@ const QUOTE_LINE_ITEM_TYPES = new Set(['product', 'service', 'labor', 'misc']);
 
 /**
  * Return the allowed quote_type values for a given opportunity
- * transaction_type. Used by the quote create form to render the picker.
+ * transaction_type (which may be comma-separated for multi-type opps).
+ * Used by the quote create form to render the picker.
  */
 export function allowedQuoteTypes(transactionType) {
-  return QUOTE_TYPES_BY_TRANSACTION[transactionType] ?? [];
+  const types = parseTransactionTypes(transactionType);
+  if (types.length === 0) return [];
+  const merged = [];
+  const seen = new Set();
+  for (const t of types) {
+    for (const qt of (QUOTE_TYPES_BY_TRANSACTION[t] ?? [])) {
+      if (!seen.has(qt)) { seen.add(qt); merged.push(qt); }
+    }
+  }
+  return merged;
 }
 
 /**
@@ -502,7 +529,7 @@ export function validateQuote(input, { transactionType = null, requireType = tru
       errors.quote_type = 'Unknown quote type';
       value.quote_type = null;
     } else if (transactionType && !allowedQuoteTypes(transactionType).includes(qt)) {
-      errors.quote_type = `Not valid for a ${transactionType} opportunity`;
+      errors.quote_type = `Not valid for this opportunity's type(s)`;
       value.quote_type = null;
     } else {
       value.quote_type = qt;

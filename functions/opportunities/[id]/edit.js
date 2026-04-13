@@ -9,7 +9,8 @@
 import { one, all } from '../../lib/db.js';
 import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
 import { readFlash } from '../../lib/http.js';
-import { oppPickerScript } from '../new.js';
+import { oppPickerScript, typePickerScript } from '../new.js';
+import { parseTransactionTypes } from '../../lib/validators.js';
 
 const TYPE_OPTIONS = [
   { value: 'spares', label: 'Spares' },
@@ -115,17 +116,20 @@ export async function renderEditForm(context, opts = {}) {
             ${errors.account_id ? html`<small class="field-error">${errors.account_id}</small>` : ''}
           </label>
 
-          <label style="flex:1">
-            <span>Transaction type <em>*</em></span>
-            <select name="transaction_type" required>
-              <option value="">— Select type —</option>
+          <fieldset style="flex:1;border:none;padding:0;margin:0">
+            <span>Type(s) <em>*</em></span>
+            <input type="hidden" name="transaction_type" id="tt-hidden" value="${escape(opp.transaction_type ?? '')}">
+            <div class="checkbox-row" x-data="typePicker('${escape(opp.transaction_type ?? '')}')">
               ${TYPE_OPTIONS.map(
                 (t) =>
-                  html`<option value="${t.value}" ${opp.transaction_type === t.value ? 'selected' : ''}>${t.label}</option>`
+                  html`<label class="check-label">
+                    <input type="checkbox" value="${t.value}" :checked="types.includes('${t.value}')" @change="toggle('${t.value}', $event.target.checked)">
+                    ${t.label}
+                  </label>`
               )}
-            </select>
+            </div>
             ${errors.transaction_type ? html`<small class="field-error">${errors.transaction_type}</small>` : ''}
-          </label>
+          </fieldset>
         </div>
 
         <label>
@@ -307,7 +311,8 @@ export async function renderEditForm(context, opts = {}) {
       </form>
     </section>
 
-    <script>${raw(oppPickerScript())}</script>
+    <script>${raw(oppPickerScript())}
+${raw(typePickerScript())}</script>
   `;
 
   return htmlResponse(

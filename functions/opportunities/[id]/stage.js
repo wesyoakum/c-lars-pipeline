@@ -11,7 +11,7 @@
 
 import { one, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
-import { validateStageTransition } from '../../lib/validators.js';
+import { validateStageTransition, parseTransactionTypes } from '../../lib/validators.js';
 import { uuid, now, nextNumber, currentYear } from '../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../lib/http.js';
 import { stageDef, stagesFor, evaluateGate, loadGateContext, GATE_MODE } from '../../lib/stages.js';
@@ -38,14 +38,16 @@ export async function onRequestPost(context) {
   }
 
   // Confirm the target stage is real for this transaction_type.
-  const targetDef = await stageDef(env.DB, opp.transaction_type, value.to_stage);
+  // Multi-type opps share stages, so use the primary (first) type.
+  const primaryType = parseTransactionTypes(opp.transaction_type)[0] ?? 'spares';
+  const targetDef = await stageDef(env.DB, primaryType, value.to_stage);
   if (!targetDef) {
-    const legal = (await stagesFor(env.DB, opp.transaction_type))
+    const legal = (await stagesFor(env.DB, primaryType))
       .map((s) => s.stage_key)
       .join(', ');
     return redirectWithFlash(
       `/opportunities/${oppId}`,
-      `Unknown stage "${value.to_stage}" for ${opp.transaction_type}. Legal stages: ${legal}`,
+      `Unknown stage "${value.to_stage}" for ${primaryType}. Legal stages: ${legal}`,
       'error'
     );
   }
@@ -70,7 +72,7 @@ export async function onRequestPost(context) {
 
   // ---- Gate evaluation ------------------------------------------------
   const gateCtx = await loadGateContext(env.DB, opp);
-  const gateResult = await evaluateGate(env.DB, opp.transaction_type, targetDef.stage_key, gateCtx);
+  const gateResult = await evaluateGate(env.DB, primaryType, targetDef.stage_key, gateCtx);
 
   // In enforce mode, block on hard violations (unless override_reason given)
   if (!gateResult.allowed && !value.override_reason) {
@@ -151,7 +153,8 @@ export async function onRequestPost(context) {
     if (!existingJob) {
       const jobId = uuid();
       jobNumber = await nextNumber(env.DB, `JOB-${currentYear()}`);
-      const isEps = opp.transaction_type === 'eps';
+      const oppTypes = parseTransactionTypes(opp.transaction_type);
+      const isEps = oppTypes.includes('eps');
       await batch(env.DB, [
         stmt(env.DB,
           `INSERT INTO jobs

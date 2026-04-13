@@ -17,7 +17,7 @@ export async function onRequestPost(context) {
   const job = await one(env.DB, 'SELECT * FROM jobs WHERE id = ?', [jobId]);
   if (!job) return redirectWithFlash('/jobs', 'Job not found.', 'error');
 
-  if (job.job_type !== 'eps') {
+  if (!(job.job_type || '').split(',').includes('eps')) {
     return redirectWithFlash(`/jobs/${jobId}`, 'Authorization is only applicable to EPS jobs.', 'error');
   }
   if (job.status !== 'awaiting_authorization') {

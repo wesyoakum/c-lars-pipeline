@@ -17,7 +17,7 @@ export async function onRequestPost(context) {
   const job = await one(env.DB, 'SELECT * FROM jobs WHERE id = ?', [jobId]);
   if (!job) return redirectWithFlash('/jobs', 'Job not found.', 'error');
 
-  if (job.job_type !== 'refurb') {
+  if (!(job.job_type || '').split(',').includes('refurb')) {
     return redirectWithFlash(`/jobs/${jobId}`, 'OC amendments are only applicable to refurb jobs.', 'error');
   }
   if (job.status !== 'handed_off') {

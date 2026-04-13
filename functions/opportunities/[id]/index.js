@@ -24,6 +24,7 @@ import {
   QUOTE_TYPE_LABELS,
   QUOTE_STATUS_LABELS,
   allowedQuoteTypes,
+  parseTransactionTypes,
 } from '../../lib/validators.js';
 
 const UPDATE_FIELDS = [
@@ -164,7 +165,8 @@ export async function onRequestGet(context) {
   if (!opp) return notFound(context);
 
   const catalog = await loadStageCatalog(env.DB);
-  const typeStages = catalog.get(opp.transaction_type) ?? [];
+  const primaryType = parseTransactionTypes(opp.transaction_type)[0] ?? 'spares';
+  const typeStages = catalog.get(primaryType) ?? [];
   const currentIdx = typeStages.findIndex(s => s.stage_key === opp.stage);
   const currentStage = typeStages[currentIdx] ?? null;
 
@@ -338,7 +340,14 @@ export async function onRequestGet(context) {
           <p class="muted" style="margin:0.15rem 0 0">
             <code>${escape(opp.number)}</code>
             · <a href="/accounts/${escape(opp.account_id)}">${escape(opp.account_name ?? '—')}</a>
-            · ${inlineSelect('transaction_type', opp.transaction_type, TYPE_OPTIONS)}
+            · <span x-data="oppTypePicker('${escape(opp.transaction_type ?? '')}', '${escape(opp.id)}')" class="type-pills-inline">
+                <template x-for="t in allTypes" :key="t.value">
+                  <button type="button" class="pill pill-toggle"
+                          :class="{ 'pill-active': selected.indexOf(t.value) !== -1 }"
+                          @click="toggle(t.value)"
+                          x-text="t.label"></button>
+                </template>
+              </span>
           </p>
         </div>
         <a class="icon-btn primary" href="/opportunities/${escape(opp.id)}?tab=quotes" title="New quote">
@@ -569,7 +578,7 @@ export async function onRequestGet(context) {
     </section>`;
 
   // ---- Quotes tab --------------------------------------------------------
-  const quoteTypeOptions = allowedQuoteTypes(opp.transaction_type);
+  const quoteTypeOptions = allowedQuoteTypes(opp.transaction_type);  // handles comma-separated
   const quotesTab = html`
     <section class="card">
       <div class="card-header">
@@ -1236,6 +1245,34 @@ function docInline(docId) {
       if (input && input.parentNode === el) el.removeChild(input);
       const display = el.querySelector('.ie-display');
       if (display) display.style.display = '';
+    },
+  };
+}
+
+// Multi-type picker for opportunity transaction_type
+function oppTypePicker(initial, oppId) {
+  return {
+    selected: initial ? initial.split(',').map(function(s){ return s.trim(); }).filter(Boolean) : [],
+    allTypes: [
+      { value: 'spares', label: 'Spares' },
+      { value: 'eps', label: 'EPS' },
+      { value: 'refurb', label: 'Refurb' },
+      { value: 'service', label: 'Service' },
+    ],
+    toggle(val) {
+      var idx = this.selected.indexOf(val);
+      if (idx === -1) this.selected.push(val);
+      else if (this.selected.length > 1) this.selected.splice(idx, 1);
+      // Don't allow deselecting the last type
+      this.save();
+    },
+    save() {
+      var csv = this.selected.join(',');
+      fetch('/opportunities/' + oppId + '/patch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ field: 'transaction_type', value: csv }),
+      });
     },
   };
 }

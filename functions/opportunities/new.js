@@ -119,17 +119,20 @@ export async function renderNewForm(context, opts = {}) {
             ${errors.account_id ? html`<small class="field-error">${errors.account_id}</small>` : ''}
           </label>
 
-          <label style="flex:1">
-            <span>Transaction type <em>*</em></span>
-            <select name="transaction_type" required>
-              <option value="">— Select type —</option>
+          <fieldset style="flex:1;border:none;padding:0;margin:0">
+            <span>Type(s) <em>*</em></span>
+            <input type="hidden" name="transaction_type" id="tt-hidden" value="${escape(values.transaction_type ?? '')}">
+            <div class="checkbox-row" x-data="typePicker('${escape(values.transaction_type ?? '')}')">
               ${TYPE_OPTIONS.map(
                 (t) =>
-                  html`<option value="${t.value}" ${values.transaction_type === t.value ? 'selected' : ''}>${t.label}</option>`
+                  html`<label class="check-label">
+                    <input type="checkbox" value="${t.value}" :checked="types.includes('${t.value}')" @change="toggle('${t.value}', $event.target.checked)">
+                    ${t.label}
+                  </label>`
               )}
-            </select>
+            </div>
             ${errors.transaction_type ? html`<small class="field-error">${errors.transaction_type}</small>` : ''}
-          </label>
+          </fieldset>
         </div>
 
         <label>
@@ -267,7 +270,8 @@ export async function renderNewForm(context, opts = {}) {
       </form>
     </section>
 
-    <script>${raw(oppPickerScript())}</script>
+    <script>${raw(oppPickerScript())}
+${raw(typePickerScript())}</script>
   `;
 
   return htmlResponse(
@@ -287,6 +291,28 @@ export async function renderNewForm(context, opts = {}) {
 
 export async function onRequestGet(context) {
   return renderNewForm(context);
+}
+
+/**
+ * Alpine component for multi-type checkboxes. Maintains a comma-separated
+ * hidden input so the form submits a single `transaction_type` value.
+ */
+export function typePickerScript() {
+  return `
+document.addEventListener('alpine:init', function() {
+  Alpine.data('typePicker', function(initial) {
+    return {
+      types: initial ? initial.split(',').map(function(s){ return s.trim(); }).filter(Boolean) : [],
+      toggle: function(val, checked) {
+        if (checked && this.types.indexOf(val) === -1) this.types.push(val);
+        if (!checked) this.types = this.types.filter(function(t){ return t !== val; });
+        var hidden = document.getElementById('tt-hidden');
+        if (hidden) hidden.value = this.types.join(',');
+      },
+    };
+  });
+});
+`;
 }
 
 /**

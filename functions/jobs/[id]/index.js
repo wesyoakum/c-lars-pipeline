@@ -8,6 +8,7 @@ import { auditStmt, diff } from '../../lib/audit.js';
 import { now } from '../../lib/ids.js';
 import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
+import { parseTransactionTypes } from '../../lib/validators.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
@@ -77,8 +78,9 @@ export async function onRequestGet(context) {
     [jobId]
   );
 
-  const isEps = job.job_type === 'eps';
-  const isRefurb = job.job_type === 'refurb';
+  const jobTypes = parseTransactionTypes(job.job_type);
+  const isEps = jobTypes.includes('eps');
+  const isRefurb = jobTypes.includes('refurb');
   const canIssueOc = job.status === 'created';
   const canRecordAuth = isEps && job.status === 'awaiting_authorization';
   const canIssueNtp = isEps && job.status === 'awaiting_ntp';
@@ -98,7 +100,7 @@ export async function onRequestGet(context) {
       </div>
       <p class="muted" style="margin:0.15rem 0 0.5rem">
         <span class="pill ${statusClass(job.status)}">${escape(STATUS_LABELS[job.status] ?? job.status)}</span>
-        · ${escape(TYPE_LABELS[job.job_type] ?? job.job_type)}
+        · ${escape(jobTypes.map(t => TYPE_LABELS[t] ?? t).join(', '))}
         · <a href="/opportunities/${escape(job.opp_id)}">${escape(job.opp_number)} — ${escape(job.opp_title)}</a>
         · <a href="/accounts/${escape(job.account_id)}">${escape(job.account_name)}</a>
       </p>

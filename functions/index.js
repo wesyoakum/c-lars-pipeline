@@ -6,6 +6,7 @@
 import { all, one } from './lib/db.js';
 import { layout, htmlResponse, html, escape, raw } from './lib/layout.js';
 import { loadStageCatalog } from './lib/stages.js';
+import { parseTransactionTypes } from './lib/validators.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
@@ -13,6 +14,9 @@ const TYPE_LABELS = {
   refurb: 'Refurb',
   service: 'Service',
 };
+function multiTypeLabel(csv) {
+  return parseTransactionTypes(csv).map(t => TYPE_LABELS[t] ?? t).join(', ') || csv;
+}
 
 export async function onRequestGet(context) {
   const { env, data } = context;
@@ -124,7 +128,7 @@ export async function onRequestGet(context) {
   });
 
   const typeChartData = JSON.stringify({
-    labels: typeSummary.map(s => TYPE_LABELS[s.transaction_type] ?? s.transaction_type),
+    labels: typeSummary.map(s => multiTypeLabel(s.transaction_type)),
     values: typeSummary.map(s => Number(s.total_value)),
     counts: typeSummary.map(s => s.n),
   });
@@ -246,7 +250,7 @@ export async function onRequestGet(context) {
                     <td>${o.account_id
                       ? html`<a href="/accounts/${escape(o.account_id)}">${escape(o.account_name ?? '—')}</a>`
                       : html`<span class="muted">—</span>`}</td>
-                    <td>${escape(TYPE_LABELS[o.transaction_type] ?? o.transaction_type)}</td>
+                    <td>${escape(multiTypeLabel(o.transaction_type))}</td>
                     <td><span class="pill">${escape(stageLabels.get(o.stage) ?? o.stage)}</span></td>
                     <td class="num">${o.estimated_value_usd != null ? `$${formatMoney(o.estimated_value_usd)}` : ''}</td>
                   </tr>`
