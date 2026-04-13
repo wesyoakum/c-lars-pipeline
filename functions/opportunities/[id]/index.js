@@ -122,27 +122,29 @@ export async function onRequestGet(context) {
     [opp.account_id]
   );
 
-  // Cost builds for this opportunity — loaded and compute-rendered only
-  // when the cost tab is active (avoids running the pricing engine for
-  // every page load on other tabs).
-  let costBuildRows = [];
-  let costBuildBadgeCount = 0;
+  // Price builds (now under quote line items) — loaded for the cost tab.
+  let priceBuildRows = [];
+  let priceBuildBadgeCount = 0;
   {
     const rows = await all(
       env.DB,
-      `SELECT id, label, status, updated_at
-         FROM cost_builds
-        WHERE opportunity_id = ?
-        ORDER BY created_at DESC`,
+      `SELECT cb.id, cb.label, cb.status, cb.updated_at, cb.quote_line_id,
+              ql.description AS line_description,
+              q.number AS quote_number, q.revision AS quote_revision, q.id AS quote_id
+         FROM cost_builds cb
+         JOIN quote_lines ql ON ql.id = cb.quote_line_id
+         JOIN quotes q ON q.id = ql.quote_id
+        WHERE q.opportunity_id = ?
+        ORDER BY q.created_at DESC, ql.sort_order`,
       [oppId]
     );
-    costBuildBadgeCount = rows.length;
+    priceBuildBadgeCount = rows.length;
     if (tab === 'cost') {
       const settings = await loadPricingSettings(env.DB);
       for (const cb of rows) {
         const bundle = await loadCostBuildBundle(env.DB, cb.id);
         const result = computeFromBundle(bundle, settings);
-        costBuildRows.push({ row: cb, result });
+        priceBuildRows.push({ row: cb, result });
       }
     }
   }
@@ -394,35 +396,33 @@ export async function onRequestGet(context) {
   const costTab = html`
     <section class="card">
       <div class="card-header">
-        <h2>Cost builds</h2>
-        <form method="post" action="/opportunities/${escape(opp.id)}/cost-builds" class="inline-form">
-          <button class="btn primary" type="submit">+ New cost build</button>
-        </form>
+        <h2>Price builds</h2>
       </div>
       <p class="muted">
-        Each build captures a snapshot of the four cost categories
-        (DM / DL / IMOH / Other) for this opportunity. Library linkage,
-        workcenter labor, and user overrides feed the pricing engine;
-        any blanks auto-fill from the effective quote × target %.
+        Price builds are now created per line item on each quote. This
+        tab shows a rollup of all price builds across quotes on this
+        opportunity. To create or edit a price build, go to the quote
+        and click the line item's "Build" link.
       </p>
 
-      ${costBuildRows.length === 0
-        ? html`<p class="muted">No cost builds yet. Create one to start pricing this opportunity.</p>`
+      ${priceBuildRows.length === 0
+        ? html`<p class="muted">No price builds yet. Add one from a quote line item.</p>`
         : html`
           <table class="data">
             <thead>
               <tr>
                 <th>Label</th>
+                <th>Quote</th>
+                <th>Line item</th>
                 <th>Status</th>
                 <th class="num">Total cost</th>
-                <th class="num">Quote</th>
+                <th class="num">Quote price</th>
                 <th class="num">Margin</th>
-                <th>Updated</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
-              ${costBuildRows.map(({ row, result }) => {
+              ${priceBuildRows.map(({ row, result }) => {
                 const eff = result.pricing.effective;
                 const marg = result.pricing.margin;
                 const pillClass = marg.status === 'good'
@@ -432,27 +432,19 @@ export async function onRequestGet(context) {
                     : 'pill';
                 const marginCell = marg.amount !== null
                   ? html`<span class="${pillClass}">${fmtDollar(marg.amount)} (${fmtPct(marg.pct)})</span>`
-                  : '—';
+                  : '\u2014';
+                const pbUrl = `/opportunities/${opp.id}/quotes/${row.quote_id}/lines/${row.quote_line_id}/price-build`;
                 return html`
                   <tr>
-                    <td>
-                      <a href="/opportunities/${escape(opp.id)}/cost-builds/${escape(row.id)}">
-                        ${escape(row.label || '(unlabeled)')}
-                      </a>
-                    </td>
-                    <td>
-                      <span class="pill ${row.status === 'locked' ? 'pill-locked' : ''}">
-                        ${escape(row.status)}
-                      </span>
-                    </td>
+                    <td><a href="${pbUrl}">${escape(row.label || '(unlabeled)')}</a></td>
+                    <td><a href="/opportunities/${escape(opp.id)}/quotes/${escape(row.quote_id)}">${escape(row.quote_number)} Rev ${escape(row.quote_revision)}</a></td>
+                    <td>${escape(row.line_description || '')}</td>
+                    <td><span class="pill ${row.status === 'locked' ? 'pill-locked' : ''}">${escape(row.status)}</span></td>
                     <td class="num">${fmtDollar(eff.totalCost)}</td>
                     <td class="num">${fmtDollar(eff.quote)}</td>
                     <td class="num">${marginCell}</td>
-                    <td><small class="muted">${escape((row.updated_at ?? '').slice(0, 10))}</small></td>
                     <td class="row-actions">
-                      <a class="btn small" href="/opportunities/${escape(opp.id)}/cost-builds/${escape(row.id)}">
-                        ${row.status === 'locked' ? 'View' : 'Edit'}
-                      </a>
+                      <a class="btn small" href="${pbUrl}">${row.status === 'locked' ? 'View' : 'Edit'}</a>
                     </td>
                   </tr>`;
               })}
@@ -570,7 +562,7 @@ export async function onRequestGet(context) {
   const tabs = html`
     <nav class="card" style="padding: 0.5rem 1rem;">
       <a class="nav-link ${tab === 'overview' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}">Overview</a>
-      <a class="nav-link ${tab === 'cost' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=cost">Cost builds (${costBuildBadgeCount})</a>
+      <a class="nav-link ${tab === 'cost' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=cost">Price builds (${priceBuildBadgeCount})</a>
       <a class="nav-link ${tab === 'quotes' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=quotes">Quotes (${quoteBadgeCount})</a>
       <a class="nav-link ${tab === 'activity' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=activity">Activity (${events.length})</a>
     </nav>

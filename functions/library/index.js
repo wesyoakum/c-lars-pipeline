@@ -18,6 +18,8 @@ export async function onRequestGet(context) {
 
   const dmCount = await one(env.DB, 'SELECT COUNT(*) AS n FROM dm_items');
   const laborCount = await one(env.DB, 'SELECT COUNT(*) AS n FROM labor_items');
+  const itemsCount = await one(env.DB, 'SELECT COUNT(*) AS n FROM items_library WHERE active = 1');
+  const buildsCount = await one(env.DB, 'SELECT COUNT(*) AS n FROM builds_library WHERE active = 1');
 
   const body = html`
     <section class="card">
@@ -40,6 +42,16 @@ export async function onRequestGet(context) {
           <h2>Labor</h2>
           <p class="muted">Reusable labor packages broken out by workcenter (hours × rate).</p>
           <p class="library-count"><strong>${laborCount?.n ?? 0}</strong> items</p>
+        </a>
+        <a class="library-card" href="/library/items">
+          <h2>Items</h2>
+          <p class="muted">Catalog of products and services available for quoting.</p>
+          <p class="library-count"><strong>${itemsCount?.n ?? 0}</strong> items</p>
+        </a>
+        <a class="library-card" href="/library/builds">
+          <h2>Builds</h2>
+          <p class="muted">Reusable price build templates with DM/DL/IMOH/Other cost structures.</p>
+          <p class="library-count"><strong>${buildsCount?.n ?? 0}</strong> templates</p>
         </a>
       </div>
     </section>

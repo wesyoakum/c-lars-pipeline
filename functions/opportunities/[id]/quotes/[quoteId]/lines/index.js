@@ -1,16 +1,13 @@
 // functions/opportunities/[id]/quotes/[quoteId]/lines/index.js
 //
 // POST /opportunities/:id/quotes/:quoteId/lines — add a line item.
-// If a cost_build_id is provided, the line's unit_price is auto-set
-// from the cost build's computed quote price.
 // Recomputes the quote's subtotal_price and total_price in the same batch.
 
-import { one, all, stmt, batch } from '../../../../../lib/db.js';
+import { one, stmt, batch } from '../../../../../lib/db.js';
 import { auditStmt } from '../../../../../lib/audit.js';
 import { uuid, now } from '../../../../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../../../../lib/http.js';
 import { validateQuoteLine } from '../../../../../lib/validators.js';
-import { loadCostBuildBundle, loadPricingSettings, computeFromBundle } from '../../../../../lib/pricing.js';
 
 const READ_ONLY_STATUSES = new Set([
   'accepted',
@@ -52,22 +49,10 @@ export async function onRequestPost(context) {
     );
   }
 
-  // If a cost build is linked to this line, auto-set unit_price from
-  // the cost build's computed quote price.
-  const lineCbId = input.cost_build_id || null;
-  if (lineCbId) {
-    const cbPrice = await getCostBuildPrice(env.DB, lineCbId);
-    if (cbPrice != null) {
-      value.unit_price = cbPrice;
-    }
-  }
-
   const id = uuid();
   const ts = now();
   const extended = Number(value.quantity) * Number(value.unit_price);
 
-  // sort_order: next after the current max (1-based-ish, defaults to 0
-  // when the quote has no lines yet).
   const maxRow = await one(
     env.DB,
     'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort FROM quote_lines WHERE quote_id = ?',
@@ -80,9 +65,9 @@ export async function onRequestPost(context) {
       env.DB,
       `INSERT INTO quote_lines
          (id, quote_id, sort_order, item_type, description, quantity, unit,
-          unit_price, extended_price, notes, cost_build_id,
+          unit_price, extended_price, notes,
           created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                ?, ?)`,
       [
         id,
@@ -95,12 +80,10 @@ export async function onRequestPost(context) {
         value.unit_price,
         extended,
         value.notes,
-        lineCbId,
         ts,
         ts,
       ]
     ),
-    // Recompute totals.
     stmt(
       env.DB,
       `UPDATE quotes
@@ -122,7 +105,6 @@ export async function onRequestPost(context) {
         quantity: value.quantity,
         unit_price: value.unit_price,
         extended_price: extended,
-        cost_build_id: lineCbId,
       },
     }),
   ]);
@@ -131,17 +113,4 @@ export async function onRequestPost(context) {
     `/opportunities/${oppId}/quotes/${quoteId}`,
     'Line added.'
   );
-}
-
-/**
- * Compute the quote price from a cost build using the pricing engine.
- * Returns the effective quote price, or null if the cost build has no
- * meaningful data to price from.
- */
-async function getCostBuildPrice(db, costBuildId) {
-  const bundle = await loadCostBuildBundle(db, costBuildId);
-  if (!bundle) return null;
-  const settings = await loadPricingSettings(db);
-  const { pricing } = computeFromBundle(bundle, settings);
-  return pricing.effective.quote ?? null;
 }

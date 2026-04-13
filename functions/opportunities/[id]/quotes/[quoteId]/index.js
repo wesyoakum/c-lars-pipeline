@@ -50,7 +50,6 @@ const UPDATE_FIELDS = [
   'delivery_terms',
   'delivery_estimate',
   'tax_amount',
-  'cost_build_id',
   'notes_internal',
   'notes_customer',
 ];
@@ -81,24 +80,19 @@ export async function onRequestGet(context) {
 
   const lines = await all(
     env.DB,
-    `SELECT * FROM quote_lines WHERE quote_id = ? ORDER BY sort_order, id`,
+    `SELECT ql.*, cb.label AS price_build_label, cb.status AS price_build_status
+       FROM quote_lines ql
+       LEFT JOIN cost_builds cb ON cb.quote_line_id = ql.id
+      WHERE ql.quote_id = ?
+      ORDER BY ql.sort_order, ql.id`,
     [quoteId]
   );
 
-  // Cost builds on the same opportunity — used to populate the
-  // cost_build_id picker. Show locked and draft alike; the user's
-  // expected to link a locked build for a real submission but we don't
-  // enforce it here.
-  const costBuilds = await all(
+  // Items library for the new-line dropdown
+  const libraryItems = await all(
     env.DB,
-    `SELECT id, label, status FROM cost_builds
-      WHERE opportunity_id = ?
-      ORDER BY created_at DESC`,
-    [oppId]
+    `SELECT id, name, default_unit, default_price FROM items_library WHERE active = 1 ORDER BY name`
   );
-
-  // Cost build labels map — used for the per-line cost build dropdown.
-  const hasCostBuilds = costBuilds.length > 0;
 
   // Revision history: all quotes on this opportunity with the same
   // quote_type, ordered by created_at. Used to render a "Rev A/B/C"
@@ -119,18 +113,6 @@ export async function onRequestGet(context) {
   const total = subtotal + Number(quote.tax_amount ?? 0);
 
   const flash = readFlash(url);
-
-  // Helper: render cost build options for the per-line dropdown.
-  function renderCbOptions(selectedId) {
-    return html`
-      <option value="">—</option>
-      ${costBuilds.map((cb) => html`
-        <option value="${escape(cb.id)}" ${selectedId === cb.id ? 'selected' : ''}>
-          ${escape(cb.label || '(unlabeled)')} ${cb.status === 'locked' ? '[locked]' : ''}
-        </option>
-      `)}
-    `;
-  }
 
   // --- Header section -----------------------------------------------------
   const headerSection = html`
@@ -301,17 +283,6 @@ export async function onRequestGet(context) {
               Tax amount ($)
               <input type="text" name="tax_amount" value="${quote.tax_amount != null ? escape(Number(quote.tax_amount).toFixed(2)) : ''}">
             </label>
-            <label>
-              Linked cost build
-              <select name="cost_build_id">
-                <option value="">— none —</option>
-                ${costBuilds.map((cb) => html`
-                  <option value="${escape(cb.id)}" ${cb.id === quote.cost_build_id ? 'selected' : ''}>
-                    ${escape(cb.label || '(unlabeled)')} ${cb.status === 'locked' ? '[locked]' : ''}
-                  </option>
-                `)}
-              </select>
-            </label>
           </div>
 
           <label>
@@ -332,17 +303,13 @@ export async function onRequestGet(context) {
   `;
 
   // --- Lines section ------------------------------------------------------
+  const pbUrl = (lineId) => `/opportunities/${oppId}/quotes/${quoteId}/lines/${lineId}/price-build`;
+
   const linesSection = html`
     <section class="card">
       <div class="card-header">
         <h2>Line items</h2>
         <div class="header-actions">
-          ${!readOnly && quote.cost_build_id ? html`
-            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/populate-from-cost-build" class="inline-form"
-                  onsubmit="return confirm('This will add lines from the linked cost build. Continue?');">
-              <button class="btn small" type="submit">Populate from cost build</button>
-            </form>
-          ` : ''}
           <span class="header-value" id="q-lines-subtotal">${fmtDollar(subtotal)} subtotal</span>
         </div>
       </div>
@@ -352,11 +319,11 @@ export async function onRequestGet(context) {
           <tr>
             <th>#</th>
             <th>Description</th>
-            ${hasCostBuilds ? html`<th>Cost build</th>` : ''}
             <th class="num">Qty</th>
             <th>Unit</th>
             <th class="num">Unit price</th>
             <th class="num">Extended</th>
+            <th>Price build</th>
             <th></th>
           </tr>
         </thead>
@@ -369,13 +336,6 @@ export async function onRequestGet(context) {
                   <input type="text" name="description" value="${escape(l.description ?? '')}" ${readOnly ? 'disabled' : ''} style="width: 100%;">
                 </form>
               </td>
-              ${hasCostBuilds ? html`
-                <td>
-                  <select name="cost_build_id" form="line-form-${escape(l.id)}" ${readOnly ? 'disabled' : ''}>
-                    ${renderCbOptions(l.cost_build_id)}
-                  </select>
-                </td>
-              ` : ''}
               <td class="num">
                 <input type="text" name="quantity" form="line-form-${escape(l.id)}" value="${escape(l.quantity ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input">
               </td>
@@ -386,11 +346,16 @@ export async function onRequestGet(context) {
                 <input type="text" name="unit_price" form="line-form-${escape(l.id)}" value="${escape(l.unit_price ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input">
               </td>
               <td class="num" data-line-extended>${fmtDollar(l.extended_price)}</td>
+              <td>
+                ${l.price_build_label
+                  ? html`<a href="${pbUrl(l.id)}" class="pill ${l.price_build_status === 'locked' ? 'pill-locked' : ''}" style="font-size:0.8rem">${escape(l.price_build_label)}</a>`
+                  : (!readOnly ? html`<a href="${pbUrl(l.id)}" class="btn small">+ Build</a>` : html`<span class="muted">\u2014</span>`)}
+              </td>
               <td class="row-actions">
                 ${!readOnly ? html`
                   <button class="btn small" type="submit" form="line-form-${escape(l.id)}">Save</button>
                   <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}/delete" class="inline-form">
-                    <button class="btn small danger" type="submit">×</button>
+                    <button class="btn small danger" type="submit">\u00d7</button>
                   </form>
                 ` : ''}
               </td>
@@ -402,16 +367,9 @@ export async function onRequestGet(context) {
                 <td class="muted">${lines.length + 1}</td>
                 <td>
                   <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines" class="inline-form" id="new-line-form">
-                    <input type="text" name="description" placeholder="New line item…" style="width: 100%;">
+                    <input type="text" name="description" placeholder="New line item\u2026" style="width: 100%;">
                   </form>
                 </td>
-                ${hasCostBuilds ? html`
-                  <td>
-                    <select name="cost_build_id" form="new-line-form">
-                      ${renderCbOptions(null)}
-                    </select>
-                  </td>
-                ` : ''}
                 <td class="num">
                   <input type="text" name="quantity" form="new-line-form" value="1" class="num-input">
                 </td>
@@ -422,6 +380,7 @@ export async function onRequestGet(context) {
                   <input type="text" name="unit_price" form="new-line-form" class="num-input" placeholder="0">
                 </td>
                 <td class="num" data-line-extended>\u2014</td>
+                <td></td>
                 <td class="row-actions">
                   <button class="btn small primary" type="submit" form="new-line-form">+</button>
                 </td>
@@ -429,19 +388,19 @@ export async function onRequestGet(context) {
             `
             : ''}
           <tr class="totals-row">
-            <td colspan="${hasCostBuilds ? 6 : 5}" class="num"><strong>Subtotal</strong></td>
+            <td colspan="5" class="num"><strong>Subtotal</strong></td>
             <td class="num" id="q-subtotal"><strong>${fmtDollar(subtotal)}</strong></td>
-            <td></td>
+            <td colspan="2"></td>
           </tr>
           <tr class="totals-row">
-            <td colspan="${hasCostBuilds ? 6 : 5}" class="num">Tax</td>
+            <td colspan="5" class="num">Tax</td>
             <td class="num">${fmtDollar(Number(quote.tax_amount ?? 0))}</td>
-            <td></td>
+            <td colspan="2"></td>
           </tr>
           <tr class="totals-row">
-            <td colspan="${hasCostBuilds ? 6 : 5}" class="num"><strong>Total</strong></td>
+            <td colspan="5" class="num"><strong>Total</strong></td>
             <td class="num" id="q-total"><strong>${fmtDollar(total)}</strong></td>
-            <td></td>
+            <td colspan="2"></td>
           </tr>
         </tbody>
       </table>
@@ -498,22 +457,6 @@ export async function onRequestPost(context) {
     );
   }
 
-  // Verify cost_build_id belongs to this opportunity (if supplied).
-  if (value.cost_build_id) {
-    const cb = await one(
-      env.DB,
-      'SELECT id FROM cost_builds WHERE id = ? AND opportunity_id = ?',
-      [value.cost_build_id, oppId]
-    );
-    if (!cb) {
-      return redirectWithFlash(
-        `/opportunities/${oppId}/quotes/${quoteId}`,
-        'Selected cost build does not belong to this opportunity.',
-        'error'
-      );
-    }
-  }
-
   const ts = now();
   const after = { ...before, ...value };
   const changes = diff(before, after, UPDATE_FIELDS);
@@ -541,7 +484,6 @@ export async function onRequestPost(context) {
               tax_amount = ?,
               subtotal_price = ?,
               total_price = ?,
-              cost_build_id = ?,
               notes_internal = ?,
               notes_customer = ?,
               updated_at = ?
@@ -557,7 +499,6 @@ export async function onRequestPost(context) {
         value.tax_amount,
         subtotal,
         total,
-        value.cost_build_id,
         value.notes_internal,
         value.notes_customer,
         ts,

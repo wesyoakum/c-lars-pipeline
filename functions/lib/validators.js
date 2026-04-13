@@ -531,10 +531,6 @@ export function validateQuote(input, { transactionType = null, requireType = tru
   if (taxErr) errors.tax_amount = taxErr;
   value.tax_amount = tax === null ? 0 : tax;
 
-  // Optional link to a cost build. Stored as-is; the route handler
-  // should verify it belongs to the same opportunity.
-  value.cost_build_id = trim(input.cost_build_id) || null;
-
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, value };
 }
