@@ -3,21 +3,18 @@
 // POST /opportunities/:id/stage — advance / move an opportunity to a
 // new stage.
 //
-// M3 keeps this simple: it verifies the target stage is a legal
-// stage_key for the opportunity's transaction_type (via the
-// stage_definitions catalog), records a `stage_changed` audit event
-// with before/after, and writes an override_reason if one was supplied.
-//
-// Gate rule enforcement is deferred to M7 (see lib/stages.js) — for
-// now, every transition is allowed. We still capture override_reason
-// because it costs us nothing and makes M7 a drop-in upgrade.
+// Gate checks evaluate real data (account, contacts, cost builds, quotes,
+// documents) and produce warnings or blockers depending on GATE_MODE.
+// In 'warn' mode (current default), all violations are shown as warnings
+// but the transition always proceeds. Switch to 'enforce' in lib/stages.js
+// to make hard gates block transitions.
 
 import { one, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
 import { validateStageTransition } from '../../lib/validators.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../lib/http.js';
-import { stageDef, stagesFor } from '../../lib/stages.js';
+import { stageDef, stagesFor, evaluateGate, loadGateContext, GATE_MODE } from '../../lib/stages.js';
 
 export async function onRequestPost(context) {
   const { env, data, request, params } = context;
@@ -26,7 +23,7 @@ export async function onRequestPost(context) {
 
   const opp = await one(
     env.DB,
-    `SELECT id, number, transaction_type, stage, probability FROM opportunities WHERE id = ?`,
+    `SELECT * FROM opportunities WHERE id = ?`,
     [oppId]
   );
   if (!opp) {
@@ -43,7 +40,6 @@ export async function onRequestPost(context) {
   // Confirm the target stage is real for this transaction_type.
   const targetDef = await stageDef(env.DB, opp.transaction_type, value.to_stage);
   if (!targetDef) {
-    // Dump the legal stage keys into the flash so the user knows what went wrong.
     const legal = (await stagesFor(env.DB, opp.transaction_type))
       .map((s) => s.stage_key)
       .join(', ');
@@ -62,16 +58,36 @@ export async function onRequestPost(context) {
     );
   }
 
-  // TODO(M7): call evaluateGate(env.DB, opp.transaction_type, targetDef.stage_key, ctx)
-  // and block on hard violations / require override_reason on soft violations.
+  // ---- Gate evaluation ------------------------------------------------
+  const gateCtx = await loadGateContext(env.DB, opp);
+  const gateResult = await evaluateGate(env.DB, opp.transaction_type, targetDef.stage_key, gateCtx);
 
+  // In enforce mode, block on hard violations (unless override_reason given)
+  if (!gateResult.allowed && !value.override_reason) {
+    const hardMessages = gateResult.violations
+      .filter(v => v.severity === 'hard')
+      .map(v => v.message);
+    return redirectWithFlash(
+      `/opportunities/${oppId}`,
+      `Blocked: ${hardMessages.join('; ')}. Provide an override reason to proceed.`,
+      'error'
+    );
+  }
+
+  // ---- Perform the transition -----------------------------------------
   const ts = now();
   const newProbability = targetDef.default_probability ?? opp.probability;
 
-  // Build the audit summary so it's informative in the activity feed.
-  const summary =
-    `Stage changed from ${opp.stage} → ${targetDef.stage_key}` +
-    (value.override_reason ? ` (override: ${value.override_reason})` : '');
+  // Build audit summary with gate info
+  const warningMessages = gateResult.warnings.map(w => w.message);
+  let summary =
+    `Stage changed from ${opp.stage} → ${targetDef.stage_key}`;
+  if (value.override_reason) {
+    summary += ` (override: ${value.override_reason})`;
+  }
+  if (warningMessages.length > 0) {
+    summary += ` [warnings: ${warningMessages.join('; ')}]`;
+  }
 
   const statements = [
     stmt(
@@ -90,6 +106,7 @@ export async function onRequestPost(context) {
       changes: {
         stage: { from: opp.stage, to: targetDef.stage_key },
         probability: { from: opp.probability, to: newProbability },
+        gate_warnings: warningMessages.length > 0 ? warningMessages : undefined,
       },
       overrideReason: value.override_reason,
     }),
@@ -97,8 +114,15 @@ export async function onRequestPost(context) {
 
   await batch(env.DB, statements);
 
+  // Flash: show the success + any warnings
+  let flashMsg = `Moved to ${targetDef.label}.`;
+  if (warningMessages.length > 0) {
+    flashMsg += ` ⚠ ${warningMessages.join(' · ')}`;
+  }
+
   return redirectWithFlash(
     `/opportunities/${oppId}`,
-    `Moved to ${targetDef.label}.`
+    flashMsg,
+    warningMessages.length > 0 ? 'warn' : 'success'
   );
 }

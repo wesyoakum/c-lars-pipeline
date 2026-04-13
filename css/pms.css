@@ -157,7 +157,7 @@ code {
 }
 .flash-info    { background: #ddf4ff; border-color: #54aeff; color: #0550ae; }
 .flash-success { background: #dafbe1; border-color: #4ac26b; color: #1a7f37; }
-.flash-warning { background: #fff8c5; border-color: #d4a72c; color: #7a5200; }
+.flash-warning, .flash-warn { background: #fff8c5; border-color: #d4a72c; color: #7a5200; }
 .flash-error   { background: #ffebe9; border-color: #ff8182; color: #cf222e; }
 
 /* ---------- Tables ---------- */

@@ -2,22 +2,22 @@
 //
 // Stage catalog lookups + gate rule engine.
 //
-// The stage catalog lives in the stage_definitions table and is loaded
-// once per request and cached in a module-level Map for the lifetime of
-// the Worker isolate. Gate rules are evaluated against an opportunity
-// and its related rows (accounts, contacts, quotes, cost_builds, jobs)
-// and return { allowed: boolean, violations: [{check, severity, message}] }.
+// Gate rules are stored in the stage_definitions table as JSON:
+//   { "requires": [ { "check": "<name>", "severity": "soft"|"hard" } ] }
 //
-// TODO(M3 / M7): load gate_rules_json, implement checks listed below:
-//   has_account_and_contact, has_cost_build, has_cost_build_locked,
-//   has_quote_in_status:<status>, has_bant_fields, has_valid_until_set,
-//   has_delivery_terms_set, has_payment_terms_set,
-//   has_governance_revisions_snapshotted, has_customer_po, has_oc_data
+// Enforcement mode:
+//   GATE_MODE = 'warn'  → all violations shown as warnings, transition allowed
+//   GATE_MODE = 'enforce' → soft violations warn, hard violations block
 //
-// P0 scaffolding only: exports an empty check table and a passthrough
-// evaluator so imports elsewhere don't break.
+// To switch to enforcing mode later, change GATE_MODE to 'enforce'.
 
 import { all, one } from './db.js';
+
+// ---- Configuration ------------------------------------------------
+// Change this to 'enforce' when ready to block transitions on hard gates.
+export const GATE_MODE = 'warn';
+
+// ---- Stage catalog ------------------------------------------------
 
 let _catalogCache = null;
 
@@ -46,64 +46,177 @@ export function clearStageCatalogCache() {
   _catalogCache = null;
 }
 
-/**
- * Get the ordered list of stages for a transaction_type.
- */
 export async function stagesFor(db, transactionType) {
   const catalog = await loadStageCatalog(db);
   return catalog.get(transactionType) ?? [];
 }
 
-/**
- * Look up a single stage definition.
- */
 export async function stageDef(db, transactionType, stageKey) {
   const list = await stagesFor(db, transactionType);
   return list.find((s) => s.stage_key === stageKey) ?? null;
 }
 
-/**
- * Gate rule registry — mapping check name → async function(ctx) → boolean.
- * Populated in M3/M7. ctx has { db, opportunity, account, contacts, quotes, costBuilds, job }.
- */
-export const CHECKS = {
-  // eslint-disable-next-line no-unused-vars
-  has_account_and_contact: async (ctx) => true, // TODO M3
-  has_cost_build: async (ctx) => true,          // TODO M4
-  has_cost_build_locked: async (ctx) => true,   // TODO M4
-  has_bant_fields: async (ctx) => true,         // TODO M3
-  has_valid_until_set: async (ctx) => true,     // TODO M5
-  has_delivery_terms_set: async (ctx) => true,  // TODO M5
-  has_payment_terms_set: async (ctx) => true,   // TODO M5
-  has_governance_revisions_snapshotted: async (ctx) => true, // TODO M5
-  has_customer_po: async (ctx) => true,         // TODO M7
-  has_oc_data: async (ctx) => true,             // TODO M7
+// ---- Gate check implementations -----------------------------------
+//
+// Each check receives a context object:
+//   { db, opportunity, account, contacts, quotes, costBuilds }
+// and returns { passed: boolean, message: string }
+
+const CHECKS = {
+  async has_account_and_contact(ctx) {
+    const hasAccount = !!ctx.opportunity.account_id;
+    const hasContact = ctx.contacts.length > 0;
+    if (hasAccount && hasContact) return { passed: true };
+    const missing = [];
+    if (!hasAccount) missing.push('account');
+    if (!hasContact) missing.push('contact');
+    return { passed: false, message: `Missing ${missing.join(' and ')}` };
+  },
+
+  async has_cost_build(ctx) {
+    if (ctx.costBuilds.length > 0) return { passed: true };
+    return { passed: false, message: 'No price build exists on any quote' };
+  },
+
+  async has_cost_build_locked(ctx) {
+    const locked = ctx.costBuilds.some(cb => cb.status === 'locked');
+    if (locked) return { passed: true };
+    if (ctx.costBuilds.length === 0) return { passed: false, message: 'No price build exists' };
+    return { passed: false, message: 'No price build is locked' };
+  },
+
+  async has_bant_fields(ctx) {
+    const o = ctx.opportunity;
+    const missing = [];
+    if (!o.bant_budget) missing.push('budget');
+    if (!o.bant_authority) missing.push('authority');
+    if (!o.bant_need) missing.push('need');
+    if (!o.bant_timeline) missing.push('timeline');
+    if (missing.length === 0) return { passed: true };
+    return { passed: false, message: `BANT missing: ${missing.join(', ')}` };
+  },
+
+  async has_valid_until_set(ctx) {
+    const hasIt = ctx.quotes.some(q =>
+      q.valid_until && (q.status === 'submitted' || q.status === 'draft' || q.status === 'approved_internal')
+    );
+    if (hasIt) return { passed: true };
+    if (ctx.quotes.length === 0) return { passed: false, message: 'No quote exists' };
+    return { passed: false, message: 'No quote has a valid-until date set' };
+  },
+
+  async has_delivery_terms_set(ctx) {
+    const hasIt = ctx.quotes.some(q => q.delivery_terms);
+    if (hasIt) return { passed: true };
+    if (ctx.quotes.length === 0) return { passed: false, message: 'No quote exists' };
+    return { passed: false, message: 'No quote has delivery terms set' };
+  },
+
+  async has_payment_terms_set(ctx) {
+    const hasIt = ctx.quotes.some(q => q.payment_terms);
+    if (hasIt) return { passed: true };
+    if (ctx.quotes.length === 0) return { passed: false, message: 'No quote exists' };
+    return { passed: false, message: 'No quote has payment terms set' };
+  },
+
+  async has_governance_revisions_snapshotted(ctx) {
+    const hasIt = ctx.quotes.some(q => q.gov_rev_tandc);
+    if (hasIt) return { passed: true };
+    if (ctx.quotes.length === 0) return { passed: false, message: 'No quote exists' };
+    return { passed: false, message: 'No quote has governance revisions snapshotted (submit the quote first)' };
+  },
+
+  async has_customer_po(ctx) {
+    // Check if any document of kind 'po' is attached
+    const po = await one(ctx.db,
+      `SELECT id FROM documents WHERE opportunity_id = ? AND kind = 'po' LIMIT 1`,
+      [ctx.opportunity.id]);
+    if (po) return { passed: true };
+    return { passed: false, message: 'No customer PO document uploaded' };
+  },
+
+  async has_oc_data(ctx) {
+    // For now, check if a quote has been accepted
+    const accepted = ctx.quotes.some(q => q.status === 'accepted');
+    if (accepted) return { passed: true };
+    return { passed: false, message: 'No quote has been accepted (OC not ready)' };
+  },
 };
 
+// ---- Gate evaluation ----------------------------------------------
+
 /**
- * Evaluate the gate rules for a target stage against an opportunity context.
- * Returns { allowed, violations }. In P0 scaffold, always returns allowed.
- *
- * TODO(M7): wire into POST /opportunities/:id/stage with override_reason support.
+ * Load the context needed for gate checks.
  */
-export async function evaluateGate(db, transactionType, targetStageKey, ctx) {
+export async function loadGateContext(db, opportunity) {
+  const [contacts, quotes, costBuilds] = await Promise.all([
+    all(db,
+      'SELECT id FROM contacts WHERE account_id = ?',
+      [opportunity.account_id]),
+    all(db,
+      `SELECT id, status, valid_until, delivery_terms, payment_terms, gov_rev_tandc
+         FROM quotes WHERE opportunity_id = ?`,
+      [opportunity.id]),
+    all(db,
+      `SELECT cb.id, cb.status
+         FROM cost_builds cb
+         JOIN quote_lines ql ON ql.id = cb.quote_line_id
+         JOIN quotes q ON q.id = ql.quote_id
+        WHERE q.opportunity_id = ?`,
+      [opportunity.id]),
+  ]);
+
+  return { db, opportunity, contacts, quotes, costBuilds };
+}
+
+/**
+ * Evaluate gate rules for a target stage.
+ *
+ * Returns { allowed, violations, warnings }.
+ * - In 'warn' mode: allowed is always true, all violations go to warnings.
+ * - In 'enforce' mode: hard violations set allowed=false, soft go to warnings.
+ */
+export async function evaluateGate(db, transactionType, targetStageKey, gateCtx) {
   const def = await stageDef(db, transactionType, targetStageKey);
   if (!def || !def.gate_rules?.requires) {
-    return { allowed: true, violations: [] };
+    return { allowed: true, violations: [], warnings: [] };
   }
+
   const violations = [];
+  const warnings = [];
+
   for (const rule of def.gate_rules.requires) {
     const checkFn = CHECKS[rule.check];
     if (!checkFn) continue;
-    const ok = await checkFn(ctx);
-    if (!ok) {
-      violations.push({
-        check: rule.check,
-        severity: rule.severity ?? 'soft',
-        message: `Gate check failed: ${rule.check}`,
-      });
+
+    const result = await checkFn(gateCtx);
+    if (result.passed) continue;
+
+    const entry = {
+      check: rule.check,
+      severity: rule.severity ?? 'soft',
+      message: result.message || `Gate check failed: ${rule.check}`,
+    };
+
+    violations.push(entry);
+
+    if (GATE_MODE === 'warn') {
+      // Warn-only mode: everything is a warning, nothing blocks
+      warnings.push(entry);
+    } else {
+      // Enforce mode: soft → warning, hard → blocker
+      if (entry.severity === 'soft') {
+        warnings.push(entry);
+      }
+      // hard violations stay in violations[] and will block
     }
   }
-  const hardFail = violations.some((v) => v.severity === 'hard');
-  return { allowed: !hardFail, violations };
+
+  const hardFail = GATE_MODE === 'enforce' && violations.some(v => v.severity === 'hard');
+
+  return {
+    allowed: !hardFail,
+    violations,
+    warnings,
+  };
 }
