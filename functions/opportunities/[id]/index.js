@@ -353,6 +353,7 @@ export async function onRequestGet(context) {
               return html`
                 <button type="submit" name="to_stage" value="${s.stage_key}"
                         class="${cls}" data-idx="${i}"
+                        x-show="Math.abs(${i} - idx) <= 1"
                         ${isCurrent ? 'disabled' : ''}>
                   ${s.label}
                 </button>`;
@@ -882,20 +883,14 @@ function notFound(context) {
 
 function inlineEditScript() {
   return `
-// Stage carousel component
+// Stage carousel component — shows prev/current/next via x-show
 function stageCarousel(startIdx, count) {
   return {
     idx: startIdx,
     max: count,
     closingStage: '',
-    init() { this.scrollTo(this.idx); },
-    prev() { if (this.idx > 0) { this.idx--; this.scrollTo(this.idx); } },
-    next() { if (this.idx < this.max - 1) { this.idx++; this.scrollTo(this.idx); } },
-    scrollTo(i) {
-      const win = this.$el.querySelector('.stage-carousel-window');
-      const pills = win.querySelectorAll('.stage-pill');
-      if (pills[i]) pills[i].scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
-    },
+    prev() { if (this.idx > 0) this.idx--; },
+    next() { if (this.idx < this.max - 1) this.idx++; },
     showCloseReason(stage) {
       this.closingStage = stage;
       this.$nextTick(() => this.$refs.closeReasonInput?.focus());

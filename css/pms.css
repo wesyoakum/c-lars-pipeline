@@ -1147,9 +1147,8 @@ table.data.compact td input.num-input {
 .stage-carousel-window {
   display: flex;
   gap: 0.2rem;
-  overflow: hidden;
   flex: 1;
-  scroll-behavior: smooth;
+  justify-content: center;
 }
 
 .stage-pill {
