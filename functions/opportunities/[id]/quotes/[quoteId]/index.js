@@ -97,6 +97,15 @@ export async function onRequestGet(context) {
     [oppId, quote.quote_seq]
   );
 
+  const generatedDocs = await all(
+    env.DB,
+    `SELECT id, kind, original_filename, size_bytes, uploaded_at
+       FROM documents
+      WHERE quote_id = ? AND kind IN ('quote_pdf', 'quote_docx')
+      ORDER BY uploaded_at DESC`,
+    [quoteId]
+  );
+
   const readOnly = READ_ONLY_STATUSES.has(quote.status);
   const subtotal = lines.reduce((a, l) => a + Number(l.extended_price ?? 0), 0);
   const total = subtotal + Number(quote.tax_amount ?? 0);
@@ -166,6 +175,12 @@ export async function onRequestGet(context) {
                 <button class="btn danger" type="submit">Delete</button>
               </form>
             ` : ''}
+            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/generate-pdf" class="inline-form">
+              <button class="btn" type="submit">Generate PDF</button>
+            </form>
+            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/generate-docx" class="inline-form">
+              <button class="btn" type="submit">Download Word</button>
+            </form>
           </div>
         </div>
       </div>
@@ -195,6 +210,21 @@ export async function onRequestGet(context) {
               · Rate Sched ${escape(quote.rate_schedule_revision ?? '—')}
               · SOP ${escape(quote.sop_revision ?? '—')}
             </p>
+          </div>`
+        : ''}
+
+      ${generatedDocs.length
+        ? html`
+          <div style="padding:0.5rem 1rem 0.75rem;border-top:1px solid var(--border)">
+            <p class="muted" style="margin:0 0 0.35rem;font-size:0.8em;font-weight:600">Generated Documents</p>
+            ${generatedDocs.map(d => html`
+              <a href="/documents/${escape(d.id)}/download"
+                 style="display:inline-block;margin:0 0.5rem 0.25rem 0;font-size:0.85em"
+                 target="_blank">
+                ${d.kind === 'quote_pdf' ? '📄' : '📝'} ${escape(d.original_filename)}
+                <span class="muted">(${formatSize(d.size_bytes)})</span>
+              </a>
+            `)}
           </div>`
         : ''}
     </section>
@@ -757,6 +787,13 @@ function statusPillClass(status) {
 function formatTimestamp(iso) {
   if (!iso) return '';
   return String(iso).replace('T', ' ').replace(/\.\d+Z?$/, '').slice(0, 16);
+}
+
+function formatSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function notFound(context) {

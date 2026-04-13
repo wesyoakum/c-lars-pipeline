@@ -9,6 +9,8 @@ import { auditStmt } from '../../../../lib/audit.js';
 import { now } from '../../../../lib/ids.js';
 import { redirectWithFlash } from '../../../../lib/http.js';
 import { snapshotGoverningDocs, createIssueTask } from '../../../../lib/quote-transitions.js';
+import { getQuoteDocData, fillTemplate, convertToPdf, templateKeyForQuote } from '../../../../lib/doc-generate.js';
+import { storeGeneratedDoc } from '../../../../lib/doc-storage.js';
 
 export async function onRequestPost(context) {
   const { env, data, params } = context;
@@ -64,6 +66,38 @@ export async function onRequestPost(context) {
   statements.push(...taskStmts);
 
   await batch(env.DB, statements);
+
+  // Auto-generate PDF in the background (non-blocking)
+  context.waitUntil(
+    (async () => {
+      try {
+        const docData = await getQuoteDocData(env, quoteId);
+        if (!docData) return;
+        const templateKey = templateKeyForQuote(quote.quote_type);
+        const docxBuffer = await fillTemplate(env, templateKey, docData);
+        const baseFilename = `${quote.number}-Rev-${quote.revision}`;
+
+        await storeGeneratedDoc(env, {
+          opportunityId: oppId, quoteId,
+          buffer: docxBuffer,
+          filename: `${baseFilename}.docx`,
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          kind: 'quote_docx', user,
+        });
+
+        const pdfBuffer = await convertToPdf(env, docxBuffer);
+        await storeGeneratedDoc(env, {
+          opportunityId: oppId, quoteId,
+          buffer: pdfBuffer,
+          filename: `${baseFilename}.pdf`,
+          mimeType: 'application/pdf',
+          kind: 'quote_pdf', user,
+        });
+      } catch (err) {
+        console.error('Auto PDF generation failed:', err);
+      }
+    })()
+  );
 
   return redirectWithFlash(
     `/opportunities/${oppId}/quotes/${quoteId}`,
