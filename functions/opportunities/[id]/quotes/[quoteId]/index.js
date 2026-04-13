@@ -4,16 +4,15 @@
 // POST /opportunities/:id/quotes/:quoteId  — update header fields
 //
 // Layout mirrors the C-LARS Word quotation template:
-//   1. Header card — quote number, status pill, transition actions,
-//      revision strip, governance snapshot (all in one card)
-//   2. Two-column grid — client info (left) + quote metadata (right)
-//   3. Line items table with price build links
+//   1. Header card — quote number, status pill, total, transition actions,
+//      revision strip, governance snapshot
+//   2. Banner card — "QUOTATION" + quote type left, C-LARS logo right
+//   3. Details card — account/address left, quote meta right, description
+//   4. Line items card — item table with notes row per line
+//   5. Footer card — customer notes, terms
 //
-// Status transitions (submit, revise, accept, reject, supersede,
-// expire) live in sibling files.
-//
-// Quotes in a terminal status (accepted, rejected, expired, dead)
-// are read-only — the header form and line routes refuse updates.
+// Status transitions live in sibling files.
+// Quotes in a terminal status are read-only.
 
 import { one, all, stmt, batch } from '../../../../lib/db.js';
 import { auditStmt, diff } from '../../../../lib/audit.js';
@@ -64,7 +63,6 @@ export async function onRequestGet(context) {
             o.transaction_type AS opp_transaction_type,
             o.account_id,
             a.name AS account_name, a.phone AS account_phone,
-            a.address_billing AS account_address,
             c.first_name AS contact_first, c.last_name AS contact_last,
             c.email AS contact_email, c.phone AS contact_phone, c.title AS contact_title,
             sup.number AS supersedes_number, sup.revision AS supersedes_revision,
@@ -82,6 +80,17 @@ export async function onRequestGet(context) {
   );
   if (!quote || quote.opportunity_id !== oppId) return notFound(context);
 
+  // Primary billing address from account_addresses
+  const primaryAddr = quote.account_id
+    ? await one(
+        env.DB,
+        `SELECT address FROM account_addresses
+          WHERE account_id = ? AND kind = 'billing' AND is_default = 1
+          LIMIT 1`,
+        [quote.account_id]
+      )
+    : null;
+
   const lines = await all(
     env.DB,
     `SELECT ql.*, cb.label AS price_build_label, cb.status AS price_build_status,
@@ -91,11 +100,6 @@ export async function onRequestGet(context) {
       WHERE ql.quote_id = ?
       ORDER BY ql.sort_order, ql.id`,
     [quoteId]
-  );
-
-  const libraryItems = await all(
-    env.DB,
-    `SELECT id, name, default_unit, default_price FROM items_library WHERE active = 1 ORDER BY name`
   );
 
   const revisionHistory = await all(
@@ -116,11 +120,9 @@ export async function onRequestGet(context) {
 
   const isDraft = quote.status === 'draft' || quote.status === 'revision_draft';
   const isIssued = quote.status === 'issued' || quote.status === 'revision_issued';
-
-  // Allowed quote types for the transaction type (for type selector)
   const typeOptions = allowedQuoteTypes(quote.opp_transaction_type);
 
-  // --- Header card (title, status, actions, revisions, governance) ---------
+  // ── 1. Header card ─────────────────────────────────────────────────
   const headerSection = html`
     <section class="card">
       <div class="card-header">
@@ -194,7 +196,7 @@ export async function onRequestGet(context) {
       ${quote.submitted_at
         ? html`
           <div class="governance-snapshot">
-            <p class="muted" style="margin:0 0 0.25rem">
+            <p class="muted" style="margin:0">
               Issued ${escape(formatTimestamp(quote.submitted_at))}
               by ${escape(quote.submitted_by_name ?? quote.submitted_by_email ?? 'unknown')}
               · T&amp;Cs ${escape(quote.tc_revision ?? '—')}
@@ -207,8 +209,22 @@ export async function onRequestGet(context) {
     </section>
   `;
 
-  // --- Client + quote details (two-column grid) ---------------------------
+  // ── 2. Banner card ─────────────────────────────────────────────────
+  const bannerCard = html`
+    <section class="card quote-banner">
+      <div class="quote-banner-inner">
+        <div>
+          <h2 class="quote-banner-title">QUOTATION</h2>
+          <p class="quote-banner-type">${escape(QUOTE_TYPE_LABELS[quote.quote_type] ?? quote.quote_type)}</p>
+        </div>
+        <img src="/img/logo-black.png" alt="C-LARS" class="quote-banner-logo">
+      </div>
+    </section>
+  `;
+
+  // ── 3. Details card ────────────────────────────────────────────────
   const contactName = [quote.contact_first, quote.contact_last].filter(Boolean).join(' ');
+  const addressText = primaryAddr?.address ?? '';
 
   const detailsSection = html`
     <section class="card">
@@ -219,7 +235,6 @@ export async function onRequestGet(context) {
         <fieldset ${readOnly ? 'disabled' : ''}>
           <div class="quote-meta-grid">
             <div class="quote-meta-left">
-              <h3 style="margin:0 0 0.5rem">Client</h3>
               <div class="client-info">
                 ${quote.account_name
                   ? html`<p style="margin:0"><strong><a href="/accounts/${escape(quote.account_id)}">${escape(quote.account_name)}</a></strong></p>`
@@ -233,90 +248,54 @@ export async function onRequestGet(context) {
                 ${quote.contact_phone
                   ? html`<p style="margin:0">${escape(quote.contact_phone)}</p>`
                   : ''}
-                ${quote.account_address
-                  ? html`<p style="margin:0.25rem 0 0" class="muted">${escape(quote.account_address)}</p>`
+                ${addressText
+                  ? html`<pre class="addr" style="margin:0.4rem 0 0">${escape(addressText)}</pre>`
                   : ''}
               </div>
             </div>
             <div class="quote-meta-right">
-              <div class="form-grid form-grid-2">
-                ${typeOptions.length > 1 ? html`
-                  <label>
-                    Quote type
-                    <select name="quote_type">
-                      ${typeOptions.map(t => html`
-                        <option value="${escape(t)}" ${quote.quote_type === t ? 'selected' : ''}>
-                          ${escape(QUOTE_TYPE_LABELS[t] ?? t)}
-                        </option>
-                      `)}
-                    </select>
-                  </label>
-                ` : html`
-                  <input type="hidden" name="quote_type" value="${escape(quote.quote_type)}">
-                `}
-                <label>
-                  Title
-                  <input type="text" name="title" value="${escape(quote.title ?? '')}" placeholder="Short descriptor">
-                </label>
-                <label>
-                  Valid until
-                  <input type="date" name="valid_until" value="${escape(quote.valid_until ?? '')}">
-                </label>
-                <label>
-                  Payment terms
-                  <input type="text" name="payment_terms" value="${escape(quote.payment_terms ?? '')}" placeholder="Net 30 / 50% down / ..."
-                         list="payment-terms-list">
-                  <datalist id="payment-terms-list">
-                    <option value="Net 30">
-                    <option value="Net 60">
-                    <option value="Net 90">
-                    <option value="50% down, 50% on delivery">
-                    <option value="COD (Cash on Delivery)">
-                    <option value="CIA (Cash in Advance)">
-                    <option value="Progress payments per milestone">
-                  </datalist>
-                </label>
-                <label>
-                  Delivery terms
-                  <input type="text" name="delivery_terms" value="${escape(quote.delivery_terms ?? '')}"
-                         placeholder="EXW / FCA / DAP / ..."
-                         list="delivery-terms-list">
-                  <datalist id="delivery-terms-list">
-                    <option value="EXW — Ex Works">
-                    <option value="FCA — Free Carrier">
-                    <option value="FOB — Free on Board">
-                    <option value="CIF — Cost, Insurance & Freight">
-                    <option value="DAP — Delivered at Place">
-                    <option value="DDP — Delivered Duty Paid">
-                    <option value="Customer Pickup">
-                  </datalist>
-                </label>
-                <label>
-                  Lead time
-                  <input type="text" name="delivery_estimate" value="${escape(quote.delivery_estimate ?? '')}" placeholder="14-16 weeks ARO">
-                </label>
-              </div>
+              <table class="quote-meta-table">
+                <tr>
+                  <td class="meta-label">Quote No:</td>
+                  <td><strong>${escape(quote.number)}</strong></td>
+                </tr>
+                <tr>
+                  <td class="meta-label">Date:</td>
+                  <td>${quote.submitted_at ? escape(formatTimestamp(quote.submitted_at).slice(0, 10)) : html`<span class="muted">Not yet issued</span>`}</td>
+                </tr>
+                <tr>
+                  <td class="meta-label">Expiration:</td>
+                  <td>
+                    <input type="date" name="valid_until" value="${escape(quote.valid_until ?? '')}" class="meta-input">
+                  </td>
+                </tr>
+                <tr>
+                  <td class="meta-label">Delivery:</td>
+                  <td>
+                    <input type="text" name="delivery_estimate" value="${escape(quote.delivery_estimate ?? '')}" placeholder="14-16 weeks ARO" class="meta-input">
+                  </td>
+                </tr>
+              </table>
             </div>
           </div>
 
-          <label>
+          <label class="desc-label">
             Description
-            <textarea name="description" rows="2" placeholder="Scope description for the customer">${escape(quote.description ?? '')}</textarea>
+            <textarea name="description" placeholder="Scope description for the customer" class="desc-textarea">${escape(quote.description ?? '')}</textarea>
           </label>
 
+          ${typeOptions.length > 1 ? html`
+            <input type="hidden" name="quote_type" value="${escape(quote.quote_type)}">
+          ` : html`
+            <input type="hidden" name="quote_type" value="${escape(quote.quote_type)}">
+          `}
+          <input type="hidden" name="title" value="${escape(quote.title ?? '')}">
           <input type="hidden" name="tax_amount" value="${quote.tax_amount != null ? escape(Number(quote.tax_amount).toFixed(2)) : '0'}">
           <input type="hidden" name="incoterms" value="${escape(quote.incoterms ?? '')}">
-
-          <div class="form-grid form-grid-2">
-            <label>
-              Internal notes <span class="muted">(C-LARS only)</span>
-              <textarea name="notes_internal" rows="2">${escape(quote.notes_internal ?? '')}</textarea>
-            </label>
-            <label>
-              Customer notes
-              <textarea name="notes_customer" rows="2">${escape(quote.notes_customer ?? '')}</textarea>
-            </label>
-          </div>
+          <input type="hidden" name="payment_terms" value="${escape(quote.payment_terms ?? '')}">
+          <input type="hidden" name="delivery_terms" value="${escape(quote.delivery_terms ?? '')}">
+          <input type="hidden" name="notes_internal" value="${escape(quote.notes_internal ?? '')}">
+          <input type="hidden" name="notes_customer" value="${escape(quote.notes_customer ?? '')}">
         </fieldset>
 
         ${!readOnly
@@ -326,7 +305,7 @@ export async function onRequestGet(context) {
     </section>
   `;
 
-  // --- Lines section -------------------------------------------------------
+  // ── 4. Line items card ─────────────────────────────────────────────
   const pbUrl = (lineId) => `/opportunities/${oppId}/quotes/${quoteId}/lines/${lineId}/price-build`;
 
   const optionSubtotal = lines.filter(l => l.is_option).reduce((a, l) => a + Number(l.extended_price ?? 0), 0);
@@ -341,57 +320,56 @@ export async function onRequestGet(context) {
         </div>
       </div>
 
-      <table class="data compact" data-live-calc="quote-lines" id="quote-lines-table">
+      <table class="data compact quote-lines-table" data-live-calc="quote-lines" id="quote-lines-table">
         <thead>
           <tr>
-            <th>#</th>
-            <th>Title / Part #</th>
-            <th>Description</th>
-            <th class="num">Qty</th>
-            <th>Unit</th>
-            <th class="num">Unit price</th>
-            <th class="num">Extended</th>
-            <th>Build</th>
-            <th></th>
+            <th class="col-num">#</th>
+            <th class="col-item">Item</th>
+            <th class="num col-qty">Qty</th>
+            <th class="col-unit">Unit</th>
+            <th class="num col-price">Unit price</th>
+            <th class="num col-ext">Price ext</th>
+            <th class="col-build">Build</th>
           </tr>
         </thead>
         <tbody>
           ${lines.map((l, i) => html`
             <tr data-line-row data-line-id="${escape(l.id)}" class="${l.is_option ? 'line-option' : ''}">
-              <td>${i + 1}${l.is_option ? html`<br><span class="pill" style="font-size:0.7em">OPT</span>` : ''}</td>
-              <td>
+              <td class="col-num">${i + 1}${l.is_option ? html`<br><span class="pill" style="font-size:0.7em">OPT</span>` : ''}</td>
+              <td class="col-item">
                 <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}" class="inline-form" id="line-form-${escape(l.id)}">
-                  <input type="text" name="title" value="${escape(l.title ?? '')}" ${readOnly ? 'disabled' : ''}
-                         placeholder="Title / Part #" style="width: 100%;" data-autosave>
+                  <div class="line-item-fields">
+                    <input type="text" name="title" value="${escape(l.title ?? '')}" ${readOnly ? 'disabled' : ''}
+                           placeholder="Title / Part #" class="line-title" data-autosave>
+                    <input type="text" name="description" value="${escape(l.description ?? '')}" ${readOnly ? 'disabled' : ''}
+                           placeholder="Description" class="line-desc" data-autosave>
+                  </div>
+                  <textarea name="line_notes" ${readOnly ? 'disabled' : ''}
+                            placeholder="Item notes..." class="line-notes" data-autosave>${escape(l.line_notes ?? '')}</textarea>
                   <input type="hidden" name="is_option" value="${l.is_option ? '1' : '0'}">
                 </form>
               </td>
-              <td>
-                <input type="text" name="description" form="line-form-${escape(l.id)}" value="${escape(l.description ?? '')}" ${readOnly ? 'disabled' : ''} style="width: 100%;" data-autosave>
-              </td>
-              <td class="num">
+              <td class="num col-qty">
                 <input type="text" name="quantity" form="line-form-${escape(l.id)}" value="${escape(l.quantity ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input" data-autosave>
               </td>
-              <td>
+              <td class="col-unit">
                 <input type="text" name="unit" form="line-form-${escape(l.id)}" value="${escape(l.unit ?? '')}" ${readOnly ? 'disabled' : ''} style="width: 4rem;" data-autosave>
               </td>
-              <td class="num">
+              <td class="num col-price">
                 <input type="text" name="unit_price" form="line-form-${escape(l.id)}" value="${escape(l.unit_price ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input" data-autosave>
               </td>
-              <td class="num" data-line-extended>
+              <td class="num col-ext" data-line-extended>
                 ${fmtDollar(l.extended_price)}
                 ${l.build_quote_price != null && Math.abs(Number(l.unit_price ?? 0) - Number(l.build_quote_price)) > 0.01
                   ? html`<br><small class="muted" style="color:var(--warning)" title="Price build suggests ${fmtDollar(l.build_quote_price)}/unit">Build: ${fmtDollar(l.build_quote_price)}</small>`
                   : ''}
               </td>
-              <td>
+              <td class="col-build">
                 ${l.price_build_label
                   ? html`<a href="${pbUrl(l.id)}" class="pill ${l.price_build_status === 'locked' ? 'pill-locked' : ''}" style="font-size:0.8rem">${escape(l.build_number || l.price_build_label)}</a>`
-                  : (!readOnly ? html`<a href="${pbUrl(l.id)}" class="btn small">+ Build</a>` : html`<span class="muted">\u2014</span>`)}
-              </td>
-              <td class="row-actions">
+                  : (!readOnly ? html`<a href="${pbUrl(l.id)}" class="btn small">+</a>` : html`<span class="muted">\u2014</span>`)}
                 ${!readOnly ? html`
-                  <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}/delete" class="inline-form">
+                  <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}/delete" class="inline-form" style="display:inline">
                     <button class="btn small danger" type="submit" title="Delete line">\u00d7</button>
                   </form>
                 ` : ''}
@@ -401,83 +379,125 @@ export async function onRequestGet(context) {
           ${!readOnly
             ? html`
               <tr class="new-line-row" data-line-row>
-                <td class="muted">${lines.length + 1}</td>
-                <td>
+                <td class="col-num muted">${lines.length + 1}</td>
+                <td class="col-item">
                   <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines" class="inline-form" id="new-line-form">
-                    <input type="text" name="title" placeholder="Title / Part #" style="width: 100%;">
+                    <div class="line-item-fields">
+                      <input type="text" name="title" placeholder="Title / Part #" class="line-title">
+                      <input type="text" name="description" placeholder="Description" class="line-desc">
+                    </div>
+                    <textarea name="line_notes" placeholder="Item notes..." class="line-notes"></textarea>
                   </form>
                 </td>
-                <td>
-                  <input type="text" name="description" form="new-line-form" placeholder="Description" style="width: 100%;">
-                </td>
-                <td class="num">
+                <td class="num col-qty">
                   <input type="text" name="quantity" form="new-line-form" value="1" class="num-input">
                 </td>
-                <td>
+                <td class="col-unit">
                   <input type="text" name="unit" form="new-line-form" value="ea" style="width: 4rem;">
                 </td>
-                <td class="num">
+                <td class="num col-price">
                   <input type="text" name="unit_price" form="new-line-form" class="num-input" placeholder="0">
                 </td>
-                <td class="num" data-line-extended>\u2014</td>
-                <td></td>
-                <td></td>
+                <td class="num col-ext" data-line-extended>\u2014</td>
+                <td class="col-build"></td>
               </tr>
             `
             : ''}
           <tr class="totals-row">
-            <td colspan="6" class="num"><strong>Subtotal</strong></td>
+            <td colspan="5" class="num"><strong>Subtotal</strong></td>
             <td class="num" id="q-subtotal"><strong>${fmtDollar(includedSubtotal)}</strong></td>
-            <td colspan="2"></td>
+            <td></td>
           </tr>
           ${optionSubtotal > 0 ? html`
             <tr class="totals-row">
-              <td colspan="6" class="num"><em>Options (not included)</em></td>
+              <td colspan="5" class="num"><em>Options (not included)</em></td>
               <td class="num"><em>${fmtDollar(optionSubtotal)}</em></td>
-              <td colspan="2"></td>
+              <td></td>
             </tr>
           ` : ''}
           <tr class="totals-row">
-            <td colspan="6" class="num"><strong>Total</strong></td>
+            <td colspan="5" class="num"><strong>Total</strong></td>
             <td class="num" id="q-total"><strong>${fmtDollar(total)}</strong></td>
-            <td colspan="2"></td>
+            <td></td>
           </tr>
         </tbody>
       </table>
     </section>
-
-    ${!readOnly ? html`
-      <script>
-      (function() {
-        var timers = {};
-        document.querySelectorAll('[data-autosave]').forEach(function(input) {
-          input.addEventListener('change', function() {
-            var form = input.form || document.getElementById(input.getAttribute('form'));
-            if (!form) return;
-            var formId = form.id;
-            if (timers[formId]) clearTimeout(timers[formId]);
-            timers[formId] = setTimeout(function() {
-              form.requestSubmit();
-            }, 800);
-          });
-        });
-        var newForm = document.getElementById('new-line-form');
-        if (newForm) {
-          var descInput = newForm.querySelector('[name="description"]');
-          var titleInput = newForm.querySelector('[name="title"]');
-          var target = descInput || titleInput;
-          if (target) {
-            target.addEventListener('change', function() {
-              if (target.value.trim()) newForm.requestSubmit();
-            });
-          }
-        }
-      })();
-      </script>
-    ` : ''}
   `;
 
-  const body = html`${headerSection}${detailsSection}${linesSection}`;
+  // ── 5. Footer card ─────────────────────────────────────────────────
+  const footerSection = html`
+    <section class="card">
+      <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}" class="stack-form" id="quote-footer-form">
+        <fieldset ${readOnly ? 'disabled' : ''}>
+          <label>
+            <strong>Quote notes</strong>
+            <textarea name="notes_customer" class="desc-textarea" placeholder="Notes to the customer (appears on the issued quote)">${escape(quote.notes_customer ?? '')}</textarea>
+          </label>
+          <label style="margin-top:0.75rem">
+            <strong>Terms</strong>
+            <textarea name="payment_terms" class="desc-textarea" placeholder="Payment terms, delivery terms, conditions...">${escape(quote.payment_terms ?? '')}</textarea>
+          </label>
+          <label style="margin-top:0.75rem">
+            <strong>Delivery terms</strong>
+            <textarea name="delivery_terms" class="desc-textarea" placeholder="EXW, FCA, FOB, DAP...">${escape(quote.delivery_terms ?? '')}</textarea>
+          </label>
+
+          <!-- Carry forward all required hidden fields for the save -->
+          <input type="hidden" name="quote_type" value="${escape(quote.quote_type)}">
+          <input type="hidden" name="title" value="${escape(quote.title ?? '')}">
+          <input type="hidden" name="description" value="${escape(quote.description ?? '')}">
+          <input type="hidden" name="valid_until" value="${escape(quote.valid_until ?? '')}">
+          <input type="hidden" name="incoterms" value="${escape(quote.incoterms ?? '')}">
+          <input type="hidden" name="delivery_estimate" value="${escape(quote.delivery_estimate ?? '')}">
+          <input type="hidden" name="tax_amount" value="${quote.tax_amount != null ? escape(Number(quote.tax_amount).toFixed(2)) : '0'}">
+          <input type="hidden" name="notes_internal" value="${escape(quote.notes_internal ?? '')}">
+        </fieldset>
+
+        ${!readOnly
+          ? html`<div class="form-actions"><button type="submit" class="btn primary">Save</button></div>`
+          : ''}
+      </form>
+
+      ${quote.notes_internal ? html`
+        <div style="margin-top:0.75rem;padding:0.5rem 0.7rem;background:#fff8c5;border:1px solid #d4a72c;border-radius:var(--radius)">
+          <strong style="font-size:0.85em">Internal notes (not visible to customer):</strong>
+          <p style="margin:0.25rem 0 0;font-size:0.9em;white-space:pre-wrap">${escape(quote.notes_internal)}</p>
+        </div>
+      ` : ''}
+    </section>
+  `;
+
+  // ── Auto-save script ───────────────────────────────────────────────
+  const autoSaveScript = !readOnly ? html`
+    <script>
+    (function() {
+      var timers = {};
+      document.querySelectorAll('[data-autosave]').forEach(function(input) {
+        input.addEventListener('change', function() {
+          var form = input.form || document.getElementById(input.getAttribute('form'));
+          if (!form) return;
+          var formId = form.id;
+          if (timers[formId]) clearTimeout(timers[formId]);
+          timers[formId] = setTimeout(function() {
+            form.requestSubmit();
+          }, 800);
+        });
+      });
+      var newForm = document.getElementById('new-line-form');
+      if (newForm) {
+        var titleInput = newForm.querySelector('[name="title"]');
+        if (titleInput) {
+          titleInput.addEventListener('change', function() {
+            if (titleInput.value.trim()) newForm.requestSubmit();
+          });
+        }
+      }
+    })();
+    </script>
+  ` : '';
+
+  const body = html`${headerSection}${bannerCard}${detailsSection}${linesSection}${footerSection}${autoSaveScript}`;
 
   return htmlResponse(
     layout(
@@ -536,7 +556,6 @@ export async function onRequestPost(context) {
     );
   }
 
-  // If quote_type wasn't in the form (single-type transaction), keep existing
   if (!value.quote_type) value.quote_type = before.quote_type;
 
   const ts = now();

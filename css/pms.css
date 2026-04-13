@@ -1053,6 +1053,128 @@ table.data.compact td {
   .quote-meta-grid { grid-template-columns: 1fr; }
 }
 
+/* Quote banner card — "QUOTATION" + type left, logo right. */
+.quote-banner { padding: 1rem 1.2rem; }
+.quote-banner-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.quote-banner-title {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--fg);
+}
+.quote-banner-type {
+  margin: 0.1rem 0 0;
+  font-size: 0.95rem;
+  color: var(--fg-muted);
+}
+.quote-banner-logo {
+  height: 56px;
+  width: auto;
+  object-fit: contain;
+}
+
+/* Quote meta table — right column on the details card. */
+.quote-meta-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92em;
+}
+.quote-meta-table td {
+  padding: 0.3rem 0;
+  vertical-align: middle;
+}
+.quote-meta-table .meta-label {
+  font-weight: 600;
+  white-space: nowrap;
+  width: 1%;
+  padding-right: 0.75rem;
+  color: var(--fg-muted);
+}
+.meta-input {
+  padding: 0.25rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  background: var(--bg);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Description auto-sizing textarea (full-width). */
+.desc-label { display: block; font-weight: 500; font-size: 0.9em; }
+.desc-textarea {
+  display: block;
+  width: 100%;
+  margin-top: 0.2rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  background: var(--bg);
+  field-sizing: content;
+  min-height: 2.5rem;
+  resize: none;
+  box-sizing: border-box;
+}
+
+/* Address in client info */
+.client-info pre.addr {
+  font-family: var(--font);
+  font-size: 0.9em;
+  background: var(--bg-alt);
+  padding: 0.35rem 0.5rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  white-space: pre-wrap;
+}
+
+/* Line items table — Item column layout. */
+.quote-lines-table .col-item { min-width: 280px; }
+.line-item-fields {
+  display: flex;
+  gap: 0.5rem;
+}
+.line-title {
+  flex: 1;
+  min-width: 0;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  background: var(--bg);
+}
+.line-desc {
+  flex: 2;
+  min-width: 0;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  background: var(--bg);
+}
+.line-notes {
+  display: block;
+  width: 100%;
+  margin-top: 0.3rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 0.88em;
+  color: var(--fg-muted);
+  background: var(--bg);
+  field-sizing: content;
+  min-height: 1.6rem;
+  resize: none;
+  box-sizing: border-box;
+}
+.line-notes::placeholder { color: var(--fg-muted); opacity: 0.5; }
+
 /* Quotes tab: the "+ New quote" inline create form (type picker + button). */
 .quotes-new-form {
   display: flex;
