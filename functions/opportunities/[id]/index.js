@@ -683,7 +683,7 @@ export async function onRequestGet(context) {
                     <span class="ie-display"><span class="pill">${escape(DOC_KIND_LABELS[d.kind] ?? d.kind)}</span></span>
                     <span class="ie-raw" hidden>${escape(d.kind)}</span>
                   </span>
-                </td>`; })
+                </td>
                 <td><small>${escape(fmtSize(d.size_bytes))}</small></td>
                 <td><small class="muted">${escape((d.uploaded_at ?? '').slice(0, 10))}</small></td>
                 <td><small>${escape(d.uploaded_by_name ?? d.uploaded_by_email ?? '—')}</small></td>
@@ -698,8 +698,8 @@ export async function onRequestGet(context) {
                     <button class="btn small danger" type="submit">Delete</button>
                   </form>
                 </td>
-              </tr>`)}
-            </tbody>
+              </tr>`; })
+            }</tbody>
           </table>`}
     </section>`;
 
