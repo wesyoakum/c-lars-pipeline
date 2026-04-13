@@ -132,39 +132,41 @@ export async function onRequestGet(context) {
               : ''}
           </p>
         </div>
-        <div class="header-actions">
-          ${isDraft ? html`
-            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/submit" class="inline-form">
-              <button class="btn primary" type="submit">Issue</button>
-            </form>
-          ` : ''}
-          ${isIssued ? html`
-            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
-              <button class="btn" type="submit">Revise</button>
-            </form>
-            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/accept" class="inline-form">
-              <button class="btn primary" type="submit">Accept</button>
-            </form>
-            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/reject" class="inline-form">
-              <button class="btn" type="submit">Reject</button>
-            </form>
-            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/expire" class="inline-form">
-              <button class="btn danger" type="submit">Cancel</button>
-            </form>
-          ` : ''}
-          ${quote.status === 'accepted' || quote.status === 'rejected' || quote.status === 'expired' ? html`
-            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
-              <button class="btn primary" type="submit">New revision</button>
-            </form>
-          ` : ''}
-          ${isDraft ? html`
-            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/delete"
-                  class="inline-form"
-                  onsubmit="return confirm('Delete this quote? This cannot be undone.');">
-              <button class="btn danger" type="submit">Delete</button>
-            </form>
-          ` : ''}
+        <div class="header-actions-stack">
           <a class="back-link" href="/opportunities/${escape(quote.opportunity_id)}?tab=quotes">\u2190 Quotes</a>
+          <div class="header-actions">
+            ${isDraft ? html`
+              <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/submit" class="inline-form">
+                <button class="btn primary" type="submit">Issue</button>
+              </form>
+            ` : ''}
+            ${isIssued ? html`
+              <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
+                <button class="btn" type="submit">Revise</button>
+              </form>
+              <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/accept" class="inline-form">
+                <button class="btn primary" type="submit">Accept</button>
+              </form>
+              <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/reject" class="inline-form">
+                <button class="btn" type="submit">Reject</button>
+              </form>
+              <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/expire" class="inline-form">
+                <button class="btn danger" type="submit">Cancel</button>
+              </form>
+            ` : ''}
+            ${quote.status === 'accepted' || quote.status === 'rejected' || quote.status === 'expired' ? html`
+              <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
+                <button class="btn primary" type="submit">New revision</button>
+              </form>
+            ` : ''}
+            ${isDraft ? html`
+              <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/delete"
+                    class="inline-form"
+                    onsubmit="return confirm('Delete this quote? This cannot be undone.');">
+                <button class="btn danger" type="submit">Delete</button>
+              </form>
+            ` : ''}
+          </div>
         </div>
       </div>
 
