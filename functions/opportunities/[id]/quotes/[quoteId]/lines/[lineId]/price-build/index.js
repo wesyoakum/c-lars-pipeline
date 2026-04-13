@@ -557,6 +557,18 @@ async function handleCreate(context, ctx, input) {
   const label = input.label || line.description || 'Price build';
   const templateId = input.builds_library_id || null;
 
+  // Auto-generate price build number: P{quoteSeq}.{lineIndex}
+  // quoteSeq is the quote's position (1, 2, 3...) and lineIndex is
+  // the build's position within the quote (1, 2, 3...).
+  const quote = await one(env.DB, 'SELECT quote_seq FROM quotes WHERE id = ?', [quoteId]);
+  const quoteSeqNum = quote?.quote_seq ?? 1;
+  const existingBuilds = await one(env.DB,
+    `SELECT COUNT(*) AS n FROM cost_builds cb
+       JOIN quote_lines ql ON ql.id = cb.quote_line_id
+      WHERE ql.quote_id = ?`, [quoteId]);
+  const buildIndex = (existingBuilds?.n ?? 0) + 1;
+  const buildNumber = `P${quoteSeqNum}.${buildIndex}`;
+
   const statements = [];
 
   if (templateId) {
@@ -569,12 +581,12 @@ async function handleCreate(context, ctx, input) {
     statements.push(
       stmt(env.DB,
         `INSERT INTO cost_builds
-           (id, opportunity_id, quote_line_id, builds_library_id, label, status,
+           (id, opportunity_id, quote_line_id, builds_library_id, label, number, status,
             dm_user_cost, dl_user_cost, imoh_user_cost, other_user_cost,
             quote_price_user, use_dm_library, use_labor_library,
             notes, created_at, updated_at, created_by_user_id)
-         VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, line.opportunity_id, lineId, templateId, label,
+         VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, line.opportunity_id, lineId, templateId, label, buildNumber,
          tmpl.dm_user_cost, tmpl.dl_user_cost, tmpl.imoh_user_cost, tmpl.other_user_cost,
          tmpl.quote_price_user, tmpl.use_dm_library, tmpl.use_labor_library,
          tmpl.notes, ts, ts, user?.id ?? null]
@@ -602,12 +614,12 @@ async function handleCreate(context, ctx, input) {
     statements.push(
       stmt(env.DB,
         `INSERT INTO cost_builds
-           (id, opportunity_id, quote_line_id, label, status,
+           (id, opportunity_id, quote_line_id, label, number, status,
             dm_user_cost, dl_user_cost, imoh_user_cost, other_user_cost,
             quote_price_user, use_dm_library, use_labor_library,
             notes, created_at, updated_at, created_by_user_id)
-         VALUES (?, ?, ?, ?, 'draft', NULL, NULL, NULL, NULL, NULL, 0, 0, NULL, ?, ?, ?)`,
-        [id, line.opportunity_id, lineId, label, ts, ts, user?.id ?? null]
+         VALUES (?, ?, ?, ?, ?, 'draft', NULL, NULL, NULL, NULL, NULL, 0, 0, NULL, ?, ?, ?)`,
+        [id, line.opportunity_id, lineId, label, buildNumber, ts, ts, user?.id ?? null]
       )
     );
   }

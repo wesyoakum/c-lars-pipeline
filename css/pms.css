@@ -1299,6 +1299,45 @@ tr.line-option td:first-child {
   margin-top: 0.15rem;
 }
 
+/* ---------- Dashboard ---------- */
+
+.dashboard-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+.metric-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  text-align: center;
+}
+.metric-value {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+.metric-label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+  margin-top: 0.2rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.dashboard-charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+@media (max-width: 700px) {
+  .dashboard-charts { grid-template-columns: 1fr; }
+}
+
 /* ---------- Version badge (bottom-right corner) ---------- */
 .version-badge {
   position: fixed;

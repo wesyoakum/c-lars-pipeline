@@ -113,6 +113,7 @@ export function layout(title, body, opts = {}) {
   <script defer src="/js/htmx.min.js"></script>
   <script defer src="/js/alpine.min.js"></script>
   <script defer src="/js/live-calc.js"></script>
+  ${opts.charts ? '<script defer src="/js/chart.min.js"></script>' : ''}
 </head>
 <body>
   <header class="site-header">
@@ -126,6 +127,7 @@ export function layout(title, body, opts = {}) {
       ${navLink('/jobs', 'Jobs', activeNav)}
       ${navLink('/library', 'Library', activeNav)}
       ${navLink('/activities', 'Tasks', activeNav)}
+      ${navLink('/reports', 'Reports', activeNav)}
     </nav>
     <div class="header-right">
       <a href="/settings" class="settings-gear" title="Settings">

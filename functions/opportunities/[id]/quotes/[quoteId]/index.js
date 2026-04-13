@@ -80,7 +80,8 @@ export async function onRequestGet(context) {
 
   const lines = await all(
     env.DB,
-    `SELECT ql.*, cb.label AS price_build_label, cb.status AS price_build_status
+    `SELECT ql.*, cb.label AS price_build_label, cb.status AS price_build_status,
+            cb.quote_price_user AS build_quote_price, cb.number AS build_number
        FROM quote_lines ql
        LEFT JOIN cost_builds cb ON cb.quote_line_id = ql.id
       WHERE ql.quote_id = ?
@@ -371,10 +372,15 @@ export async function onRequestGet(context) {
               <td class="num">
                 <input type="text" name="unit_price" form="line-form-${escape(l.id)}" value="${escape(l.unit_price ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input" data-autosave>
               </td>
-              <td class="num" data-line-extended>${fmtDollar(l.extended_price)}</td>
+              <td class="num" data-line-extended>
+                ${fmtDollar(l.extended_price)}
+                ${l.build_quote_price != null && Math.abs(Number(l.unit_price ?? 0) - Number(l.build_quote_price)) > 0.01
+                  ? html`<br><small class="muted" style="color:var(--warning)" title="Price build suggests ${fmtDollar(l.build_quote_price)}/unit">Build: ${fmtDollar(l.build_quote_price)}</small>`
+                  : ''}
+              </td>
               <td>
                 ${l.price_build_label
-                  ? html`<a href="${pbUrl(l.id)}" class="pill ${l.price_build_status === 'locked' ? 'pill-locked' : ''}" style="font-size:0.8rem">${escape(l.price_build_label)}</a>`
+                  ? html`<a href="${pbUrl(l.id)}" class="pill ${l.price_build_status === 'locked' ? 'pill-locked' : ''}" style="font-size:0.8rem">${escape(l.build_number || l.price_build_label)}</a>`
                   : (!readOnly ? html`<a href="${pbUrl(l.id)}" class="btn small">+ Build</a>` : html`<span class="muted">\u2014</span>`)}
               </td>
               <td class="row-actions">
