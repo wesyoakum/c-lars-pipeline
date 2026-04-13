@@ -3,11 +3,12 @@
 // POST /opportunities/:id/quotes/:quoteId/lines — add a line item.
 // Recomputes the quote's subtotal_price and total_price in the same batch.
 
-import { one, stmt, batch } from '../../../../../lib/db.js';
+import { one, all, stmt, batch } from '../../../../../lib/db.js';
 import { auditStmt } from '../../../../../lib/audit.js';
 import { uuid, now } from '../../../../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../../../../lib/http.js';
 import { validateQuoteLine } from '../../../../../lib/validators.js';
+import { resolveCostRef } from '../../../../../lib/quote-cost-ref.js';
 
 const READ_ONLY_STATUSES = new Set([
   'accepted',
@@ -53,6 +54,9 @@ export async function onRequestPost(context) {
   const ts = now();
   const extended = Number(value.quantity) * Number(value.unit_price);
 
+  // Resolve cost reference (if a cost build item was selected).
+  const costRef = await resolveCostRef(env.DB, input.cost_ref);
+
   // sort_order: next after the current max (1-based-ish, defaults to 0
   // when the quote has no lines yet).
   const maxRow = await one(
@@ -67,8 +71,12 @@ export async function onRequestPost(context) {
       env.DB,
       `INSERT INTO quote_lines
          (id, quote_id, sort_order, item_type, description, quantity, unit,
-          unit_price, extended_price, notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          unit_price, extended_price, notes,
+          cost_ref_type, cost_ref_id, cost_ref_amount,
+          created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+               ?, ?, ?,
+               ?, ?)`,
       [
         id,
         quoteId,
@@ -80,6 +88,9 @@ export async function onRequestPost(context) {
         value.unit_price,
         extended,
         value.notes,
+        costRef.cost_ref_type,
+        costRef.cost_ref_id,
+        costRef.cost_ref_amount,
         ts,
         ts,
       ]

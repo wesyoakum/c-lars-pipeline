@@ -79,9 +79,15 @@ export async function onRequestPost(context) {
       stmt(env.DB,
         `INSERT INTO quote_lines
            (id, quote_id, sort_order, item_type, description, quantity, unit,
-            unit_price, extended_price, notes, created_at, updated_at)
-         VALUES (?, ?, ?, 'product', ?, 1, 'ea', ?, ?, NULL, ?, ?)`,
-        [id, quoteId, sortOrder, dm.description, cost, cost, ts, ts]
+            unit_price, extended_price, notes,
+            cost_ref_type, cost_ref_id, cost_ref_amount,
+            created_at, updated_at)
+         VALUES (?, ?, ?, 'product', ?, 1, 'ea', ?, ?, NULL,
+                 'dm', ?, ?,
+                 ?, ?)`,
+        [id, quoteId, sortOrder, dm.description, cost, cost,
+         dm.id, cost,
+         ts, ts]
       )
     );
     sortOrder++;
@@ -102,9 +108,15 @@ export async function onRequestPost(context) {
       stmt(env.DB,
         `INSERT INTO quote_lines
            (id, quote_id, sort_order, item_type, description, quantity, unit,
-            unit_price, extended_price, notes, created_at, updated_at)
-         VALUES (?, ?, ?, 'labor', ?, ?, 'hr', ?, ?, NULL, ?, ?)`,
-        [id, quoteId, sortOrder, li.description, totalHours, totalCost / (totalHours || 1), totalCost, ts, ts]
+            unit_price, extended_price, notes,
+            cost_ref_type, cost_ref_id, cost_ref_amount,
+            created_at, updated_at)
+         VALUES (?, ?, ?, 'labor', ?, ?, 'hr', ?, ?, NULL,
+                 'labor', ?, ?,
+                 ?, ?)`,
+        [id, quoteId, sortOrder, li.description, totalHours, totalCost / (totalHours || 1), totalCost,
+         li.id, totalCost,
+         ts, ts]
       )
     );
     sortOrder++;
@@ -113,7 +125,8 @@ export async function onRequestPost(context) {
 
   // --- Current-project labor → one aggregate line -------------------------
   // If the cost build has per-workcenter labor hours (the "Current Project"
-  // section), create a single summary line.
+  // section), create a single summary line. No cost_ref since this is an
+  // aggregate of multiple workcenters, not a single library item.
   const currentLabor = bundle.currentLabor || [];
   if (currentLabor.length > 0) {
     const id = uuid();

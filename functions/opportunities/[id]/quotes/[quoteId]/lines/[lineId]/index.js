@@ -9,6 +9,7 @@ import { auditStmt, diff } from '../../../../../../lib/audit.js';
 import { now } from '../../../../../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../../../../../lib/http.js';
 import { validateQuoteLine } from '../../../../../../lib/validators.js';
+import { resolveCostRef } from '../../../../../../lib/quote-cost-ref.js';
 
 const READ_ONLY_STATUSES = new Set([
   'accepted',
@@ -25,6 +26,9 @@ const LINE_FIELDS = [
   'unit_price',
   'extended_price',
   'notes',
+  'cost_ref_type',
+  'cost_ref_id',
+  'cost_ref_amount',
 ];
 
 export async function onRequestPost(context) {
@@ -72,7 +76,18 @@ export async function onRequestPost(context) {
 
   const ts = now();
   const extended = Number(value.quantity) * Number(value.unit_price);
-  const after = { ...before, ...value, extended_price: extended };
+
+  // Resolve cost reference (if a cost build item was selected).
+  const costRef = await resolveCostRef(env.DB, input.cost_ref);
+
+  const after = {
+    ...before,
+    ...value,
+    extended_price: extended,
+    cost_ref_type: costRef.cost_ref_type,
+    cost_ref_id: costRef.cost_ref_id,
+    cost_ref_amount: costRef.cost_ref_amount,
+  };
   const changes = diff(before, after, LINE_FIELDS);
 
   await batch(env.DB, [
@@ -86,6 +101,9 @@ export async function onRequestPost(context) {
               unit_price = ?,
               extended_price = ?,
               notes = ?,
+              cost_ref_type = ?,
+              cost_ref_id = ?,
+              cost_ref_amount = ?,
               updated_at = ?
         WHERE id = ? AND quote_id = ?`,
       [
@@ -96,6 +114,9 @@ export async function onRequestPost(context) {
         value.unit_price,
         extended,
         value.notes,
+        costRef.cost_ref_type,
+        costRef.cost_ref_id,
+        costRef.cost_ref_amount,
         ts,
         lineId,
         quoteId,
