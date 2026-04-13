@@ -1,6 +1,6 @@
 // functions/lib/version.js
 //
-// Simple sequential version number. Bump this manually before each deploy.
+// Auto-bumped by the pre-commit git hook on every commit.
 // Displayed in the bottom-right corner of every page via layout.js.
 
-export const VERSION = '01';
+export const VERSION = '0.3';
