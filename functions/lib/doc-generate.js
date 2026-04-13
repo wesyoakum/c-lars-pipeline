@@ -186,7 +186,10 @@ export async function convertToPdf(env, docxBuffer) {
     `https://v2.convertapi.com/convert/docx/to/pdf?Secret=${secret}`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream' },
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': 'attachment; filename="document.docx"',
+      },
       body: docxBuffer,
     }
   );
