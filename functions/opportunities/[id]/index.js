@@ -340,6 +340,9 @@ export async function onRequestGet(context) {
             · ${inlineSelect('transaction_type', opp.transaction_type, TYPE_OPTIONS)}
           </p>
         </div>
+        <a class="icon-btn primary" href="/opportunities/${escape(opp.id)}?tab=quotes" title="New quote">
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="10" y1="4" x2="10" y2="16"/><line x1="4" y1="10" x2="16" y2="10"/></svg>
+        </a>
       </div>
 
       <!-- Stage carousel -->
@@ -387,55 +390,24 @@ export async function onRequestGet(context) {
       </form>
 
       <!-- Main detail fields -->
-      <div class="detail-grid">
-        <div class="detail-pair">
-          <span class="detail-label">Account</span>
-          <span class="detail-value">${inlineSelect('account_id', opp.account_id, accountOptions)}</span>
-        </div>
-        <div class="detail-pair">
-          <span class="detail-label">Primary contact</span>
-          <span class="detail-value">${inlineSelect('primary_contact_id', opp.primary_contact_id, contactOptions)}</span>
-        </div>
-        <div class="detail-pair">
-          <span class="detail-label">Estimated value</span>
-          <span class="detail-value">${inlineMoney('estimated_value_usd', opp.estimated_value_usd)}</span>
-        </div>
-        <div class="detail-pair">
-          <span class="detail-label">Probability</span>
-          <span class="detail-value">${inlineText('probability', opp.probability != null ? `${opp.probability}` : '', { placeholder: '—', inputType: 'number' })}</span>
-        </div>
-        <div class="detail-pair">
-          <span class="detail-label">RFQ format</span>
-          <span class="detail-value">${inlineSelect('rfq_format', opp.rfq_format, RFQ_FORMAT_OPTIONS)}</span>
-        </div>
-        <div class="detail-pair">
-          <span class="detail-label">Source</span>
-          <span class="detail-value">${inlineSelect('source', opp.source, SOURCE_OPTIONS)}</span>
-        </div>
-        <div class="detail-pair">
-          <span class="detail-label">Owner</span>
-          <span class="detail-value">${inlineSelect('owner_user_id', opp.owner_user_id, userOptions)}</span>
-        </div>
-        <div class="detail-pair">
-          <span class="detail-label">Salesperson</span>
-          <span class="detail-value">${inlineSelect('salesperson_user_id', opp.salesperson_user_id, userOptions)}</span>
-        </div>
-        <div class="detail-pair">
-          <span class="detail-label">Customer PO</span>
-          <span class="detail-value">${inlineText('customer_po_number', opp.customer_po_number ?? '', { placeholder: '—' })}</span>
-        </div>
-      </div>
-
-      <!-- Description -->
-      <div style="margin-top:0.5rem">
-        <span class="detail-label" style="display:block; margin-bottom:0.15rem">Description</span>
-        ${inlineTextarea('description', opp.description ?? '', { placeholder: 'Click to add description...' })}
-      </div>
-
-      <!-- Pipeline dates -->
-      <div style="margin-top:0.75rem">
-        <strong style="font-size:0.85em">Pipeline dates</strong>
-        <div class="detail-grid" style="margin-top:0.25rem">
+      <div x-data="{ more: false }" >
+        <div class="detail-grid">
+          <div class="detail-pair">
+            <span class="detail-label">Account</span>
+            <span class="detail-value">${inlineSelect('account_id', opp.account_id, accountOptions)}</span>
+          </div>
+          <div class="detail-pair">
+            <span class="detail-label">Primary contact</span>
+            <span class="detail-value">${inlineSelect('primary_contact_id', opp.primary_contact_id, contactOptions)}</span>
+          </div>
+          <div class="detail-pair">
+            <span class="detail-label">Estimated value</span>
+            <span class="detail-value">${inlineMoney('estimated_value_usd', opp.estimated_value_usd)}</span>
+          </div>
+          <div class="detail-pair">
+            <span class="detail-label">Owner</span>
+            <span class="detail-value">${inlineSelect('owner_user_id', opp.owner_user_id, userOptions)}</span>
+          </div>
           <div class="detail-pair">
             <span class="detail-label">RFQ received</span>
             <span class="detail-value">${inlineDate('rfq_received_date', opp.rfq_received_date)}</span>
@@ -444,32 +416,79 @@ export async function onRequestGet(context) {
             <span class="detail-label">RFQ due</span>
             <span class="detail-value">${inlineDate('rfq_due_date', opp.rfq_due_date)}</span>
           </div>
+          ${opp.customer_po_number ? html`
           <div class="detail-pair">
-            <span class="detail-label">RFI due</span>
-            <span class="detail-value">${inlineDate('rfi_due_date', opp.rfi_due_date)}</span>
-          </div>
+            <span class="detail-label">Customer PO</span>
+            <span class="detail-value">${inlineText('customer_po_number', opp.customer_po_number, { placeholder: '—' })}</span>
+          </div>` : ''}
+          ${opp.quoted_date ? html`
           <div class="detail-pair">
             <span class="detail-label">Quoted</span>
             <span class="detail-value">${inlineDate('quoted_date', opp.quoted_date)}</span>
-          </div>
+          </div>` : ''}
+          ${opp.expected_close_date ? html`
           <div class="detail-pair">
             <span class="detail-label">Expected close</span>
             <span class="detail-value">${inlineDate('expected_close_date', opp.expected_close_date)}</span>
-          </div>
+          </div>` : ''}
           <div class="detail-pair">
             <span class="detail-label">Created</span>
             <span class="detail-value muted">${escape((opp.created_at ?? '').slice(0, 10) || '—')}</span>
           </div>
         </div>
-      </div>
 
-      <!-- BANT -->
-      <div x-data="{ showBant: false }" style="margin-top:0.75rem">
-        <button class="show-more-toggle" @click="showBant = !showBant">
-          <span x-text="showBant ? '&#9662; Qualification (BANT)' : '&#9656; Qualification (BANT)'"></span>
+        <!-- Description -->
+        <div style="margin-top:0.5rem">
+          <span class="detail-label" style="display:block; margin-bottom:0.15rem">Description</span>
+          ${inlineTextarea('description', opp.description ?? '', { placeholder: 'Click to add description...' })}
+        </div>
+
+        <!-- More details toggle -->
+        <button class="show-more-toggle" style="margin-top:0.75rem" @click="more = !more">
+          <span x-text="more ? '&#9662; Less details' : '&#9656; More details'"></span>
         </button>
-        <div class="show-more-content" x-show="showBant" x-cloak>
-          <div class="detail-grid">
+        <div x-show="more" x-cloak>
+          <div class="detail-grid" style="margin-top:0.25rem">
+            <div class="detail-pair">
+              <span class="detail-label">Probability</span>
+              <span class="detail-value">${inlineText('probability', opp.probability != null ? `${opp.probability}` : '', { placeholder: '—', inputType: 'number' })}</span>
+            </div>
+            <div class="detail-pair">
+              <span class="detail-label">RFQ format</span>
+              <span class="detail-value">${inlineSelect('rfq_format', opp.rfq_format, RFQ_FORMAT_OPTIONS)}</span>
+            </div>
+            <div class="detail-pair">
+              <span class="detail-label">Source</span>
+              <span class="detail-value">${inlineSelect('source', opp.source, SOURCE_OPTIONS)}</span>
+            </div>
+            <div class="detail-pair">
+              <span class="detail-label">Salesperson</span>
+              <span class="detail-value">${inlineSelect('salesperson_user_id', opp.salesperson_user_id, userOptions)}</span>
+            </div>
+            <div class="detail-pair">
+              <span class="detail-label">RFI due</span>
+              <span class="detail-value">${inlineDate('rfi_due_date', opp.rfi_due_date)}</span>
+            </div>
+            ${!opp.customer_po_number ? html`
+            <div class="detail-pair">
+              <span class="detail-label">Customer PO</span>
+              <span class="detail-value">${inlineText('customer_po_number', '', { placeholder: '—' })}</span>
+            </div>` : ''}
+            ${!opp.quoted_date ? html`
+            <div class="detail-pair">
+              <span class="detail-label">Quoted</span>
+              <span class="detail-value">${inlineDate('quoted_date', opp.quoted_date)}</span>
+            </div>` : ''}
+            ${!opp.expected_close_date ? html`
+            <div class="detail-pair">
+              <span class="detail-label">Expected close</span>
+              <span class="detail-value">${inlineDate('expected_close_date', opp.expected_close_date)}</span>
+            </div>` : ''}
+          </div>
+
+          <!-- BANT -->
+          <strong style="font-size:0.85em; display:block; margin-top:0.5rem">Qualification (BANT)</strong>
+          <div class="detail-grid" style="margin-top:0.25rem">
             <div class="detail-pair">
               <span class="detail-label">Budget</span>
               <span class="detail-value">${inlineSelect('bant_budget', opp.bant_budget, BANT_BUDGET_OPTIONS)}</span>
@@ -741,8 +760,8 @@ export async function onRequestGet(context) {
   const tabs = html`
     <nav class="card" style="padding: 0.5rem 1rem;">
       <a class="nav-link ${tab === 'overview' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}">Overview</a>
-      <a class="nav-link ${tab === 'cost' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=cost">Price builds (${priceBuildBadgeCount})</a>
       <a class="nav-link ${tab === 'quotes' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=quotes">Quotes (${quoteBadgeCount})</a>
+      <a class="nav-link ${tab === 'cost' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=cost">Price builds (${priceBuildBadgeCount})</a>
       <a class="nav-link ${tab === 'tasks' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=tasks">Tasks${taskBadgeCount > 0 ? ` (${taskBadgeCount})` : ''}</a>
       <a class="nav-link ${tab === 'docs' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=docs">Docs${docBadgeCount > 0 ? ` (${docBadgeCount})` : ''}</a>
       <a class="nav-link ${tab === 'history' ? 'active' : ''}" href="/opportunities/${escape(opp.id)}?tab=history">History (${events.length})</a>

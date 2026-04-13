@@ -16,6 +16,11 @@ import { redirectWithFlash } from '../../../lib/http.js';
 import { validateQuote, allowedQuoteTypes } from '../../../lib/validators.js';
 import { formBody } from '../../../lib/http.js';
 
+export async function onRequestGet(context) {
+  const oppId = context.params.id;
+  return Response.redirect(new URL(`/opportunities/${oppId}?tab=quotes`, context.request.url), 302);
+}
+
 export async function onRequestPost(context) {
   const { env, data, request, params } = context;
   const user = data?.user;
