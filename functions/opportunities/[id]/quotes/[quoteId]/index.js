@@ -325,7 +325,15 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h2>Line items</h2>
-        <span class="header-value" id="q-lines-subtotal">${fmtDollar(subtotal)} subtotal</span>
+        <div class="header-actions">
+          ${!readOnly && quote.cost_build_id ? html`
+            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/populate-from-cost-build" class="inline-form"
+                  onsubmit="return confirm('This will add lines from the linked cost build. Continue?');">
+              <button class="btn small" type="submit">Populate from cost build</button>
+            </form>
+          ` : ''}
+          <span class="header-value" id="q-lines-subtotal">${fmtDollar(subtotal)} subtotal</span>
+        </div>
       </div>
 
       <table class="data compact" data-live-calc="quote-lines">
@@ -333,7 +341,6 @@ export async function onRequestGet(context) {
           <tr>
             <th>#</th>
             <th>Description</th>
-            <th>Type</th>
             <th class="num">Qty</th>
             <th>Unit</th>
             <th class="num">Unit price</th>
@@ -349,14 +356,6 @@ export async function onRequestGet(context) {
                 <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}" class="inline-form" id="line-form-${escape(l.id)}">
                   <input type="text" name="description" value="${escape(l.description ?? '')}" ${readOnly ? 'disabled' : ''} style="width: 100%;">
                 </form>
-              </td>
-              <td>
-                <select name="item_type" form="line-form-${escape(l.id)}" ${readOnly ? 'disabled' : ''}>
-                  <option value="misc"    ${l.item_type === 'misc'    ? 'selected' : ''}>Misc</option>
-                  <option value="product" ${l.item_type === 'product' ? 'selected' : ''}>Product</option>
-                  <option value="service" ${l.item_type === 'service' ? 'selected' : ''}>Service</option>
-                  <option value="labor"   ${l.item_type === 'labor'   ? 'selected' : ''}>Labor</option>
-                </select>
               </td>
               <td class="num">
                 <input type="text" name="quantity" form="line-form-${escape(l.id)}" value="${escape(l.quantity ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input">
@@ -387,19 +386,11 @@ export async function onRequestGet(context) {
                     <input type="text" name="description" placeholder="New line item…" style="width: 100%;">
                   </form>
                 </td>
-                <td>
-                  <select name="item_type" form="new-line-form">
-                    <option value="misc">Misc</option>
-                    <option value="product">Product</option>
-                    <option value="service">Service</option>
-                    <option value="labor">Labor</option>
-                  </select>
-                </td>
                 <td class="num">
                   <input type="text" name="quantity" form="new-line-form" value="1" class="num-input">
                 </td>
                 <td>
-                  <input type="text" name="unit" form="new-line-form" placeholder="ea" style="width: 100%;">
+                  <input type="text" name="unit" form="new-line-form" value="ea" style="width: 100%;">
                 </td>
                 <td class="num">
                   <input type="text" name="unit_price" form="new-line-form" class="num-input" placeholder="0">
@@ -412,17 +403,17 @@ export async function onRequestGet(context) {
             `
             : ''}
           <tr class="totals-row">
-            <td colspan="6" class="num"><strong>Subtotal</strong></td>
+            <td colspan="5" class="num"><strong>Subtotal</strong></td>
             <td class="num" id="q-subtotal"><strong>${fmtDollar(subtotal)}</strong></td>
             <td></td>
           </tr>
           <tr class="totals-row">
-            <td colspan="6" class="num">Tax</td>
+            <td colspan="5" class="num">Tax</td>
             <td class="num">${fmtDollar(Number(quote.tax_amount ?? 0))}</td>
             <td></td>
           </tr>
           <tr class="totals-row">
-            <td colspan="6" class="num"><strong>Total</strong></td>
+            <td colspan="5" class="num"><strong>Total</strong></td>
             <td class="num" id="q-total"><strong>${fmtDollar(total)}</strong></td>
             <td></td>
           </tr>

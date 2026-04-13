@@ -552,10 +552,10 @@ export function validateQuoteLine(input) {
     errors.description = 'Description is required';
   }
 
-  const itemType = trim(input.item_type) || 'misc';
+  const itemType = trim(input.item_type) || 'product';
   if (!QUOTE_LINE_ITEM_TYPES.has(itemType)) {
     errors.item_type = 'Unknown item type';
-    value.item_type = 'misc';
+    value.item_type = 'product';
   } else {
     value.item_type = itemType;
   }
@@ -565,7 +565,7 @@ export function validateQuoteLine(input) {
   if (qtyErr) errors.quantity = qtyErr;
   value.quantity = qty === null ? 1 : qty;
 
-  value.unit = trim(input.unit) || null;
+  value.unit = trim(input.unit) || 'ea';
 
   // Unit price: optional, defaults to 0.
   const { value: price, error: priceErr } = parseOptionalMoney(input.unit_price);
