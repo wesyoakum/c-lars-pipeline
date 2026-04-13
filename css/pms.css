@@ -802,7 +802,7 @@ fieldset.qualification-box select {
 }
 
 /* ---------- Form helpers ---------- */
-.stack-form { max-width: 640px; }
+.stack-form { max-width: 100%; }
 .stack-form .field {
   display: block;
   margin-bottom: 0.9rem;
