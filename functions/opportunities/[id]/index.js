@@ -289,15 +289,10 @@ export async function onRequestGet(context) {
   const salespersonLabel = opp.sp_name ?? opp.sp_email ?? '—';
 
   // ---- Stage carousel data -----------------------------------------------
-  // Only closed_lost and closed_died are pulled out as separate buttons.
-  // Everything else (including oc_issued, ntp_issued, closed_won) goes in
-  // the carousel.
-  const LOSS_STAGES = new Set(['closed_lost', 'closed_died']);
-  const carouselStages = typeStages.filter(s => !LOSS_STAGES.has(s.stage_key));
-  const lossStages = typeStages.filter(s => LOSS_STAGES.has(s.stage_key));
+  // All stages go in the carousel, including loss stages.
+  const carouselStages = typeStages;
   const carouselIdx = carouselStages.findIndex(s => s.stage_key === opp.stage);
-  // If current stage is a loss stage, default carousel to last stage
-  const effectiveIdx = carouselIdx >= 0 ? carouselIdx : carouselStages.length - 1;
+  const effectiveIdx = carouselIdx >= 0 ? carouselIdx : 0;
 
   // Build option lists for inline-edit select fields
   const contactOptions = [
@@ -349,29 +344,23 @@ export async function onRequestGet(context) {
           <div class="stage-carousel-window">
             ${carouselStages.map((s, i) => {
               const isCurrent = s.stage_key === opp.stage;
+              const isLoss = s.stage_key === 'closed_lost' || s.stage_key === 'closed_died';
               let cls = 'stage-pill';
               if (isCurrent) cls += ' stage-pill-current';
+              else if (isLoss) cls += ' stage-pill-loss';
               else if (s.sort_order < (currentStage?.sort_order ?? 0)) cls += ' stage-pill-past';
               return html`
-                <button type="submit" name="to_stage" value="${s.stage_key}"
+                <button type="${isLoss && !isCurrent ? 'button' : 'submit'}"
+                        ${!isLoss ? `name="to_stage"` : ''} value="${s.stage_key}"
                         class="${cls}" data-idx="${i}"
                         x-show="Math.abs(${i} - idx) <= 1"
-                        ${isCurrent ? 'disabled' : ''}>
+                        ${isCurrent ? 'disabled' : ''}
+                        ${isLoss && !isCurrent ? `@click="showCloseReason('${s.stage_key}')"` : ''}>
                   ${s.label}
                 </button>`;
             })}
           </div>
           <button type="button" class="stage-arrow" @click="next()" :disabled="idx >= max - 1">&rsaquo;</button>
-          ${lossStages.map(s => {
-            const isCurrent = s.stage_key === opp.stage;
-            return html`
-              <button type="${isCurrent ? 'submit' : 'button'}" ${isCurrent ? `name="to_stage"` : ''} value="${s.stage_key}"
-                      class="stage-pill-terminal stage-pill-loss${isCurrent ? ' stage-pill-current' : ''}"
-                      ${isCurrent ? 'disabled' : ''}
-                      ${!isCurrent ? `@click="showCloseReason('${s.stage_key}')"` : ''}>
-                ${s.label}
-              </button>`;
-          })}
         </div>
 
         <!-- Close reason (shown when clicking a loss stage) -->
@@ -691,7 +680,7 @@ export async function onRequestGet(context) {
               const who = e.user_name ?? e.user_email ?? 'system';
               const when = formatTimestamp(e.at);
               const summary = e.summary ?? `${e.event_type}`;
-              const changes = parseChangeList(e.changes_json);
+              const changes = parseChanges(e.changes_json);
               return html`<li>
                 <div class="activity-head">
                   <strong>${escape(who)}</strong>
@@ -700,7 +689,9 @@ export async function onRequestGet(context) {
                 </div>
                 <div>${escape(summary)}</div>
                 ${e.override_reason ? html`<div class="activity-changes"><small class="muted">Reason: ${escape(e.override_reason)}</small></div>` : ''}
-                ${changes ? html`<div class="activity-changes"><small class="muted">Changed: ${changes.map((k, i) => html`${i > 0 ? ', ' : ''}<code>${escape(k)}</code>`)}</small></div>` : ''}
+                ${changes ? html`<div class="activity-changes">${changes.map(c => html`
+                  <div><small class="muted"><code>${escape(c.field)}</code>: ${escape(fmtChangeValue(c.from))} → ${escape(fmtChangeValue(c.to))}</small></div>
+                `)}</div>` : ''}
               </li>`;
             })}
           </ul>`}
@@ -853,15 +844,21 @@ function formatTimestamp(iso) {
   return iso.replace('T', ' ').replace(/\.\d+Z?$/, '').slice(0, 16);
 }
 
-function parseChangeList(json) {
+function parseChanges(json) {
   if (!json) return null;
   let obj;
   try { obj = JSON.parse(json); } catch { return null; }
   if (!obj || typeof obj !== 'object') return null;
-  const keys = Object.keys(obj);
+  const keys = Object.keys(obj).filter(k => k !== 'gate_warnings');
   if (!keys.length) return null;
   const isDiff = keys.every(k => obj[k] && typeof obj[k] === 'object' && 'from' in obj[k] && 'to' in obj[k]);
-  return isDiff ? keys : null;
+  if (!isDiff) return null;
+  return keys.map(k => ({ field: k, from: obj[k].from, to: obj[k].to }));
+}
+
+function fmtChangeValue(v) {
+  if (v === null || v === undefined || v === '') return '(empty)';
+  return String(v);
 }
 
 function notFound(context) {
