@@ -289,13 +289,15 @@ export async function onRequestGet(context) {
   const salespersonLabel = opp.sp_name ?? opp.sp_email ?? '—';
 
   // ---- Stage carousel data -----------------------------------------------
-  // Show previous, current, next (non-terminal only — terminal stages are
-  // separate buttons below the carousel).
-  const nonTerminal = typeStages.filter(s => !s.is_terminal);
-  const terminal = typeStages.filter(s => s.is_terminal);
-  const carouselIdx = nonTerminal.findIndex(s => s.stage_key === opp.stage);
-  // If current stage is a terminal stage, show last non-terminal as "prev"
-  const isCurrentTerminal = terminal.some(s => s.stage_key === opp.stage);
+  // Only closed_lost and closed_died are pulled out as separate buttons.
+  // Everything else (including oc_issued, ntp_issued, closed_won) goes in
+  // the carousel.
+  const LOSS_STAGES = new Set(['closed_lost', 'closed_died']);
+  const carouselStages = typeStages.filter(s => !LOSS_STAGES.has(s.stage_key));
+  const lossStages = typeStages.filter(s => LOSS_STAGES.has(s.stage_key));
+  const carouselIdx = carouselStages.findIndex(s => s.stage_key === opp.stage);
+  // If current stage is a loss stage, default carousel to last stage
+  const effectiveIdx = carouselIdx >= 0 ? carouselIdx : carouselStages.length - 1;
 
   // Build option lists for inline-edit select fields
   const contactOptions = [
@@ -340,12 +342,12 @@ export async function onRequestGet(context) {
 
       <!-- Stage carousel -->
       <form method="post" action="/opportunities/${escape(opp.id)}/stage"
-            x-data="stageCarousel(${carouselIdx >= 0 ? carouselIdx : nonTerminal.length - 1}, ${nonTerminal.length})"
+            x-data="stageCarousel(${effectiveIdx}, ${carouselStages.length})"
             class="stage-carousel" style="margin:0.5rem 0">
         <div class="stage-carousel-row">
           <button type="button" class="stage-arrow" @click="prev()" :disabled="idx <= 0">&lsaquo;</button>
           <div class="stage-carousel-window">
-            ${nonTerminal.map((s, i) => {
+            ${carouselStages.map((s, i) => {
               const isCurrent = s.stage_key === opp.stage;
               let cls = 'stage-pill';
               if (isCurrent) cls += ' stage-pill-current';
@@ -360,21 +362,13 @@ export async function onRequestGet(context) {
             })}
           </div>
           <button type="button" class="stage-arrow" @click="next()" :disabled="idx >= max - 1">&rsaquo;</button>
-        </div>
-
-        <!-- Terminal stages as small buttons -->
-        <div class="stage-terminal-row">
-          ${terminal.map(s => {
+          ${lossStages.map(s => {
             const isCurrent = s.stage_key === opp.stage;
-            const isLoss = s.stage_key === 'closed_lost' || s.stage_key === 'closed_died';
-            let cls = 'stage-pill-terminal';
-            if (isCurrent) cls += ' stage-pill-current';
-            else if (s.is_won) cls += ' stage-pill-won';
-            else if (isLoss) cls += ' stage-pill-loss';
             return html`
-              <button type="${isLoss && !isCurrent ? 'button' : 'submit'}" name="${isLoss ? '' : 'to_stage'}" value="${s.stage_key}"
-                      class="${cls}" ${isCurrent ? 'disabled' : ''}
-                      ${isLoss && !isCurrent ? `@click="showCloseReason('${s.stage_key}')"` : ''}>
+              <button type="${isCurrent ? 'submit' : 'button'}" ${isCurrent ? `name="to_stage"` : ''} value="${s.stage_key}"
+                      class="stage-pill-terminal stage-pill-loss${isCurrent ? ' stage-pill-current' : ''}"
+                      ${isCurrent ? 'disabled' : ''}
+                      ${!isCurrent ? `@click="showCloseReason('${s.stage_key}')"` : ''}>
                 ${s.label}
               </button>`;
           })}

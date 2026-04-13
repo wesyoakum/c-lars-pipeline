@@ -1147,8 +1147,6 @@ table.data.compact td input.num-input {
 .stage-carousel-window {
   display: flex;
   gap: 0.2rem;
-  flex: 1;
-  justify-content: center;
 }
 
 .stage-pill {
@@ -1186,7 +1184,10 @@ table.data.compact td input.num-input {
   display: flex;
   gap: 0.3rem;
   margin-top: 0.3rem;
-  justify-content: flex-end;
+}
+
+.stage-carousel-row .stage-pill-terminal:first-of-type {
+  margin-left: auto;
 }
 
 .stage-pill-terminal {
