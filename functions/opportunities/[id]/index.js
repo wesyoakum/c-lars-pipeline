@@ -372,7 +372,7 @@ export async function onRequestGet(context) {
 
         <!-- Close reason (shown when clicking a loss stage) -->
         <div class="stage-close-reason" x-show="closingStage" x-cloak>
-          <input type="hidden" name="to_stage" :value="closingStage" :disabled="!closingStage">
+          <input type="hidden" :name="closingStage ? 'to_stage' : ''" :value="closingStage">
           <input type="text" name="override_reason" x-ref="closeReasonInput"
                  placeholder="Close reason (required)" :required="!!closingStage" :disabled="!closingStage"
                  style="font-size:0.85em; flex:1; min-width:200px; max-width:400px;">
