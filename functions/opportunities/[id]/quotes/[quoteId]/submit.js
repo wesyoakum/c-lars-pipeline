@@ -1,34 +1,72 @@
 // POST /opportunities/:id/quotes/:quoteId/submit
 //
-// Submit to customer: approved_internal → submitted. This is the one
-// transition that snapshots the governance document revisions (T&Cs,
-// warranty, rate schedule, refurb SOP) currently in force, so the quote
-// record permanently reflects which version of each governing document
-// applied at the moment of submission. Stamps submitted_at + submitted_by.
+// Issue a quote to customer: draft → issued.
+// Snapshots governance document revisions, stamps submitted_at/by,
+// and auto-creates a task to submit the quote to the customer.
 
-import { transitionQuote, snapshotGoverningDocs } from '../../../../lib/quote-transitions.js';
+import { one, stmt, batch } from '../../../../lib/db.js';
+import { auditStmt } from '../../../../lib/audit.js';
+import { now } from '../../../../lib/ids.js';
+import { redirectWithFlash } from '../../../../lib/http.js';
+import { snapshotGoverningDocs, createIssueTask } from '../../../../lib/quote-transitions.js';
 
 export async function onRequestPost(context) {
-  const { env } = context;
-  const snapshot = await snapshotGoverningDocs(env.DB);
+  const { env, data, params } = context;
+  const user = data?.user;
+  const oppId = params.id;
+  const quoteId = params.quoteId;
 
-  return transitionQuote(context, {
-    from: ['draft', 'internal_review', 'approved_internal'],
-    to: 'submitted',
-    eventType: 'submitted',
-    summaryFn: (q) =>
-      `Submitted ${q.number} Rev ${q.revision} to customer ` +
-      `(T&C ${snapshot.tc_revision ?? '—'}, Warranty ${snapshot.warranty_revision ?? '—'})`,
-    extraSets: {
-      submitted_at: (q, ts) => ts,
-      submitted_by_user_id: (q, ts, user) => user?.id ?? null,
-      tc_revision: snapshot.tc_revision,
-      warranty_revision: snapshot.warranty_revision,
-      rate_schedule_revision: snapshot.rate_schedule_revision,
-      sop_revision: snapshot.sop_revision,
-    },
-    extraAuditChanges: () => ({
-      governance_snapshot: snapshot,
+  const quote = await one(env.DB, 'SELECT * FROM quotes WHERE id = ?', [quoteId]);
+  if (!quote || quote.opportunity_id !== oppId) {
+    return new Response('Quote not found', { status: 404 });
+  }
+
+  // Determine the target status based on current status
+  const allowedFrom = ['draft', 'revision_draft'];
+  if (!allowedFrom.includes(quote.status)) {
+    return redirectWithFlash(
+      `/opportunities/${oppId}/quotes/${quoteId}`,
+      `Cannot issue from ${quote.status} status.`,
+      'error'
+    );
+  }
+
+  const targetStatus = quote.status === 'revision_draft' ? 'revision_issued' : 'issued';
+  const snapshot = await snapshotGoverningDocs(env.DB);
+  const ts = now();
+
+  const statements = [
+    stmt(env.DB,
+      `UPDATE quotes
+          SET status = ?, submitted_at = ?, submitted_by_user_id = ?,
+              tc_revision = ?, warranty_revision = ?, rate_schedule_revision = ?, sop_revision = ?,
+              updated_at = ?
+        WHERE id = ?`,
+      [targetStatus, ts, user?.id ?? null,
+       snapshot.tc_revision, snapshot.warranty_revision,
+       snapshot.rate_schedule_revision, snapshot.sop_revision,
+       ts, quoteId]),
+    auditStmt(env.DB, {
+      entityType: 'quote',
+      entityId: quoteId,
+      eventType: 'issued',
+      user,
+      summary: `Issued ${quote.number} Rev ${quote.revision} to customer (${targetStatus})`,
+      changes: {
+        status: { from: quote.status, to: targetStatus },
+        governance_snapshot: snapshot,
+      },
     }),
-  });
+  ];
+
+  // Auto-create task to submit quote to customer
+  const taskStmts = await createIssueTask(env.DB, quote, user);
+  statements.push(...taskStmts);
+
+  await batch(env.DB, statements);
+
+  return redirectWithFlash(
+    `/opportunities/${oppId}/quotes/${quoteId}`,
+    `Issued ${quote.number} Rev ${quote.revision}.`
+  );
 }

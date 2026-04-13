@@ -250,6 +250,16 @@ export async function renderEditForm(context, opts = {}) {
           </label>
         </div>
 
+        <div class="row">
+          <label style="flex:1">
+            <span>Customer PO number</span>
+            <input type="text" name="customer_po_number"
+                   value="${escape(opp.customer_po_number ?? '')}"
+                   placeholder="PO-12345 (required for Closed Won)">
+          </label>
+          <div style="flex:1"></div>
+        </div>
+
         <fieldset class="qualification-box">
           <legend>Qualification</legend>
           <div class="row">

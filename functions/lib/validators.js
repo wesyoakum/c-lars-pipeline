@@ -171,6 +171,9 @@ export function validateOpportunity(input) {
   value.owner_user_id = trim(input.owner_user_id) || null;
   value.salesperson_user_id = trim(input.salesperson_user_id) || null;
 
+  // Customer PO number — free text, required for Closed Won gate check.
+  value.customer_po_number = trim(input.customer_po_number) || null;
+
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, value };
 }
@@ -427,13 +430,13 @@ const ALL_QUOTE_TYPES = new Set(
 
 const QUOTE_STATUSES = new Set([
   'draft',
-  'internal_review',
-  'approved_internal',
-  'submitted',
+  'issued',
+  'revision_draft',
+  'revision_issued',
   'accepted',
   'rejected',
-  'superseded',
   'expired',
+  'dead',
 ]);
 
 const QUOTE_LINE_ITEM_TYPES = new Set(['product', 'service', 'labor', 'misc']);
@@ -462,14 +465,14 @@ export const QUOTE_TYPE_LABELS = {
  * Human-readable labels for quote status keys.
  */
 export const QUOTE_STATUS_LABELS = {
-  draft:             'Draft',
-  internal_review:   'Internal review',
-  approved_internal: 'Approved (internal)',
-  submitted:         'Submitted',
-  accepted:          'Accepted',
-  rejected:          'Rejected',
-  superseded:        'Superseded',
-  expired:           'Expired',
+  draft:            'Draft',
+  issued:           'Issued',
+  revision_draft:   'Revision Draft',
+  revision_issued:  'Revision Issued',
+  accepted:         'Accepted',
+  rejected:         'Rejected',
+  expired:          'Expired',
+  dead:             'Dead',
 };
 
 /**

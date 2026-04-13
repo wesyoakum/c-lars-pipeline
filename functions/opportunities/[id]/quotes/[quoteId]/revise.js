@@ -7,9 +7,9 @@
 //   - copies header fields (title, description, terms)
 //   - copies all line items (new UUIDs, same sort_order/description/etc)
 //   - sets supersedes_quote_id to the source
-//   - starts in 'draft' status
+//   - starts in 'revision_draft' status
 //
-// The source quote is marked 'superseded' IF it was in a customer-
+// The source quote is marked 'dead' IF it was in a customer-
 // facing status (submitted/accepted/rejected/expired). If the source
 // was still in draft/internal_review/approved_internal, it's left alone.
 
@@ -18,7 +18,7 @@ import { auditStmt } from '../../../../lib/audit.js';
 import { uuid, now } from '../../../../lib/ids.js';
 import { redirectWithFlash } from '../../../../lib/http.js';
 
-const CUSTOMER_FACING = new Set(['submitted', 'accepted', 'rejected', 'expired']);
+const CUSTOMER_FACING = new Set(['issued', 'revision_issued', 'accepted', 'rejected', 'expired']);
 
 export async function onRequestPost(context) {
   const { env, data, params } = context;
@@ -90,7 +90,7 @@ export async function onRequestPost(context) {
           cost_build_id, supersedes_quote_id,
           notes_internal, notes_customer,
           created_at, updated_at, created_by_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, 'draft',
+       VALUES (?, ?, ?, ?, ?, ?, 'revision_draft',
                ?, ?, ?, ?,
                ?, ?, ?,
                ?, ?, ?, ?,
@@ -162,7 +162,7 @@ export async function onRequestPost(context) {
     statements.push(
       stmt(
         env.DB,
-        `UPDATE quotes SET status = 'superseded', updated_at = ? WHERE id = ?`,
+        `UPDATE quotes SET status = 'dead', updated_at = ? WHERE id = ?`,
         [ts, source.id]
       )
     );
@@ -170,11 +170,11 @@ export async function onRequestPost(context) {
       auditStmt(env.DB, {
         entityType: 'quote',
         entityId: source.id,
-        eventType: 'superseded',
+        eventType: 'dead',
         user,
         summary: `${source.number} ${source.revision} superseded by ${number} ${nextRev}`,
         changes: {
-          status: { from: source.status, to: 'superseded' },
+          status: { from: source.status, to: 'dead' },
           superseded_by: newId,
         },
       })

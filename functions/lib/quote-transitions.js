@@ -8,9 +8,9 @@
 // Pages Functions will route any .js file underneath functions/ —
 // we don't want a /_transitions endpoint exposed by accident.
 
-import { one, stmt, batch } from './db.js';
+import { one, all, stmt, batch } from './db.js';
 import { auditStmt } from './audit.js';
-import { now } from './ids.js';
+import { uuid, now } from './ids.js';
 import { redirectWithFlash } from './http.js';
 
 /**
@@ -99,6 +99,49 @@ export async function transitionQuote(context, opts) {
     `/opportunities/${oppId}/quotes/${quoteId}`,
     flash
   );
+}
+
+/**
+ * Create an auto-task when a quote is issued. Assigns to the opportunity
+ * owner with a subject like "Submit Q25004-1 to [account name]".
+ * Returns D1 prepared statements to include in a batch.
+ */
+export async function createIssueTask(db, quote, user) {
+  const opp = await one(db,
+    `SELECT o.id, o.owner_user_id, a.name AS account_name
+       FROM opportunities o
+       LEFT JOIN accounts a ON a.id = o.account_id
+      WHERE o.id = ?`,
+    [quote.opportunity_id]);
+  if (!opp) return [];
+
+  const taskId = uuid();
+  const ts = now();
+  const accountName = opp.account_name || 'customer';
+  const subject = `Submit ${quote.number} to ${accountName}`;
+  const assignedTo = opp.owner_user_id || user?.id || null;
+
+  // Due date: next business day (skip weekends)
+  const due = new Date();
+  due.setDate(due.getDate() + 1);
+  if (due.getDay() === 0) due.setDate(due.getDate() + 1); // Sunday → Monday
+  if (due.getDay() === 6) due.setDate(due.getDate() + 2); // Saturday → Monday
+  const dueAt = due.toISOString().slice(0, 10);
+
+  return [
+    stmt(db,
+      `INSERT INTO activities
+         (id, opportunity_id, type, subject, status, due_at, assigned_user_id, created_at, updated_at, created_by_user_id)
+       VALUES (?, ?, 'task', ?, 'pending', ?, ?, ?, ?, ?)`,
+      [taskId, opp.id, subject, dueAt, assignedTo, ts, ts, user?.id]),
+    auditStmt(db, {
+      entityType: 'activity',
+      entityId: taskId,
+      eventType: 'created',
+      user,
+      summary: `Auto-created task: ${subject}`,
+    }),
+  ];
 }
 
 /**

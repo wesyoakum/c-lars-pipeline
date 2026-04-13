@@ -63,6 +63,91 @@ export async function stageDef(db, transactionType, stageKey) {
 // and returns { passed: boolean, message: string }
 
 const CHECKS = {
+  // --- Lead gates ---
+  async has_title(ctx) {
+    if (ctx.opportunity.title) return { passed: true };
+    return { passed: false, message: 'Missing title' };
+  },
+
+  async has_account(ctx) {
+    if (ctx.opportunity.account_id) return { passed: true };
+    return { passed: false, message: 'Missing account' };
+  },
+
+  // --- RFQ Received gates ---
+  async has_rfq_fields(ctx) {
+    const o = ctx.opportunity;
+    const missing = [];
+    if (!o.transaction_type) missing.push('type');
+    if (!o.primary_contact_id) missing.push('primary contact');
+    if (!o.description) missing.push('description');
+    if (!o.rfq_format) missing.push('RFQ format');
+    if (!o.source) missing.push('source');
+    if (o.estimated_value_usd == null) missing.push('estimated value');
+    if (!o.rfq_received_date) missing.push('RFQ received date');
+    if (!o.rfq_due_date) missing.push('RFQ due date');
+    if (missing.length === 0) return { passed: true };
+    return { passed: false, message: `Missing: ${missing.join(', ')}` };
+  },
+
+  // --- Awaiting Client Feedback ---
+  async has_activity_note(ctx) {
+    const activity = await one(ctx.db,
+      `SELECT id FROM activities WHERE opportunity_id = ? LIMIT 1`,
+      [ctx.opportunity.id]);
+    if (activity) return { passed: true };
+    return { passed: false, message: 'No activity or note logged on this opportunity' };
+  },
+
+  // --- Quote gates ---
+  async has_quote_draft(ctx) {
+    const has = ctx.quotes.some(q => q.status === 'draft' || q.status === 'revision_draft');
+    if (has) return { passed: true };
+    if (ctx.quotes.length === 0) return { passed: false, message: 'No quote exists' };
+    return { passed: false, message: 'No quote in draft status' };
+  },
+
+  async has_quote_issued(ctx) {
+    const has = ctx.quotes.some(q => q.status === 'issued');
+    if (has) return { passed: true };
+    if (ctx.quotes.length === 0) return { passed: false, message: 'No quote exists' };
+    return { passed: false, message: 'No quote has been issued' };
+  },
+
+  async has_quote_revision_draft(ctx) {
+    const has = ctx.quotes.some(q => q.status === 'revision_draft');
+    if (has) return { passed: true };
+    return { passed: false, message: 'No revision draft exists' };
+  },
+
+  async has_quote_revision_issued(ctx) {
+    const has = ctx.quotes.some(q => q.status === 'revision_issued');
+    if (has) return { passed: true };
+    return { passed: false, message: 'No revision has been issued' };
+  },
+
+  // --- Closed Won gates ---
+  async has_customer_po_number(ctx) {
+    if (ctx.opportunity.customer_po_number) return { passed: true };
+    return { passed: false, message: 'Missing customer PO number' };
+  },
+
+  async has_customer_po_document(ctx) {
+    const po = await one(ctx.db,
+      `SELECT id FROM documents WHERE opportunity_id = ? AND kind = 'po' LIMIT 1`,
+      [ctx.opportunity.id]);
+    if (po) return { passed: true };
+    return { passed: false, message: 'No customer PO document uploaded' };
+  },
+
+  // --- Close reason ---
+  async has_close_reason(ctx) {
+    // This is checked specially in the stage transition handler
+    // via the override_reason field. Always passes here — the handler enforces it.
+    return { passed: true };
+  },
+
+  // --- Legacy checks (kept for compatibility) ---
   async has_account_and_contact(ctx) {
     const hasAccount = !!ctx.opportunity.account_id;
     const hasContact = ctx.contacts.length > 0;
@@ -78,28 +163,8 @@ const CHECKS = {
     return { passed: false, message: 'No price build exists on any quote' };
   },
 
-  async has_cost_build_locked(ctx) {
-    const locked = ctx.costBuilds.some(cb => cb.status === 'locked');
-    if (locked) return { passed: true };
-    if (ctx.costBuilds.length === 0) return { passed: false, message: 'No price build exists' };
-    return { passed: false, message: 'No price build is locked' };
-  },
-
-  async has_bant_fields(ctx) {
-    const o = ctx.opportunity;
-    const missing = [];
-    if (!o.bant_budget) missing.push('budget');
-    if (!o.bant_authority) missing.push('authority');
-    if (!o.bant_need) missing.push('need');
-    if (!o.bant_timeline) missing.push('timeline');
-    if (missing.length === 0) return { passed: true };
-    return { passed: false, message: `BANT missing: ${missing.join(', ')}` };
-  },
-
   async has_valid_until_set(ctx) {
-    const hasIt = ctx.quotes.some(q =>
-      q.valid_until && (q.status === 'submitted' || q.status === 'draft' || q.status === 'approved_internal')
-    );
+    const hasIt = ctx.quotes.some(q => q.valid_until);
     if (hasIt) return { passed: true };
     if (ctx.quotes.length === 0) return { passed: false, message: 'No quote exists' };
     return { passed: false, message: 'No quote has a valid-until date set' };
@@ -123,20 +188,10 @@ const CHECKS = {
     const hasIt = ctx.quotes.some(q => q.tc_revision);
     if (hasIt) return { passed: true };
     if (ctx.quotes.length === 0) return { passed: false, message: 'No quote exists' };
-    return { passed: false, message: 'No quote has governance revisions snapshotted (submit the quote first)' };
-  },
-
-  async has_customer_po(ctx) {
-    // Check if any document of kind 'po' is attached
-    const po = await one(ctx.db,
-      `SELECT id FROM documents WHERE opportunity_id = ? AND kind = 'po' LIMIT 1`,
-      [ctx.opportunity.id]);
-    if (po) return { passed: true };
-    return { passed: false, message: 'No customer PO document uploaded' };
+    return { passed: false, message: 'No quote has been issued yet (governance snapshot missing)' };
   },
 
   async has_oc_data(ctx) {
-    // For now, check if a quote has been accepted
     const accepted = ctx.quotes.some(q => q.status === 'accepted');
     if (accepted) return { passed: true };
     return { passed: false, message: 'No quote has been accepted (OC not ready)' };

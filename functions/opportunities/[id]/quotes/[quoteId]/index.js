@@ -35,10 +35,12 @@ import { fmtDollar } from '../../../../lib/pricing.js';
 // accepted/rejected/superseded/expired, its fields and lines can't be
 // touched — create a new revision instead.
 const READ_ONLY_STATUSES = new Set([
+  'issued',
+  'revision_issued',
   'accepted',
   'rejected',
-  'superseded',
   'expired',
+  'dead',
 ]);
 
 const UPDATE_FIELDS = [
@@ -158,33 +160,20 @@ export async function onRequestGet(context) {
   `;
 
   // --- Status transition strip --------------------------------------------
+  const isDraft = quote.status === 'draft' || quote.status === 'revision_draft';
+  const isIssued = quote.status === 'issued' || quote.status === 'revision_issued';
+
   const transitionStrip = html`
     <section class="card">
       <h2>Status</h2>
       <p class="muted">Current: <strong>${escape(QUOTE_STATUS_LABELS[quote.status] ?? quote.status)}</strong></p>
       <div class="transition-row">
-        ${quote.status === 'draft' ? html`
-          <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/submit-internal-review" class="inline-form">
-            <button class="btn" type="submit">Send to internal review</button>
-          </form>
-        ` : ''}
-        ${quote.status === 'internal_review' ? html`
-          <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/approve-internal" class="inline-form">
-            <button class="btn" type="submit">Approve (internal)</button>
-          </form>
-          <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/return-to-draft" class="inline-form">
-            <button class="btn" type="submit">Return to draft</button>
-          </form>
-        ` : ''}
-        ${quote.status === 'approved_internal' ? html`
+        ${isDraft ? html`
           <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/submit" class="inline-form">
-            <button class="btn primary" type="submit">Submit to customer</button>
-          </form>
-          <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/return-to-draft" class="inline-form">
-            <button class="btn" type="submit">Return to draft</button>
+            <button class="btn primary" type="submit">Issue to customer</button>
           </form>
         ` : ''}
-        ${quote.status === 'submitted' ? html`
+        ${isIssued ? html`
           <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/accept" class="inline-form">
             <button class="btn primary" type="submit">Accept</button>
           </form>
@@ -194,27 +183,19 @@ export async function onRequestGet(context) {
           <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/expire" class="inline-form">
             <button class="btn" type="submit">Mark expired</button>
           </form>
-        ` : ''}
-        ${!readOnly ? html`
           <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
-            <button class="btn" type="submit" title="Create a new revision based on this quote">Create new revision</button>
-          </form>
-        ` : html`
-          <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
-            <button class="btn primary" type="submit" title="Create a new revision based on this quote">Create new revision</button>
-          </form>
-        `}
-        ${!readOnly && quote.status !== 'draft' ? html`
-          <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/delete"
-                class="inline-form"
-                onsubmit="return confirm('Delete this quote revision? This cannot be undone.');">
-            <button class="btn danger" type="submit">Delete</button>
+            <button class="btn" type="submit">Revise</button>
           </form>
         ` : ''}
-        ${quote.status === 'draft' ? html`
+        ${quote.status === 'accepted' || quote.status === 'rejected' || quote.status === 'expired' ? html`
+          <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
+            <button class="btn primary" type="submit">Create new revision</button>
+          </form>
+        ` : ''}
+        ${isDraft || isIssued ? html`
           <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/delete"
                 class="inline-form"
-                onsubmit="return confirm('Delete this quote revision? This cannot be undone.');">
+                onsubmit="return confirm('Delete this quote? This cannot be undone.');">
             <button class="btn danger" type="submit">Delete</button>
           </form>
         ` : ''}
@@ -223,9 +204,9 @@ export async function onRequestGet(context) {
       ${quote.submitted_at
         ? html`
           <div class="governance-snapshot">
-            <h3>Governance snapshot (at submission)</h3>
+            <h3>Governance snapshot (at issuance)</h3>
             <p class="muted">
-              Submitted ${escape(formatTimestamp(quote.submitted_at))}
+              Issued ${escape(formatTimestamp(quote.submitted_at))}
               by ${escape(quote.submitted_by_name ?? quote.submitted_by_email ?? 'unknown')}
             </p>
             <ul class="plain">
@@ -236,7 +217,7 @@ export async function onRequestGet(context) {
             </ul>
           </div>`
         : html`
-          <p class="muted">Governance revisions will be snapshotted when the quote is submitted to the customer.</p>
+          <p class="muted">Governance revisions will be snapshotted when the quote is issued.</p>
         `}
     </section>
   `;
@@ -599,15 +580,15 @@ export async function onRequestPost(context) {
 
 function statusPillClass(status) {
   switch (status) {
-    case 'draft':             return '';
-    case 'internal_review':   return 'pill-warn';
-    case 'approved_internal': return 'pill-warn';
-    case 'submitted':         return 'pill-success';
-    case 'accepted':          return 'pill-success';
-    case 'rejected':          return 'pill-locked';
-    case 'superseded':        return 'pill-locked';
-    case 'expired':           return 'pill-locked';
-    default:                  return '';
+    case 'draft':            return '';
+    case 'revision_draft':   return '';
+    case 'issued':           return 'pill-success';
+    case 'revision_issued':  return 'pill-success';
+    case 'accepted':         return 'pill-success';
+    case 'rejected':         return 'pill-locked';
+    case 'expired':          return 'pill-locked';
+    case 'dead':             return 'pill-locked';
+    default:                 return '';
   }
 }
 

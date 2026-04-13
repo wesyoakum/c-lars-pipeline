@@ -50,6 +50,7 @@ const UPDATE_FIELDS = [
   'bant_timeline',
   'owner_user_id',
   'salesperson_user_id',
+  'customer_po_number',
 ];
 
 const TYPE_LABELS = {
@@ -248,9 +249,11 @@ export async function onRequestGet(context) {
     else if (isTerminalLoss) cls += ' stage-btn-loss';
     else if (s.is_won) cls += ' stage-btn-won';
     else cls += ' stage-btn-next';
+    const needsReason = s.stage_key === 'closed_lost' || s.stage_key === 'closed_died';
     return html`
       <button type="submit" name="to_stage" value="${s.stage_key}"
-              class="${cls}" ${isCurrent ? 'disabled aria-current="step"' : ''}>
+              class="${cls}" ${isCurrent ? 'disabled aria-current="step"' : ''}
+              ${needsReason ? `@click="$event.preventDefault(); pendingStage = '${s.stage_key}'; requireReason = true; showReason = true; $nextTick(() => $refs.reasonInput.focus());"` : `@click="requireReason = false"`}>
         ${s.label}
       </button>`;
   });
@@ -298,17 +301,22 @@ export async function onRequestGet(context) {
         </div>
       </div>
 
-      <form method="post" action="/opportunities/${escape(opp.id)}/stage" class="stage-picker" style="margin:0.5rem 0" x-data="{ showReason: false }">
+      <form method="post" action="/opportunities/${escape(opp.id)}/stage" class="stage-picker" style="margin:0.5rem 0"
+            x-data="{ showReason: false, requireReason: false, pendingStage: '' }"
         <div class="stage-strip-compact">
           ${stageButtons}
           <button type="button" class="btn btn-sm" style="margin-left:0.5rem;font-size:0.75em"
                   @click="showReason = !showReason"
                   x-text="showReason ? 'Hide reason' : 'Add reason'"></button>
         </div>
-        <div x-show="showReason" x-cloak style="margin-top:0.3rem">
-          <input type="text" name="override_reason"
-                 placeholder="Override reason (optional, recorded in audit)"
-                 style="font-size:0.85em; padding:0.25rem 0.5rem; border:1px solid var(--border); border-radius:var(--radius); width:100%; max-width:500px;">
+        <input type="hidden" name="to_stage" x-show="false" :value="pendingStage" x-bind:disabled="!requireReason">
+        <div x-show="showReason || requireReason" x-cloak style="margin-top:0.3rem; display:flex; gap:0.4rem; align-items:center; flex-wrap:wrap;">
+          <input type="text" name="override_reason" x-ref="reasonInput"
+                 :placeholder="requireReason ? 'Close reason (required)' : 'Override reason (optional, recorded in audit)'"
+                 style="font-size:0.85em; padding:0.25rem 0.5rem; border:1px solid var(--border); border-radius:var(--radius); flex:1; min-width:200px; max-width:500px;">
+          <template x-if="requireReason">
+            <button type="submit" class="btn btn-sm danger">Confirm close</button>
+          </template>
         </div>
       </form>
 
@@ -858,6 +866,7 @@ export async function onRequestPost(context) {
                 bant_budget = ?, bant_authority = ?, bant_authority_contact_id = ?,
                 bant_need = ?, bant_timeline = ?,
                 owner_user_id = ?, salesperson_user_id = ?,
+                customer_po_number = ?,
                 updated_at = ?
           WHERE id = ?`,
         [
@@ -883,6 +892,7 @@ export async function onRequestPost(context) {
           value.bant_timeline,
           value.owner_user_id,
           value.salesperson_user_id,
+          value.customer_po_number,
           ts,
           oppId,
         ]

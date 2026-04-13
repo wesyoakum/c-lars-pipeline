@@ -58,6 +58,16 @@ export async function onRequestPost(context) {
     );
   }
 
+  // ---- Close reason required for terminal-loss stages -----------------
+  const CLOSE_REASON_REQUIRED = ['closed_lost', 'closed_died'];
+  if (CLOSE_REASON_REQUIRED.includes(targetDef.stage_key) && !value.override_reason?.trim()) {
+    return redirectWithFlash(
+      `/opportunities/${oppId}`,
+      `A close reason is required when moving to "${targetDef.label}".`,
+      'error'
+    );
+  }
+
   // ---- Gate evaluation ------------------------------------------------
   const gateCtx = await loadGateContext(env.DB, opp);
   const gateResult = await evaluateGate(env.DB, opp.transaction_type, targetDef.stage_key, gateCtx);
@@ -89,13 +99,29 @@ export async function onRequestPost(context) {
     summary += ` [warnings: ${warningMessages.join('; ')}]`;
   }
 
+  // If moving to a terminal stage, set close_reason and actual_close_date
+  const isTerminal = !!targetDef.is_terminal;
+  const closeReason = isTerminal
+    ? (targetDef.is_won ? 'won' : (targetDef.stage_key === 'closed_lost' ? 'lost' : 'abandoned'))
+    : null;
+  const isCloseLoss = targetDef.stage_key === 'closed_lost' || targetDef.stage_key === 'closed_died';
+  const lossReasonTag = isCloseLoss ? (value.override_reason || null) : null;
+
   const statements = [
     stmt(
       env.DB,
       `UPDATE opportunities
-          SET stage = ?, stage_entered_at = ?, probability = ?, updated_at = ?
+          SET stage = ?, stage_entered_at = ?, probability = ?,
+              ${isTerminal ? 'close_reason = ?, actual_close_date = ?,' : ''}
+              ${isCloseLoss ? 'loss_reason_tag = ?,' : ''}
+              updated_at = ?
         WHERE id = ?`,
-      [targetDef.stage_key, ts, newProbability, ts, oppId]
+      [
+        targetDef.stage_key, ts, newProbability,
+        ...(isTerminal ? [closeReason, ts] : []),
+        ...(isCloseLoss ? [lossReasonTag] : []),
+        ts, oppId,
+      ]
     ),
     auditStmt(env.DB, {
       entityType: 'opportunity',
@@ -106,6 +132,7 @@ export async function onRequestPost(context) {
       changes: {
         stage: { from: opp.stage, to: targetDef.stage_key },
         probability: { from: opp.probability, to: newProbability },
+        ...(isTerminal ? { close_reason: { from: opp.close_reason, to: closeReason } } : {}),
         gate_warnings: warningMessages.length > 0 ? warningMessages : undefined,
       },
       overrideReason: value.override_reason,
