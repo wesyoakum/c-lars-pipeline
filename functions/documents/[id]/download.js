@@ -3,10 +3,12 @@
 // GET /documents/:id/download — Stream a document from R2.
 
 import { one } from '../../lib/db.js';
+import { auditStmt } from '../../lib/audit.js';
 import { streamFromR2 } from '../../lib/r2.js';
 
 export async function onRequestGet(context) {
-  const { env, params } = context;
+  const { env, data, params } = context;
+  const user = data?.user;
   const docId = params.id;
 
   const doc = await one(env.DB,
@@ -22,6 +24,15 @@ export async function onRequestGet(context) {
   if (response.status === 404) {
     return new Response('File not found in storage', { status: 404 });
   }
+
+  // Log the download (fire-and-forget — don't block the response)
+  context.waitUntil(auditStmt(env.DB, {
+    entityType: 'document',
+    entityId: docId,
+    eventType: 'downloaded',
+    user,
+    summary: `Downloaded: ${doc.title}`,
+  }).run());
 
   // Set content-disposition so the browser downloads with the original name
   const headers = new Headers(response.headers);
