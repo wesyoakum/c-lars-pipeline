@@ -150,7 +150,7 @@ function resUpload() {
                   <tr data-row-id="${escape(r.id)}"
                       ${raw(rowDataAttrs(columns, r))}>
                     <td class="col-title" data-col="title" style="overflow:hidden;text-overflow:ellipsis"
-                        x-data="resEdit('${escape(r.id)}', 'title', ${raw(JSON.stringify(r.title))})">
+                        x-data="resEdit('${escape(r.id)}', 'title', ${escape(JSON.stringify(r.title))})">
                       <span x-show="!editing" @click="editing = true" style="cursor:pointer">
                         <strong style="border-bottom:1px dashed var(--border)" x-text="val">${escape(r.title)}</strong>
                       </span>

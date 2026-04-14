@@ -5,6 +5,7 @@
 // (with size / last-modified), and provides download + upload/replace
 // all inline in a single row per template.
 
+import { all } from '../lib/db.js';
 import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { readFlash } from '../lib/http.js';
 import { TEMPLATE_CATALOG } from '../lib/template-catalog.js';
@@ -46,12 +47,24 @@ export async function onRequestGet(context) {
           uploaded: obj?.uploaded?.toISOString?.()?.slice(0, 10) ?? '',
           uploadedBy: obj?.customMetadata?.uploadedBy ?? '',
           originalFilename: obj?.customMetadata?.originalFilename ?? '',
+          customLabel: obj?.customMetadata?.customLabel ?? '',
         };
       } catch {
-        return { key, ...entry, exists: false, size: 0, uploaded: '', uploadedBy: '', originalFilename: '' };
+        return { key, ...entry, exists: false, size: 0, uploaded: '', uploadedBy: '', originalFilename: '', customLabel: '' };
       }
     })
   );
+
+  // Resolve uploader emails to display names
+  const uploaderEmails = [...new Set(r2Results.map(t => t.uploadedBy).filter(Boolean))];
+  let emailToName = {};
+  if (uploaderEmails.length) {
+    const placeholders = uploaderEmails.map(() => '?').join(',');
+    const users = await all(env.DB,
+      `SELECT email, display_name FROM users WHERE email IN (${placeholders})`,
+      uploaderEmails);
+    emailToName = Object.fromEntries(users.map(u => [u.email, u.display_name || u.email]));
+  }
 
   const columns = [
     { key: 'label',     label: 'Template',   sort: 'text',   filter: 'text',   default: true },
@@ -65,7 +78,7 @@ export async function onRequestGet(context) {
   const rowData = r2Results.map(t => ({
     id: t.key,
     key: t.key,
-    label: t.label,
+    label: t.customLabel || t.label,
     filename: t.filename,
     category: templateCategory(t.key),
     status: t.exists ? 'Uploaded' : 'Missing',
@@ -73,7 +86,7 @@ export async function onRequestGet(context) {
     size: t.size || 0,
     size_display: t.exists ? formatSize(t.size) : '\u2014',
     uploaded: t.uploaded,
-    uploadedBy: t.uploadedBy,
+    uploadedBy: emailToName[t.uploadedBy] || t.uploadedBy,
     originalFilename: t.originalFilename,
     actions: '',
   }));
@@ -161,8 +174,16 @@ function tplUpload() {
             ${rowData.map(r => html`
               <tr data-row-id="${escape(r.id)}"
                   ${raw(rowDataAttrs(columns, r))}>
-                <td class="col-label" data-col="label" style="overflow:hidden;text-overflow:ellipsis">
-                  <strong>${escape(r.label)}</strong>
+                <td class="col-label" data-col="label" style="overflow:hidden;text-overflow:ellipsis"
+                    x-data="tplEdit('${escape(r.key)}', 'label', ${escape(JSON.stringify(r.label))})">
+                  <span x-show="!editing" @click="editing = true" style="cursor:pointer">
+                    <strong style="border-bottom:1px dashed var(--border)" x-text="val">${escape(r.label)}</strong>
+                  </span>
+                  <input x-show="editing" x-cloak type="text" :value="val"
+                         @blur="save($event.target.value)" @keydown.enter="save($event.target.value)"
+                         @keydown.escape="editing = false"
+                         x-ref="inp" style="width:100%;font:inherit;padding:0.15rem 0.3rem;font-weight:600"
+                         x-effect="if(editing) $nextTick(() => $refs.inp?.focus())">
                   <br><small class="muted">${escape(r.originalFilename || r.filename)}</small>
                 </td>
                 <td class="col-category" data-col="category">${escape(r.category)}</td>
@@ -208,6 +229,25 @@ function tplUpload() {
         </table>
       </div>
       <script>${raw(listScript('pms.templates.v1', 'label', 'asc'))}</script>
+      <script>
+      document.addEventListener('alpine:init', function() {
+        Alpine.data('tplEdit', function(tplKey, field, initial) {
+          return {
+            val: initial, editing: false,
+            save: function(v) {
+              this.editing = false;
+              if (v === this.val) return;
+              this.val = v;
+              fetch('/templates/' + tplKey + '/patch', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ field: field, value: v }),
+              });
+            },
+          };
+        });
+      });
+      </script>
     </section>
   `;
 

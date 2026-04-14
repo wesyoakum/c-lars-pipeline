@@ -140,7 +140,7 @@ export async function onRequestGet(context) {
                   <tr data-row-id="${escape(d.id)}"
                       ${raw(rowDataAttrs(columns, d))}>
                     <td class="col-name" data-col="name" style="overflow:hidden;text-overflow:ellipsis"
-                        x-data="docEdit('${escape(d.id)}', 'title', ${raw(JSON.stringify(d.name))})">
+                        x-data="docEdit('${escape(d.id)}', 'title', ${escape(JSON.stringify(d.name))})">
                       <span x-show="!editing" @click="editing = true" style="cursor:pointer">
                         <strong style="border-bottom:1px dashed var(--border)" x-text="val">${escape(d.name)}</strong>
                       </span>
