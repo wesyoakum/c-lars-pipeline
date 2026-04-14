@@ -53,7 +53,12 @@ export async function onRequestGet(context) {
     status_label: QUOTE_STATUS_LABELS[r.status] ?? r.status ?? '',
     status: r.status,
     title: r.title ?? '',
-    opp_number: r.opp_number ?? '',
+    // Combine number + opp title into the filter data so the quicksearch
+    // matches either — typing part of the title finds the row even when the
+    // cell displays the number prominently. The raw number is kept in
+    // `opp_number_display` for the cell render.
+    opp_number: `${r.opp_number ?? ''} ${r.opp_title ?? ''}`.trim(),
+    opp_number_display: r.opp_number ?? '',
     opp_title: r.opp_title ?? '',
     account_name: r.account_name ?? '',
     account_id: r.account_id ?? '',
@@ -106,7 +111,7 @@ export async function onRequestGet(context) {
                              x-ref="inp" style="width:100%;font:inherit;padding:0.15rem 0.3rem"
                              x-effect="if(editing) $nextTick(() => $refs.inp?.focus())">
                     </td>
-                    <td class="col-opp_number" data-col="opp_number"><a href="/opportunities/${escape(r.opp_id)}"><code>${escape(r.opp_number)}</code> ${escape(r.opp_title)}</a></td>
+                    <td class="col-opp_number" data-col="opp_number"><a href="/opportunities/${escape(r.opp_id)}"><code>${escape(r.opp_number_display)}</code> ${escape(r.opp_title)}</a></td>
                     <td class="col-account_name" data-col="account_name">
                       ${r.account_id
                         ? html`<a href="/accounts/${escape(r.account_id)}">${escape(r.account_name)}</a>`
