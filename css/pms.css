@@ -1325,7 +1325,14 @@ table.data.compact td {
 }
 
 /* Line items table — Item column layout. */
-.quote-lines-table .col-item { min-width: 280px; }
+.quote-lines-table { table-layout: fixed; width: 100%; }
+.quote-lines-table .col-num   { width: 40px; }
+.quote-lines-table .col-item  { width: auto; }
+.quote-lines-table .col-qty   { width: 70px; }
+.quote-lines-table .col-unit  { width: 70px; }
+.quote-lines-table .col-price { width: 100px; }
+.quote-lines-table .col-ext   { width: 100px; }
+.quote-lines-table .col-build { width: 70px; }
 .line-item-fields {
   display: flex;
   gap: 0.5rem;
@@ -1351,6 +1358,7 @@ table.data.compact td {
 .line-notes {
   display: block;
   width: 100%;
+  max-width: 100%;
   margin-top: 0.3rem;
   padding: 0.2rem 0.45rem;
   border: 1px solid var(--border);
@@ -1363,6 +1371,8 @@ table.data.compact td {
   min-height: 1.6rem;
   resize: none;
   box-sizing: border-box;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 .line-notes::placeholder { color: var(--fg-muted); opacity: 0.5; }
 

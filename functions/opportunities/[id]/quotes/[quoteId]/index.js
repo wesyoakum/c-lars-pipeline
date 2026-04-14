@@ -333,17 +333,18 @@ export async function onRequestGet(context) {
               <td class="meta-label">Delivery:</td>
               <td>
                 <div x-data="deliveryPicker('${escape(quote.delivery_estimate ?? '')}')">
-                  <input type="text" x-model="textVal" @change="save()" class="meta-input" ${readOnly ? 'disabled' : ''} placeholder="14-16 weeks ARO" style="margin-bottom:0.2rem">
-                  ${!readOnly ? html`
-                    <div class="quick-dates">
+                  <div style="display:flex;gap:0.4rem;align-items:center">
+                    <input type="text" x-model="textVal" @change="save()" class="meta-input" ${readOnly ? 'disabled' : ''} placeholder="e.g. 12 weeks ARO" style="flex:1">
+                    ${!readOnly ? html`
+                      <select @change="if($event.target.value) setWeeks(+$event.target.value); $event.target.value=''" style="font-size:0.85em;padding:0.2rem 0.3rem;width:auto">
+                        <option value="">Weeks\u2026</option>
+                        ${Array.from({ length: 52 }, (_, i) => i + 1).map(n =>
+                          html`<option value="${n}">${n} wk</option>`
+                        )}
+                      </select>
                       <input type="date" @change="setDate($event.target.value); $event.target.value=''" class="btn-link-date" title="Pick a date">
-                      <button type="button" class="btn-link" @click="setWeeks(4)">4wk</button>
-                      <button type="button" class="btn-link" @click="setWeeks(8)">8wk</button>
-                      <button type="button" class="btn-link" @click="setWeeks(12)">12wk</button>
-                      <button type="button" class="btn-link" @click="setWeeks(16)">16wk</button>
-                      <button type="button" class="btn-link" @click="setWeeks(20)">20wk</button>
-                    </div>
-                  ` : ''}
+                    ` : ''}
+                  </div>
                 </div>
               </td>
             </tr>
