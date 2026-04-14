@@ -73,6 +73,7 @@ export async function onRequestGet(context) {
     { key: 'attached_to', label: 'Attached To',  sort: 'text',   filter: 'text',   default: true },
     { key: 'size',        label: 'Size',         sort: 'number', filter: null,     default: true },
     { key: 'date',        label: 'Uploaded',     sort: 'date',   filter: 'text',   default: true },
+    { key: 'actions',     label: '',             sort: null,      filter: null,     default: true },
   ];
 
   const rowData = docs.map(d => {
@@ -105,6 +106,7 @@ export async function onRequestGet(context) {
       size_display: formatSize(d.size_bytes),
       date: (d.uploaded_at || '').slice(0, 10),
       uploaded_by: d.uploaded_by_name || d.uploaded_by_email || '',
+      actions: '',
     };
   });
 
@@ -113,7 +115,7 @@ export async function onRequestGet(context) {
 
     <section class="card">
       <div class="card-header">
-        <h1 class="page-title">Documents</h1>
+        <h1 class="page-title">Attachments</h1>
         ${listToolbar({ id: 'dl', count: docs.length, showColumnsMenu: false })}
       </div>
 
@@ -129,6 +131,7 @@ export async function onRequestGet(context) {
                 <col data-col="attached_to" style="width:180px">
                 <col data-col="size"        style="width:80px">
                 <col data-col="date"        style="width:130px">
+                <col data-col="actions"     style="width:190px">
               </colgroup>
               ${listTableHead(columns, rowData)}
               <tbody data-role="rows">
@@ -153,6 +156,19 @@ export async function onRequestGet(context) {
                     <td class="col-date muted" data-col="date" style="font-size:0.85em;white-space:nowrap">
                       ${d.date ? escape(d.date) : '\u2014'}
                       ${d.uploaded_by ? html`<br><small>${escape(d.uploaded_by)}</small>` : ''}
+                    </td>
+                    <td class="col-actions" data-col="actions" style="text-align:right;white-space:nowrap">
+                      <div style="display:inline-flex;align-items:center;gap:0.35rem;justify-content:flex-end">
+                        <a href="/documents/${escape(d.id)}/download" class="btn btn-sm">Download</a>
+                        <form method="post" action="/documents/${escape(d.id)}/replace"
+                              enctype="multipart/form-data" style="display:inline">
+                          <input type="file" name="file" style="display:none"
+                                 onchange="this.form.submit()">
+                          <input type="hidden" name="return_to" value="/documents/library">
+                          <button type="button" class="btn btn-sm primary"
+                                  onclick="this.previousElementSibling.previousElementSibling.click()">Replace</button>
+                        </form>
+                      </div>
                     </td>
                   </tr>
                 `)}

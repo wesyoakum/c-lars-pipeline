@@ -1,4 +1,4 @@
-// functions/documents/resources.js
+// functions/documents/resources/index.js
 //
 // GET  /documents/resources — Resource library page.
 // POST /documents/resources — Upload a new resource.
@@ -6,13 +6,13 @@
 // General-purpose company documents: NDAs, governing documents,
 // checklists, reference guides, etc. Not tied to any opportunity.
 
-import { all, stmt, batch } from '../lib/db.js';
-import { auditStmt } from '../lib/audit.js';
-import { uuid, now } from '../lib/ids.js';
-import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
-import { readFlash } from '../lib/http.js';
-import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
-import { docsSubNav } from '../lib/docs-subnav.js';
+import { all, stmt, batch } from '../../lib/db.js';
+import { auditStmt } from '../../lib/audit.js';
+import { uuid, now } from '../../lib/ids.js';
+import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
+import { readFlash } from '../../lib/http.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
+import { docsSubNav } from '../../lib/docs-subnav.js';
 
 const MAX_SIZE = 50 * 1024 * 1024; // 50 MB
 
@@ -146,6 +146,13 @@ export async function onRequestGet(context) {
                     <td class="col-actions" data-col="actions" style="text-align:right;white-space:nowrap">
                       <div style="display:inline-flex;align-items:center;gap:0.35rem;justify-content:flex-end">
                         <a href="/documents/resources/${escape(r.id)}/download" class="btn btn-sm">Download</a>
+                        <form method="post" action="/documents/resources/${escape(r.id)}/replace"
+                              enctype="multipart/form-data" style="display:inline">
+                          <input type="file" name="file" style="display:none"
+                                 onchange="this.form.submit()">
+                          <button type="button" class="btn btn-sm primary"
+                                  onclick="this.previousElementSibling.click()">Replace</button>
+                        </form>
                         <form method="post" action="/documents/resources/${escape(r.id)}/delete"
                               style="display:inline"
                               onsubmit="return confirm('Delete this resource?')">
