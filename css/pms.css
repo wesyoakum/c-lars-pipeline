@@ -1598,6 +1598,22 @@ table.data.compact td input.num-input {
   font-size: 0.88em;
 }
 
+/* ---------- Generated document links ---------- */
+.gen-doc-link {
+  display: inline-block;
+  margin: 0 0.5rem 0.25rem 0;
+  font-size: 0.85em;
+  padding: 0.15rem 0.4rem;
+  border-radius: var(--radius);
+}
+.gen-doc-highlight {
+  animation: doc-highlight 3s ease-out;
+}
+@keyframes doc-highlight {
+  0%   { background: #fff3a8; }
+  100% { background: transparent; }
+}
+
 /* ---------- Inline-edit fields ---------- */
 
 .ie {

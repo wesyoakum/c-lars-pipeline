@@ -110,7 +110,8 @@ export async function onRequestGet(context) {
   const readOnly = READ_ONLY_STATUSES.has(quote.status);
   const subtotal = lines.reduce((a, l) => a + Number(l.extended_price ?? 0), 0);
   const total = subtotal + Number(quote.tax_amount ?? 0);
-  const flash = readFlash(url);
+  const highlightDocId = url.searchParams.get('highlight');
+  const flash = highlightDocId ? null : readFlash(url);
 
   const isDraft = quote.status === 'draft' || quote.status === 'revision_draft';
   const isIssued = quote.status === 'issued' || quote.status === 'revision_issued';
@@ -220,7 +221,7 @@ export async function onRequestGet(context) {
             <p class="muted" style="margin:0 0 0.35rem;font-size:0.8em;font-weight:600">Generated Documents</p>
             ${generatedDocs.map(d => html`
               <a href="/documents/${escape(d.id)}/download"
-                 style="display:inline-block;margin:0 0.5rem 0.25rem 0;font-size:0.85em"
+                 class="gen-doc-link ${d.id === highlightDocId ? 'gen-doc-highlight' : ''}"
                  target="_blank">
                 ${d.kind === 'quote_pdf' ? '📄' : '📝'} ${escape(d.original_filename)}
                 <span class="muted">(${formatSize(d.size_bytes)})</span>

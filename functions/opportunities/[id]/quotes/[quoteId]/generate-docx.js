@@ -4,7 +4,7 @@
 // No PDF conversion — for when the user just needs the Word doc.
 
 import { one } from '../../../../lib/db.js';
-import { redirectWithFlash } from '../../../../lib/http.js';
+import { redirect, redirectWithFlash } from '../../../../lib/http.js';
 import {
   getQuoteDocData,
   fillTemplate,
@@ -36,7 +36,7 @@ export async function onRequestPost(context) {
       ? `${quote.number}-${quote.revision}`
       : quote.number;
 
-    await storeGeneratedDoc(env, {
+    const docId = await storeGeneratedDoc(env, {
       opportunityId: oppId,
       quoteId,
       buffer: docxBuffer,
@@ -46,7 +46,7 @@ export async function onRequestPost(context) {
       user,
     });
 
-    return redirectWithFlash(returnTo, `Generated ${baseFilename}.docx`);
+    return redirect(`${returnTo}?highlight=${docId}`);
   } catch (err) {
     console.error('DOCX generation failed:', err);
     return redirectWithFlash(returnTo, `Word generation failed: ${err.message}`, 'error');

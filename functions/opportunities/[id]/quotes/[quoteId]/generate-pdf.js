@@ -4,7 +4,7 @@
 // ConvertAPI, and store both in R2 linked to the quote.
 
 import { one } from '../../../../lib/db.js';
-import { redirectWithFlash } from '../../../../lib/http.js';
+import { redirect, redirectWithFlash } from '../../../../lib/http.js';
 import {
   getQuoteDocData,
   fillTemplate,
@@ -45,7 +45,7 @@ export async function onRequestPost(context) {
 
     const pdfBuffer = await convertToPdf(env, docxBuffer);
 
-    await storeGeneratedDoc(env, {
+    const docId = await storeGeneratedDoc(env, {
       opportunityId: oppId,
       quoteId,
       buffer: pdfBuffer,
@@ -55,7 +55,7 @@ export async function onRequestPost(context) {
       user,
     });
 
-    return redirectWithFlash(returnTo, `Generated ${baseFilename}.pdf`);
+    return redirect(`${returnTo}?highlight=${docId}`);
   } catch (err) {
     console.error('PDF generation failed:', err);
     return redirectWithFlash(returnTo, `PDF generation failed: ${err.message}`, 'error');
