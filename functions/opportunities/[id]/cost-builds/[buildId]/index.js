@@ -226,9 +226,6 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
   const targetPct = pricing.targetPct;
   const linked = pricing.linked;
 
-  // For each category, decide what value to show in the input: if the
-  // user has set a value it's `dm_user_cost`, otherwise the auto-fill
-  // value (styled as estimated), otherwise blank.
   const valOrAuto = (userVal, autoVal) => {
     if (userVal !== null && userVal !== undefined && userVal !== '') return String(userVal);
     if (autoVal !== null && autoVal !== undefined) return Math.round(autoVal).toString();
@@ -241,112 +238,121 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
     return '';
   };
 
-  const categoryRow = (id, label, userVal, autoVal, noteText, disabled = false) => html`
+  const pctOf = (cost, base) => {
+    if (cost == null || base == null || base === 0) return '\u2014';
+    return fmtPct(cost / base, 1);
+  };
+
+  const categoryRow = (id, label, userVal, autoVal, noteText, disabled, effCost) => html`
     <tr>
-      <td><strong>${label}</strong><div class="muted" style="font-size:0.75rem">target ${fmtPct(targetPct[id === 'quote' ? 'total' : id], 1)}</div></td>
+      <td><strong>${label}</strong></td>
       <td class="num">
-        <input type="text"
-               name="${id === 'quote' ? 'quote_price_user' : id + '_user_cost'}"
+        <input type="text" name="${id}_user_cost"
                value="${valOrAuto(userVal, autoVal)}"
                class="num-input ${autoClass(userVal, autoVal)}"
-               ${disabled || locked ? 'disabled' : ''}
-               placeholder="$0">
-        ${errText(id === 'quote' ? 'quote_price_user' : id + '_user_cost')}
+               ${disabled || locked ? 'disabled' : ''} placeholder="$0">
+        ${errText(id + '_user_cost')}
         ${noteText ? html`<div class="muted" style="font-size:0.75rem">${escape(noteText)}</div>` : ''}
       </td>
+      <td class="num muted">${fmtPct(targetPct[id], 1)}</td>
+      <td class="num" id="cb-pct-target-${id}">${pctOf(effCost, eff.targetPrice)}</td>
+      <td class="num" id="cb-pct-quote-${id}">${pctOf(effCost, eff.quote)}</td>
     </tr>`;
 
   return html`
     <section class="card">
-      <h2 class="section-h">Pricing engine</h2>
-      <p class="muted">
-        Fill in any combination below. Blanks auto-fill from the effective
-        quote × target %. If you link DM to the library or labor to the
-        Labor Cost tab, those totals win over user-entered values.
-      </p>
+      <h2 class="section-h">Pricing</h2>
 
-      <table class="data compact">
-        <thead>
-          <tr><th>Category</th><th class="num">Cost</th></tr>
-        </thead>
-        <tbody>
-          ${categoryRow('dm',    'Direct Material (DM)',     build.dm_user_cost,    auto.dm,    linked.dm ? notes.dm : (auto.dm !== null ? notes.dm : ''), linked.dm)}
-          ${categoryRow('dl',    'Direct Labor (DL)',        build.dl_user_cost,    auto.dl,    linked.labor ? notes.dl : (auto.dl !== null ? notes.dl : ''), linked.labor)}
-          ${categoryRow('imoh',  'Indirect Material + OH',   build.imoh_user_cost,  auto.imoh,  auto.imoh !== null ? notes.imoh : '')}
-          ${categoryRow('other', 'Other',                    build.other_user_cost, auto.other, auto.other !== null ? notes.other : '')}
-        </tbody>
-        <tfoot>
-          <tr>
-            <th>Total cost</th>
-            <th class="num" id="cb-total-cost">${fmtDollar(eff.totalCost)}</th>
-          </tr>
-        </tfoot>
-      </table>
+      <div class="pricing-target-line">
+        <span class="muted">Target Price</span>
+        <span id="cb-target-price">${fmtDollar(eff.targetPrice)}</span>
+      </div>
 
-      <div class="pricing-grid">
-        <div class="pricing-box">
-          <div class="muted">Quote price</div>
+      <div class="pricing-grid pricing-grid-2">
+        <div class="pricing-box pricing-box-quote">
+          <div class="muted">Quote Price</div>
           <input type="text" name="quote_price_user"
                  value="${valOrAuto(build.quote_price_user, auto.quote)}"
-                 class="num-input ${autoClass(build.quote_price_user, auto.quote)}"
-                 ${locked ? 'disabled' : ''}
-                 placeholder="$0">
+                 class="num-input pricing-input ${autoClass(build.quote_price_user, auto.quote)}"
+                 ${locked ? 'disabled' : ''} placeholder="$0">
           ${errText('quote_price_user')}
           ${auto.quote !== null
             ? html`<div class="muted" style="font-size:0.75rem">${escape(notes.quote)}</div>`
             : ''}
         </div>
-        <div class="pricing-box">
-          <div class="muted">Target price (cost ÷ ${fmtPct(targetPct.total, 1)})</div>
-          <div class="pricing-value" id="cb-target-price">${fmtDollar(eff.targetPrice)}</div>
-        </div>
         <div class="pricing-box ${marg.status === 'good' ? 'margin-good' : marg.status === 'low' ? 'margin-low' : ''}" id="cb-margin-box">
-          <div class="muted">Margin</div>
+          <div class="muted">Estimated Gross Margin</div>
           <div class="pricing-value" id="cb-margin-value">
             ${marg.amount !== null
               ? html`${fmtDollar(marg.amount)} (${fmtPct(marg.pct)})`
-              : '—'}
+              : '\u2014'}
           </div>
           <div class="muted" id="cb-margin-status" style="font-size:0.75rem">
           ${marg.status
             ? (marg.status === 'good'
                   ? `Good (> ${fmtPct(marg.threshold)})`
-                  : `Too low (≤ ${fmtPct(marg.threshold)})`)
+                  : `Too Low (\u2264 ${fmtPct(marg.threshold)})`)
             : ''}</div>
         </div>
       </div>
 
-      <details class="reference-details">
-        <summary>Reference estimates</summary>
-        <div class="addr-grid">
+      <h2 class="section-h">Cost Inputs &amp; Summary</h2>
+      <p class="muted" style="margin-top:-0.5rem">
+        Blanks auto-fill from quote \u00d7 target %. Linked DM/labor totals override manual values.
+      </p>
+
+      <table class="data compact cost-summary-table">
+        <thead>
+          <tr><th></th><th class="num">Cost</th><th class="num">Target %</th><th class="num">% of Target</th><th class="num">% of Quote</th></tr>
+        </thead>
+        <tbody>
+          ${categoryRow('dm',    'Direct Material (DM)',        build.dm_user_cost,   auto.dm,   linked.dm ? notes.dm : (auto.dm !== null ? notes.dm : ''),       linked.dm,    eff.dm)}
+          ${categoryRow('dl',    'Direct Labor (DL)',           build.dl_user_cost,   auto.dl,   linked.labor ? notes.dl : (auto.dl !== null ? notes.dl : ''),    linked.labor, eff.dl)}
+          ${categoryRow('imoh',  'Indirect Material &amp; Overhead', build.imoh_user_cost, auto.imoh, auto.imoh !== null ? notes.imoh : '',                       false,        eff.imoh)}
+          ${categoryRow('other', 'Other',                       build.other_user_cost, auto.other, auto.other !== null ? notes.other : '',                        false,        eff.other)}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th>Total Est. Cost</th>
+            <th class="num" id="cb-total-cost">${fmtDollar(eff.totalCost)}</th>
+            <th class="num muted">${fmtPct(targetPct.total, 1)}</th>
+            <th class="num" id="cb-pct-target-total">${pctOf(eff.totalCost, eff.targetPrice)}</th>
+            <th class="num" id="cb-pct-quote-total">${pctOf(eff.totalCost, eff.quote)}</th>
+          </tr>
+        </tfoot>
+      </table>
+
+      <div class="reference-estimates">
+        <div class="ref-heading">Reference Estimates</div>
+        <div class="ref-grid">
           <div>
-            <strong>From Quote Price</strong>
-            <ul class="plain">
-              <li>DM (${fmtPct(targetPct.dm, 1)}): <span id="cb-ref-fq-dm">${fmtDollar(refs.fromQuote.dm)}</span></li>
-              <li>DL (${fmtPct(targetPct.dl, 1)}): <span id="cb-ref-fq-dl">${fmtDollar(refs.fromQuote.dl)}</span></li>
-              <li>IMOH (${fmtPct(targetPct.imoh, 1)}): <span id="cb-ref-fq-imoh">${fmtDollar(refs.fromQuote.imoh)}</span></li>
-              <li>Other (${fmtPct(targetPct.other, 1)}): <span id="cb-ref-fq-other">${fmtDollar(refs.fromQuote.other)}</span></li>
-            </ul>
+            <div class="ref-subhead">Estimates based on Quote Price</div>
+            <table class="ref-table">
+              <tr><td>DM</td><td class="num" id="cb-ref-fq-dm">${fmtDollar(refs.fromQuote.dm)}</td></tr>
+              <tr><td>DL</td><td class="num" id="cb-ref-fq-dl">${fmtDollar(refs.fromQuote.dl)}</td></tr>
+              <tr><td>IMOH</td><td class="num" id="cb-ref-fq-imoh">${fmtDollar(refs.fromQuote.imoh)}</td></tr>
+              <tr><td>Other</td><td class="num" id="cb-ref-fq-other">${fmtDollar(refs.fromQuote.other)}</td></tr>
+            </table>
           </div>
           <div>
-            <strong>From DM</strong>
-            <ul class="plain">
-              <li>Implied price: <span id="cb-ref-fdm-price">${fmtDollar(refs.fromDm.price)}</span></li>
-              <li>Implied DL: <span id="cb-ref-fdm-dl">${fmtDollar(refs.fromDm.dl)}</span></li>
-              <li>Implied IMOH: <span id="cb-ref-fdm-imoh">${fmtDollar(refs.fromDm.imoh)}</span></li>
-              <li>Implied Other: <span id="cb-ref-fdm-other">${fmtDollar(refs.fromDm.other)}</span></li>
-            </ul>
+            <div class="ref-subhead">Estimates from DM only</div>
+            <table class="ref-table">
+              <tr><td>Price</td><td class="num" id="cb-ref-fdm-price">${fmtDollar(refs.fromDm.price)}</td></tr>
+              <tr><td>Labor</td><td class="num" id="cb-ref-fdm-dl">${fmtDollar(refs.fromDm.dl)}</td></tr>
+              <tr><td>IMOH</td><td class="num" id="cb-ref-fdm-imoh">${fmtDollar(refs.fromDm.imoh)}</td></tr>
+              <tr><td>Other</td><td class="num" id="cb-ref-fdm-other">${fmtDollar(refs.fromDm.other)}</td></tr>
+            </table>
           </div>
           <div>
-            <strong>From DM + DL</strong>
-            <ul class="plain">
-              <li>Implied price: <span id="cb-ref-fdmdl-price">${fmtDollar(refs.fromDmDl.price)}</span></li>
-              <li>Implied IMOH: <span id="cb-ref-fdmdl-imoh">${fmtDollar(refs.fromDmDl.imoh)}</span></li>
-              <li>Implied Other: <span id="cb-ref-fdmdl-other">${fmtDollar(refs.fromDmDl.other)}</span></li>
-            </ul>
+            <div class="ref-subhead">Estimates from DM + DL</div>
+            <table class="ref-table">
+              <tr><td>Price</td><td class="num" id="cb-ref-fdmdl-price">${fmtDollar(refs.fromDmDl.price)}</td></tr>
+              <tr><td>IMOH</td><td class="num" id="cb-ref-fdmdl-imoh">${fmtDollar(refs.fromDmDl.imoh)}</td></tr>
+              <tr><td>Other</td><td class="num" id="cb-ref-fdmdl-other">${fmtDollar(refs.fromDmDl.other)}</td></tr>
+            </table>
           </div>
         </div>
-      </details>
+      </div>
     </section>
   `;
 }

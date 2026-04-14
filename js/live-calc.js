@@ -155,6 +155,18 @@
       setText('cb-total-cost', fmtDollar(totalCost));
       setText('cb-target-price', fmtDollar(targetPrice));
 
+      // % of Target and % of Quote columns
+      var cats = ['dm', 'dl', 'imoh', 'other'];
+      var catVals = { dm: dm, dl: dl, imoh: imoh, other: other };
+      for (var ci = 0; ci < cats.length; ci++) {
+        var cat = cats[ci];
+        var cv = catVals[cat];
+        setText('cb-pct-target-' + cat, (cv !== null && targetPrice) ? fmtPct(cv / targetPrice, 1) : '\u2014');
+        setText('cb-pct-quote-' + cat, (cv !== null && quote) ? fmtPct(cv / quote, 1) : '\u2014');
+      }
+      setText('cb-pct-target-total', (totalCost !== null && targetPrice) ? fmtPct(totalCost / targetPrice, 1) : '\u2014');
+      setText('cb-pct-quote-total', (totalCost !== null && quote) ? fmtPct(totalCost / quote, 1) : '\u2014');
+
       var marginEl = document.getElementById('cb-margin-value');
       if (marginEl) {
         marginEl.textContent = marginAmt !== null
@@ -173,7 +185,7 @@
         if (marginStatus === 'good') {
           marginStatusEl.textContent = 'Good (> ' + fmtPct(cfg.marginThresholdGood) + ')';
         } else if (marginStatus === 'low') {
-          marginStatusEl.textContent = 'Too low (\u2264 ' + fmtPct(cfg.marginThresholdGood) + ')';
+          marginStatusEl.textContent = 'Too Low (\u2264 ' + fmtPct(cfg.marginThresholdGood) + ')';
         } else {
           marginStatusEl.textContent = '';
         }

@@ -910,44 +910,105 @@ table.data.compact td {
 }
 
 /* ---------- Price build pricing panels ---------- */
+.pricing-target-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0.4rem 0;
+  font-size: 0.95rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.8rem;
+}
+.pricing-target-line span:last-child {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 .pricing-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 0.8rem;
   margin: 1rem 0;
 }
+.pricing-grid-2 { grid-template-columns: 1fr 1fr; }
 .pricing-box {
   padding: 0.8rem 1rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
 }
+.pricing-box-quote {
+  background: #fff5a8;
+  border-color: #e3cf6a;
+}
+.pricing-box-quote .pricing-input {
+  font-size: 1.5rem;
+  font-weight: 700;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 0.2rem 0;
+  font-variant-numeric: tabular-nums;
+}
+.pricing-box-quote .pricing-input:focus {
+  outline: 2px solid #1a3a5c;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
 .pricing-box .pricing-value {
-  font-size: 1.3em;
-  font-weight: 600;
+  font-size: 1.5rem;
+  font-weight: 700;
   margin-top: 0.25rem;
   font-variant-numeric: tabular-nums;
 }
 .pricing-box.margin-good {
-  background: #e9f7ec;
+  background: #d4edda;
   border-color: #4ac26b;
+  color: #155724;
 }
 .pricing-box.margin-low {
-  background: #fdecee;
+  background: #f8d7da;
   border-color: #dfa6a9;
+  color: #721c24;
 }
 
-.reference-details {
-  margin-top: 1rem;
-  padding: 0.7rem 1rem;
-  border: 1px dashed var(--border);
+/* Cost Inputs & Summary table */
+.cost-summary-table { font-size: 0.9rem; }
+.cost-summary-table thead th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--fg-muted); }
+.cost-summary-table .num-input { background: #fff5a8; }
+
+/* Reference estimates section */
+.reference-estimates {
+  margin-top: 1.5rem;
+  padding: 0.8rem 1rem;
+  background: var(--bg-muted, #f8f9fa);
+  border: 1px solid var(--border);
   border-radius: var(--radius);
 }
-.reference-details summary {
-  cursor: pointer;
+.ref-heading {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   color: var(--fg-muted);
-  font-size: 0.9em;
+  margin-bottom: 0.6rem;
 }
+.ref-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1rem;
+}
+.ref-subhead {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--fg-muted);
+  margin-bottom: 0.3rem;
+}
+.ref-table { font-size: 0.8rem; width: 100%; }
+.ref-table td { padding: 0.1rem 0; }
+.ref-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 600px) { .ref-grid { grid-template-columns: 1fr; } .pricing-grid-2 { grid-template-columns: 1fr; } }
 
 /* ---------- Pill variants ---------- */
 .pill-warn {
