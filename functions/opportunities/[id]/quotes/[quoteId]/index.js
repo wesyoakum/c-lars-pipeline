@@ -234,9 +234,6 @@ export async function onRequestGet(context) {
             `)}
           </div>`
         : ''}
-      <div style="padding:0 1rem 0.5rem;border-top:1px solid var(--border)">
-        ${raw(templateManagerHtml(templateTypeForQuote(quote.quote_type)))}
-      </div>
     </section>
   `;
 
