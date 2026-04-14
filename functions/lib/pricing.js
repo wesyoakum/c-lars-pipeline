@@ -344,7 +344,7 @@ export function fmtKnown(v) {
 // =====================================================================
 
 /**
- * Load everything needed to compute a cost build's pricing in one go:
+ * Load everything needed to compute a price build's pricing in one go:
  *   - the cost_builds row
  *   - cost_build_labor (this build's workcenter hours/rate)
  *   - cost_build_dm_selections + joined dm_items (descriptions + cost)

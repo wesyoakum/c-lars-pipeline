@@ -8,7 +8,7 @@
 // come from the stage_definitions table so adding a stage later
 // doesn't require touching this route.
 
-import { all, one, stmt, batch } from '../lib/db.js';
+import { all, one, run, stmt, batch } from '../lib/db.js';
 import { auditStmt } from '../lib/audit.js';
 import { validateOpportunity, parseTransactionTypes } from '../lib/validators.js';
 import { uuid, now, nextSequenceValue } from '../lib/ids.js';
@@ -200,6 +200,17 @@ export async function onRequestPost(context) {
   if (!number) {
     const allocated = await nextSequenceValue(env.DB, 'opportunity');
     number = String(allocated).padStart(5, '0');
+  } else {
+    // Keep the sequence counter ahead of explicitly-provided numbers
+    // (e.g. the pre-filled next number from the form) so the next
+    // auto-allocate doesn't collide.
+    const numInt = parseInt(number, 10);
+    if (!isNaN(numInt)) {
+      const seq = await one(env.DB, 'SELECT next_value FROM sequences WHERE scope = ?', ['opportunity']);
+      if (seq && numInt >= seq.next_value) {
+        await run(env.DB, 'UPDATE sequences SET next_value = ? WHERE scope = ?', [numInt + 1, 'opportunity']);
+      }
+    }
   }
 
   // Default starting stage is 'lead'. Probability defaults from the stage

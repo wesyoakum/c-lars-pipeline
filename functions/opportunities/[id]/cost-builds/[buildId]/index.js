@@ -49,7 +49,7 @@ async function renderEditor(context, { values = null, errors = {} } = {}) {
 
   const bundle = await loadCostBuildBundle(env.DB, buildId);
   if (!bundle || bundle.build.opportunity_id !== oppId) {
-    return new Response('Cost build not found', { status: 404 });
+    return new Response('Price build not found', { status: 404 });
   }
 
   const settings = await loadPricingSettings(env.DB);
@@ -145,23 +145,23 @@ async function renderEditor(context, { values = null, errors = {} } = {}) {
           </h1>
           <p class="muted">
             <a href="/opportunities/${escape(oppId)}">${escape(opp.number)} — ${escape(opp.title)}</a>
-            · <a href="/opportunities/${escape(oppId)}?tab=cost">All cost builds</a>
+            · <a href="/opportunities/${escape(oppId)}?tab=cost">All price builds</a>
           </p>
         </div>
         <div class="header-actions">
           ${locked
             ? html`
               <form method="post" action="/opportunities/${escape(oppId)}/cost-builds/${escape(buildId)}/unlock"
-                    onsubmit="return confirm('Unlock this cost build for editing?')">
+                    onsubmit="return confirm('Unlock this price build for editing?')">
                 <button class="btn" type="submit">Unlock</button>
               </form>`
             : html`
               <form method="post" action="/opportunities/${escape(oppId)}/cost-builds/${escape(buildId)}/lock"
-                    onsubmit="return confirm('Lock this cost build? It will become view-only.')">
+                    onsubmit="return confirm('Lock this price build? It will become view-only.')">
                 <button class="btn" type="submit">Lock</button>
               </form>
               <form method="post" action="/opportunities/${escape(oppId)}/cost-builds/${escape(buildId)}/delete"
-                    onsubmit="return confirm('Delete this cost build? This cannot be undone.')">
+                    onsubmit="return confirm('Delete this price build? This cannot be undone.')">
                 <button class="btn danger" type="submit">Delete</button>
               </form>`}
         </div>
@@ -195,7 +195,7 @@ async function renderEditor(context, { values = null, errors = {} } = {}) {
       </div>
 
       ${locked
-        ? html`<p class="muted">This cost build is locked. Unlock it to make changes.</p>`
+        ? html`<p class="muted">This price build is locked. Unlock it to make changes.</p>`
         : html`<div class="form-actions">
             <button class="btn primary" type="submit">Save</button>
             <a class="btn" href="/opportunities/${escape(oppId)}?tab=cost">Back</a>
@@ -204,7 +204,7 @@ async function renderEditor(context, { values = null, errors = {} } = {}) {
   `;
 
   return htmlResponse(
-    layout(`${build.label || 'Cost build'} — ${opp.number}`, body, {
+    layout(`${build.label || 'Price build'} — ${opp.number}`, body, {
       user,
       env: data?.env,
       activeNav: '/opportunities',
@@ -472,7 +472,7 @@ function renderDmSubtab({ allDmItems, dmSelectedIds, dmLibTotal, useDmLibrary, l
     <section class="card">
       <h2 class="section-h">Direct Material</h2>
       <p class="muted">
-        Check the items from the shared DM library that this cost build
+        Check the items from the shared DM library that this price build
         should include. Turn on "link DM to library" to have their sum
         override the Direct Material category on the Pricing tab.
       </p>
@@ -537,10 +537,10 @@ export async function onRequestPost(context) {
     [buildId]
   );
   if (!existing || existing.opportunity_id !== oppId) {
-    return new Response('Cost build not found', { status: 404 });
+    return new Response('Price build not found', { status: 404 });
   }
   if (existing.status === 'locked') {
-    return new Response('Cost build is locked', { status: 409 });
+    return new Response('Price build is locked', { status: 409 });
   }
 
   const input = await formBody(request);
@@ -630,7 +630,7 @@ export async function onRequestPost(context) {
       entityId: buildId,
       eventType: 'updated',
       user,
-      summary: `Updated ${value.label || 'cost build'}`,
+      summary: `Updated ${value.label || 'price build'}`,
       changes: {
         label: value.label,
         dm_user_cost: value.dm_user_cost,

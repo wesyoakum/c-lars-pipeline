@@ -30,7 +30,7 @@ async function renderEdit(context, { values = null, errors = {} } = {}) {
     return new Response('DM item not found', { status: 404 });
   }
 
-  // Count how many cost builds currently reference this item (informational).
+  // Count how many price builds currently reference this item (informational).
   const usageRow = await one(
     env.DB,
     'SELECT COUNT(*) AS n FROM cost_build_dm_selections WHERE dm_item_id = ?',
@@ -61,7 +61,7 @@ async function renderEdit(context, { values = null, errors = {} } = {}) {
         </div>
         <p class="muted">
           Current: <strong>${fmtDollar(item.cost)}</strong> ·
-          Used in ${usage} cost build${usage === 1 ? '' : 's'}.
+          Used in ${usage} price build${usage === 1 ? '' : 's'}.
         </p>
         <div class="form-actions">
           <button class="btn primary" type="submit">Save</button>

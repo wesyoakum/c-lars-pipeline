@@ -50,7 +50,7 @@ export async function onRequestPost(context) {
   const buildId = build.id;
   const settings = await loadPricingSettings(env.DB);
 
-  // ── Validate cost build scalars ──
+  // ── Validate price build scalars ──
   const { ok, value, errors } = validateCostBuild(input);
 
   // ── Validate workcenter entries ──

@@ -48,7 +48,7 @@ async function renderEdit(context, { values = null, entriesOverride = null, erro
   );
   const currentByWc = new Map(existingEntries.map((e) => [e.workcenter, e]));
 
-  // Informational: how many cost builds reference this item?
+  // Informational: how many price builds reference this item?
   const usageRow = await one(
     env.DB,
     'SELECT COUNT(*) AS n FROM cost_build_labor_selections WHERE labor_item_id = ?',
@@ -142,7 +142,7 @@ async function renderEdit(context, { values = null, entriesOverride = null, erro
           </tfoot>
         </table>
 
-        <p class="muted">Used in ${usage} cost build${usage === 1 ? '' : 's'}.</p>
+        <p class="muted">Used in ${usage} price build${usage === 1 ? '' : 's'}.</p>
 
         <div class="form-actions">
           <button class="btn primary" type="submit">Save</button>

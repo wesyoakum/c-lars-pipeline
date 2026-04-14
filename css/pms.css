@@ -204,6 +204,7 @@ form.stacked {
   gap: 1rem;
   max-width: 640px;
 }
+form.stacked.opp-form { max-width: none; }
 form.stacked label {
   display: flex;
   flex-direction: column;
@@ -786,7 +787,7 @@ fieldset.qualification-box select {
 .filter-range input { width: 50%; }
 
 /* =====================================================================
-   M4 — Library + cost build editor
+   M4 — Library + price build editor
    ===================================================================== */
 
 /* ---------- Library landing cards ---------- */
@@ -908,7 +909,7 @@ table.data.compact td {
   font-style: italic;
 }
 
-/* ---------- Cost build pricing panels ---------- */
+/* ---------- Price build pricing panels ---------- */
 .pricing-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -1391,15 +1392,16 @@ table.data.compact td input.num-input {
 /* ---------- Breadcrumbs ---------- */
 
 .breadcrumbs {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: var(--fg-muted);
+  opacity: 0.6;
   padding: 0;
   margin: -0.5rem 0 0.5rem 0;
 }
 .breadcrumbs a { color: var(--fg-muted); }
-.breadcrumbs a:hover { color: var(--accent); }
+.breadcrumbs a:hover { color: var(--accent); opacity: 1; }
 .bc-sep { margin: 0 0.4rem; color: var(--border); }
-.bc-current { color: var(--fg); font-weight: 500; }
+.bc-current { color: var(--fg-muted); font-weight: 500; }
 
 /* ---------- Stage carousel ---------- */
 

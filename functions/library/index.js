@@ -1,9 +1,9 @@
 // functions/library/index.js
 //
-// GET /library — landing page for the shared cost libraries.
+// GET /library — landing page for the shared price libraries.
 //
 // The Direct Material and Labor libraries are global (all users see
-// the same items) and feed cost builds via opt-in linkage toggles.
+// the same items) and feed price builds via opt-in linkage toggles.
 // This page gives each library its own entry point, plus headline
 // counts so Wes can see at a glance what's in the catalog.
 
@@ -27,7 +27,7 @@ export async function onRequestGet(context) {
         <h1>Library</h1>
       </div>
       <p class="muted">
-        Shared cost libraries feed Opportunity cost builds via opt-in
+        Shared price libraries feed Opportunity price builds via opt-in
         toggles. Changes here apply globally — every user sees the same
         items.
       </p>

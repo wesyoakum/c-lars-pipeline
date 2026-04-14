@@ -28,7 +28,7 @@ const RFQ_FORMATS = new Set([
 ]);
 const SOURCES = new Set(['inbound', 'outreach', 'referral', 'existing', 'other']);
 const BANT_BUDGET = new Set(['known', 'estimated', 'unknown']);
-// Cost-build statuses (migration 0005 — calculator-model cost builds).
+// Cost-build statuses (migration 0005 — calculator-model price builds).
 const COST_BUILD_STATUSES = new Set(['draft', 'locked']);
 
 // Workcenters for labor entries. Mirrors the seed value in

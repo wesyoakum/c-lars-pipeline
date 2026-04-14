@@ -62,7 +62,7 @@ export async function onRequestPost(context) {
     if (!cb) {
       return redirectWithFlash(
         `/opportunities/${oppId}?tab=quotes`,
-        'Selected cost build does not belong to this opportunity.',
+        'Selected price build does not belong to this opportunity.',
         'error'
       );
     }

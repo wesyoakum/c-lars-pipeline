@@ -22,7 +22,7 @@ export async function onRequestPost(context) {
     [buildId]
   );
   if (!cb || cb.opportunity_id !== oppId) {
-    return new Response('Cost build not found', { status: 404 });
+    return new Response('Price build not found', { status: 404 });
   }
   if (cb.status === 'locked') {
     return redirectWithFlash(
@@ -50,7 +50,7 @@ export async function onRequestPost(context) {
       entityId: buildId,
       eventType: 'locked',
       user,
-      summary: `Locked ${cb.label || 'cost build'}`,
+      summary: `Locked ${cb.label || 'price build'}`,
     }),
   ]);
 

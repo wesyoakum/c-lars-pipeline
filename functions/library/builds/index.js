@@ -107,7 +107,7 @@ async function renderList(context, { values = {}, errors = {} } = {}) {
 
       <p class="muted">
         Reusable pricing templates. Create a build here and use it as a
-        starting point when adding cost builds to opportunities.
+        starting point when adding price builds to opportunities.
       </p>
 
       <form method="post" action="/library/builds" class="inline-form">

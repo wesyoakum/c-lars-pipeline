@@ -21,10 +21,10 @@ export async function onRequestPost(context) {
     [buildId]
   );
   if (!cb || cb.opportunity_id !== oppId) {
-    return new Response('Cost build not found', { status: 404 });
+    return new Response('Price build not found', { status: 404 });
   }
   if (cb.status === 'locked') {
-    return new Response('Unlock the cost build before deleting.', { status: 409 });
+    return new Response('Unlock the price build before deleting.', { status: 409 });
   }
 
   await batch(env.DB, [
@@ -34,12 +34,12 @@ export async function onRequestPost(context) {
       entityId: buildId,
       eventType: 'deleted',
       user,
-      summary: `Deleted ${cb.label || 'cost build'}`,
+      summary: `Deleted ${cb.label || 'price build'}`,
     }),
   ]);
 
   return redirectWithFlash(
     `/opportunities/${oppId}?tab=cost`,
-    `Deleted ${cb.label || 'cost build'}.`
+    `Deleted ${cb.label || 'price build'}.`
   );
 }

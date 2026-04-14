@@ -274,7 +274,7 @@ export async function onRequestGet(context) {
   }
 
   // Audit events — include opportunity events plus related entity events
-  // (documents, quotes, activities, cost builds tied to this opp)
+  // (documents, quotes, activities, price builds tied to this opp)
   const events = await all(
     env.DB,
     `SELECT ae.event_type, ae.entity_type, ae.at, ae.summary,

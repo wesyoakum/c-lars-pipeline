@@ -1,12 +1,12 @@
 // js/live-calc.js
 //
 // Client-side live calculation for:
-//   1. Cost build pricing tab  — total cost, target price, margin
-//   2. Cost build labor tab    — per-workcenter cost, current project total
+//   1. Price build pricing tab  — total cost, target price, margin
+//   2. Price build labor tab    — per-workcenter cost, current project total
 //   3. Quote lines             — extended price per line, subtotal, total
 //
 // Auto-initializes on DOMContentLoaded by detecting data attributes
-// on the page. Pages that don't have cost builds or quote lines get
+// on the page. Pages that don't have price builds or quote lines get
 // a zero-cost no-op.
 //
 // No dependencies — vanilla JS. Works alongside HTMX / Alpine.
@@ -41,7 +41,7 @@
   }
 
   // =====================================================================
-  // 1. COST BUILD — pricing + labor + DM live calc
+  // 1. PRICE BUILD — pricing + labor + DM live calc
   // =====================================================================
 
   function initCostBuild() {

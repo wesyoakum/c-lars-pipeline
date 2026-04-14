@@ -235,7 +235,7 @@ async function renderEditor(context, { values = null, errors = {} } = {}) {
 }
 
 // =====================================================================
-// Sub-tab renderers (same as cost build editor, without locked state)
+// Sub-tab renderers (same as price build editor, without locked state)
 // =====================================================================
 
 function renderPricingSubtab({ build, pricing, totals, settings, errText }) {
@@ -564,7 +564,7 @@ export async function onRequestPost(context) {
     });
   }
 
-  // Reuse the cost build validator for the pricing fields.
+  // Reuse the price build validator for the pricing fields.
   // We pass label so validateCostBuild doesn't complain, though we use name.
   const { ok, value, errors } = validateCostBuild({ ...input, label: name });
 

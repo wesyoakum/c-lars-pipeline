@@ -3,7 +3,7 @@
 // POST /opportunities/:id/stage — advance / move an opportunity to a
 // new stage.
 //
-// Gate checks evaluate real data (account, contacts, cost builds, quotes,
+// Gate checks evaluate real data (account, contacts, price builds, quotes,
 // documents) and produce warnings or blockers depending on GATE_MODE.
 // In 'warn' mode (current default), all violations are shown as warnings
 // but the transition always proceeds. Switch to 'enforce' in lib/stages.js

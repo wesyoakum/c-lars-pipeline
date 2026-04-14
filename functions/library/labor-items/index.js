@@ -83,7 +83,7 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
 
       <p class="muted">
         Shared catalog of reusable labor packages. Each package holds
-        hours and rates per workcenter; cost builds can link one or
+        hours and rates per workcenter; price builds can link one or
         more into the Direct Labor category.
         Default rate: <strong>${fmtDollar(settings.defaultLaborRate)}</strong>/hr.
       </p>

@@ -1,7 +1,7 @@
 // functions/opportunities/[id]/cost-builds/[buildId]/unlock.js
 //
 // POST /opportunities/:id/cost-builds/:buildId/unlock — return a
-// locked cost build to draft status so it can be edited again.
+// locked price build to draft status so it can be edited again.
 
 import { one, stmt, batch } from '../../../../lib/db.js';
 import { auditStmt } from '../../../../lib/audit.js';
@@ -20,7 +20,7 @@ export async function onRequestPost(context) {
     [buildId]
   );
   if (!cb || cb.opportunity_id !== oppId) {
-    return new Response('Cost build not found', { status: 404 });
+    return new Response('Price build not found', { status: 404 });
   }
   if (cb.status !== 'locked') {
     return redirectWithFlash(
@@ -48,7 +48,7 @@ export async function onRequestPost(context) {
       entityId: buildId,
       eventType: 'unlocked',
       user,
-      summary: `Unlocked ${cb.label || 'cost build'}`,
+      summary: `Unlocked ${cb.label || 'price build'}`,
     }),
   ]);
 

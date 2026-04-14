@@ -1,10 +1,10 @@
 // functions/opportunities/[id]/cost-builds/index.js
 //
-// POST /opportunities/:id/cost-builds  — create a new cost build for
+// POST /opportunities/:id/cost-builds  — create a new price build for
 // this opportunity and redirect into the editor. The new build starts
 // empty (all five nullable cost / quote inputs NULL, no library
-// linkage, no current-project labor). Multiple cost builds per
-// opportunity are allowed — the list on the "Cost builds" tab shows
+// linkage, no current-project labor). Multiple price builds per
+// opportunity are allowed — the list on the "Price builds" tab shows
 // them in created_at DESC order.
 
 import { one, stmt, batch } from '../../../lib/db.js';
@@ -24,7 +24,7 @@ export async function onRequestPost(context) {
   );
   if (!opp) return new Response('Opportunity not found', { status: 404 });
 
-  // Auto-label: "Cost build #N" where N is one higher than the current
+  // Auto-label: "Price build #N" where N is one higher than the current
   // count for this opportunity. Cheap to compute and gives the user a
   // sensible default they can overwrite in the editor.
   const countRow = await one(
@@ -33,7 +33,7 @@ export async function onRequestPost(context) {
     [oppId]
   );
   const nextIdx = (countRow?.n ?? 0) + 1;
-  const label = `Cost build #${nextIdx}`;
+  const label = `Price build #${nextIdx}`;
 
   const id = uuid();
   const ts = now();

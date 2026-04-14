@@ -5,7 +5,7 @@
 //
 // Each quote line item has at most one price build (1:1). The build is
 // stored in cost_builds with quote_line_id set. The pricing engine is
-// identical to the old opp-level cost builds.
+// identical to the old opp-level price builds.
 
 import { one, all, stmt, batch } from '../../../../../../../lib/db.js';
 import { auditStmt } from '../../../../../../../lib/audit.js';
@@ -596,7 +596,7 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
   );
 }
 
-// ── Sub-tab renderers (same as old cost build editor) ───────────
+// ── Sub-tab renderers (same as old price build editor) ───────────
 
 function renderPricingSubtab({ build, pricing, totals, settings, errText, locked }) {
   const eff = pricing.effective;

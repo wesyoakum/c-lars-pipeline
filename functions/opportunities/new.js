@@ -6,14 +6,14 @@
 // which will re-render this page with inline errors on validation failure
 // by importing renderNewForm() below.
 
-import { all } from '../lib/db.js';
+import { all, one } from '../lib/db.js';
 import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { readFlash } from '../lib/http.js';
 
 const TYPE_OPTIONS = [
   { value: 'spares', label: 'Spares' },
-  { value: 'eps', label: 'Engineered Product (EPS)' },
-  { value: 'refurb', label: 'Refurbishment' },
+  { value: 'eps', label: 'EPS' },
+  { value: 'refurb', label: 'Refurb' },
   { value: 'service', label: 'Service' },
 ];
 
@@ -55,6 +55,13 @@ export async function renderNewForm(context, opts = {}) {
   const values = opts.values ?? {};
   const errors = opts.errors ?? {};
 
+  // Peek at next available opportunity number (read-only, doesn't consume it).
+  let nextNum = '';
+  if (!values.number) {
+    const seq = await one(env.DB, 'SELECT next_value FROM sequences WHERE scope = ?', ['opportunity']);
+    if (seq) nextNum = String(seq.next_value).padStart(5, '0');
+  }
+
   // Accounts dropdown. In P0 we load the whole list (solo-user system,
   // never going to be huge). Later this could become an HTMX autocomplete.
   const accounts = await all(env.DB, 'SELECT id, name FROM accounts ORDER BY name');
@@ -80,7 +87,7 @@ export async function renderNewForm(context, opts = {}) {
     <section class="card">
       <h1>New opportunity</h1>
       <p class="muted">
-        An opportunity is the spine of a deal. Cost builds, quotes,
+        An opportunity is the spine of a deal. Price builds, quotes,
         documents, and the Job handoff all hang off it.
       </p>
 
@@ -96,10 +103,10 @@ export async function renderNewForm(context, opts = {}) {
           <label style="flex:1">
             <span>Number</span>
             <input type="text" name="number" inputmode="numeric"
-                   value="${escape(values.number ?? '')}"
-                   placeholder="auto (next: 25001+)">
+                   value="${escape(values.number || nextNum)}"
+                   onfocus="this.select()">
             ${errors.number ? html`<small class="field-error">${errors.number}</small>` : ''}
-            <small class="muted">Leave blank to auto-allocate.</small>
+            <small class="muted">Auto-assigned — click to enter a custom number</small>
           </label>
         </div>
 

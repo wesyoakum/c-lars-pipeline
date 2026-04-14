@@ -57,7 +57,7 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
       </div>
 
       <p class="muted">
-        Shared catalog of DM items. Cost builds can link to one or more
+        Shared catalog of DM items. Price builds can link to one or more
         of these to auto-populate the Direct Material category.
       </p>
 
