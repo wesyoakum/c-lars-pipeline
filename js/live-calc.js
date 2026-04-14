@@ -26,7 +26,7 @@
 
   function fmtDollar(n) {
     if (n === null || n === undefined || !Number.isFinite(n)) return '\u2014'; // em-dash
-    return '$' + Math.round(n).toLocaleString('en-US');
+    return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
   function fmtPct(n, d) {
@@ -132,7 +132,7 @@
     function setAutoVal(name, v) {
       var el = form.querySelector('[name="' + name + '"]');
       if (!el) return;
-      el.value = Math.round(v);
+      el.value = v.toFixed(2);
       el.classList.add('auto-filled');
     }
 

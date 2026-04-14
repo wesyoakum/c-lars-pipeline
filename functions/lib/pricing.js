@@ -321,8 +321,7 @@ export function computePricing(inputs, settings) {
  */
 export function fmtDollar(n, { showNull = '-' } = {}) {
   if (n === null || n === undefined || Number.isNaN(n)) return showNull;
-  const rounded = Math.round(Number(n));
-  return '$' + rounded.toLocaleString('en-US');
+  return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /**

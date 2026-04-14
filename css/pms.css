@@ -1338,13 +1338,19 @@ table.data.compact td {
 .quote-lines-table .col-price { width: 100px; }
 .quote-lines-table .col-ext   { width: 110px; }
 .quote-lines-table .col-build { width: 100px; }
+.quote-lines-table .inline-form {
+  display: block;
+  margin: 0;
+}
 .line-item-fields {
   display: flex;
   gap: 0.5rem;
+  width: 100%;
 }
 .line-title {
   flex: 1;
   min-width: 0;
+  max-width: none;
   padding: 0.25rem 0.45rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1354,6 +1360,7 @@ table.data.compact td {
 .line-desc {
   flex: 2;
   min-width: 0;
+  max-width: none;
   padding: 0.25rem 0.45rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1362,7 +1369,7 @@ table.data.compact td {
 }
 .line-notes {
   display: block;
-  width: 50%;
+  width: 100%;
   max-width: 100%;
   margin-top: 0.3rem;
   padding: 0.2rem 0.45rem;
