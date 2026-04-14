@@ -102,17 +102,41 @@ export async function getQuoteDocData(env, quoteId) {
   const contactLast  = quote.contact_last  || '';
   const contactFullName = [contactFirst, contactLast].filter(Boolean).join(' ');
 
+  // Format line items with both PMS camelCase and WFM PascalCase keys
+  const fmtLineWfm = (line) => {
+    const base = fmtLine(line);
+    return {
+      ...base,
+      // WFM-compatible aliases
+      Name: base.title,
+      Description: line.description || '',
+      Note: base.note,
+      Quantity: base.quantity,
+      Rate: base.unitPrice,
+      Amount: base.amount,
+      Code: base.partNumber,
+    };
+  };
+
+  const formattedLines = regularLines.map(fmtLineWfm);
+  const formattedOptions = optionLines.map(fmtLineWfm);
+
+  // Quote number: omit "Rev" for v1
+  const quoteNumDisplay = quote.revision && quote.revision !== 'v1'
+    ? `${quote.number} Rev ${quote.revision}`
+    : quote.number;
+
   return {
-    // Header
+    // Header — camelCase (PMS)
     clientName: quote.account_name || '',
     clientAddress: billingAddr?.address || '',
-    quoteNumber: `${quote.number} Rev ${quote.revision}`,
+    quoteNumber: quoteNumDisplay,
     quoteDate: fmtDate(quote.submitted_at) || fmtDate(new Date().toISOString()),
     quoteExpiration: fmtDate(quote.valid_until),
     delivery: quote.delivery_estimate || '',
     description: quote.description || '',
 
-    // Contact info
+    // Contact info — camelCase (PMS)
     contactFirstName: contactFirst,
     contactLastName:  contactLast,
     contactEmail: quote.contact_email || '',
@@ -120,18 +144,16 @@ export async function getQuoteDocData(env, quoteId) {
     contactTitle: quote.contact_title || '',
     contactName:  contactFullName,
 
-    // Line items
-    lines: regularLines.map(fmtLine),
-    options: optionLines.map(fmtLine),
+    // Line items — camelCase (PMS)
+    lines: formattedLines,
+    options: formattedOptions,
     hasOptions: optionLines.length > 0,
     optionHeading: 'Preferred Options',
     quoteOptionExplanation: '',
 
-    // Pricing breakdown
+    // Pricing breakdown — camelCase (PMS)
     quoteSubtotal: fmtDollar(subtotalRaw),
     quoteTax: fmtDollar(quote.tax_amount),
-
-    // Totals
     quoteTotal: fmtDollar(quote.total_price),
 
     // Quote extras
@@ -157,6 +179,44 @@ export async function getQuoteDocData(env, quoteId) {
 
     // OC-specific (populated when generating OC docs)
     ocDate: '',
+
+    // ── WFM-compatible PascalCase aliases ──
+    // Client & contact
+    ClientName: quote.account_name || '',
+    ClientBillingAddress: billingAddr?.address || '',
+    ClientAddressText: billingAddr?.address || '',
+    ContactName: contactFullName,
+    ContactEmail: quote.contact_email || '',
+    ContactMobile: quote.contact_phone || '',
+
+    // Document headers
+    QuoteNumber: quoteNumDisplay,
+    QuoteName: quote.title || '',
+    QuoteDescription: quote.description || '',
+    QuoteValidDate: fmtDate(quote.valid_until),
+    Date: fmtDate(quote.submitted_at) || fmtDate(new Date().toISOString()),
+    Today: fmtDate(new Date().toISOString()),
+    TITLE: quote.title || '',
+    OrderNumber: quote.customer_po_number || '',
+
+    // Financial totals
+    QuoteSubTotal: fmtDollar(subtotalRaw),
+    QuoteTaxTotal: fmtDollar(quote.tax_amount),
+    QuoteTotal: fmtDollar(quote.total_price),
+
+    // Job context
+    JobName: quote.opp_title || '',
+    JobNumber: quote.opp_number || '',
+    JobDescription: quote.description || '',
+    JobClientOrderNumber: quote.customer_po_number || '',
+
+    // Notes / terms / governance
+    PreferenceTerms: quote.payment_terms || '',
+
+    // WFM table loops (alias for {#Task}...{/Task}, {#Cost}...{/Cost})
+    Task: formattedLines,
+    Cost: formattedLines,
+    Option: formattedOptions,
 
     // Metadata for filename/storage
     _quoteId: quote.id,

@@ -1599,18 +1599,33 @@ table.data.compact td input.num-input {
 }
 
 /* ---------- Generated document links ---------- */
-.gen-doc-link {
-  display: inline-block;
+.gen-doc-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
   margin: 0 0.5rem 0.25rem 0;
-  font-size: 0.85em;
   padding: 0.15rem 0.4rem;
   border-radius: var(--radius);
 }
+.gen-doc-link { font-size: 0.85em; }
+.gen-doc-delete {
+  background: none;
+  border: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.gen-doc-row:hover .gen-doc-delete { opacity: 1; }
+.gen-doc-delete:hover { color: var(--danger, #d1242f); }
 .gen-doc-highlight {
   animation: doc-highlight 3s ease-out;
 }
 @keyframes doc-highlight {
-  0%   { background: #fff3a8; }
+  0%   { background: #d4edda; }
   100% { background: transparent; }
 }
 

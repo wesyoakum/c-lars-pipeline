@@ -220,12 +220,17 @@ export async function onRequestGet(context) {
           <div style="padding:0.5rem 1rem 0.75rem;border-top:1px solid var(--border)">
             <p class="muted" style="margin:0 0 0.35rem;font-size:0.8em;font-weight:600">Generated Documents</p>
             ${generatedDocs.map(d => html`
-              <a href="/documents/${escape(d.id)}/download"
-                 class="gen-doc-link ${d.id === highlightDocId ? 'gen-doc-highlight' : ''}"
-                 target="_blank">
-                ${d.kind === 'quote_pdf' ? '📄' : '📝'} ${escape(d.original_filename)}
-                <span class="muted">(${formatSize(d.size_bytes)})</span>
-              </a>
+              <span class="gen-doc-row ${d.id === highlightDocId ? 'gen-doc-highlight' : ''}">
+                <a href="/documents/${escape(d.id)}/download" class="gen-doc-link" target="_blank">
+                  ${d.kind === 'quote_pdf' ? '📄' : '📝'} ${escape(d.original_filename)}
+                  <span class="muted">(${formatSize(d.size_bytes)})</span>
+                </a>
+                ${!readOnly ? html`
+                  <form method="post" action="/documents/${escape(d.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this document?')">
+                    <input type="hidden" name="return_to" value="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}">
+                    <button type="submit" class="gen-doc-delete" title="Delete">\u00d7</button>
+                  </form>` : ''}
+              </span>
             `)}
           </div>`
         : ''}
