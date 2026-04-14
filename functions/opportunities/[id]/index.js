@@ -226,7 +226,7 @@ export async function onRequestGet(context) {
       [oppId]
     );
     quoteBadgeCount = rows.length;
-    if (tab === 'quotes') quoteRows = rows;
+    quoteRows = rows;
   }
 
   // Tasks
@@ -321,6 +321,14 @@ export async function onRequestGet(context) {
     { value: '', label: '— Select —' },
     ...accounts.map(a => ({ value: a.id, label: a.name })),
   ];
+
+  // ---- Shared labels -----------------------------------------------------
+  const DOC_KIND_LABELS = {
+    rfq: 'RFQ', rfi: 'RFI', quote_pdf: 'Quote PDF', po: 'PO',
+    oc_pdf: 'OC PDF', ntp_pdf: 'NTP PDF', drawing: 'Drawing',
+    specification: 'Specification', supplier_quote: 'Vendor Quote',
+    image: 'Image / Photo', other: 'Other',
+  };
 
   // ---- Overview tab ------------------------------------------------------
   const overviewTab = html`
@@ -522,11 +530,31 @@ export async function onRequestGet(context) {
             <tbody>
               ${contacts.map(c => {
                 const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
-                return html`<tr>
-                  <td><strong>${escape(name)}</strong></td>
-                  <td>${escape(c.title ?? '')}</td>
-                  <td>${c.email ? html`<a href="mailto:${escape(c.email)}">${escape(c.email)}</a>` : ''}</td>
-                  <td>${escape(c.phone ?? '')}</td>
+                return html`<tr x-data="contactInline('${escape(c.id)}')">
+                  <td>
+                    <span class="ie" data-field="first_name" data-type="text" @click="activate($el)">
+                      <span class="ie-display"><strong>${escape(c.first_name ?? '')}</strong></span>
+                    </span>
+                    ${' '}
+                    <span class="ie" data-field="last_name" data-type="text" @click="activate($el)">
+                      <span class="ie-display"><strong>${escape(c.last_name ?? '')}</strong></span>
+                    </span>
+                  </td>
+                  <td>
+                    <span class="ie" data-field="title" data-type="text" @click="activate($el)">
+                      <span class="ie-display ${c.title ? '' : 'muted'}">${escape(c.title ?? '—')}</span>
+                    </span>
+                  </td>
+                  <td>
+                    <span class="ie" data-field="email" data-type="text" data-input-type="email" @click="activate($el)">
+                      <span class="ie-display ${c.email ? '' : 'muted'}">${c.email ? html`<a href="mailto:${escape(c.email)}" @click.stop>${escape(c.email)}</a>` : '—'}</span>
+                    </span>
+                  </td>
+                  <td>
+                    <span class="ie" data-field="phone" data-type="text" data-input-type="tel" @click="activate($el)">
+                      <span class="ie-display ${c.phone ? '' : 'muted'}">${escape(c.phone ?? '—')}</span>
+                    </span>
+                  </td>
                   <td>${c.is_primary ? html`<span class="pill pill-success">primary</span>` : ''}</td>
                 </tr>`;
               })}
@@ -534,6 +562,81 @@ export async function onRequestGet(context) {
           </table>
         </section>`
       : ''}
+
+    ${quoteRows.length > 0
+      ? html`
+        <section class="card">
+          <div class="card-header">
+            <h2>Quotes</h2>
+            <a class="btn btn-sm" href="/opportunities/${escape(opp.id)}?tab=quotes">View all</a>
+          </div>
+          <table class="data compact">
+            <thead><tr><th>Number</th><th>Rev</th><th>Type</th><th>Title</th><th>Status</th><th class="num">Total</th><th></th></tr></thead>
+            <tbody>
+              ${quoteRows.map(q => {
+                const statusClass = quoteStatusPillClass(q.status);
+                return html`<tr>
+                  <td><code>${escape(q.number)}</code></td>
+                  <td>${escape(q.revision)}</td>
+                  <td>${escape(QUOTE_TYPE_LABELS[q.quote_type] ?? q.quote_type)}</td>
+                  <td><a href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">${escape(q.title || '(no title)')}</a></td>
+                  <td><span class="pill ${statusClass}">${escape(QUOTE_STATUS_LABELS[q.status] ?? q.status)}</span></td>
+                  <td class="num">${fmtDollar(q.total_price)}</td>
+                  <td class="row-actions"><a class="btn small" href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">Open</a></td>
+                </tr>`;
+              })}
+            </tbody>
+          </table>
+        </section>`
+      : ''}
+
+    <section class="card">
+      <div class="card-header"><h2>Attachments</h2></div>
+      <div x-data="dropUpload()" style="margin-bottom:1rem;">
+        <form method="post" action="/documents" enctype="multipart/form-data" x-ref="uploadForm">
+          <input type="hidden" name="opportunity_id" value="${escape(opp.id)}">
+          <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}">
+          <div class="drop-zone" :class="{ 'drop-zone-active': dragging }"
+               @dragover.prevent="dragging = true"
+               @dragleave.prevent="dragging = false"
+               @drop.prevent="handleDrop($event)"
+               @click="$refs.fileInput.click()">
+            <input type="file" name="file" required x-ref="fileInput" hidden @change="fileSelected($event)">
+            <div class="drop-zone-content">
+              <span x-show="!fileName" class="muted">Drop file here or click to browse</span>
+              <span x-show="fileName" x-text="fileName" style="font-weight:500"></span>
+            </div>
+          </div>
+          <div style="margin-top:0.4rem; display:grid; grid-template-columns:auto 1fr 1fr auto; gap:0.5rem; align-items:end;">
+            <div><label class="field-label">Kind</label>
+              <select name="kind" style="font-size:0.85em">${Object.entries(DOC_KIND_LABELS).map(([k, v]) => html`<option value="${k}">${v}</option>`)}</select></div>
+            <div><input type="text" name="title" placeholder="Title (defaults to filename)" style="width:100%; font-size:0.85em"></div>
+            <div><input type="text" name="notes" placeholder="Notes (optional)" style="width:100%; font-size:0.85em"></div>
+            <div><button class="btn btn-sm primary" type="submit">Upload</button></div>
+          </div>
+        </form>
+      </div>
+      ${docRows.length > 0
+        ? html`
+          <table class="data compact">
+            <thead><tr><th>Title</th><th>Kind</th><th>Size</th><th>Uploaded</th><th></th></tr></thead>
+            <tbody>
+              ${docRows.map(d => html`<tr>
+                <td>
+                  <strong>${escape(d.title)}</strong>
+                  ${d.original_filename ? html`<br><small class="muted">${escape(d.original_filename)}</small>` : ''}
+                </td>
+                <td><span class="pill">${escape(DOC_KIND_LABELS[d.kind] ?? d.kind)}</span></td>
+                <td><small>${escape(fmtSize(d.size_bytes))}</small></td>
+                <td><small class="muted">${escape((d.uploaded_at ?? '').slice(0, 10))}</small></td>
+                <td class="row-actions">
+                  <a class="btn small" href="/documents/${escape(d.id)}/download">Download</a>
+                </td>
+              </tr>`)}
+            </tbody>
+          </table>`
+        : html`<p class="muted">No attachments yet.</p>`}
+    </section>
   `;
 
   // ---- Price builds tab --------------------------------------------------
@@ -647,12 +750,6 @@ export async function onRequestGet(context) {
     </section>`;
 
   // ---- Docs tab ----------------------------------------------------------
-  const DOC_KIND_LABELS = {
-    rfq: 'RFQ', rfi: 'RFI', quote_pdf: 'Quote PDF', po: 'PO',
-    oc_pdf: 'OC PDF', ntp_pdf: 'NTP PDF', drawing: 'Drawing',
-    specification: 'Specification', supplier_quote: 'Vendor Quote',
-    image: 'Image / Photo', other: 'Other',
-  };
   const docsTab = html`
     <section class="card">
       <div class="card-header"><h2>Documents</h2></div>
@@ -1120,6 +1217,76 @@ function oppInline(oppId, accountId) {
     deactivate(el, input) {
       if (input && input.parentNode === el) el.removeChild(input);
       el.querySelectorAll('.ie-new-contact').forEach(f => f.remove());
+      const display = el.querySelector('.ie-display');
+      if (display) display.style.display = '';
+    },
+  };
+}
+
+// Per-row inline-edit for contacts
+function contactInline(contactId) {
+  const patchUrl = '/contacts/' + contactId + '/patch';
+  return {
+    activate(el) {
+      if (el.querySelector('.ie-input')) return;
+      const field = el.dataset.field;
+      const type = el.dataset.type;
+      const display = el.querySelector('.ie-display');
+      const currentValue = display.textContent.trim();
+      if (currentValue === '—') var cv = ''; else var cv = currentValue;
+
+      let input;
+      input = document.createElement('input');
+      input.type = el.dataset.inputType || 'text';
+      input.className = 'ie-input';
+      input.value = cv;
+      input.addEventListener('blur', () => this.save(el, input));
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); this.save(el, input); }
+        if (e.key === 'Escape') { this.deactivate(el, input); }
+      });
+
+      display.style.display = 'none';
+      el.appendChild(input);
+      input.focus();
+      input.select();
+    },
+    async save(el, input) {
+      const field = el.dataset.field;
+      const value = input.value.trim();
+      this.deactivate(el, input);
+
+      el.classList.add('ie-saving');
+      try {
+        const res = await fetch(patchUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ field, value }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          el.classList.add('ie-error');
+          setTimeout(() => el.classList.remove('ie-error'), 2000);
+          return;
+        }
+        const display = el.querySelector('.ie-display');
+        if (field === 'email' && data.value) {
+          display.innerHTML = '<a href="mailto:' + data.value + '">' + data.value + '</a>';
+        } else {
+          display.textContent = data.value || '—';
+        }
+        display.classList.toggle('muted', !data.value);
+        el.classList.add('ie-saved');
+        setTimeout(() => el.classList.remove('ie-saved'), 1200);
+      } catch (err) {
+        el.classList.add('ie-error');
+        setTimeout(() => el.classList.remove('ie-error'), 2000);
+      } finally {
+        el.classList.remove('ie-saving');
+      }
+    },
+    deactivate(el, input) {
+      if (input && input.parentNode === el) el.removeChild(input);
       const display = el.querySelector('.ie-display');
       if (display) display.style.display = '';
     },

@@ -133,12 +133,6 @@ export function layout(title, body, opts = {}) {
       ${navLink('/jobs', 'Jobs', activeNav)}
     </nav>
     <div class="header-right">
-      <a href="/settings" class="settings-gear" title="Settings">
-        <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="10" cy="10" r="3"/>
-          <path d="M10 1.5v2M10 16.5v2M3.5 3.5l1.4 1.4M15.1 15.1l1.4 1.4M1.5 10h2M16.5 10h2M3.5 16.5l1.4-1.4M15.1 4.9l1.4-1.4"/>
-        </svg>
-      </a>
       <div class="user-badge">
         ${user ? `<span class="user-name">${escape(user.display_name ?? user.email)}</span>
                    <span class="user-role">${escape(user.email ?? '')} · ${escape(user.role)}</span>` : '<span>Not signed in</span>'}
