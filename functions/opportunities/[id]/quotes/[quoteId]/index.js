@@ -499,7 +499,7 @@ export async function onRequestGet(context) {
       </label>
       <label style="margin-top:0.75rem">
         <strong>Terms</strong>
-        <textarea class="desc-textarea" placeholder="Payment terms, conditions..."
+        <textarea class="desc-textarea" data-field="payment_terms" placeholder="Payment terms, conditions..."
                   ${readOnly ? 'disabled' : ''}
                   @change="window._qPatch('payment_terms', $event.target.value)">${escape(quote.payment_terms ?? '')}</textarea>
       </label>
@@ -556,6 +556,28 @@ export async function onRequestGet(context) {
         };
       });
 
+      // Default EPS payment terms based on delivery weeks
+      function epsDefaultTerms(weeks) {
+        var w1 = Math.floor(weeks / 3);
+        var w2 = Math.floor(2 * weeks / 3);
+        return '25% Due upon receipt of purchase order\\n'
+             + '25% Due ' + w1 + ' weeks ARO\\n'
+             + '25% Due ' + w2 + ' weeks ARO\\n'
+             + '15% Due upon completion of FAT\\n'
+             + '10% Due upon delivery of final documentation';
+      }
+      var _quoteType = ${raw(JSON.stringify(quote.quote_type || ''))};
+
+      function tryAutoFillTerms(weeks) {
+        if (_quoteType !== 'eps') return;
+        var ta = document.querySelector('textarea[data-field="payment_terms"]');
+        if (!ta) return;
+        if (ta.value.trim() !== '') return; // user has terms, don't overwrite
+        var terms = epsDefaultTerms(weeks);
+        ta.value = terms;
+        window._qPatch('payment_terms', terms);
+      }
+
       // Delivery picker with text, calendar, and weeks buttons
       Alpine.data('deliveryPicker', function(initial) {
         return {
@@ -566,6 +588,7 @@ export async function onRequestGet(context) {
             var dateStr = d.toISOString().slice(0, 10);
             this.textVal = n + ' weeks (' + dateStr + ')';
             this.save();
+            tryAutoFillTerms(n);
           },
           setDate: function(dateStr) {
             if (!dateStr) return;
@@ -577,6 +600,14 @@ export async function onRequestGet(context) {
           },
         };
       });
+
+      // On page load, auto-fill EPS terms if delivery is set and terms are empty
+      if (_quoteType === 'eps') {
+        var m = (${raw(JSON.stringify(quote.delivery_estimate || ''))}).match(/^(\\d+)\\s*week/);
+        if (m) {
+          setTimeout(function() { tryAutoFillTerms(parseInt(m[1], 10)); }, 100);
+        }
+      }
 
       // Details card: address selector + description auto-save
       Alpine.data('quoteDetails', function() {
