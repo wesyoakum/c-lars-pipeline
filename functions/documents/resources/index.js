@@ -119,7 +119,7 @@ export async function onRequestGet(context) {
                 <col data-col="category_label" style="width:150px">
                 <col data-col="size"           style="width:80px">
                 <col data-col="uploaded"       style="width:130px">
-                <col data-col="actions"        style="width:190px">
+                <col data-col="actions"        style="width:260px">
               </colgroup>
               ${listTableHead(columns, rowData)}
               <tbody data-role="rows">
@@ -258,5 +258,5 @@ export async function onRequestPost(context) {
 
 function redirect(message, level = 'success') {
   const url = `/documents/resources?flash=${encodeURIComponent(message)}&flash_level=${level}`;
-  return Response.redirect(url, 303);
+  return new Response(null, { status: 303, headers: { Location: url } });
 }

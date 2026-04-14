@@ -73,9 +73,9 @@ export async function onRequestPost(context) {
 
 function respondBack(request, message, level = 'success') {
   const referer = request.headers.get('referer') || '/documents/resources';
-  const sep = referer.includes('?') ? '&' : '?';
-  const url = `${referer}${sep}flash=${encodeURIComponent(message)}&flash_level=${level}`;
-  return Response.redirect(url, 303);
+  const clean = referer.split('?')[0];
+  const url = `${clean}?flash=${encodeURIComponent(message)}&flash_level=${level}`;
+  return new Response(null, { status: 303, headers: { Location: url } });
 }
 
 function formatSize(bytes) {

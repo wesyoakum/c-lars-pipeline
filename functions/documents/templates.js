@@ -103,7 +103,7 @@ export async function onRequestGet(context) {
             <col data-col="status"   style="width:90px">
             <col data-col="size"     style="width:80px">
             <col data-col="uploaded" style="width:130px">
-            <col data-col="actions"  style="width:190px">
+            <col data-col="actions"  style="width:260px">
           </colgroup>
           ${listTableHead(columns, rowData)}
           <tbody data-role="rows">
@@ -142,6 +142,13 @@ export async function onRequestGet(context) {
                         ${r.exists ? 'Replace' : 'Upload'}
                       </button>
                     </form>
+                    ${r.exists
+                      ? html`<form method="post" action="/templates/${escape(r.key)}/delete"
+                                   style="display:inline"
+                                   onsubmit="return confirm('Delete this template?')">
+                               <button type="submit" class="btn btn-sm danger">Delete</button>
+                             </form>`
+                      : ''}
                   </div>
                 </td>
               </tr>

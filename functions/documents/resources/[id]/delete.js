@@ -45,5 +45,5 @@ export async function onRequestPost(context) {
 
 function redirect(message, level = 'success') {
   const url = `/documents/resources?flash=${encodeURIComponent(message)}&flash_level=${level}`;
-  return Response.redirect(url, 303);
+  return new Response(null, { status: 303, headers: { Location: url } });
 }

@@ -131,7 +131,7 @@ export async function onRequestGet(context) {
                 <col data-col="attached_to" style="width:180px">
                 <col data-col="size"        style="width:80px">
                 <col data-col="date"        style="width:130px">
-                <col data-col="actions"     style="width:190px">
+                <col data-col="actions"     style="width:260px">
               </colgroup>
               ${listTableHead(columns, rowData)}
               <tbody data-role="rows">
@@ -167,6 +167,12 @@ export async function onRequestGet(context) {
                           <input type="hidden" name="return_to" value="/documents/library">
                           <button type="button" class="btn btn-sm primary"
                                   onclick="this.previousElementSibling.previousElementSibling.click()">Replace</button>
+                        </form>
+                        <form method="post" action="/documents/${escape(d.id)}/delete"
+                              style="display:inline"
+                              onsubmit="return confirm('Delete this document?')">
+                          <input type="hidden" name="return_to" value="/documents/library">
+                          <button type="submit" class="btn btn-sm danger">Delete</button>
                         </form>
                       </div>
                     </td>
