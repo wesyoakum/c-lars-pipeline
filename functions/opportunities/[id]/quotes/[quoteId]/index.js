@@ -499,19 +499,17 @@ export async function onRequestGet(context) {
       </label>
       ${quote.quote_type === 'eps'
         ? html`
-          <div x-data="epsTerms(${raw(JSON.stringify(quote.payment_terms ?? ''))})" style="margin-top:0.75rem">
-            <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.25rem">
-              <strong>Terms</strong>
-              <label style="font-size:0.8rem; color:var(--fg-muted); cursor:pointer; display:flex; align-items:center; gap:0.3rem; user-select:none">
-                <input type="checkbox" :checked="useDefault" @change="toggleDefault()" ${readOnly ? 'disabled' : ''}>
-                Default EPS Terms
-              </label>
-            </div>
+          <div x-data="epsTerms()" style="margin-top:0.75rem">
+            <strong>Terms</strong>
             <textarea class="desc-textarea" data-field="payment_terms" placeholder="Payment terms, conditions..."
                       ${readOnly ? 'disabled' : ''}
                       x-model="termsVal"
                       @input="onInput()"
                       @change="onSave()"></textarea>
+            <label style="font-size:0.8rem; color:var(--fg-muted); cursor:pointer; display:inline-flex; align-items:center; gap:0.3rem; user-select:none; margin-top:0.25rem">
+              <input type="checkbox" x-model="useDefault" ${readOnly ? 'disabled' : ''}>
+              Default EPS Terms
+            </label>
           </div>`
         : html`
           <label style="margin-top:0.75rem">
@@ -576,6 +574,7 @@ export async function onRequestGet(context) {
       // --- EPS default payment terms based on delivery weeks ---
       var _quoteType = ${raw(JSON.stringify(quote.quote_type || ''))};
       var _deliveryWeeks = null;
+      var _initialPaymentTerms = ${raw(JSON.stringify(quote.payment_terms || ''))};
 
       // Parse initial delivery weeks
       var _initDeliveryMatch = (${raw(JSON.stringify(quote.delivery_estimate || ''))}).match(/^(\\d+)\\s*week/);
@@ -585,10 +584,10 @@ export async function onRequestGet(context) {
         if (!weeks || weeks <= 0) return '';
         var w1 = Math.floor(weeks / 3);
         var w2 = Math.floor(2 * weeks / 3);
-        return '25% Due upon receipt of purchase order\\n'
-             + '25% Due ' + w1 + ' weeks ARO\\n'
-             + '25% Due ' + w2 + ' weeks ARO\\n'
-             + '15% Due upon completion of FAT\\n'
+        return '25% Due upon receipt of purchase order' + '\\n'
+             + '25% Due ' + w1 + ' weeks ARO' + '\\n'
+             + '25% Due ' + w2 + ' weeks ARO' + '\\n'
+             + '15% Due upon completion of FAT' + '\\n'
              + '10% Due upon delivery of final documentation';
       }
 
@@ -619,25 +618,28 @@ export async function onRequestGet(context) {
       });
 
       // EPS Terms component — manages default/manual toggle
-      Alpine.data('epsTerms', function(initialTerms) {
+      Alpine.data('epsTerms', function() {
         return {
-          termsVal: initialTerms || '',
-          useDefault: false,
+          termsVal: _initialPaymentTerms,
+          useDefault: true,
+          _skipWatch: false,
           init: function() {
             var self = this;
             // Determine initial state
             var trimmed = this.termsVal.trim();
             if (!trimmed) {
-              // Empty → default mode, fill if we have weeks
               this.useDefault = true;
               if (_deliveryWeeks) this.applyDefault();
             } else if (_deliveryWeeks && trimmed === epsDefaultTerms(_deliveryWeeks)) {
-              // Matches current default → default mode
               this.useDefault = true;
             } else {
-              // Custom text → manual mode
               this.useDefault = false;
             }
+            // Watch checkbox changes via x-model
+            this.$watch('useDefault', function(val) {
+              if (self._skipWatch) return;
+              if (val && _deliveryWeeks) self.applyDefault();
+            });
             // Listen for delivery changes
             document.addEventListener('delivery-changed', function(e) {
               if (self.useDefault && e.detail.weeks) self.applyDefault();
@@ -649,20 +651,16 @@ export async function onRequestGet(context) {
             window._qPatch('payment_terms', this.termsVal);
           },
           onInput: function() {
-            // Any manual keystroke disables default mode
+            this._skipWatch = true;
             this.useDefault = false;
+            this._skipWatch = false;
           },
           onSave: function() {
-            // On blur/change: if cleared to empty, reset to default mode
             if (!this.termsVal.trim()) {
               this.useDefault = true;
               if (_deliveryWeeks) { this.applyDefault(); return; }
             }
             window._qPatch('payment_terms', this.termsVal);
-          },
-          toggleDefault: function() {
-            this.useDefault = !this.useDefault;
-            if (this.useDefault && _deliveryWeeks) this.applyDefault();
           },
         };
       });
