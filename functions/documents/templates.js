@@ -2,7 +2,8 @@
 //
 // GET /documents/templates — Template manager page.
 // Lists every template from the catalog, shows which ones exist in R2
-// (with size / last-modified), and provides download + upload/replace.
+// (with size / last-modified), and provides download + upload/replace
+// all inline in a single row per template.
 
 import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { readFlash } from '../lib/http.js';
@@ -58,6 +59,7 @@ export async function onRequestGet(context) {
     { key: 'status',    label: 'Status',     sort: 'text',   filter: 'select', default: true },
     { key: 'size',      label: 'Size',       sort: 'number', filter: null,     default: true },
     { key: 'uploaded',  label: 'Uploaded',   sort: 'date',   filter: 'text',   default: true },
+    { key: 'actions',   label: '',           sort: null,      filter: null,     default: true },
   ];
 
   const rowData = r2Results.map(t => ({
@@ -73,6 +75,7 @@ export async function onRequestGet(context) {
     uploaded: t.uploaded,
     uploadedBy: t.uploadedBy,
     originalFilename: t.originalFilename,
+    actions: '',
   }));
 
   const uploadedCount = rowData.filter(r => r.exists).length;
@@ -90,7 +93,6 @@ export async function onRequestGet(context) {
       <p class="muted" style="padding:0 1rem">
         ${uploadedCount} of ${totalCount} templates uploaded.
         Templates are Word .docx files with <code>{placeholder}</code> variables.
-        Upload a template here to make it available for document generation across all quotes, OCs, and NTPs.
       </p>
 
       <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
@@ -117,34 +119,28 @@ export async function onRequestGet(context) {
                   ${r.uploaded ? escape(r.uploaded) : '\u2014'}
                   ${r.uploadedBy ? html`<br><small>${escape(r.uploadedBy)}</small>` : ''}
                 </td>
+                <td class="col-actions" data-col="actions" style="white-space:nowrap">
+                  <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap">
+                    ${r.exists
+                      ? html`<a href="/templates/${escape(r.key)}/download" class="btn btn-sm">Download</a>`
+                      : ''}
+                    <form method="post" action="/templates/${escape(r.key)}/upload"
+                          enctype="multipart/form-data"
+                          style="display:inline-flex;align-items:center;gap:0.25rem">
+                      <input type="file" name="file" accept=".docx"
+                             style="font-size:0.8em;max-width:180px">
+                      <button type="submit" class="btn btn-sm primary">
+                        ${r.exists ? 'Replace' : 'Upload'}
+                      </button>
+                    </form>
+                  </div>
+                </td>
               </tr>
             `)}
           </tbody>
         </table>
       </div>
       <script>${raw(listScript('pms.templates.v1', 'label', 'asc'))}</script>
-
-      <!-- Expanded row actions rendered outside the table for cleaner layout -->
-      <div style="margin-top:1.5rem">
-        ${rowData.map(r => html`
-          <div class="template-row-actions" id="tpl-${escape(r.key)}"
-               style="padding:0.75rem 1rem; border-top:1px solid var(--border); display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
-            <strong style="min-width:200px">${escape(r.label)}</strong>
-            ${r.exists
-              ? html`<a href="/templates/${escape(r.key)}/download" class="btn btn-sm">Download</a>`
-              : html`<span class="btn btn-sm" style="opacity:0.4;pointer-events:none">Download</span>`}
-            <form method="post" action="/templates/${escape(r.key)}/upload"
-                  enctype="multipart/form-data"
-                  style="display:flex;align-items:center;gap:0.35rem">
-              <input type="file" name="file" accept=".docx"
-                     style="font-size:0.85em;max-width:220px">
-              <button type="submit" class="btn btn-sm primary">
-                ${r.exists ? 'Replace' : 'Upload'}
-              </button>
-            </form>
-          </div>
-        `)}
-      </div>
     </section>
   `;
 
