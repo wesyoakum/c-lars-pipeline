@@ -518,6 +518,75 @@ export async function onRequestGet(context) {
       </div>
     </section>
 
+    ${(() => {
+      // Tasks strip on the overview: pending tasks only (not the other
+      // activity types — those still live on the Tasks tab). Limit to 10
+      // and link out to the full tab if there are more. Quick-add form at
+      // the top so users can drop in a task without tab-switching.
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const pendingTasks = taskRows.filter(
+        (a) => a.type === 'task' && a.status === 'pending'
+      );
+      const visibleTasks = pendingTasks.slice(0, 10);
+      const moreCount = pendingTasks.length - visibleTasks.length;
+      return html`
+        <section class="card">
+          <div class="card-header">
+            <h2>Pending tasks${pendingTasks.length > 0 ? ` (${pendingTasks.length})` : ''}</h2>
+            <a class="btn btn-sm" href="/opportunities/${escape(opp.id)}?tab=tasks">View all</a>
+          </div>
+          <div style="margin-bottom:0.75rem; padding:0.75rem; background:var(--bg-muted,#f6f8fa); border-radius:var(--radius);">
+            <form method="post" action="/activities">
+              <input type="hidden" name="opportunity_id" value="${escape(opp.id)}">
+              <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}">
+              <div style="display:grid; grid-template-columns:auto 1fr auto auto; gap:0.5rem; align-items:end;">
+                <select name="type" style="font-size:0.85em">
+                  <option value="task">Task</option><option value="note">Note</option>
+                  <option value="email">Email</option><option value="call">Call</option>
+                  <option value="meeting">Meeting</option>
+                </select>
+                <input type="text" name="subject" placeholder="Subject..." required style="width:100%; font-size:0.85em">
+                <input type="date" name="due_at" style="font-size:0.85em">
+                <button class="btn btn-sm primary" type="submit">Add</button>
+              </div>
+            </form>
+          </div>
+          ${visibleTasks.length === 0
+            ? html`<p class="muted">No pending tasks.</p>`
+            : html`
+              <table class="data compact">
+                <thead><tr><th style="width:2rem"></th><th>Subject</th><th>Assigned</th><th>Due</th></tr></thead>
+                <tbody>
+                  ${visibleTasks.map((a) => {
+                    const isOverdue = a.due_at && a.due_at < todayIso;
+                    return html`<tr class="${isOverdue ? 'row-overdue' : ''}">
+                      <td>
+                        <form method="post" action="/activities/${escape(a.id)}/complete" style="display:inline">
+                          <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}">
+                          <button type="submit" class="check-btn" title="Mark complete">
+                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/></svg>
+                          </button>
+                        </form>
+                      </td>
+                      <td>
+                        <a href="/activities/${escape(a.id)}"><strong>${escape(a.subject || '(no subject)')}</strong></a>
+                        ${a.body ? html`<br><small class="muted">${escape(a.body.length > 60 ? a.body.slice(0, 60) + '...' : a.body)}</small>` : ''}
+                      </td>
+                      <td>${escape(a.assigned_name ?? a.assigned_email ?? '—')}</td>
+                      <td class="${isOverdue ? 'overdue-text' : ''}">
+                        ${a.due_at ? escape(a.due_at.slice(0, 10)) : html`<span class="muted">—</span>`}
+                      </td>
+                    </tr>`;
+                  })}
+                </tbody>
+              </table>
+              ${moreCount > 0
+                ? html`<p style="margin:0.5rem 0 0"><a href="/opportunities/${escape(opp.id)}?tab=tasks">${moreCount} more…</a></p>`
+                : ''}
+            `}
+        </section>`;
+    })()}
+
     ${contacts.length > 0
       ? html`
         <section class="card">
