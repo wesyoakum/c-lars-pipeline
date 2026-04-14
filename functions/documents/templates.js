@@ -95,6 +95,57 @@ export async function onRequestGet(context) {
         Templates are Word .docx files with <code>{placeholder}</code> variables.
       </p>
 
+      <!-- Upload drop zone -->
+      <div x-data="tplUpload()" style="margin:0.75rem 1rem">
+        <form x-ref="uploadForm" enctype="multipart/form-data" method="post"
+              :action="'/templates/' + selectedKey + '/upload'">
+          <div class="drop-zone" :class="{ 'drop-zone-active': dragging }"
+               @dragover.prevent="dragging = true"
+               @dragleave.prevent="dragging = false"
+               @drop.prevent="handleDrop($event)"
+               @click="$refs.fileInput.click()">
+            <input type="file" name="file" accept=".docx" required x-ref="fileInput" hidden @change="fileSelected($event)">
+            <div class="drop-zone-content">
+              <span x-show="!fileName" class="muted">Drop .docx template here or click to browse</span>
+              <span x-show="fileName" x-text="fileName" style="font-weight:500"></span>
+            </div>
+          </div>
+          <div x-show="fileName" x-cloak style="margin-top:0.4rem;display:flex;gap:0.5rem;align-items:center">
+            <label class="muted" style="font-size:0.85em;white-space:nowrap">Upload as:</label>
+            <select x-model="selectedKey" style="font-size:0.85em">
+              ${rowData.map(r => html`<option value="${escape(r.key)}">${escape(r.label)}</option>`)}
+            </select>
+            <button class="btn btn-sm primary" type="submit">Upload</button>
+            <button class="btn btn-sm" type="button" @click="clear()">Cancel</button>
+          </div>
+        </form>
+      </div>
+      <script>${raw(`
+function tplUpload() {
+  return {
+    dragging: false,
+    fileName: '',
+    selectedKey: '${rowData[0]?.key || ''}',
+    handleDrop(e) {
+      this.dragging = false;
+      var files = e.dataTransfer && e.dataTransfer.files;
+      if (files && files.length) {
+        this.$refs.fileInput.files = files;
+        this.fileName = files[0].name;
+      }
+    },
+    fileSelected(e) {
+      var f = e.target.files && e.target.files[0];
+      this.fileName = f ? f.name : '';
+    },
+    clear() {
+      this.$refs.fileInput.value = '';
+      this.fileName = '';
+    },
+  };
+}
+      `)}</script>
+
       <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
         <table class="data opp-list-table" style="table-layout:fixed;width:100%">
           <colgroup>
