@@ -120,16 +120,17 @@ export async function onRequestGet(context) {
                   ${r.uploadedBy ? html`<br><small>${escape(r.uploadedBy)}</small>` : ''}
                 </td>
                 <td class="col-actions" data-col="actions" style="white-space:nowrap">
-                  <div style="display:flex;align-items:center;gap:0.35rem;flex-wrap:wrap">
+                  <div style="display:flex;align-items:center;gap:0.35rem">
                     ${r.exists
                       ? html`<a href="/templates/${escape(r.key)}/download" class="btn btn-sm">Download</a>`
                       : ''}
                     <form method="post" action="/templates/${escape(r.key)}/upload"
-                          enctype="multipart/form-data"
-                          style="display:inline-flex;align-items:center;gap:0.25rem">
+                          enctype="multipart/form-data" style="display:inline">
                       <input type="file" name="file" accept=".docx"
-                             style="font-size:0.8em;max-width:180px">
-                      <button type="submit" class="btn btn-sm primary">
+                             style="display:none"
+                             onchange="this.form.submit()">
+                      <button type="button" class="btn btn-sm primary"
+                              onclick="this.previousElementSibling.click()">
                         ${r.exists ? 'Replace' : 'Upload'}
                       </button>
                     </form>
