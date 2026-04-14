@@ -570,19 +570,19 @@ export async function onRequestGet(context) {
             <h2>Quotes</h2>
             <a class="btn btn-sm" href="/opportunities/${escape(opp.id)}?tab=quotes">View all</a>
           </div>
-          <table class="data compact">
+          <table class="data compact quotes-table">
             <thead><tr><th>Number</th><th>Rev</th><th>Type</th><th>Title</th><th>Status</th><th class="num">Total</th><th></th></tr></thead>
             <tbody>
               ${quoteRows.map(q => {
                 const statusClass = quoteStatusPillClass(q.status);
                 return html`<tr>
-                  <td><code>${escape(q.number)}</code></td>
-                  <td>${escape(q.revision)}</td>
-                  <td>${escape(QUOTE_TYPE_LABELS[q.quote_type] ?? q.quote_type)}</td>
+                  <td style="white-space:nowrap"><code>${escape(q.number)}</code></td>
+                  <td style="white-space:nowrap">${escape(q.revision)}</td>
+                  <td style="white-space:nowrap">${escape(QUOTE_TYPE_LABELS[q.quote_type] ?? q.quote_type)}</td>
                   <td><a href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">${escape(q.title || '(no title)')}</a></td>
-                  <td><span class="pill ${statusClass}">${escape(QUOTE_STATUS_LABELS[q.status] ?? q.status)}</span></td>
-                  <td class="num">${fmtDollar(q.total_price)}</td>
-                  <td class="row-actions"><a class="btn small" href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">Open</a></td>
+                  <td style="white-space:nowrap"><span class="pill ${statusClass}">${escape(QUOTE_STATUS_LABELS[q.status] ?? q.status)}</span></td>
+                  <td class="num" style="white-space:nowrap">${fmtDollar(q.total_price)}</td>
+                  <td class="row-actions" style="white-space:nowrap"><a class="btn small" href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">Open</a></td>
                 </tr>`;
               })}
             </tbody>
@@ -684,20 +684,20 @@ export async function onRequestGet(context) {
       ${quoteRows.length === 0
         ? html`<p class="muted">No quotes yet.</p>`
         : html`
-          <table class="data">
+          <table class="data quotes-table">
             <thead><tr><th>Number</th><th>Rev</th><th>Type</th><th>Title</th><th>Status</th><th class="num">Total</th><th>Valid until</th><th></th></tr></thead>
             <tbody>
               ${quoteRows.map(q => {
                 const statusClass = quoteStatusPillClass(q.status);
                 return html`<tr>
-                  <td><code>${escape(q.number)}</code></td>
-                  <td>${escape(q.revision)}</td>
-                  <td>${escape(QUOTE_TYPE_LABELS[q.quote_type] ?? q.quote_type)}</td>
+                  <td style="white-space:nowrap"><code>${escape(q.number)}</code></td>
+                  <td style="white-space:nowrap">${escape(q.revision)}</td>
+                  <td style="white-space:nowrap">${escape(QUOTE_TYPE_LABELS[q.quote_type] ?? q.quote_type)}</td>
                   <td><a href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">${escape(q.title || '(no title)')}</a></td>
-                  <td><span class="pill ${statusClass}">${escape(QUOTE_STATUS_LABELS[q.status] ?? q.status)}</span></td>
-                  <td class="num">${fmtDollar(q.total_price)}</td>
-                  <td><small class="muted">${escape(q.valid_until ?? '—')}</small></td>
-                  <td class="row-actions"><a class="btn small" href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">Open</a></td>
+                  <td style="white-space:nowrap"><span class="pill ${statusClass}">${escape(QUOTE_STATUS_LABELS[q.status] ?? q.status)}</span></td>
+                  <td class="num" style="white-space:nowrap">${fmtDollar(q.total_price)}</td>
+                  <td style="white-space:nowrap"><small class="muted">${escape(q.valid_until ?? '—')}</small></td>
+                  <td class="row-actions" style="white-space:nowrap"><a class="btn small" href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">Open</a></td>
                 </tr>`;
               })}
             </tbody>

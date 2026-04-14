@@ -481,10 +481,10 @@ export function allowedQuoteTypes(transactionType) {
  */
 export const QUOTE_TYPE_LABELS = {
   spares:               'Spares',
-  eps:                  'Engineered Product (EPS)',
-  refurb_baseline:      'Refurb — baseline',
-  refurb_modified:      'Refurb — modified',
-  refurb_supplemental:  'Refurb — supplemental',
+  eps:                  'EPS',
+  refurb_baseline:      'Refurb – Base',
+  refurb_modified:      'Refurb – Mod',
+  refurb_supplemental:  'Refurb – Supp',
   service:              'Service',
 };
 
