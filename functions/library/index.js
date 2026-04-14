@@ -44,8 +44,8 @@ export async function onRequestGet(context) {
           <p class="library-count"><strong>${laborCount?.n ?? 0}</strong> items</p>
         </a>
         <a class="library-card" href="/library/items">
-          <h2>Items</h2>
-          <p class="muted">Catalog of products and services available for quoting.</p>
+          <h2>Line Items</h2>
+          <p class="muted">All the info that appears within a line item on a quote \u2014 part numbers, descriptions, units, default prices.</p>
           <p class="library-count"><strong>${itemsCount?.n ?? 0}</strong> items</p>
         </a>
         <a class="library-card" href="/library/builds">

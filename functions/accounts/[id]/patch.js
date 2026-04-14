@@ -10,7 +10,7 @@ import { auditStmt } from '../../lib/audit.js';
 import { now } from '../../lib/ids.js';
 
 const PATCHABLE = new Set([
-  'name', 'segment', 'phone', 'website', 'notes', 'owner_user_id',
+  'name', 'alias', 'segment', 'phone', 'website', 'notes', 'owner_user_id',
 ]);
 
 function coerce(field, raw) {

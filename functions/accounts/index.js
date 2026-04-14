@@ -28,7 +28,7 @@ export async function onRequestGet(context) {
 
   const rows = await all(
     env.DB,
-    `SELECT a.id, a.name, a.segment, a.phone, a.website, a.updated_at,
+    `SELECT a.id, a.name, a.alias, a.segment, a.phone, a.website, a.updated_at,
             (SELECT COUNT(*) FROM contacts c WHERE c.account_id = a.id) AS contact_count,
             (SELECT COUNT(*) FROM opportunities o WHERE o.account_id = a.id) AS opp_count
        FROM accounts a
@@ -48,7 +48,12 @@ export async function onRequestGet(context) {
 
   const rowData = rows.map(r => ({
     id: r.id,
-    name: r.name ?? '',
+    // Combine name + alias into the filter data so the quicksearch
+    // matches either — typing "helix" finds "Helix Robotics Inc."
+    // even when the row shows the full legal name.
+    name: r.alias ? `${r.name ?? ''} ${r.alias}` : (r.name ?? ''),
+    name_display: r.name ?? '',
+    alias: r.alias ?? '',
     segment: r.segment ?? '',
     phone: r.phone ?? '',
     contact_count: r.contact_count ?? 0,
@@ -78,7 +83,9 @@ export async function onRequestGet(context) {
                 ${rowData.map(r => html`
                   <tr data-row-id="${escape(r.id)}"
                       ${raw(rowDataAttrs(columns, r))}>
-                    <td class="col-name" data-col="name"><a href="/accounts/${escape(r.id)}">${escape(r.name)}</a></td>
+                    <td class="col-name" data-col="name">
+                      <a href="/accounts/${escape(r.id)}">${escape(r.name_display)}</a>${r.alias ? html` <span class="muted">(${escape(r.alias)})</span>` : ''}
+                    </td>
                     <td class="col-segment" data-col="segment">${escape(r.segment)}</td>
                     <td class="col-phone" data-col="phone">${escape(r.phone)}</td>
                     <td class="col-contact_count num" data-col="contact_count">${r.contact_count}</td>

@@ -54,7 +54,7 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
   const body = html`
     <section class="card">
       <div class="card-header">
-        <h1>Items Library</h1>
+        <h1>Line Items Library</h1>
         <div style="display:flex;align-items:center;gap:0.5rem">
           ${listToolbar({ id: 'items', count: rows.length, showColumnsMenu: false })}
           <a class="btn" href="/library">\u2190 Library</a>
@@ -62,8 +62,8 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
       </div>
 
       <p class="muted">
-        Catalog of products and services available for quoting. Items can
-        be referenced from quote line items.
+        All the info that appears within a line item on a quote \u2014 part
+        numbers, descriptions, units, default prices.
       </p>
 
       ${rows.length === 0
@@ -127,14 +127,14 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
   `;
 
   return htmlResponse(
-    layout('Items Library', body, {
+    layout('Line Items Library', body, {
       user,
       env: data?.env,
       activeNav: '/library',
       flash: readFlash(url),
       breadcrumbs: [
         { label: 'Library', href: '/library' },
-        { label: 'Items' },
+        { label: 'Line Items' },
       ],
     })
   );

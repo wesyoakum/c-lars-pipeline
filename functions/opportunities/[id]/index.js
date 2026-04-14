@@ -185,7 +185,7 @@ export async function onRequestGet(context) {
   );
 
   // Accounts for account select
-  const accounts = await all(env.DB, 'SELECT id, name FROM accounts ORDER BY name');
+  const accounts = await all(env.DB, 'SELECT id, name, alias FROM accounts ORDER BY name');
 
   // Price builds
   let priceBuildRows = [];
@@ -319,7 +319,7 @@ export async function onRequestGet(context) {
   ];
   const accountOptions = [
     { value: '', label: '— Select —' },
-    ...accounts.map(a => ({ value: a.id, label: a.name })),
+    ...accounts.map(a => ({ value: a.id, label: a.alias ? `${a.name} (${a.alias})` : a.name })),
   ];
 
   // ---- Shared labels -----------------------------------------------------

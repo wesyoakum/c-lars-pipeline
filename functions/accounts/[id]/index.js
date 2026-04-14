@@ -136,6 +136,10 @@ export async function onRequestGet(context) {
 
       <div class="detail-grid">
         <div class="detail-pair">
+          <span class="detail-label">Alias</span>
+          <span class="detail-value">${inlineText('alias', account.alias, { placeholder: 'Click to set a short nickname\u2026' })}</span>
+        </div>
+        <div class="detail-pair">
           <span class="detail-label">Segment</span>
           <span class="detail-value">${inlineSelect('segment', account.segment, SEGMENT_OPTIONS)}</span>
         </div>

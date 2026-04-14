@@ -514,13 +514,27 @@ export async function onRequestGet(context) {
               Default EPS Terms
             </label>
           </div>`
-        : html`
-          <label style="margin-top:0.75rem">
-            <strong>Terms</strong>
-            <textarea class="desc-textarea" data-field="payment_terms" placeholder="Payment terms, conditions..."
-                      ${readOnly ? 'disabled' : ''}
-                      @change="window._qPatch('payment_terms', $event.target.value)">${escape(quote.payment_terms ?? '')}</textarea>
-          </label>`}
+        : (quote.quote_type === 'spares' || quote.quote_type === 'service')
+          ? html`
+            <div x-data="flatTerms()" style="margin-top:0.75rem">
+              <strong>Terms</strong>
+              <textarea class="desc-textarea" data-field="payment_terms" placeholder="Payment terms, conditions..."
+                        ${readOnly ? 'disabled' : ''}
+                        x-model="termsVal"
+                        @input="onInput()"
+                        @change="onSave()"></textarea>
+              <label style="font-size:0.8rem; color:var(--fg-muted); cursor:pointer; display:inline-flex; align-items:center; gap:0.3rem; user-select:none; margin-top:0.25rem">
+                <input type="checkbox" x-model="useDefault" ${readOnly ? 'disabled' : ''}>
+                Default ${quote.quote_type === 'spares' ? 'Spares' : 'Service'} Terms
+              </label>
+            </div>`
+          : html`
+            <label style="margin-top:0.75rem">
+              <strong>Terms</strong>
+              <textarea class="desc-textarea" data-field="payment_terms" placeholder="Payment terms, conditions..."
+                        ${readOnly ? 'disabled' : ''}
+                        @change="window._qPatch('payment_terms', $event.target.value)">${escape(quote.payment_terms ?? '')}</textarea>
+            </label>`}
       <label style="margin-top:0.75rem">
         <strong>Delivery terms</strong>
         <textarea class="desc-textarea" placeholder="EXW, FCA, FOB, DAP..."
@@ -594,6 +608,19 @@ export async function onRequestGet(context) {
              + '10% Due upon delivery of final documentation';
       }
 
+      // --- Static default payment terms for Spares and Service ---
+      // Keep these in lockstep with the seeded defaults in
+      // functions/opportunities/[id]/quotes/index.js (quote create handler).
+      var _sparesDefaultTerms = '50% Due upon receipt of purchase order' + '\\n'
+                              + '50% Due upon delivery, payable Net 15';
+      var _serviceDefaultTerms = '50% of estimated price Due upon receipt of purchase order' + '\\n'
+                               + 'Remainder Due upon completion of work, payable Net 15';
+      function flatDefaultTerms() {
+        if (_quoteType === 'spares') return _sparesDefaultTerms;
+        if (_quoteType === 'service') return _serviceDefaultTerms;
+        return '';
+      }
+
       // Delivery picker with text, calendar, and weeks buttons
       Alpine.data('deliveryPicker', function(initial) {
         return {
@@ -662,6 +689,52 @@ export async function onRequestGet(context) {
             if (!this.termsVal.trim()) {
               this.useDefault = true;
               if (_deliveryWeeks) { this.applyDefault(); return; }
+            }
+            window._qPatch('payment_terms', this.termsVal);
+          },
+        };
+      });
+
+      // Spares / Service terms component — mirrors epsTerms but uses a
+      // static default (no delivery-weeks dependency). The default text is
+      // chosen by quote_type via flatDefaultTerms().
+      Alpine.data('flatTerms', function() {
+        return {
+          termsVal: _initialPaymentTerms,
+          useDefault: true,
+          _skipWatch: false,
+          init: function() {
+            var self = this;
+            var trimmed = this.termsVal.trim();
+            var deflt = flatDefaultTerms();
+            if (!trimmed) {
+              this.useDefault = true;
+              if (deflt) this.applyDefault();
+            } else if (deflt && trimmed === deflt) {
+              this.useDefault = true;
+            } else {
+              this.useDefault = false;
+            }
+            this.$watch('useDefault', function(val) {
+              if (self._skipWatch) return;
+              if (val) self.applyDefault();
+            });
+          },
+          applyDefault: function() {
+            var deflt = flatDefaultTerms();
+            if (!deflt) return;
+            this.termsVal = deflt;
+            window._qPatch('payment_terms', this.termsVal);
+          },
+          onInput: function() {
+            this._skipWatch = true;
+            this.useDefault = false;
+            this._skipWatch = false;
+          },
+          onSave: function() {
+            if (!this.termsVal.trim()) {
+              this.useDefault = true;
+              if (flatDefaultTerms()) { this.applyDefault(); return; }
             }
             window._qPatch('payment_terms', this.termsVal);
           },

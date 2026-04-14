@@ -123,7 +123,8 @@ export async function onRequestGet(context) {
       activeNav: '/library',
       flash: readFlash(url),
       breadcrumbs: [
-        { label: 'Library', href: '/library/items' },
+        { label: 'Library', href: '/library' },
+        { label: 'Line Items', href: '/library/items' },
         { label: item.name || '(unnamed)' },
       ],
     })

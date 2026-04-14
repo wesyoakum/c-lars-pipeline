@@ -58,7 +58,7 @@ export async function renderEditForm(context, opts = {}) {
   // Accounts, contacts (for primary-contact picker scoped to current account),
   // and users (for owner/salesperson).
   const [accounts, contacts, users] = await Promise.all([
-    all(env.DB, 'SELECT id, name FROM accounts ORDER BY name'),
+    all(env.DB, 'SELECT id, name, alias FROM accounts ORDER BY name'),
     all(
       env.DB,
       `SELECT id, first_name, last_name, title FROM contacts WHERE account_id = ?
@@ -107,7 +107,7 @@ export async function renderEditForm(context, opts = {}) {
               <option value="">— Select account —</option>
               ${accounts.map(
                 (a) =>
-                  html`<option value="${escape(a.id)}" ${opp.account_id === a.id ? 'selected' : ''}>${a.name}</option>`
+                  html`<option value="${escape(a.id)}" ${opp.account_id === a.id ? 'selected' : ''}>${escape(a.alias ? `${a.name} (${a.alias})` : a.name)}</option>`
               )}
               <option value="__new__">+ Add new account</option>
             </select>

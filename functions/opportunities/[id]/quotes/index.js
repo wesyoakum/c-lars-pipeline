@@ -51,6 +51,31 @@ export async function onRequestPost(context) {
     );
   }
 
+  // Seed type-specific defaults when the user didn't supply them. These
+  // strings match the quote detail page's "Default XXX Terms" checkbox so
+  // that the seeded value round-trips as "still the default" on load.
+  const qt = value.quote_type;
+  const isRefurb = typeof qt === 'string' && qt.startsWith('refurb_');
+  if (!value.valid_until) {
+    const days = (qt === 'spares' || qt === 'service') ? 14 : 30;
+    const exp = new Date();
+    exp.setUTCDate(exp.getUTCDate() + days);
+    value.valid_until = exp.toISOString().slice(0, 10);
+  }
+  if (!value.payment_terms) {
+    if (qt === 'spares') {
+      value.payment_terms =
+        '50% Due upon receipt of purchase order\n50% Due upon delivery, payable Net 15';
+    } else if (qt === 'service') {
+      value.payment_terms =
+        '50% of estimated price Due upon receipt of purchase order\nRemainder Due upon completion of work, payable Net 15';
+    }
+    // EPS terms are computed client-side from delivery_estimate — don't seed here.
+  }
+  if (!value.delivery_terms && (qt === 'eps' || isRefurb)) {
+    value.delivery_terms = 'EXW, C-LARS facility';
+  }
+
   // Validate cost_build_id belongs to this opportunity (if supplied).
   value.cost_build_id = (input.cost_build_id || '').trim() || null;
   if (value.cost_build_id) {

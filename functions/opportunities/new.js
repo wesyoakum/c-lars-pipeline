@@ -64,7 +64,7 @@ export async function renderNewForm(context, opts = {}) {
 
   // Accounts dropdown. In P0 we load the whole list (solo-user system,
   // never going to be huge). Later this could become an HTMX autocomplete.
-  const accounts = await all(env.DB, 'SELECT id, name FROM accounts ORDER BY name');
+  const accounts = await all(env.DB, 'SELECT id, name, alias FROM accounts ORDER BY name');
 
   // Allow ?account=<id> to preselect (e.g. "new opp" link from an account page).
   const preselectAccount = values.account_id ?? url.searchParams.get('account') ?? '';
@@ -117,7 +117,7 @@ export async function renderNewForm(context, opts = {}) {
               <option value="">— Select account —</option>
               ${accounts.map(
                 (a) =>
-                  html`<option value="${escape(a.id)}" ${preselectAccount === a.id ? 'selected' : ''}>${a.name}</option>`
+                  html`<option value="${escape(a.id)}" ${preselectAccount === a.id ? 'selected' : ''}>${escape(a.alias ? `${a.name} (${a.alias})` : a.name)}</option>`
               )}
               <option value="__new__">+ Add new account</option>
             </select>
