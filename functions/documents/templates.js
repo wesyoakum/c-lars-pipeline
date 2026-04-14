@@ -104,7 +104,7 @@ export async function onRequestGet(context) {
                   ${raw(rowDataAttrs(columns, r))}>
                 <td class="col-label" data-col="label">
                   <strong>${escape(r.label)}</strong>
-                  <br><small class="muted">${escape(r.filename)}</small>
+                  <br><small class="muted">${escape(r.originalFilename || r.filename)}</small>
                 </td>
                 <td class="col-category" data-col="category">${escape(r.category)}</td>
                 <td class="col-status" data-col="status">
