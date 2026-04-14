@@ -14,7 +14,8 @@ import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 import {
   loadAddresses,
-  renderAddressView,
+  renderAddressEditor,
+  addressEditorScript,
   parseAddressForm,
   buildAddressStatements,
 } from '../../lib/address_editor.js';
@@ -157,7 +158,12 @@ export async function onRequestGet(context) {
         </div>
       </div>
 
-      ${renderAddressView(addresses)}
+      <form method="post" action="/accounts/${escape(account.id)}/addresses" class="inline-address-form">
+        ${renderAddressEditor(addresses)}
+        <div class="form-actions" style="margin-top:0.5rem">
+          <button type="submit" class="btn primary">Save addresses</button>
+        </div>
+      </form>
 
       <h3 style="margin-top:1rem">Notes</h3>
       ${inlineTextarea('notes', account.notes, { placeholder: 'Click to add notes…' })}
@@ -348,6 +354,8 @@ export async function onRequestGet(context) {
         },
       };
     }
+
+    ${raw(addressEditorScript())}
 
     function contactInline(contactId) {
       const patchUrl = '/contacts/' + contactId + '/patch';
