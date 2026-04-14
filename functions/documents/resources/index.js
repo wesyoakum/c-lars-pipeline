@@ -101,11 +101,9 @@ export async function onRequestGet(context) {
         </div>
         <div style="display:flex;align-items:center;gap:0.5rem;padding-bottom:0.15rem">
           <input type="file" name="file" id="res-file-input" style="display:none"
-                 onchange="document.getElementById('res-file-label').textContent = this.files[0]?.name || 'Choose file'">
-          <button type="button" class="btn btn-sm"
-                  onclick="document.getElementById('res-file-input').click()"
-                  id="res-file-label">Choose file</button>
-          <button type="submit" class="btn btn-sm primary">Upload</button>
+                 onchange="this.form.submit()">
+          <button type="button" class="btn btn-sm primary"
+                  onclick="document.getElementById('res-file-input').click()">Upload</button>
         </div>
       </form>
 
