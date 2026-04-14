@@ -11,7 +11,7 @@ import { auditStmt } from '../lib/audit.js';
 import { uuid, now } from '../lib/ids.js';
 import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { readFlash } from '../lib/http.js';
-import { listScript, listTableHead, listToolbar, columnsMenu, rowDataAttrs } from '../lib/list-table.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { docsSubNav } from '../lib/docs-subnav.js';
 
 const MAX_SIZE = 50 * 1024 * 1024; // 50 MB
@@ -31,15 +31,6 @@ function formatSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function fileIcon(mime) {
-  if (!mime) return '\uD83D\uDCCE';
-  if (mime.includes('pdf')) return '\uD83D\uDCC4';
-  if (mime.includes('word') || mime.includes('docx')) return '\uD83D\uDCDD';
-  if (mime.includes('image/')) return '\uD83D\uDDBC\uFE0F';
-  if (mime.includes('spreadsheet') || mime.includes('xlsx') || mime.includes('excel')) return '\uD83D\uDCCA';
-  return '\uD83D\uDCCE';
-}
-
 export async function onRequestGet(context) {
   const { env, data, request } = context;
   const user = data?.user;
@@ -54,12 +45,11 @@ export async function onRequestGet(context) {
   );
 
   const columns = [
-    { key: 'title',       label: 'Name',        sort: 'text',   filter: 'text',   default: true },
-    { key: 'category_label', label: 'Category', sort: 'text',   filter: 'select', default: true },
-    { key: 'size',        label: 'Size',         sort: 'number', filter: null,     default: true },
-    { key: 'uploaded',    label: 'Uploaded',     sort: 'date',   filter: 'text',   default: true },
-    { key: 'uploaded_by', label: 'By',           sort: 'text',   filter: 'text',   default: true },
-    { key: 'actions',     label: '',             sort: null,      filter: null,     default: true },
+    { key: 'title',          label: 'Name',      sort: 'text',   filter: 'text',   default: true },
+    { key: 'category_label', label: 'Category',  sort: 'text',   filter: 'select', default: true },
+    { key: 'size',           label: 'Size',      sort: 'number', filter: null,     default: true },
+    { key: 'uploaded',       label: 'Uploaded',  sort: 'date',   filter: 'text',   default: true },
+    { key: 'actions',        label: '',          sort: null,      filter: null,     default: true },
   ];
 
   const rowData = rows.map(r => ({
@@ -126,11 +116,10 @@ export async function onRequestGet(context) {
             <table class="data opp-list-table" style="table-layout:fixed;width:100%">
               <colgroup>
                 <col data-col="title"          style="width:auto">
-                <col data-col="category_label" style="width:130px">
+                <col data-col="category_label" style="width:150px">
                 <col data-col="size"           style="width:80px">
-                <col data-col="uploaded"        style="width:110px">
-                <col data-col="uploaded_by"     style="width:120px">
-                <col data-col="actions"         style="width:170px">
+                <col data-col="uploaded"       style="width:130px">
+                <col data-col="actions"        style="width:190px">
               </colgroup>
               ${listTableHead(columns, rowData)}
               <tbody data-role="rows">
@@ -152,9 +141,7 @@ export async function onRequestGet(context) {
                     </td>
                     <td class="col-uploaded muted" data-col="uploaded" style="font-size:0.85em;white-space:nowrap">
                       ${r.uploaded ? escape(r.uploaded) : '\u2014'}
-                    </td>
-                    <td class="col-uploaded_by muted" data-col="uploaded_by" style="font-size:0.85em">
-                      ${escape(r.uploaded_by)}
+                      ${r.uploaded_by ? html`<br><small>${escape(r.uploaded_by)}</small>` : ''}
                     </td>
                     <td class="col-actions" data-col="actions" style="text-align:right;white-space:nowrap">
                       <div style="display:inline-flex;align-items:center;gap:0.35rem;justify-content:flex-end">

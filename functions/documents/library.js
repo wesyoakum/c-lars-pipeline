@@ -6,7 +6,7 @@
 import { all } from '../lib/db.js';
 import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { readFlash } from '../lib/http.js';
-import { listScript, listTableHead, listToolbar, columnsMenu, rowDataAttrs } from '../lib/list-table.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { docsSubNav } from '../lib/docs-subnav.js';
 
 const DOC_KIND_LABELS = {
@@ -41,15 +41,6 @@ function fileTypeFromMime(mime) {
   return 'Other';
 }
 
-function fileIcon(mime) {
-  if (!mime) return '\uD83D\uDCCE';
-  if (mime.includes('pdf')) return '\uD83D\uDCC4';
-  if (mime.includes('word') || mime.includes('docx')) return '\uD83D\uDCDD';
-  if (mime.includes('image/')) return '\uD83D\uDDBC\uFE0F';
-  if (mime.includes('spreadsheet') || mime.includes('xlsx') || mime.includes('excel')) return '\uD83D\uDCCA';
-  return '\uD83D\uDCCE';
-}
-
 export async function onRequestGet(context) {
   const { env, data, request } = context;
   const user = data?.user;
@@ -76,14 +67,12 @@ export async function onRequestGet(context) {
   );
 
   const columns = [
-    { key: 'name',        label: 'Name',        sort: 'text',   filter: 'text',   default: true },
-    { key: 'kind_label',  label: 'Type',        sort: 'text',   filter: 'select', default: true },
-    { key: 'file_type',   label: 'Format',      sort: 'text',   filter: 'select', default: true },
+    { key: 'name',        label: 'Name',         sort: 'text',   filter: 'text',   default: true },
+    { key: 'kind_label',  label: 'Type',         sort: 'text',   filter: 'select', default: true },
+    { key: 'file_type',   label: 'Format',       sort: 'text',   filter: 'select', default: true },
     { key: 'attached_to', label: 'Attached To',  sort: 'text',   filter: 'text',   default: true },
-    { key: 'account_name',label: 'Account',      sort: 'text',   filter: 'select', default: true },
     { key: 'size',        label: 'Size',         sort: 'number', filter: null,     default: true },
     { key: 'date',        label: 'Uploaded',     sort: 'date',   filter: 'text',   default: true },
-    { key: 'uploaded_by', label: 'By',           sort: 'text',   filter: 'text',   default: true },
   ];
 
   const rowData = docs.map(d => {
@@ -105,21 +94,17 @@ export async function onRequestGet(context) {
     }
     return {
       id: d.id,
-      icon: fileIcon(d.mime_type),
       name: d.title || d.original_filename || 'Untitled',
       original_filename: d.original_filename,
       notes: d.notes,
-      kind: d.kind,
       kind_label: DOC_KIND_LABELS[d.kind] || d.kind || '',
       file_type: ft,
       attached_to: attachedTo,
       attached_url: attachedUrl,
-      account_name: d.account_name ?? '',
-      account_id: d.account_id,
       size: d.size_bytes || 0,
       size_display: formatSize(d.size_bytes),
       date: (d.uploaded_at || '').slice(0, 10),
-      uploaded_by: d.uploaded_by_name || d.uploaded_by_email || '\u2014',
+      uploaded_by: d.uploaded_by_name || d.uploaded_by_email || '',
     };
   });
 
@@ -129,22 +114,29 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Documents</h1>
-        ${listToolbar({ id: 'dl', count: docs.length })}
+        ${listToolbar({ id: 'dl', count: docs.length, showColumnsMenu: false })}
       </div>
 
       ${docs.length === 0
         ? html`<p class="muted" style="padding:1rem">No documents uploaded yet.</p>`
         : html`
           <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
-            ${columnsMenu(columns)}
-            <table class="data opp-list-table">
+            <table class="data opp-list-table" style="table-layout:fixed;width:100%">
+              <colgroup>
+                <col data-col="name"        style="width:auto">
+                <col data-col="kind_label"  style="width:110px">
+                <col data-col="file_type"   style="width:80px">
+                <col data-col="attached_to" style="width:180px">
+                <col data-col="size"        style="width:80px">
+                <col data-col="date"        style="width:130px">
+              </colgroup>
               ${listTableHead(columns, rowData)}
               <tbody data-role="rows">
                 ${rowData.map(d => html`
                   <tr data-row-id="${escape(d.id)}"
                       ${raw(rowDataAttrs(columns, d))}>
-                    <td class="col-name" data-col="name">
-                      <a href="/documents/${escape(d.id)}/download">${escape(d.name)}</a>
+                    <td class="col-name" data-col="name" style="overflow:hidden;text-overflow:ellipsis">
+                      <strong><a href="/documents/${escape(d.id)}/download">${escape(d.name)}</a></strong>
                       ${d.original_filename && d.original_filename !== d.name
                         ? html`<br><small class="muted">${escape(d.original_filename)}</small>`
                         : ''}
@@ -152,21 +144,22 @@ export async function onRequestGet(context) {
                     </td>
                     <td class="col-kind_label" data-col="kind_label"><span class="pill" style="font-size:0.8em">${escape(d.kind_label)}</span></td>
                     <td class="col-file_type muted" data-col="file_type" style="font-size:0.85em">${escape(d.file_type)}</td>
-                    <td class="col-attached_to" data-col="attached_to">
+                    <td class="col-attached_to" data-col="attached_to" style="overflow:hidden;text-overflow:ellipsis">
                       ${d.attached_url
                         ? html`<a href="${escape(d.attached_url)}">${escape(d.attached_to)}</a>`
                         : html`<span class="muted">\u2014</span>`}
                     </td>
-                    <td class="col-account_name" data-col="account_name">${d.account_id ? html`<a href="/accounts/${escape(d.account_id)}">${escape(d.account_name)}</a>` : html`<span class="muted">\u2014</span>`}</td>
-                    <td class="col-size num muted" data-col="size" style="font-size:0.85em;white-space:nowrap">${escape(d.size_display)}</td>
-                    <td class="col-date muted" data-col="date" style="font-size:0.85em;white-space:nowrap">${escape(d.date)}</td>
-                    <td class="col-uploaded_by muted" data-col="uploaded_by" style="font-size:0.85em">${escape(d.uploaded_by)}</td>
+                    <td class="col-size num muted" data-col="size" style="font-size:0.85em;text-align:right">${escape(d.size_display)}</td>
+                    <td class="col-date muted" data-col="date" style="font-size:0.85em;white-space:nowrap">
+                      ${d.date ? escape(d.date) : '\u2014'}
+                      ${d.uploaded_by ? html`<br><small>${escape(d.uploaded_by)}</small>` : ''}
+                    </td>
                   </tr>
                 `)}
               </tbody>
             </table>
           </div>
-          <script>${raw(listScript('pms.docLib.v1', 'date', 'desc'))}</script>`}
+          <script>${raw(listScript('pms.docLib.v2', 'date', 'desc'))}</script>`}
     </section>
   `;
 
