@@ -2,27 +2,19 @@
 //
 // GET  /library/items        — list + inline-add form
 // POST /library/items        — create a new library item
-//
-// Items library is a global catalog of products and services available
-// for quoting. Each item has a name, description, default unit, default
-// price, and an optional category. Items can be deactivated without
-// deleting them.
 
 import { all, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
-import { layout, htmlResponse, html, escape } from '../../lib/layout.js';
+import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
 import { uuid, now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 import { fmtDollar } from '../../lib/pricing.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
 
 export async function onRequestGet(context) {
   return renderList(context, {});
 }
 
-/**
- * Render the items list + add form. Extracted so POST handlers can
- * re-render in place when validation fails.
- */
 export async function renderList(context, { values = {}, errors = {} } = {}) {
   const { env, data, request } = context;
   const user = data?.user;
@@ -35,13 +27,38 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
       ORDER BY active DESC, name`
   );
 
+  const columns = [
+    { key: 'name',          label: 'Name',          sort: 'text',   filter: 'text',   default: true },
+    { key: 'description',   label: 'Description',   sort: 'text',   filter: 'text',   default: true },
+    { key: 'category',      label: 'Category',      sort: 'text',   filter: 'select', default: true },
+    { key: 'default_unit',  label: 'Unit',           sort: 'text',   filter: 'text',   default: true },
+    { key: 'default_price', label: 'Default Price',  sort: 'number', filter: 'range',  default: true },
+    { key: 'status',        label: 'Status',         sort: 'text',   filter: 'select', default: true },
+  ];
+
+  const rowData = rows.map(r => ({
+    id: r.id,
+    name: r.name ?? '',
+    description: r.description ?? '',
+    category: r.category ?? '',
+    default_unit: r.default_unit ?? 'ea',
+    default_price: r.default_price != null ? Number(r.default_price) : 0,
+    default_price_display: fmtDollar(r.default_price),
+    status: r.active ? 'Active' : 'Inactive',
+    active: r.active,
+    updated: (r.updated_at ?? '').slice(0, 10),
+  }));
+
   const errText = (k) => (errors[k] ? html`<small class="error">${errors[k]}</small>` : '');
 
   const body = html`
     <section class="card">
       <div class="card-header">
         <h1>Items Library</h1>
-        <a class="btn" href="/library">← Library</a>
+        <div style="display:flex;align-items:center;gap:0.5rem">
+          ${listToolbar({ id: 'items', count: rows.length, showColumnsMenu: false })}
+          <a class="btn" href="/library">\u2190 Library</a>
+        </div>
       </div>
 
       <p class="muted">
@@ -52,39 +69,29 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
       ${rows.length === 0
         ? html`<p class="muted">No items yet.</p>`
         : html`
-          <table class="data">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Description</th>
-                <th>Category</th>
-                <th>Unit</th>
-                <th class="num">Default Price</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map((r) => html`
-                <tr${r.active ? '' : ' class="inactive"'}>
-                  <td><a href="/library/items/${escape(r.id)}">${escape(r.name)}</a></td>
-                  <td>${escape(r.description ?? '')}</td>
-                  <td>${escape(r.category ?? '')}</td>
-                  <td>${escape(r.default_unit ?? 'ea')}</td>
-                  <td class="num">${fmtDollar(r.default_price)}</td>
-                  <td>${r.active ? 'Active' : html`<span class="muted">Inactive</span>`}</td>
-                  <td class="row-actions">
-                    <a class="btn small" href="/library/items/${escape(r.id)}">Edit</a>
-                  </td>
-                </tr>
-              `)}
-            </tbody>
-            <tfoot>
-              <tr>
-                <th colspan="7">${rows.length} item${rows.length === 1 ? '' : 's'}</th>
-              </tr>
-            </tfoot>
-          </table>
+          <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
+            <table class="data opp-list-table">
+              ${listTableHead(columns, rowData)}
+              <tbody data-role="rows">
+                ${rowData.map(r => html`
+                  <tr data-row-id="${escape(r.id)}"
+                      ${raw(rowDataAttrs(columns, r))}
+                      ${!r.active ? 'class="inactive"' : ''}>
+                    <td class="col-name" data-col="name"><a href="/library/items/${escape(r.id)}">${escape(r.name)}</a></td>
+                    <td class="col-description" data-col="description">${escape(r.description)}</td>
+                    <td class="col-category" data-col="category">${escape(r.category)}</td>
+                    <td class="col-default_unit" data-col="default_unit">${escape(r.default_unit)}</td>
+                    <td class="col-default_price num" data-col="default_price">${escape(r.default_price_display)}</td>
+                    <td class="col-status" data-col="status">${r.active ? 'Active' : html`<span class="muted">Inactive</span>`}</td>
+                  </tr>
+                `)}
+              </tbody>
+              <tfoot>
+                <tr><th colspan="6">${rows.length} item${rows.length === 1 ? '' : 's'}</th></tr>
+              </tfoot>
+            </table>
+          </div>
+          <script>${raw(listScript('pms.libItems.v1', 'name', 'asc'))}</script>
         `}
 
       <h2 class="section-h">Add item</h2>

@@ -5,9 +5,10 @@
 
 import { all, one, stmt, batch } from '../lib/db.js';
 import { auditStmt } from '../lib/audit.js';
-import { layout, htmlResponse, html, escape } from '../lib/layout.js';
+import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { uuid, now } from '../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 
 const TYPE_LABELS = {
   task: 'Task',
@@ -41,7 +42,6 @@ export async function onRequestGet(context) {
     conditions.push('a.assigned_user_id = ?');
     params.push(user.id);
   }
-  // 'all' shows everything
 
   if (!showCompleted) {
     conditions.push("a.status = 'pending'");
@@ -87,6 +87,35 @@ export async function onRequestGet(context) {
     a.status === 'pending' && a.due_at && a.due_at < new Date().toISOString().slice(0, 10)
   ).length;
 
+  const columns = [
+    { key: 'subject',       label: 'Subject',     sort: 'text',   filter: 'text',   default: true },
+    { key: 'type_label',    label: 'Type',         sort: 'text',   filter: 'select', default: true },
+    { key: 'opp_number',    label: 'Opportunity',  sort: 'text',   filter: 'text',   default: true },
+    { key: 'assigned_name', label: 'Assigned to',  sort: 'text',   filter: 'select', default: true },
+    { key: 'due',           label: 'Due',          sort: 'date',   filter: 'text',   default: true },
+    { key: 'status_label',  label: 'Status',       sort: 'text',   filter: 'select', default: true },
+  ];
+
+  const rowData = activities.map(a => {
+    const isOverdue = a.status === 'pending' && a.due_at && a.due_at < new Date().toISOString().slice(0, 10);
+    return {
+      id: a.id,
+      subject: a.subject ?? '',
+      body_preview: a.body ? (a.body.length > 80 ? a.body.slice(0, 80) + '...' : a.body) : '',
+      type: a.type,
+      type_label: TYPE_LABELS[a.type] ?? a.type,
+      opportunity_id: a.opportunity_id,
+      opp_number: a.opp_number ?? '',
+      opp_title: a.opp_title ?? '',
+      assigned_name: a.assigned_name ?? a.assigned_email ?? '\u2014',
+      due: a.due_at ? a.due_at.slice(0, 10) : '',
+      status: a.status,
+      status_label: STATUS_LABELS[a.status] ?? a.status ?? '\u2014',
+      isOverdue,
+      isCompleted: a.status === 'completed',
+    };
+  });
+
   const body = html`
     <section class="card">
       <div class="card-header">
@@ -102,12 +131,6 @@ export async function onRequestGet(context) {
         <input type="checkbox" onchange="window.location.href='/activities?filter=${escape(filter)}'+(this.checked?'&completed=1':'')" ${showCompleted ? 'checked' : ''}>
         Show completed
       </label>
-      <select onchange="if(this.value)window.location.href='/activities?filter=${escape(filter)}${showCompleted ? '&completed=1' : ''}&type='+this.value; else window.location.href='/activities?filter=${escape(filter)}${showCompleted ? '&completed=1' : ''}';" style="font-size:0.85em; padding:0.2rem 0.4rem;">
-        <option value="">All types</option>
-        ${Object.entries(TYPE_LABELS).map(([k, v]) => html`
-          <option value="${k}" ${typeFilter === k ? 'selected' : ''}>${v}</option>
-        `)}
-      </select>
     </nav>
 
     ${overdueTasks > 0 ? html`
@@ -116,8 +139,11 @@ export async function onRequestGet(context) {
 
     <section class="card">
       <div class="card-header">
-        <h2>Activities <span class="muted">(${activities.length})</span></h2>
-        <button class="btn btn-sm primary" onclick="document.getElementById('new-activity-form').style.display = document.getElementById('new-activity-form').style.display === 'none' ? 'block' : 'none'">+ New</button>
+        <h2>Activities</h2>
+        <div class="toolbar-right" style="display:flex;align-items:center;gap:0.5rem">
+          ${listToolbar({ id: 'act', count: activities.length, showColumnsMenu: false })}
+          <button class="btn btn-sm primary" onclick="document.getElementById('new-activity-form').style.display = document.getElementById('new-activity-form').style.display === 'none' ? 'block' : 'none'">+ New</button>
+        </div>
       </div>
 
       <div id="new-activity-form" style="display:none; margin-bottom:1rem; padding:1rem; background:var(--bg-muted,#f6f8fa); border-radius:var(--radius);">
@@ -179,65 +205,37 @@ export async function onRequestGet(context) {
       ${activities.length === 0
         ? html`<p class="muted">No activities found.</p>`
         : html`
-          <table class="data compact">
-            <thead>
-              <tr>
-                <th style="width:2rem"></th>
-                <th>Subject</th>
-                <th>Type</th>
-                <th>Opportunity</th>
-                <th>Assigned to</th>
-                <th>Due</th>
-                <th>Status</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              ${activities.map(a => {
-                const isOverdue = a.status === 'pending' && a.due_at && a.due_at < new Date().toISOString().slice(0, 10);
-                const assignedLabel = a.assigned_name ?? a.assigned_email ?? '—';
-                return html`
-                  <tr class="${a.status === 'completed' ? 'row-muted' : ''} ${isOverdue ? 'row-overdue' : ''}">
-                    <td>
-                      ${a.status === 'pending' ? html`
-                        <form method="post" action="/activities/${escape(a.id)}/complete" style="display:inline">
-                          <button type="submit" class="check-btn" title="Mark complete">
-                            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-                              <circle cx="8" cy="8" r="6"/>
-                            </svg>
-                          </button>
-                        </form>
-                      ` : html`
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--green,#1a7f37)" stroke-width="2">
-                          <circle cx="8" cy="8" r="6"/>
-                          <path d="M5 8l2 2 4-4"/>
-                        </svg>
-                      `}
-                    </td>
-                    <td>
-                      <a href="/activities/${escape(a.id)}" class="${a.status === 'completed' ? 'completed-text' : ''}">
-                        <strong>${escape(a.subject || '(no subject)')}</strong>
+          <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
+            <table class="data compact opp-list-table">
+              ${listTableHead(columns, rowData)}
+              <tbody data-role="rows">
+                ${rowData.map(r => html`
+                  <tr data-row-id="${escape(r.id)}"
+                      ${raw(rowDataAttrs(columns, r))}
+                      class="${r.isCompleted ? 'row-muted' : ''} ${r.isOverdue ? 'row-overdue' : ''}">
+                    <td class="col-subject" data-col="subject">
+                      <a href="/activities/${escape(r.id)}" class="${r.isCompleted ? 'completed-text' : ''}">
+                        <strong>${escape(r.subject || '(no subject)')}</strong>
                       </a>
-                      ${a.body ? html`<br><small class="muted">${escape(a.body.length > 80 ? a.body.slice(0, 80) + '...' : a.body)}</small>` : ''}
+                      ${r.body_preview ? html`<br><small class="muted">${escape(r.body_preview)}</small>` : ''}
                     </td>
-                    <td><span class="pill pill-${a.type}">${escape(TYPE_LABELS[a.type] ?? a.type)}</span></td>
-                    <td>${a.opportunity_id
-                      ? html`<a href="/opportunities/${escape(a.opportunity_id)}"><code>${escape(a.opp_number ?? '')}</code></a>`
-                      : html`<span class="muted">—</span>`}
+                    <td class="col-type_label" data-col="type_label"><span class="pill pill-${r.type}">${escape(r.type_label)}</span></td>
+                    <td class="col-opp_number" data-col="opp_number">
+                      ${r.opportunity_id
+                        ? html`<a href="/opportunities/${escape(r.opportunity_id)}"><code>${escape(r.opp_number)}</code></a>`
+                        : html`<span class="muted">\u2014</span>`}
                     </td>
-                    <td>${escape(assignedLabel)}</td>
-                    <td class="${isOverdue ? 'overdue-text' : ''}">
-                      ${a.due_at ? escape(a.due_at.slice(0, 10)) : html`<span class="muted">—</span>`}
+                    <td class="col-assigned_name" data-col="assigned_name">${escape(r.assigned_name)}</td>
+                    <td class="col-due ${r.isOverdue ? 'overdue-text' : ''}" data-col="due">
+                      ${r.due ? escape(r.due) : html`<span class="muted">\u2014</span>`}
                     </td>
-                    <td><span class="pill ${a.status === 'completed' ? 'pill-success' : a.status === 'cancelled' ? 'pill-locked' : ''}">${escape(STATUS_LABELS[a.status] ?? a.status ?? '—')}</span></td>
-                    <td class="row-actions">
-                      <a class="btn small" href="/activities/${escape(a.id)}">Open</a>
-                    </td>
+                    <td class="col-status_label" data-col="status_label"><span class="pill ${r.status === 'completed' ? 'pill-success' : r.status === 'cancelled' ? 'pill-locked' : ''}">${escape(r.status_label)}</span></td>
                   </tr>
-                `;
-              })}
-            </tbody>
-          </table>
+                `)}
+              </tbody>
+            </table>
+          </div>
+          <script>${raw(listScript('pms.activities.v1', 'due', 'asc'))}</script>
         `}
     </section>
   `;

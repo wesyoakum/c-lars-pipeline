@@ -1,18 +1,12 @@
 // functions/library/labor-items/index.js
 //
 // GET  /library/labor-items     — list + inline-add form
-// POST /library/labor-items     — create a new labor item (description only;
-//                                  hours/rates edited on the detail page)
-//
-// Labor library items are globally shared. Each item has a description
-// plus a set of per-workcenter (hours, rate) entries (labor_item_entries).
-// A cost build that enables "Use labor library" and selects one or more
-// items gets their total cost folded into the DL category.
+// POST /library/labor-items     — create a new labor item
 
 import { all, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
 import { validateLaborItem } from '../../lib/validators.js';
-import { layout, htmlResponse, html, escape } from '../../lib/layout.js';
+import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
 import { uuid, now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 import {
@@ -20,6 +14,7 @@ import {
   computeLaborItemCost,
   fmtDollar,
 } from '../../lib/pricing.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
 
 export async function onRequestGet(context) {
   return renderList(context, {});
@@ -58,13 +53,32 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
     return { ...it, cost, entryCount: itemEntries.length };
   });
 
+  const columns = [
+    { key: 'description',  label: 'Description',  sort: 'text',   filter: 'text',   default: true },
+    { key: 'entry_count',  label: 'Workcenters',   sort: 'number', filter: null,     default: true },
+    { key: 'cost',         label: 'Cost',           sort: 'number', filter: 'range',  default: true },
+    { key: 'updated',      label: 'Updated',        sort: 'date',   filter: 'text',   default: true },
+  ];
+
+  const rowData = rows.map(r => ({
+    id: r.id,
+    description: r.description ?? '',
+    entry_count: r.entryCount,
+    cost: r.cost,
+    cost_display: fmtDollar(r.cost),
+    updated: (r.updated_at ?? '').slice(0, 10),
+  }));
+
   const errText = (k) => (errors[k] ? html`<small class="error">${errors[k]}</small>` : '');
 
   const body = html`
     <section class="card">
       <div class="card-header">
         <h1>Labor library</h1>
-        <a class="btn" href="/library">← Library</a>
+        <div style="display:flex;align-items:center;gap:0.5rem">
+          ${listToolbar({ id: 'labor', count: rows.length, showColumnsMenu: false })}
+          <a class="btn" href="/library">\u2190 Library</a>
+        </div>
       </div>
 
       <p class="muted">
@@ -87,39 +101,31 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
       ${rows.length === 0
         ? html`<p class="muted">No labor items yet.</p>`
         : html`
-          <table class="data">
-            <thead>
-              <tr>
-                <th>Description</th>
-                <th class="num">Workcenters</th>
-                <th class="num">Cost</th>
-                <th>Updated</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map((r) => html`
+          <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
+            <table class="data opp-list-table">
+              ${listTableHead(columns, rowData)}
+              <tbody data-role="rows">
+                ${rowData.map(r => html`
+                  <tr data-row-id="${escape(r.id)}"
+                      ${raw(rowDataAttrs(columns, r))}>
+                    <td class="col-description" data-col="description"><a href="/library/labor-items/${escape(r.id)}">${escape(r.description)}</a></td>
+                    <td class="col-entry_count num" data-col="entry_count">${r.entry_count}</td>
+                    <td class="col-cost num" data-col="cost">${escape(r.cost_display)}</td>
+                    <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
+                  </tr>
+                `)}
+              </tbody>
+              <tfoot>
                 <tr>
-                  <td><a href="/library/labor-items/${escape(r.id)}">${escape(r.description)}</a></td>
-                  <td class="num">${r.entryCount}</td>
-                  <td class="num">${fmtDollar(r.cost)}</td>
-                  <td><small class="muted">${escape((r.updated_at ?? '').slice(0, 10))}</small></td>
-                  <td class="row-actions">
-                    <a class="btn small" href="/library/labor-items/${escape(r.id)}">Edit</a>
-                  </td>
+                  <th>Total (${rows.length} item${rows.length === 1 ? '' : 's'})</th>
+                  <th></th>
+                  <th class="num">${fmtDollar(grandTotal)}</th>
+                  <th></th>
                 </tr>
-              `)}
-            </tbody>
-            <tfoot>
-              <tr>
-                <th>Total (${rows.length} item${rows.length === 1 ? '' : 's'})</th>
-                <th></th>
-                <th class="num">${fmtDollar(grandTotal)}</th>
-                <th></th>
-                <th></th>
-              </tr>
-            </tfoot>
-          </table>
+              </tfoot>
+            </table>
+          </div>
+          <script>${raw(listScript('pms.libLabor.v1', 'description', 'asc'))}</script>
         `}
     </section>
   `;

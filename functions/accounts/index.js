@@ -1,6 +1,6 @@
 // functions/accounts/index.js
 //
-// GET  /accounts        — list all accounts (with optional search)
+// GET  /accounts        — list all accounts with sort/filter/search
 // POST /accounts        — create a new account (called by the new form)
 
 import { all, stmt, batch } from '../lib/db.js';
@@ -16,83 +16,83 @@ import {
   popupCloseResponse,
 } from '../lib/http.js';
 import { parseAddressForm, buildAddressStatements } from '../lib/address_editor.js';
+import { listScript, listTableHead, listToolbar, columnsMenu, rowDataAttrs } from '../lib/list-table.js';
 
 /**
- * GET /accounts — list accounts with optional ?q= search.
+ * GET /accounts — list accounts with full client-side sort/filter/search.
  */
 export async function onRequestGet(context) {
   const { env, data, request } = context;
   const user = data?.user;
   const url = new URL(request.url);
-  const q = (url.searchParams.get('q') || '').trim();
 
-  const rows = q
-    ? await all(
-        env.DB,
-        `SELECT a.id, a.name, a.segment, a.phone, a.website, a.updated_at,
-                (SELECT COUNT(*) FROM contacts c WHERE c.account_id = a.id) AS contact_count
-           FROM accounts a
-          WHERE a.name LIKE ? COLLATE NOCASE
-             OR a.segment LIKE ? COLLATE NOCASE
-          ORDER BY a.name
-          LIMIT 200`,
-        [`%${q}%`, `%${q}%`]
-      )
-    : await all(
-        env.DB,
-        `SELECT a.id, a.name, a.segment, a.phone, a.website, a.updated_at,
-                (SELECT COUNT(*) FROM contacts c WHERE c.account_id = a.id) AS contact_count
-           FROM accounts a
-          ORDER BY a.name
-          LIMIT 200`
-      );
+  const rows = await all(
+    env.DB,
+    `SELECT a.id, a.name, a.segment, a.phone, a.website, a.updated_at,
+            (SELECT COUNT(*) FROM contacts c WHERE c.account_id = a.id) AS contact_count,
+            (SELECT COUNT(*) FROM opportunities o WHERE o.account_id = a.id) AS opp_count
+       FROM accounts a
+      ORDER BY a.name
+      LIMIT 500`
+  );
+
+  const columns = [
+    { key: 'name',          label: 'Name',      sort: 'text',   filter: 'text',   default: true },
+    { key: 'segment',       label: 'Segment',   sort: 'text',   filter: 'select', default: true },
+    { key: 'phone',         label: 'Phone',     sort: 'text',   filter: 'text',   default: true },
+    { key: 'contact_count', label: 'Contacts',  sort: 'number', filter: null,     default: true },
+    { key: 'opp_count',     label: 'Opps',      sort: 'number', filter: null,     default: true },
+    { key: 'website',       label: 'Website',   sort: 'text',   filter: 'text',   default: false },
+    { key: 'updated',       label: 'Updated',   sort: 'date',   filter: 'text',   default: true },
+  ];
+
+  const rowData = rows.map(r => ({
+    id: r.id,
+    name: r.name ?? '',
+    segment: r.segment ?? '',
+    phone: r.phone ?? '',
+    contact_count: r.contact_count ?? 0,
+    opp_count: r.opp_count ?? 0,
+    website: r.website ?? '',
+    updated: (r.updated_at ?? '').slice(0, 10),
+  }));
 
   const body = html`
     <section class="card">
       <div class="card-header">
-        <h1>Accounts</h1>
-        <a class="btn primary" href="/accounts/new">New account</a>
+        <h1 class="page-title">Accounts</h1>
+        ${listToolbar({ id: 'acct', count: rows.length, newHref: '/accounts/new', newLabel: 'New account' })}
       </div>
-
-      <form method="get" action="/accounts" class="inline-form">
-        <input type="search" name="q" value="${q}" placeholder="Search by name or segment"
-               autofocus>
-        <button class="btn" type="submit">Search</button>
-        ${q ? html`<a class="btn" href="/accounts">Clear</a>` : ''}
-      </form>
 
       ${rows.length === 0
         ? html`<p class="muted">
-            No accounts ${q ? html`match <code>${q}</code>` : 'yet'}. Start by
+            No accounts yet. Start by
             <a href="/accounts/new">creating one</a>.
           </p>`
         : html`
-          <table class="data">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Segment</th>
-                <th>Phone</th>
-                <th>Contacts</th>
-                <th>Updated</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${raw(
-                rows
-                  .map(
-                    (r) => `<tr>
-                      <td><a href="/accounts/${escape(r.id)}">${escape(r.name)}</a></td>
-                      <td>${escape(r.segment ?? '')}</td>
-                      <td>${escape(r.phone ?? '')}</td>
-                      <td>${r.contact_count}</td>
-                      <td><small class="muted">${escape((r.updated_at ?? '').slice(0, 10))}</small></td>
-                    </tr>`
-                  )
-                  .join('')
-              )}
-            </tbody>
-          </table>
+          <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
+            ${columnsMenu(columns)}
+            <table class="data opp-list-table">
+              ${listTableHead(columns, rowData)}
+              <tbody data-role="rows">
+                ${rowData.map(r => html`
+                  <tr data-row-id="${escape(r.id)}"
+                      ${raw(rowDataAttrs(columns, r))}>
+                    <td class="col-name" data-col="name"><a href="/accounts/${escape(r.id)}">${escape(r.name)}</a></td>
+                    <td class="col-segment" data-col="segment">${escape(r.segment)}</td>
+                    <td class="col-phone" data-col="phone">${escape(r.phone)}</td>
+                    <td class="col-contact_count num" data-col="contact_count">${r.contact_count}</td>
+                    <td class="col-opp_count num" data-col="opp_count">${r.opp_count}</td>
+                    <td class="col-website" data-col="website">
+                      ${r.website ? html`<a href="${escape(r.website)}" target="_blank" rel="noopener">${escape(r.website.replace(/^https?:\/\//, ''))}</a>` : ''}
+                    </td>
+                    <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
+                  </tr>
+                `)}
+              </tbody>
+            </table>
+          </div>
+          <script>${raw(listScript('pms.accounts.v1', 'name', 'asc'))}</script>
         `}
     </section>
   `;

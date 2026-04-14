@@ -2,29 +2,20 @@
 //
 // GET  /library/dm-items        — list + inline-add form
 // POST /library/dm-items        — create a new DM item
-//
-// Direct Material library items are globally shared — there is no
-// per-user or per-opportunity filtering. Each item has a description
-// and a flat dollar cost. When a cost build enables "Use DM library"
-// and selects one or more items, the pricing engine sums their costs
-// into the DM total.
 
 import { all, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
 import { validateDmItem } from '../../lib/validators.js';
-import { layout, htmlResponse, html, escape } from '../../lib/layout.js';
+import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
 import { uuid, now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 import { fmtDollar } from '../../lib/pricing.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
 
 export async function onRequestGet(context) {
   return renderList(context, {});
 }
 
-/**
- * Render the DM items list + add form. Extracted so POST handlers can
- * re-render in place when validation fails.
- */
 export async function renderList(context, { values = {}, errors = {} } = {}) {
   const { env, data, request } = context;
   const user = data?.user;
@@ -39,13 +30,30 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
 
   const total = rows.reduce((a, r) => a + (Number(r.cost) || 0), 0);
 
+  const columns = [
+    { key: 'description', label: 'Description', sort: 'text',   filter: 'text',   default: true },
+    { key: 'cost',        label: 'Cost',         sort: 'number', filter: 'range',  default: true },
+    { key: 'updated',     label: 'Updated',      sort: 'date',   filter: 'text',   default: true },
+  ];
+
+  const rowData = rows.map(r => ({
+    id: r.id,
+    description: r.description ?? '',
+    cost: Number(r.cost) || 0,
+    cost_display: fmtDollar(r.cost),
+    updated: (r.updated_at ?? '').slice(0, 10),
+  }));
+
   const errText = (k) => (errors[k] ? html`<small class="error">${errors[k]}</small>` : '');
 
   const body = html`
     <section class="card">
       <div class="card-header">
         <h1>Direct Material library</h1>
-        <a class="btn" href="/library">← Library</a>
+        <div style="display:flex;align-items:center;gap:0.5rem">
+          ${listToolbar({ id: 'dm', count: rows.length, showColumnsMenu: false })}
+          <a class="btn" href="/library">\u2190 Library</a>
+        </div>
       </div>
 
       <p class="muted">
@@ -72,36 +80,29 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
       ${rows.length === 0
         ? html`<p class="muted">No DM items yet.</p>`
         : html`
-          <table class="data">
-            <thead>
-              <tr>
-                <th>Description</th>
-                <th class="num">Cost</th>
-                <th>Updated</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map((r) => html`
+          <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
+            <table class="data opp-list-table">
+              ${listTableHead(columns, rowData)}
+              <tbody data-role="rows">
+                ${rowData.map(r => html`
+                  <tr data-row-id="${escape(r.id)}"
+                      ${raw(rowDataAttrs(columns, r))}>
+                    <td class="col-description" data-col="description"><a href="/library/dm-items/${escape(r.id)}">${escape(r.description)}</a></td>
+                    <td class="col-cost num" data-col="cost">${escape(r.cost_display)}</td>
+                    <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
+                  </tr>
+                `)}
+              </tbody>
+              <tfoot>
                 <tr>
-                  <td><a href="/library/dm-items/${escape(r.id)}">${escape(r.description)}</a></td>
-                  <td class="num">${fmtDollar(r.cost)}</td>
-                  <td><small class="muted">${escape((r.updated_at ?? '').slice(0, 10))}</small></td>
-                  <td class="row-actions">
-                    <a class="btn small" href="/library/dm-items/${escape(r.id)}">Edit</a>
-                  </td>
+                  <th>Total (${rows.length} item${rows.length === 1 ? '' : 's'})</th>
+                  <th class="num">${fmtDollar(total)}</th>
+                  <th></th>
                 </tr>
-              `)}
-            </tbody>
-            <tfoot>
-              <tr>
-                <th>Total (${rows.length} item${rows.length === 1 ? '' : 's'})</th>
-                <th class="num">${fmtDollar(total)}</th>
-                <th></th>
-                <th></th>
-              </tr>
-            </tfoot>
-          </table>
+              </tfoot>
+            </table>
+          </div>
+          <script>${raw(listScript('pms.libDm.v1', 'description', 'asc'))}</script>
         `}
     </section>
   `;

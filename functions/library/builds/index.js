@@ -2,14 +2,10 @@
 //
 // GET  /library/builds        — list all build templates
 // POST /library/builds        — create a new build template
-//
-// Builds library entries are reusable pricing engine templates.
-// They use the same pricing engine as cost builds but are not tied
-// to any opportunity.
 
 import { all, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
-import { layout, htmlResponse, html, escape } from '../../lib/layout.js';
+import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
 import { uuid, now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 import {
@@ -17,6 +13,7 @@ import {
   computeFromBundle,
   fmtDollar,
 } from '../../lib/pricing.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
 
 export async function onRequestGet(context) {
   return renderList(context, {});
@@ -77,13 +74,35 @@ async function renderList(context, { values = {}, errors = {} } = {}) {
     });
   }
 
+  const columns = [
+    { key: 'name',        label: 'Name',         sort: 'text',   filter: 'text',   default: true },
+    { key: 'description', label: 'Description',  sort: 'text',   filter: 'text',   default: true },
+    { key: 'total_cost',  label: 'Total Cost',    sort: 'number', filter: 'range',  default: true },
+    { key: 'quote_price', label: 'Quote Price',   sort: 'number', filter: 'range',  default: true },
+    { key: 'updated',     label: 'Updated',       sort: 'date',   filter: 'text',   default: true },
+  ];
+
+  const rowData = summaries.map(r => ({
+    id: r.id,
+    name: r.name ?? '',
+    description: r.description ?? '',
+    total_cost: r.totalCost,
+    total_cost_display: fmtDollar(r.totalCost),
+    quote_price: r.quotePrice,
+    quote_price_display: fmtDollar(r.quotePrice),
+    updated: (r.updated_at ?? '').slice(0, 10),
+  }));
+
   const errText = (k) => (errors[k] ? html`<small class="error">${errors[k]}</small>` : '');
 
   const body = html`
     <section class="card">
       <div class="card-header">
         <h1>Builds Library</h1>
-        <a class="btn" href="/library">← Library</a>
+        <div style="display:flex;align-items:center;gap:0.5rem">
+          ${listToolbar({ id: 'builds', count: summaries.length, showColumnsMenu: false })}
+          <a class="btn" href="/library">\u2190 Library</a>
+        </div>
       </div>
 
       <p class="muted">
@@ -109,32 +128,24 @@ async function renderList(context, { values = {}, errors = {} } = {}) {
       ${summaries.length === 0
         ? html`<p class="muted">No build templates yet.</p>`
         : html`
-          <table class="data">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Description</th>
-                <th class="num">Total Cost</th>
-                <th class="num">Quote Price</th>
-                <th>Updated</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              ${summaries.map((r) => html`
-                <tr>
-                  <td><a href="/library/builds/${escape(r.id)}">${escape(r.name)}</a></td>
-                  <td>${escape(r.description ?? '')}</td>
-                  <td class="num">${fmtDollar(r.totalCost)}</td>
-                  <td class="num">${fmtDollar(r.quotePrice)}</td>
-                  <td><small class="muted">${escape((r.updated_at ?? '').slice(0, 10))}</small></td>
-                  <td class="row-actions">
-                    <a class="btn small" href="/library/builds/${escape(r.id)}">Edit</a>
-                  </td>
-                </tr>
-              `)}
-            </tbody>
-          </table>
+          <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
+            <table class="data opp-list-table">
+              ${listTableHead(columns, rowData)}
+              <tbody data-role="rows">
+                ${rowData.map(r => html`
+                  <tr data-row-id="${escape(r.id)}"
+                      ${raw(rowDataAttrs(columns, r))}>
+                    <td class="col-name" data-col="name"><a href="/library/builds/${escape(r.id)}">${escape(r.name)}</a></td>
+                    <td class="col-description" data-col="description">${escape(r.description)}</td>
+                    <td class="col-total_cost num" data-col="total_cost">${escape(r.total_cost_display)}</td>
+                    <td class="col-quote_price num" data-col="quote_price">${escape(r.quote_price_display)}</td>
+                    <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
+                  </tr>
+                `)}
+              </tbody>
+            </table>
+          </div>
+          <script>${raw(listScript('pms.libBuilds.v1', 'name', 'asc'))}</script>
         `}
     </section>
   `;
