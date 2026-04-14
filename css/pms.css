@@ -1336,8 +1336,8 @@ table.data.compact td {
 .quote-lines-table .col-qty   { width: 70px; }
 .quote-lines-table .col-unit  { width: 70px; }
 .quote-lines-table .col-price { width: 100px; }
-.quote-lines-table .col-ext   { width: 100px; }
-.quote-lines-table .col-build { width: 70px; }
+.quote-lines-table .col-ext   { width: 110px; }
+.quote-lines-table .col-build { width: 100px; }
 .line-item-fields {
   display: flex;
   gap: 0.5rem;
@@ -1362,7 +1362,7 @@ table.data.compact td {
 }
 .line-notes {
   display: block;
-  width: 100%;
+  width: 50%;
   max-width: 100%;
   margin-top: 0.3rem;
   padding: 0.2rem 0.45rem;
