@@ -939,20 +939,24 @@ table.data.compact td {
 .pricing-box-quote {
   background: #fff5a8;
   border-color: #e3cf6a;
+  text-align: center;
 }
 .pricing-box-quote .pricing-input {
   font-size: 1.5rem;
   font-weight: 700;
   width: 100%;
   background: transparent;
-  border: none;
-  padding: 0.2rem 0;
+  border: 1px solid #c0c8d0;
+  border-radius: var(--radius);
+  padding: 0.3rem 0.5rem;
   font-variant-numeric: tabular-nums;
+  text-align: center;
+  box-sizing: border-box;
 }
 .pricing-box-quote .pricing-input:focus {
-  outline: 2px solid #1a3a5c;
-  outline-offset: 2px;
-  border-radius: 2px;
+  outline: none;
+  border-color: #1a3a5c;
+  box-shadow: 0 0 0 2px rgba(26,58,92,0.15);
 }
 .pricing-box .pricing-value {
   font-size: 1.5rem;
@@ -960,6 +964,7 @@ table.data.compact td {
   margin-top: 0.25rem;
   font-variant-numeric: tabular-nums;
 }
+.pricing-box.margin-good, .pricing-box.margin-low { text-align: center; }
 .pricing-box.margin-good {
   background: #d4edda;
   border-color: #4ac26b;

@@ -106,9 +106,34 @@
 
     // --- Main pricing recalc ---
 
+    // Track which inputs the user has manually typed in.
+    // Auto-filled inputs (from server) can be updated by the cascade;
+    // once the user types in a field, it becomes "user-owned".
+    var userEdited = {};
+    form.addEventListener('input', function(e) {
+      var n = e.target.name;
+      if (n && (n.indexOf('_user_cost') !== -1 || n === 'quote_price_user')) {
+        userEdited[n] = true;
+        e.target.classList.remove('auto-filled');
+      }
+    });
+
+    function isAutoFillable(name) {
+      var el = form.querySelector('[name="' + name + '"]');
+      return el && !userEdited[name] && !el.disabled;
+    }
+
+    function setAutoVal(name, v) {
+      var el = form.querySelector('[name="' + name + '"]');
+      if (!el) return;
+      el.value = Math.round(v);
+      el.classList.add('auto-filled');
+    }
+
     function recalc() {
       var p = cfg.targetPct;
       var pTotal = cfg.totalTargetPct;
+      var pDmDl = p.dm + p.dl;
 
       // Compute live totals from the sub-tabs
       var currentLaborTotal = computeCurrentLaborTotal();
@@ -126,12 +151,43 @@
         setText('cb-labor-linked-total', fmtDollar(laborCalcTotal));
       }
 
-      // Effective values: linked → library total, else user input
+      // Read user-entered values (linked → library total)
       var dm = dmLinked ? dmLibTotal : val('dm_user_cost');
       var dl = laborLinked ? laborCalcTotal : val('dl_user_cost');
       var imoh = val('imoh_user_cost');
       var other = val('other_user_cost');
       var quote = val('quote_price_user');
+
+      // --- Auto-fill cascade (mirrors server-side computePricing) ---
+      // Quote from DM+DL or DM
+      if (isAutoFillable('quote_price_user') && dm !== null) {
+        if (dl !== null) quote = (dm + dl) / pDmDl;
+        else quote = dm / p.dm;
+        setAutoVal('quote_price_user', quote);
+      }
+
+      var effQuote = quote;
+
+      // DM from quote
+      if (isAutoFillable('dm_user_cost') && !dmLinked && effQuote !== null) {
+        dm = effQuote * p.dm;
+        setAutoVal('dm_user_cost', dm);
+      }
+      // DL from quote
+      if (isAutoFillable('dl_user_cost') && !laborLinked && effQuote !== null) {
+        dl = effQuote * p.dl;
+        setAutoVal('dl_user_cost', dl);
+      }
+      // IMOH from quote
+      if (isAutoFillable('imoh_user_cost') && effQuote !== null) {
+        imoh = effQuote * p.imoh;
+        setAutoVal('imoh_user_cost', imoh);
+      }
+      // Other from quote
+      if (isAutoFillable('other_user_cost') && effQuote !== null) {
+        other = effQuote * p.other;
+        setAutoVal('other_user_cost', other);
+      }
 
       // Sum known costs
       var costs = [dm, dl, imoh, other];

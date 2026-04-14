@@ -215,17 +215,23 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
       <a class="nav-link ${sub === 'dm' ? 'active' : ''}" href="${base}?sub=dm">Direct Material (${fmtDollar(totals.dmLibTotal || 0)})</a>
     </nav>`;
 
+  const lineDesc = line.description || line.title || 'Line';
+  const lineUrl = `/opportunities/${oppId}/quotes/${quoteId}/lines/${lineId}`;
   const header = html`
     <section class="card">
       <div class="card-header">
         <div>
-          <h1>
-            ${escape(build.label || '(unlabeled)')}
+          <h1 x-data="lineTitle(${escape(JSON.stringify(lineDesc))})">
+            <span x-show="!editing" @click="editing = true" style="cursor:pointer;border-bottom:1px dashed var(--border)" x-text="val">${escape(lineDesc)}</span>
+            <input x-show="editing" x-cloak type="text" :value="val"
+                   @blur="save($event.target.value)" @keydown.enter="save($event.target.value)"
+                   @keydown.escape="editing = false"
+                   x-ref="inp" style="width:100%;font:inherit;padding:0.15rem 0.3rem"
+                   x-effect="if(editing) $nextTick(() => $refs.inp?.focus())">
             ${locked ? html`<span class="pill pill-locked" style="margin-left:0.5rem">locked</span>` : ''}
           </h1>
           <p class="muted">
-            Price build for: <strong>${escape(line.description)}</strong>
-            · Quote <a href="${quoteUrl(oppId, quoteId)}">${escape(line.quote_number)} Rev ${escape(line.revision)}</a>
+            Quote <a href="${quoteUrl(oppId, quoteId)}">${escape(line.quote_number)} Rev ${escape(line.revision)}</a>
             · <a href="/opportunities/${escape(oppId)}">${escape(line.opp_number)}</a>
           </p>
         </div>
@@ -249,6 +255,23 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
         </div>
       </div>
     </section>
+    <script>
+    document.addEventListener('alpine:init', function() {
+      Alpine.data('lineTitle', function(initial) {
+        return {
+          val: initial, editing: false,
+          save: function(v) {
+            this.editing = false;
+            if (v === this.val) return;
+            this.val = v;
+            var fd = new FormData();
+            fd.append('description', v);
+            fetch('${lineUrl}', { method: 'POST', headers: { 'Accept': 'application/json' }, body: fd });
+          },
+        };
+      });
+    });
+    </script>
   `;
 
   // Document upload + list for reference files
@@ -331,11 +354,6 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
         marginThresholdGood: settings.marginThresholdGood,
         defaultLaborRate: settings.defaultLaborRate,
       }))}</script>
-      <div class="field">
-        <label>Label</label>
-        <input type="text" name="label" value="${build.label ?? ''}" ${locked ? 'disabled' : ''}>
-      </div>
-
       <div style="display: ${sub === 'pricing' ? 'block' : 'none'}">${pricingTabBody}</div>
       <div style="display: ${sub === 'labor' ? 'block' : 'none'}">${laborTabBody}</div>
       <div style="display: ${sub === 'dm' ? 'block' : 'none'}">${dmTabBody}</div>
@@ -352,6 +370,9 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
           </div>`}
     </div>
     ${docsSection}
+    <div style="margin-top:1rem;text-align:center">
+      <a class="btn" href="${quoteUrl(oppId, quoteId)}">Back to quote</a>
+    </div>
     <script>
     function dropUpload() {
       return {
@@ -689,7 +710,7 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
         <tbody>
           ${categoryRow('dm',    'Direct Material (DM)',        build.dm_user_cost,   auto.dm,   linked.dm ? notes.dm : (auto.dm !== null ? notes.dm : ''),       linked.dm,    eff.dm)}
           ${categoryRow('dl',    'Direct Labor (DL)',           build.dl_user_cost,   auto.dl,   linked.labor ? notes.dl : (auto.dl !== null ? notes.dl : ''),    linked.labor, eff.dl)}
-          ${categoryRow('imoh',  'Indirect Material &amp; Overhead', build.imoh_user_cost, auto.imoh, auto.imoh !== null ? notes.imoh : '',                       false,        eff.imoh)}
+          ${categoryRow('imoh',  'Indirect Material + OH', build.imoh_user_cost, auto.imoh, auto.imoh !== null ? notes.imoh : '',                       false,        eff.imoh)}
           ${categoryRow('other', 'Other',                       build.other_user_cost, auto.other, auto.other !== null ? notes.other : '',                        false,        eff.other)}
         </tbody>
         <tfoot>
