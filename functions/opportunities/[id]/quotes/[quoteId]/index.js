@@ -26,6 +26,7 @@ import {
   QUOTE_STATUS_LABELS,
 } from '../../../../lib/validators.js';
 import { fmtDollar } from '../../../../lib/pricing.js';
+import { templateTypeForQuote, templateManagerHtml } from '../../../../lib/template-catalog.js';
 
 const READ_ONLY_STATUSES = new Set([
   'issued', 'revision_issued', 'accepted', 'rejected', 'expired', 'dead',
@@ -227,6 +228,9 @@ export async function onRequestGet(context) {
             `)}
           </div>`
         : ''}
+      <div style="padding:0 1rem 0.5rem;border-top:1px solid var(--border)">
+        ${raw(templateManagerHtml(templateTypeForQuote(quote.quote_type)))}
+      </div>
     </section>
   `;
 

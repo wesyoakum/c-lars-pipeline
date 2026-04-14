@@ -9,6 +9,7 @@ import { now } from '../../lib/ids.js';
 import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 import { parseTransactionTypes } from '../../lib/validators.js';
+import { templateTypeForOC, templateManagerHtml } from '../../lib/template-catalog.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
@@ -245,6 +246,13 @@ export async function onRequestGet(context) {
 
       </div>
     </section>` : ''}
+
+    <!-- Document Templates -->
+    <section class="card">
+      <h2>Document Templates</h2>
+      ${raw(templateManagerHtml(templateTypeForOC(jobTypes[0])))}
+      ${isEps ? raw(templateManagerHtml('ntp')) : ''}
+    </section>
 
     <!-- History -->
     <section class="card">

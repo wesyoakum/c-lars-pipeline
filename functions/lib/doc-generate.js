@@ -7,25 +7,14 @@ import { one, all } from './db.js';
 import { fmtDollar } from './pricing.js';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
+import { TEMPLATE_CATALOG, templateTypeForQuote } from './template-catalog.js';
 
 // ── Template key mapping ────────────────────────────────────────────
 
-const TEMPLATE_MAP = {
-  service:             'templates/quote-service.docx',
-  spares:              'templates/quote-spares.docx',
-  eps:                 'templates/quote-eps.docx',
-  refurb_baseline:     'templates/quote-refurb-baseline.docx',
-  refurb_modified:     'templates/quote-refurb-baseline.docx',
-  refurb_supplemental: 'templates/quote-refurb-baseline.docx',
-};
-
-const OC_TEMPLATE = 'templates/oc-eps.docx';
-
 export function templateKeyForQuote(quoteType) {
-  return TEMPLATE_MAP[quoteType] || TEMPLATE_MAP.spares;
+  const catKey = templateTypeForQuote(quoteType);
+  return TEMPLATE_CATALOG[catKey]?.r2Key || 'templates/quote-spares.docx';
 }
-
-export { OC_TEMPLATE };
 
 // ── Load quote data ─────────────────────────────────────────────────
 

@@ -1,0 +1,103 @@
+// functions/lib/template-catalog.js
+//
+// Central catalog of all document templates stored in R2.
+// Used by template download/upload routes and generation logic.
+
+export const TEMPLATE_CATALOG = {
+  'quote-service': {
+    r2Key: 'templates/quote-service.docx',
+    filename: 'quote-service.docx',
+    label: 'Quote — Service',
+  },
+  'quote-spares': {
+    r2Key: 'templates/quote-spares.docx',
+    filename: 'quote-spares.docx',
+    label: 'Quote — Spares',
+  },
+  'quote-eps': {
+    r2Key: 'templates/quote-eps.docx',
+    filename: 'quote-eps.docx',
+    label: 'Quote — EPS',
+  },
+  'quote-refurb-baseline': {
+    r2Key: 'templates/quote-refurb-baseline.docx',
+    filename: 'quote-refurb-baseline.docx',
+    label: 'Quote — Refurb Baseline',
+  },
+  'oc-eps': {
+    r2Key: 'templates/oc-eps.docx',
+    filename: 'oc-eps.docx',
+    label: 'Order Confirmation — EPS',
+  },
+  'oc-spares': {
+    r2Key: 'templates/oc-spares.docx',
+    filename: 'oc-spares.docx',
+    label: 'Order Confirmation — Spares',
+  },
+  'oc-service': {
+    r2Key: 'templates/oc-service.docx',
+    filename: 'oc-service.docx',
+    label: 'Order Confirmation — Service',
+  },
+  'oc-refurb': {
+    r2Key: 'templates/oc-refurb.docx',
+    filename: 'oc-refurb.docx',
+    label: 'Order Confirmation — Refurb',
+  },
+  'ntp': {
+    r2Key: 'templates/ntp.docx',
+    filename: 'ntp.docx',
+    label: 'Notice to Proceed (NTP)',
+  },
+};
+
+// Map quote_type values → template catalog key
+const QUOTE_TYPE_TO_TEMPLATE = {
+  service:             'quote-service',
+  spares:              'quote-spares',
+  eps:                 'quote-eps',
+  refurb_baseline:     'quote-refurb-baseline',
+  refurb_modified:     'quote-refurb-baseline',
+  refurb_supplemental: 'quote-refurb-baseline',
+};
+
+// Map job type → OC template catalog key
+const JOB_TYPE_TO_OC_TEMPLATE = {
+  eps:    'oc-eps',
+  spares: 'oc-spares',
+  service: 'oc-service',
+  refurb: 'oc-refurb',
+};
+
+export function templateTypeForQuote(quoteType) {
+  return QUOTE_TYPE_TO_TEMPLATE[quoteType] || 'quote-spares';
+}
+
+export function templateTypeForOC(jobType) {
+  return JOB_TYPE_TO_OC_TEMPLATE[jobType] || 'oc-spares';
+}
+
+/**
+ * Render the template download/upload UI snippet.
+ * Returns raw HTML string for embedding in a page.
+ */
+export function templateManagerHtml(templateType, { html, escape } = {}) {
+  const entry = TEMPLATE_CATALOG[templateType];
+  if (!entry) return '';
+
+  return `
+    <details class="template-manager" style="margin:0.5rem 0;font-size:0.85em">
+      <summary style="cursor:pointer;color:var(--muted)">
+        Template: ${entry.label}
+      </summary>
+      <div style="margin:0.35rem 0 0 1rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
+        <a href="/templates/${templateType}/download" class="btn btn-sm">Download Template</a>
+        <form method="post" action="/templates/${templateType}/upload"
+              enctype="multipart/form-data" class="inline-form"
+              style="display:flex;align-items:center;gap:0.35rem">
+          <input type="file" name="file" accept=".docx" style="font-size:0.85em;max-width:220px">
+          <button type="submit" class="btn btn-sm">Upload</button>
+        </form>
+      </div>
+    </details>`;
+}
