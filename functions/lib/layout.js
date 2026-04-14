@@ -126,6 +126,7 @@ export function layout(title, body, opts = {}) {
       ${navLink('/opportunities', 'Opportunities', activeNav)}
       ${navLink('/quotes', 'Quotes', activeNav)}
       ${navLink('/activities', 'Tasks', activeNav)}
+      ${navLink('/documents/library', 'Documents', activeNav)}
       ${navLink('/library', 'Library', activeNav)}
       ${navLink('/reports', 'Reports', activeNav)}
       ${navLink('/accounts', 'Accounts', activeNav)}
