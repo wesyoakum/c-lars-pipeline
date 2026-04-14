@@ -96,31 +96,39 @@ export async function onRequestGet(context) {
       </p>
 
       <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
-        <table class="data opp-list-table">
+        <table class="data opp-list-table" style="table-layout:fixed;width:100%">
+          <colgroup>
+            <col data-col="label"    style="width:auto">
+            <col data-col="category" style="width:150px">
+            <col data-col="status"   style="width:90px">
+            <col data-col="size"     style="width:80px">
+            <col data-col="uploaded" style="width:130px">
+            <col data-col="actions"  style="width:190px">
+          </colgroup>
           ${listTableHead(columns, rowData)}
           <tbody data-role="rows">
             ${rowData.map(r => html`
               <tr data-row-id="${escape(r.id)}"
                   ${raw(rowDataAttrs(columns, r))}>
-                <td class="col-label" data-col="label">
+                <td class="col-label" data-col="label" style="overflow:hidden;text-overflow:ellipsis">
                   <strong>${escape(r.label)}</strong>
                   <br><small class="muted">${escape(r.originalFilename || r.filename)}</small>
                 </td>
                 <td class="col-category" data-col="category">${escape(r.category)}</td>
-                <td class="col-status" data-col="status">
+                <td class="col-status" data-col="status" style="text-align:center">
                   ${r.exists
                     ? html`<span class="pill pill-success">Uploaded</span>`
                     : html`<span class="pill pill-locked">Missing</span>`}
                 </td>
-                <td class="col-size num muted" data-col="size" style="font-size:0.85em;white-space:nowrap">
+                <td class="col-size num muted" data-col="size" style="font-size:0.85em;text-align:right">
                   ${escape(r.size_display)}
                 </td>
                 <td class="col-uploaded muted" data-col="uploaded" style="font-size:0.85em;white-space:nowrap">
                   ${r.uploaded ? escape(r.uploaded) : '\u2014'}
                   ${r.uploadedBy ? html`<br><small>${escape(r.uploadedBy)}</small>` : ''}
                 </td>
-                <td class="col-actions" data-col="actions" style="white-space:nowrap">
-                  <div style="display:flex;align-items:center;gap:0.35rem">
+                <td class="col-actions" data-col="actions" style="text-align:right;white-space:nowrap">
+                  <div style="display:inline-flex;align-items:center;gap:0.35rem;justify-content:flex-end">
                     ${r.exists
                       ? html`<a href="/templates/${escape(r.key)}/download" class="btn btn-sm">Download</a>`
                       : ''}
