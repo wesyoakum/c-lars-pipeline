@@ -98,6 +98,7 @@ export async function onRequestGet(context) {
       name: d.title || d.original_filename || 'Untitled',
       original_filename: d.original_filename,
       notes: d.notes,
+      kind: d.kind || 'other',
       kind_label: DOC_KIND_LABELS[d.kind] || d.kind || '',
       file_type: ft,
       attached_to: attachedTo,
@@ -138,14 +139,34 @@ export async function onRequestGet(context) {
                 ${rowData.map(d => html`
                   <tr data-row-id="${escape(d.id)}"
                       ${raw(rowDataAttrs(columns, d))}>
-                    <td class="col-name" data-col="name" style="overflow:hidden;text-overflow:ellipsis">
-                      <strong><a href="/documents/${escape(d.id)}/download">${escape(d.name)}</a></strong>
+                    <td class="col-name" data-col="name" style="overflow:hidden;text-overflow:ellipsis"
+                        x-data="docEdit('${escape(d.id)}', 'title', ${raw(JSON.stringify(d.name))})">
+                      <span x-show="!editing" @click="editing = true" style="cursor:pointer">
+                        <strong style="border-bottom:1px dashed var(--border)" x-text="val">${escape(d.name)}</strong>
+                      </span>
+                      <input x-show="editing" x-cloak type="text" :value="val"
+                             @blur="save($event.target.value)" @keydown.enter="save($event.target.value)"
+                             @keydown.escape="editing = false"
+                             x-ref="inp" style="width:100%;font:inherit;padding:0.15rem 0.3rem;font-weight:600"
+                             x-effect="if(editing) $nextTick(() => $refs.inp?.focus())">
                       ${d.original_filename && d.original_filename !== d.name
                         ? html`<br><small class="muted">${escape(d.original_filename)}</small>`
                         : ''}
                       ${d.notes ? html`<br><small class="muted">${escape(d.notes)}</small>` : ''}
                     </td>
-                    <td class="col-kind_label" data-col="kind_label"><span class="pill" style="font-size:0.8em">${escape(d.kind_label)}</span></td>
+                    <td class="col-kind_label" data-col="kind_label"
+                        x-data="docSelect('${escape(d.id)}', 'kind', '${escape(d.kind)}')">
+                      <span x-show="!editing" @click="editing = true" style="cursor:pointer">
+                        <span class="pill" style="font-size:0.8em;border-bottom:1px dashed var(--border)" x-text="labels[val] || val">${escape(d.kind_label)}</span>
+                      </span>
+                      <select x-show="editing" x-cloak x-model="val"
+                              @change="save()" @blur="editing = false"
+                              x-ref="sel" style="font-size:0.8em;padding:0.15rem 0.3rem"
+                              x-effect="if(editing) $nextTick(() => $refs.sel?.focus())">
+                        ${Object.entries(DOC_KIND_LABELS).map(([k, v]) =>
+                          html`<option value="${escape(k)}">${escape(v)}</option>`)}
+                      </select>
+                    </td>
                     <td class="col-file_type muted" data-col="file_type" style="font-size:0.85em">${escape(d.file_type)}</td>
                     <td class="col-attached_to" data-col="attached_to" style="overflow:hidden;text-overflow:ellipsis">
                       ${d.attached_url
@@ -181,7 +202,41 @@ export async function onRequestGet(context) {
               </tbody>
             </table>
           </div>
-          <script>${raw(listScript('pms.docLib.v2', 'date', 'desc'))}</script>`}
+          <script>${raw(listScript('pms.docLib.v2', 'date', 'desc'))}</script>
+          <script>
+          document.addEventListener('alpine:init', function() {
+            var kindLabels = ${raw(JSON.stringify(DOC_KIND_LABELS))};
+            Alpine.data('docEdit', function(docId, field, initial) {
+              return {
+                val: initial, editing: false,
+                save: function(v) {
+                  this.editing = false;
+                  if (v === this.val) return;
+                  this.val = v;
+                  fetch('/documents/' + docId + '/patch', {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ field: field, value: v }),
+                  });
+                },
+              };
+            });
+            Alpine.data('docSelect', function(docId, field, initial) {
+              return {
+                val: initial, editing: false, labels: kindLabels,
+                save: function() {
+                  var v = this.val;
+                  this.editing = false;
+                  fetch('/documents/' + docId + '/patch', {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ field: field, value: v }),
+                  });
+                },
+              };
+            });
+          });
+          </script>`}
     </section>
   `;
 

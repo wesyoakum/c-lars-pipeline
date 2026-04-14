@@ -57,6 +57,7 @@ export async function onRequestGet(context) {
     title: r.title || r.original_filename || 'Untitled',
     original_filename: r.original_filename || '',
     notes: r.notes || '',
+    category: r.category || 'other',
     category_label: CATEGORIES[r.category] || r.category || 'Other',
     size: r.size_bytes || 0,
     size_display: formatSize(r.size_bytes),
@@ -148,15 +149,33 @@ function resUpload() {
                 ${rowData.map(r => html`
                   <tr data-row-id="${escape(r.id)}"
                       ${raw(rowDataAttrs(columns, r))}>
-                    <td class="col-title" data-col="title" style="overflow:hidden;text-overflow:ellipsis">
-                      <strong>${escape(r.title)}</strong>
+                    <td class="col-title" data-col="title" style="overflow:hidden;text-overflow:ellipsis"
+                        x-data="resEdit('${escape(r.id)}', 'title', ${raw(JSON.stringify(r.title))})">
+                      <span x-show="!editing" @click="editing = true" style="cursor:pointer">
+                        <strong style="border-bottom:1px dashed var(--border)" x-text="val">${escape(r.title)}</strong>
+                      </span>
+                      <input x-show="editing" x-cloak type="text" :value="val"
+                             @blur="save($event.target.value)" @keydown.enter="save($event.target.value)"
+                             @keydown.escape="editing = false"
+                             x-ref="inp" style="width:100%;font:inherit;padding:0.15rem 0.3rem;font-weight:600"
+                             x-effect="if(editing) $nextTick(() => $refs.inp?.focus())">
                       ${r.original_filename && r.original_filename !== r.title
                         ? html`<br><small class="muted">${escape(r.original_filename)}</small>`
                         : ''}
                       ${r.notes ? html`<br><small class="muted">${escape(r.notes)}</small>` : ''}
                     </td>
-                    <td class="col-category_label" data-col="category_label">
-                      <span class="pill" style="font-size:0.8em">${escape(r.category_label)}</span>
+                    <td class="col-category_label" data-col="category_label"
+                        x-data="resSelect('${escape(r.id)}', 'category', '${escape(r.category)}')">
+                      <span x-show="!editing" @click="editing = true" style="cursor:pointer">
+                        <span class="pill" style="font-size:0.8em;border-bottom:1px dashed var(--border)" x-text="labels[val] || val">${escape(r.category_label)}</span>
+                      </span>
+                      <select x-show="editing" x-cloak x-model="val"
+                              @change="save()" @blur="editing = false"
+                              x-ref="sel" style="font-size:0.8em;padding:0.15rem 0.3rem"
+                              x-effect="if(editing) $nextTick(() => $refs.sel?.focus())">
+                        ${Object.entries(CATEGORIES).map(([k, v]) =>
+                          html`<option value="${escape(k)}">${escape(v)}</option>`)}
+                      </select>
                     </td>
                     <td class="col-size num muted" data-col="size" style="font-size:0.85em;text-align:right">
                       ${escape(r.size_display)}
@@ -188,6 +207,40 @@ function resUpload() {
             </table>
           </div>
           <script>${raw(listScript('pms.resources.v1', 'title', 'asc'))}</script>
+          <script>
+          document.addEventListener('alpine:init', function() {
+            var catLabels = ${raw(JSON.stringify(CATEGORIES))};
+            Alpine.data('resEdit', function(resId, field, initial) {
+              return {
+                val: initial, editing: false,
+                save: function(v) {
+                  this.editing = false;
+                  if (v === this.val) return;
+                  this.val = v;
+                  fetch('/documents/resources/' + resId + '/patch', {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ field: field, value: v }),
+                  });
+                },
+              };
+            });
+            Alpine.data('resSelect', function(resId, field, initial) {
+              return {
+                val: initial, editing: false, labels: catLabels,
+                save: function() {
+                  var v = this.val;
+                  this.editing = false;
+                  fetch('/documents/resources/' + resId + '/patch', {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ field: field, value: v }),
+                  });
+                },
+              };
+            });
+          });
+          </script>
         `}
     </section>
   `;
