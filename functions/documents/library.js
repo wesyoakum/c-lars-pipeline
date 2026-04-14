@@ -7,6 +7,7 @@ import { all } from '../lib/db.js';
 import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { readFlash } from '../lib/http.js';
 import { listScript, listTableHead, listToolbar, columnsMenu, rowDataAttrs } from '../lib/list-table.js';
+import { docsSubNav } from '../lib/docs-subnav.js';
 
 const DOC_KIND_LABELS = {
   rfq: 'RFQ',
@@ -123,6 +124,8 @@ export async function onRequestGet(context) {
   });
 
   const body = html`
+    ${docsSubNav('library')}
+
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Documents</h1>
