@@ -1,13 +1,13 @@
 // functions/lib/docs-subnav.js
 //
 // Sub-navigation bar for the Documents section — shared between
-// the Documents Library and Templates pages.
+// the Documents Library, Templates, and Resources pages.
 
 import { html } from './layout.js';
 
 /**
- * Render the Documents sub-nav with "Documents" and "Templates" tabs.
- * @param {'library'|'templates'} active — which tab is active
+ * Render the Documents sub-nav with "Documents", "Templates", and "Resources" tabs.
+ * @param {'library'|'templates'|'resources'} active — which tab is active
  */
 export function docsSubNav(active) {
   return html`
@@ -16,5 +16,7 @@ export function docsSubNav(active) {
          href="/documents/library">Documents</a>
       <a class="nav-link ${active === 'templates' ? 'active' : ''}"
          href="/documents/templates">Templates</a>
+      <a class="nav-link ${active === 'resources' ? 'active' : ''}"
+         href="/documents/resources">Resources</a>
     </nav>`;
 }
