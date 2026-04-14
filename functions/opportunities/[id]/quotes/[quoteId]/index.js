@@ -497,12 +497,29 @@ export async function onRequestGet(context) {
                   ${readOnly ? 'disabled' : ''}
                   @change="window._qPatch('notes_customer', $event.target.value)">${escape(quote.notes_customer ?? '')}</textarea>
       </label>
-      <label style="margin-top:0.75rem">
-        <strong>Terms</strong>
-        <textarea class="desc-textarea" data-field="payment_terms" placeholder="Payment terms, conditions..."
-                  ${readOnly ? 'disabled' : ''}
-                  @change="window._qPatch('payment_terms', $event.target.value)">${escape(quote.payment_terms ?? '')}</textarea>
-      </label>
+      ${quote.quote_type === 'eps'
+        ? html`
+          <div x-data="epsTerms(${raw(JSON.stringify(quote.payment_terms ?? ''))})" style="margin-top:0.75rem">
+            <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.25rem">
+              <strong>Terms</strong>
+              <label style="font-size:0.8rem; color:var(--fg-muted); cursor:pointer; display:flex; align-items:center; gap:0.3rem; user-select:none">
+                <input type="checkbox" :checked="useDefault" @change="toggleDefault()" ${readOnly ? 'disabled' : ''}>
+                Default EPS Terms
+              </label>
+            </div>
+            <textarea class="desc-textarea" data-field="payment_terms" placeholder="Payment terms, conditions..."
+                      ${readOnly ? 'disabled' : ''}
+                      x-model="termsVal"
+                      @input="onInput()"
+                      @change="onSave()"></textarea>
+          </div>`
+        : html`
+          <label style="margin-top:0.75rem">
+            <strong>Terms</strong>
+            <textarea class="desc-textarea" data-field="payment_terms" placeholder="Payment terms, conditions..."
+                      ${readOnly ? 'disabled' : ''}
+                      @change="window._qPatch('payment_terms', $event.target.value)">${escape(quote.payment_terms ?? '')}</textarea>
+          </label>`}
       <label style="margin-top:0.75rem">
         <strong>Delivery terms</strong>
         <textarea class="desc-textarea" placeholder="EXW, FCA, FOB, DAP..."
@@ -556,8 +573,16 @@ export async function onRequestGet(context) {
         };
       });
 
-      // Default EPS payment terms based on delivery weeks
+      // --- EPS default payment terms based on delivery weeks ---
+      var _quoteType = ${raw(JSON.stringify(quote.quote_type || ''))};
+      var _deliveryWeeks = null;
+
+      // Parse initial delivery weeks
+      var _initDeliveryMatch = (${raw(JSON.stringify(quote.delivery_estimate || ''))}).match(/^(\\d+)\\s*week/);
+      if (_initDeliveryMatch) _deliveryWeeks = parseInt(_initDeliveryMatch[1], 10);
+
       function epsDefaultTerms(weeks) {
+        if (!weeks || weeks <= 0) return '';
         var w1 = Math.floor(weeks / 3);
         var w2 = Math.floor(2 * weeks / 3);
         return '25% Due upon receipt of purchase order\\n'
@@ -565,17 +590,6 @@ export async function onRequestGet(context) {
              + '25% Due ' + w2 + ' weeks ARO\\n'
              + '15% Due upon completion of FAT\\n'
              + '10% Due upon delivery of final documentation';
-      }
-      var _quoteType = ${raw(JSON.stringify(quote.quote_type || ''))};
-
-      function tryAutoFillTerms(weeks) {
-        if (_quoteType !== 'eps') return;
-        var ta = document.querySelector('textarea[data-field="payment_terms"]');
-        if (!ta) return;
-        if (ta.value.trim() !== '') return; // user has terms, don't overwrite
-        var terms = epsDefaultTerms(weeks);
-        ta.value = terms;
-        window._qPatch('payment_terms', terms);
       }
 
       // Delivery picker with text, calendar, and weeks buttons
@@ -588,7 +602,6 @@ export async function onRequestGet(context) {
             var dateStr = d.toISOString().slice(0, 10);
             this.textVal = n + ' weeks (' + dateStr + ')';
             this.save();
-            tryAutoFillTerms(n);
           },
           setDate: function(dateStr) {
             if (!dateStr) return;
@@ -597,17 +610,62 @@ export async function onRequestGet(context) {
           },
           save: function() {
             window._qPatch('delivery_estimate', this.textVal);
+            // Parse weeks and notify terms component
+            var m = this.textVal.match(/^(\\d+)\\s*week/);
+            _deliveryWeeks = m ? parseInt(m[1], 10) : null;
+            document.dispatchEvent(new CustomEvent('delivery-changed', { detail: { weeks: _deliveryWeeks } }));
           },
         };
       });
 
-      // On page load, auto-fill EPS terms if delivery is set and terms are empty
-      if (_quoteType === 'eps') {
-        var m = (${raw(JSON.stringify(quote.delivery_estimate || ''))}).match(/^(\\d+)\\s*week/);
-        if (m) {
-          setTimeout(function() { tryAutoFillTerms(parseInt(m[1], 10)); }, 100);
-        }
-      }
+      // EPS Terms component — manages default/manual toggle
+      Alpine.data('epsTerms', function(initialTerms) {
+        return {
+          termsVal: initialTerms || '',
+          useDefault: false,
+          init: function() {
+            var self = this;
+            // Determine initial state
+            var trimmed = this.termsVal.trim();
+            if (!trimmed) {
+              // Empty → default mode, fill if we have weeks
+              this.useDefault = true;
+              if (_deliveryWeeks) this.applyDefault();
+            } else if (_deliveryWeeks && trimmed === epsDefaultTerms(_deliveryWeeks)) {
+              // Matches current default → default mode
+              this.useDefault = true;
+            } else {
+              // Custom text → manual mode
+              this.useDefault = false;
+            }
+            // Listen for delivery changes
+            document.addEventListener('delivery-changed', function(e) {
+              if (self.useDefault && e.detail.weeks) self.applyDefault();
+            });
+          },
+          applyDefault: function() {
+            if (!_deliveryWeeks) return;
+            this.termsVal = epsDefaultTerms(_deliveryWeeks);
+            window._qPatch('payment_terms', this.termsVal);
+          },
+          onInput: function() {
+            // Any manual keystroke disables default mode
+            this.useDefault = false;
+          },
+          onSave: function() {
+            // On blur/change: if cleared to empty, reset to default mode
+            if (!this.termsVal.trim()) {
+              this.useDefault = true;
+              if (_deliveryWeeks) { this.applyDefault(); return; }
+            }
+            window._qPatch('payment_terms', this.termsVal);
+          },
+          toggleDefault: function() {
+            this.useDefault = !this.useDefault;
+            if (this.useDefault && _deliveryWeeks) this.applyDefault();
+          },
+        };
+      });
 
       // Details card: address selector + description auto-save
       Alpine.data('quoteDetails', function() {
