@@ -201,8 +201,9 @@ export function computePricing(inputs, settings) {
   let dmAuto = null, dlAuto = null, imohAuto = null, otherAuto = null, quoteAuto = null;
 
   // Quote auto-fill from DM (and DL) when quote is blank.
-  if (quoteUser === null && dmUser !== null) {
-    if (dlUser !== null) {
+  // Zero is treated as an explicit user value, not an auto-fill source.
+  if (quoteUser === null && dmUser !== null && dmUser > 0) {
+    if (dlUser !== null && dlUser > 0) {
       quoteAuto = (dmUser + dlUser) / pDmDl;
     } else {
       quoteAuto = dmUser / pDm;
@@ -212,16 +213,16 @@ export function computePricing(inputs, settings) {
   // Effective quote drives all remaining auto-fills.
   const effQuote = quoteUser !== null ? quoteUser : quoteAuto;
 
-  if (effQuote !== null && dmUser === null) {
+  if (effQuote !== null && effQuote > 0 && dmUser === null) {
     dmAuto = effQuote * pDm;
   }
-  if (effQuote !== null && dlUser === null && !useLaborLib) {
+  if (effQuote !== null && effQuote > 0 && dlUser === null && !useLaborLib) {
     dlAuto = effQuote * pDl;
   }
-  if (effQuote !== null && imohUser === null) {
+  if (effQuote !== null && effQuote > 0 && imohUser === null) {
     imohAuto = effQuote * pImoh;
   }
-  if (effQuote !== null && otherUser === null) {
+  if (effQuote !== null && effQuote > 0 && otherUser === null) {
     otherAuto = effQuote * pOther;
   }
 

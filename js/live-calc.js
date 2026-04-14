@@ -113,8 +113,14 @@
     form.addEventListener('input', function(e) {
       var n = e.target.name;
       if (n && (n.indexOf('_user_cost') !== -1 || n === 'quote_price_user')) {
-        userEdited[n] = true;
-        e.target.classList.remove('auto-filled');
+        var trimmed = e.target.value.replace(/[$,\s]/g, '').trim();
+        if (trimmed === '') {
+          delete userEdited[n];
+          e.target.classList.add('auto-filled');
+        } else {
+          userEdited[n] = true;
+          e.target.classList.remove('auto-filled');
+        }
       }
     });
 
@@ -159,9 +165,9 @@
       var quote = val('quote_price_user');
 
       // --- Auto-fill cascade (mirrors server-side computePricing) ---
-      // Quote from DM+DL or DM
-      if (isAutoFillable('quote_price_user') && dm !== null) {
-        if (dl !== null) quote = (dm + dl) / pDmDl;
+      // Quote from DM+DL or DM (only from positive values, not zero)
+      if (isAutoFillable('quote_price_user') && dm !== null && dm > 0) {
+        if (dl !== null && dl > 0) quote = (dm + dl) / pDmDl;
         else quote = dm / p.dm;
         setAutoVal('quote_price_user', quote);
       }
@@ -169,22 +175,22 @@
       var effQuote = quote;
 
       // DM from quote
-      if (isAutoFillable('dm_user_cost') && !dmLinked && effQuote !== null) {
+      if (isAutoFillable('dm_user_cost') && !dmLinked && effQuote !== null && effQuote > 0) {
         dm = effQuote * p.dm;
         setAutoVal('dm_user_cost', dm);
       }
       // DL from quote
-      if (isAutoFillable('dl_user_cost') && !laborLinked && effQuote !== null) {
+      if (isAutoFillable('dl_user_cost') && !laborLinked && effQuote !== null && effQuote > 0) {
         dl = effQuote * p.dl;
         setAutoVal('dl_user_cost', dl);
       }
       // IMOH from quote
-      if (isAutoFillable('imoh_user_cost') && effQuote !== null) {
+      if (isAutoFillable('imoh_user_cost') && effQuote !== null && effQuote > 0) {
         imoh = effQuote * p.imoh;
         setAutoVal('imoh_user_cost', imoh);
       }
       // Other from quote
-      if (isAutoFillable('other_user_cost') && effQuote !== null) {
+      if (isAutoFillable('other_user_cost') && effQuote !== null && effQuote > 0) {
         other = effQuote * p.other;
         setAutoVal('other_user_cost', other);
       }
