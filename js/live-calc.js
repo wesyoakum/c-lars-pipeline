@@ -129,12 +129,27 @@
       return el && !userEdited[name] && !el.disabled;
     }
 
+    function fmtInput(n) {
+      return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
     function setAutoVal(name, v) {
       var el = form.querySelector('[name="' + name + '"]');
       if (!el) return;
-      el.value = v.toFixed(2);
+      el.value = fmtInput(v);
       el.classList.add('auto-filled');
     }
+
+    // Format pricing inputs on blur (add $ and commas)
+    form.addEventListener('blur', function(e) {
+      var n = e.target.name;
+      if (n && (n.indexOf('_user_cost') !== -1 || n === 'quote_price_user')) {
+        var v = parseMoney(e.target.value);
+        if (v !== null) {
+          e.target.value = fmtInput(v);
+        }
+      }
+    }, true);
 
     function recalc() {
       var p = cfg.targetPct;

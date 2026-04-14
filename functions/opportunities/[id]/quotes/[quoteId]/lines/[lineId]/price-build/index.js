@@ -628,9 +628,15 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
   const targetPct = pricing.targetPct;
   const linked = pricing.linked;
 
+  const fmtInput = (n) => {
+    if (n === null || n === undefined || n === '') return '';
+    const num = Number(n);
+    if (Number.isNaN(num)) return String(n);
+    return '$' + num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
   const valOrAuto = (userVal, autoVal) => {
-    if (userVal !== null && userVal !== undefined && userVal !== '') return String(userVal);
-    if (autoVal !== null && autoVal !== undefined) return Math.round(autoVal).toString();
+    if (userVal !== null && userVal !== undefined && userVal !== '') return fmtInput(userVal);
+    if (autoVal !== null && autoVal !== undefined) return fmtInput(autoVal);
     return '';
   };
   const autoClass = (userVal, autoVal) => {
