@@ -18,7 +18,7 @@ import { one, run } from './db.js';
 import { uuid, now } from './ids.js';
 
 const DEV_USER_EMAIL = 'wes.yoakum@c-lars.com';
-const DEV_USER_NAME = 'Wes Yoakum (dev)';
+const DEV_USER_NAME = 'Wes Yoakum';
 
 /**
  * Resolve the current user for a Pages Functions request context.
