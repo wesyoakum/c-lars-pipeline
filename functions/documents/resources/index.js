@@ -82,30 +82,55 @@ export async function onRequestGet(context) {
         Company reference documents &mdash; NDAs, governing documents, checklists, reference guides, and other shared files.
       </p>
 
-      <!-- Upload form -->
-      <form method="post" action="/documents/resources" enctype="multipart/form-data"
-            style="padding:0.5rem 1rem 1rem;display:flex;align-items:flex-end;gap:0.75rem;flex-wrap:wrap;border-bottom:1px solid var(--border)">
-        <div class="field" style="min-width:180px;flex:1">
-          <label>Title</label>
-          <input type="text" name="title" placeholder="Document title (or auto from filename)">
-        </div>
-        <div class="field" style="min-width:120px">
-          <label>Category</label>
-          <select name="category">
-            ${raw(catOptions)}
-          </select>
-        </div>
-        <div class="field" style="min-width:120px">
-          <label>Notes <small class="muted">(optional)</small></label>
-          <input type="text" name="notes" placeholder="Brief description">
-        </div>
-        <div style="display:flex;align-items:center;gap:0.5rem;padding-bottom:0.15rem">
-          <input type="file" name="file" id="res-file-input" style="display:none"
-                 onchange="this.form.submit()">
-          <button type="button" class="btn btn-sm primary"
-                  onclick="document.getElementById('res-file-input').click()">Upload</button>
-        </div>
+      <!-- Upload drop zone -->
+      <form id="res-upload-form" method="post" action="/documents/resources" enctype="multipart/form-data"
+            style="display:none">
+        <input type="file" name="file" id="res-file-input">
+        <input type="hidden" name="title" id="res-title">
+        <input type="hidden" name="category" id="res-category" value="other">
+        <input type="hidden" name="notes" id="res-notes">
       </form>
+      <div id="res-dropzone"
+           style="margin:0.75rem 1rem;border:2px dashed var(--border);border-radius:8px;
+                  padding:1.5rem;text-align:center;cursor:pointer;transition:all 0.15s"
+           onclick="document.getElementById('res-file-input').click()">
+        <div style="font-size:1.5rem;margin-bottom:0.25rem;opacity:0.4">&#128230;</div>
+        <div style="font-weight:500;margin-bottom:0.25rem">Drop files here or click to upload</div>
+        <div class="muted" style="font-size:0.85em">Title and category auto-detected from filename. Max 50 MB.</div>
+      </div>
+      <script>${raw(`
+(function(){
+  var dz = document.getElementById('res-dropzone');
+  var fi = document.getElementById('res-file-input');
+  var form = document.getElementById('res-upload-form');
+
+  // Click to upload
+  fi.addEventListener('change', function(){ if(fi.files.length) form.submit(); });
+
+  // Drag visual feedback
+  var dragCount = 0;
+  dz.addEventListener('dragenter', function(e){
+    e.preventDefault(); dragCount++;
+    dz.style.borderColor='var(--accent)'; dz.style.background='var(--hover)';
+  });
+  dz.addEventListener('dragover', function(e){ e.preventDefault(); });
+  dz.addEventListener('dragleave', function(e){
+    e.preventDefault(); dragCount--;
+    if(dragCount<=0){ dragCount=0; dz.style.borderColor=''; dz.style.background=''; }
+  });
+  dz.addEventListener('drop', function(e){
+    e.preventDefault(); dragCount=0;
+    dz.style.borderColor=''; dz.style.background='';
+    var files = e.dataTransfer.files;
+    if(!files.length) return;
+    // Transfer the dropped file into the hidden form's file input
+    var dt = new DataTransfer();
+    dt.items.add(files[0]);
+    fi.files = dt.files;
+    form.submit();
+  });
+})();
+      `)}</script>
 
       ${rows.length === 0
         ? html`<p class="muted" style="padding:1rem">No resources uploaded yet.</p>`
