@@ -628,18 +628,56 @@ export async function onRequestGet(context) {
       });
     });
 
-    // Auto-save line items on change (debounced)
+    // Auto-save line items on change (debounced, via fetch — no page reload)
     (function() {
       var timers = {};
+      function fmtDollar(v) {
+        var n = Number(v) || 0;
+        return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+      }
+      function updateTotals(data) {
+        // Update the extended price cell for the line
+        if (data.lineId) {
+          var row = document.querySelector('[data-line-id="' + data.lineId + '"]');
+          if (row) {
+            var extCell = row.querySelector('[data-line-extended]');
+            if (extCell) extCell.textContent = fmtDollar(data.extended_price);
+          }
+        }
+        // Update subtotal and total in the table footer
+        var subEl = document.getElementById('q-subtotal');
+        if (subEl) subEl.innerHTML = '<strong>' + fmtDollar(data.subtotal_price) + '</strong>';
+        var totalEl = document.getElementById('q-total');
+        if (totalEl) totalEl.innerHTML = '<strong>' + fmtDollar(data.total_price) + '</strong>';
+        var headerTotal = document.getElementById('q-header-total');
+        if (headerTotal) headerTotal.textContent = fmtDollar(data.total_price);
+      }
+      function saveForm(form) {
+        var formData = new FormData(form);
+        fetch(form.action, {
+          method: 'POST',
+          headers: { 'accept': 'application/json' },
+          body: formData,
+        }).then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (!data.ok) { console.error('Line save failed:', data); return; }
+            updateTotals(data);
+            // If a new line was created, reload to show it as a proper row
+            if (data.isNew) {
+              var scrollY = window.scrollY;
+              sessionStorage.setItem('_scrollY', scrollY);
+              window.location.reload();
+            }
+          })
+          .catch(function(err) { console.error('Line save error:', err); });
+      }
       document.querySelectorAll('[data-autosave]').forEach(function(input) {
         input.addEventListener('change', function() {
           var form = input.form || document.getElementById(input.getAttribute('form'));
           if (!form) return;
           var formId = form.id;
           if (timers[formId]) clearTimeout(timers[formId]);
-          timers[formId] = setTimeout(function() {
-            form.requestSubmit();
-          }, 800);
+          timers[formId] = setTimeout(function() { saveForm(form); }, 800);
         });
       });
       var newForm = document.getElementById('new-line-form');
@@ -647,9 +685,15 @@ export async function onRequestGet(context) {
         var titleInput = newForm.querySelector('[name="title"]');
         if (titleInput) {
           titleInput.addEventListener('change', function() {
-            if (titleInput.value.trim()) newForm.requestSubmit();
+            if (titleInput.value.trim()) saveForm(newForm);
           });
         }
+      }
+      // Restore scroll position after new-line reload
+      var savedY = sessionStorage.getItem('_scrollY');
+      if (savedY) {
+        sessionStorage.removeItem('_scrollY');
+        window.scrollTo(0, parseInt(savedY, 10));
       }
     })();
     </script>

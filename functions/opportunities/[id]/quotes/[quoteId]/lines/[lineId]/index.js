@@ -136,6 +136,21 @@ export async function onRequestPost(context) {
     }),
   ]);
 
+  // If the client accepts JSON (fetch auto-save), return JSON instead of redirect
+  const accept = request.headers.get('accept') || '';
+  if (accept.includes('application/json')) {
+    // Fetch the updated totals to send back
+    const updated = await one(env.DB,
+      'SELECT subtotal_price, total_price FROM quotes WHERE id = ?', [quoteId]);
+    return new Response(JSON.stringify({
+      ok: true,
+      lineId,
+      extended_price: extended,
+      subtotal_price: updated?.subtotal_price ?? 0,
+      total_price: updated?.total_price ?? 0,
+    }), { headers: { 'content-type': 'application/json' } });
+  }
+
   return redirectWithFlash(
     `/opportunities/${oppId}/quotes/${quoteId}`,
     'Line saved.'
