@@ -83,53 +83,52 @@ export async function onRequestGet(context) {
       </p>
 
       <!-- Upload drop zone -->
-      <form id="res-upload-form" method="post" action="/documents/resources" enctype="multipart/form-data"
-            style="display:none">
-        <input type="file" name="file" id="res-file-input">
-        <input type="hidden" name="title" id="res-title">
-        <input type="hidden" name="category" id="res-category" value="other">
-        <input type="hidden" name="notes" id="res-notes">
-      </form>
-      <div id="res-dropzone"
-           style="margin:0.75rem 1rem;border:2px dashed var(--border);border-radius:8px;
-                  padding:1.5rem;text-align:center;cursor:pointer;transition:all 0.15s"
-           onclick="document.getElementById('res-file-input').click()">
-        <div style="font-size:1.5rem;margin-bottom:0.25rem;opacity:0.4">&#128230;</div>
-        <div style="font-weight:500;margin-bottom:0.25rem">Drop files here or click to upload</div>
-        <div class="muted" style="font-size:0.85em">Title and category auto-detected from filename. Max 50 MB.</div>
+      <div x-data="resUpload()" style="margin:0.75rem 1rem">
+        <form method="post" action="/documents/resources" enctype="multipart/form-data" x-ref="uploadForm">
+          <div class="drop-zone" :class="{ 'drop-zone-active': dragging }"
+               @dragover.prevent="dragging = true"
+               @dragleave.prevent="dragging = false"
+               @drop.prevent="handleDrop($event)"
+               @click="$refs.fileInput.click()">
+            <input type="file" name="file" required x-ref="fileInput" hidden @change="fileSelected($event)">
+            <div class="drop-zone-content">
+              <span x-show="!fileName" class="muted">Drop file here or click to browse</span>
+              <span x-show="fileName" x-text="fileName" style="font-weight:500"></span>
+            </div>
+          </div>
+          <div x-show="fileName" x-cloak style="margin-top:0.4rem;display:flex;gap:0.5rem;align-items:center">
+            <input type="text" name="title" placeholder="Title (defaults to filename)" style="flex:1;font-size:0.85em">
+            <select name="category" style="font-size:0.85em">
+              ${raw(catOptions)}
+            </select>
+            <button class="btn btn-sm primary" type="submit">Upload</button>
+            <button class="btn btn-sm" type="button" @click="clear()">Cancel</button>
+          </div>
+        </form>
       </div>
       <script>${raw(`
-(function(){
-  var dz = document.getElementById('res-dropzone');
-  var fi = document.getElementById('res-file-input');
-  var form = document.getElementById('res-upload-form');
-
-  // Click to upload
-  fi.addEventListener('change', function(){ if(fi.files.length) form.submit(); });
-
-  // Drag visual feedback
-  var dragCount = 0;
-  dz.addEventListener('dragenter', function(e){
-    e.preventDefault(); dragCount++;
-    dz.style.borderColor='var(--accent)'; dz.style.background='var(--hover)';
-  });
-  dz.addEventListener('dragover', function(e){ e.preventDefault(); });
-  dz.addEventListener('dragleave', function(e){
-    e.preventDefault(); dragCount--;
-    if(dragCount<=0){ dragCount=0; dz.style.borderColor=''; dz.style.background=''; }
-  });
-  dz.addEventListener('drop', function(e){
-    e.preventDefault(); dragCount=0;
-    dz.style.borderColor=''; dz.style.background='';
-    var files = e.dataTransfer.files;
-    if(!files.length) return;
-    // Transfer the dropped file into the hidden form's file input
-    var dt = new DataTransfer();
-    dt.items.add(files[0]);
-    fi.files = dt.files;
-    form.submit();
-  });
-})();
+function resUpload() {
+  return {
+    dragging: false,
+    fileName: '',
+    handleDrop(e) {
+      this.dragging = false;
+      var files = e.dataTransfer && e.dataTransfer.files;
+      if (files && files.length) {
+        this.$refs.fileInput.files = files;
+        this.fileName = files[0].name;
+      }
+    },
+    fileSelected(e) {
+      var f = e.target.files && e.target.files[0];
+      this.fileName = f ? f.name : '';
+    },
+    clear() {
+      this.$refs.fileInput.value = '';
+      this.fileName = '';
+    },
+  };
+}
       `)}</script>
 
       ${rows.length === 0

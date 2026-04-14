@@ -667,11 +667,6 @@ export async function onRequestGet(context) {
                @click="$refs.fileInput.click()">
             <input type="file" name="file" required x-ref="fileInput" hidden @change="fileSelected($event)">
             <div class="drop-zone-content">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.4">
-                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-                <polyline points="17 8 12 3 7 8"/>
-                <line x1="12" y1="3" x2="12" y2="15"/>
-              </svg>
               <span x-show="!fileName" class="muted">Drop file here or click to browse</span>
               <span x-show="fileName" x-text="fileName" style="font-weight:500"></span>
             </div>
