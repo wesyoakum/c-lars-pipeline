@@ -650,7 +650,7 @@ export async function onRequestGet(context) {
   const DOC_KIND_LABELS = {
     rfq: 'RFQ', rfi: 'RFI', quote_pdf: 'Quote PDF', po: 'PO',
     oc_pdf: 'OC PDF', ntp_pdf: 'NTP PDF', drawing: 'Drawing',
-    specification: 'Specification', supplier_quote: 'Supplier Quote',
+    specification: 'Specification', supplier_quote: 'Vendor Quote',
     image: 'Image / Photo', other: 'Other',
   };
   const docsTab = html`

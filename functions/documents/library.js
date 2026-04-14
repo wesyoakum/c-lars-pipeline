@@ -19,7 +19,7 @@ const DOC_KIND_LABELS = {
   ntp_pdf: 'NTP PDF',
   drawing: 'Drawing',
   specification: 'Specification',
-  supplier_quote: 'Supplier Quote',
+  supplier_quote: 'Vendor Quote',
   image: 'Image / Photo',
   other: 'Other',
 };
@@ -127,7 +127,7 @@ export async function onRequestGet(context) {
             <table class="data opp-list-table" style="table-layout:fixed;width:100%">
               <colgroup>
                 <col data-col="name"        style="width:auto">
-                <col data-col="kind_label"  style="width:110px">
+                <col data-col="kind_label"  style="width:130px">
                 <col data-col="file_type"   style="width:80px">
                 <col data-col="attached_to" style="width:180px">
                 <col data-col="size"        style="width:80px">
@@ -157,7 +157,7 @@ export async function onRequestGet(context) {
                     <td class="col-kind_label" data-col="kind_label"
                         x-data="docSelect('${escape(d.id)}', 'kind', '${escape(d.kind)}')">
                       <span x-show="!editing" @click="editing = true" style="cursor:pointer">
-                        <span class="pill" style="font-size:0.8em;border-bottom:1px dashed var(--border)" x-text="labels[val] || val">${escape(d.kind_label)}</span>
+                        <span class="pill" style="font-size:0.8em;white-space:nowrap;border-bottom:1px dashed var(--border)" x-text="labels[val] || val">${escape(d.kind_label)}</span>
                       </span>
                       <select x-show="editing" x-cloak x-model="val"
                               @change="save()" @blur="editing = false"
