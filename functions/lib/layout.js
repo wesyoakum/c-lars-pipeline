@@ -151,7 +151,7 @@ ${breadcrumbHtml}
 ${body}
   </main>
   <footer class="site-footer">
-    <small>C-LARS PMS P0 · <a href="https://github.com/wesyoakum/pms">source</a></small>
+    <small>C-LARS Pipeline Management System</small>
   </footer>
   ${versionTag ? `<div class="version-badge">${versionTag}</div>` : ''}
 </body>
