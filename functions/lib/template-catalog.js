@@ -24,6 +24,16 @@ export const TEMPLATE_CATALOG = {
     filename: 'quote-refurb-baseline.docx',
     label: 'Quote — Refurb Baseline',
   },
+  'quote-refurb-modified': {
+    r2Key: 'templates/quote-refurb-modified.docx',
+    filename: 'quote-refurb-modified.docx',
+    label: 'Quote — Refurb Modified',
+  },
+  'quote-refurb-supplemental': {
+    r2Key: 'templates/quote-refurb-supplemental.docx',
+    filename: 'quote-refurb-supplemental.docx',
+    label: 'Quote — Refurb Supplemental',
+  },
   'oc-eps': {
     r2Key: 'templates/oc-eps.docx',
     filename: 'oc-eps.docx',
@@ -57,8 +67,8 @@ const QUOTE_TYPE_TO_TEMPLATE = {
   spares:              'quote-spares',
   eps:                 'quote-eps',
   refurb_baseline:     'quote-refurb-baseline',
-  refurb_modified:     'quote-refurb-baseline',
-  refurb_supplemental: 'quote-refurb-baseline',
+  refurb_modified:     'quote-refurb-modified',
+  refurb_supplemental: 'quote-refurb-supplemental',
 };
 
 // Map job type → OC template catalog key

@@ -3,4 +3,4 @@
 // Auto-bumped by the pre-commit git hook on every commit.
 // Displayed in the bottom-right corner of every page via layout.js.
 
-export const VERSION = '0.60';
+export const VERSION = '0.61';
