@@ -37,20 +37,12 @@ export async function onRequestPost(context) {
     const templateKey = templateKeyForQuote(quote.quote_type);
     const docxBuffer = await fillTemplate(env, templateKey, docData);
 
-    const baseFilename = `${quote.number}-Rev-${quote.revision}`;
+    const baseFilename = quote.revision && quote.revision !== 'v1'
+      ? `${quote.number}-${quote.revision}`
+      : quote.number;
 
-    // 3. Store the filled .docx
-    await storeGeneratedDoc(env, {
-      opportunityId: oppId,
-      quoteId,
-      buffer: docxBuffer,
-      filename: `${baseFilename}.docx`,
-      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      kind: 'quote_docx',
-      user,
-    });
+    // 3. Convert to PDF and store (no .docx saved)
 
-    // 4. Convert to PDF and store
     const pdfBuffer = await convertToPdf(env, docxBuffer);
 
     await storeGeneratedDoc(env, {

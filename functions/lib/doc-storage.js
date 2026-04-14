@@ -17,7 +17,7 @@ import { buildR2Key } from './r2.js';
  * @param {string} opts.opportunityId
  * @param {string} opts.quoteId
  * @param {ArrayBuffer} opts.buffer   - The file content
- * @param {string} opts.filename      - e.g. "Q25004-1-Rev-v1.pdf"
+ * @param {string} opts.filename      - e.g. "Q25004-1.pdf" or "Q25004-1-v2.pdf"
  * @param {string} opts.mimeType      - e.g. "application/pdf"
  * @param {string} opts.kind          - e.g. "quote_pdf" or "quote_docx"
  * @param {object} opts.user          - Current user ({ id, email })

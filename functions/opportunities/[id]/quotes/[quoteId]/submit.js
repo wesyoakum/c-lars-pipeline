@@ -75,15 +75,9 @@ export async function onRequestPost(context) {
         if (!docData) return;
         const templateKey = templateKeyForQuote(quote.quote_type);
         const docxBuffer = await fillTemplate(env, templateKey, docData);
-        const baseFilename = `${quote.number}-Rev-${quote.revision}`;
-
-        await storeGeneratedDoc(env, {
-          opportunityId: oppId, quoteId,
-          buffer: docxBuffer,
-          filename: `${baseFilename}.docx`,
-          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          kind: 'quote_docx', user,
-        });
+        const baseFilename = quote.revision && quote.revision !== 'v1'
+          ? `${quote.number}-${quote.revision}`
+          : quote.number;
 
         const pdfBuffer = await convertToPdf(env, docxBuffer);
         await storeGeneratedDoc(env, {

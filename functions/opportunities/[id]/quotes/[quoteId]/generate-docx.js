@@ -32,7 +32,9 @@ export async function onRequestPost(context) {
 
     const templateKey = templateKeyForQuote(quote.quote_type);
     const docxBuffer = await fillTemplate(env, templateKey, docData);
-    const baseFilename = `${quote.number}-Rev-${quote.revision}`;
+    const baseFilename = quote.revision && quote.revision !== 'v1'
+      ? `${quote.number}-${quote.revision}`
+      : quote.number;
 
     await storeGeneratedDoc(env, {
       opportunityId: oppId,
