@@ -27,6 +27,8 @@ export async function getQuoteDocData(env, quoteId) {
     env.DB,
     `SELECT q.*, o.number AS opp_number,
             o.account_id,
+            o.title AS opp_title,
+            o.customer_po_number,
             a.name AS account_name,
             c.first_name AS contact_first, c.last_name AS contact_last,
             c.email AS contact_email, c.phone AS contact_phone,
@@ -89,7 +91,16 @@ export async function getQuoteDocData(env, quoteId) {
     unit: line.unit || '',
     unitPrice: fmtDollar(line.unit_price),
     amount: fmtDollar(line.extended_price),
+    lineItemType: line.item_type || '',
   });
+
+  // Compute subtotal from lines (sum of extended_price)
+  const subtotalRaw = lines.reduce((sum, l) => sum + (Number(l.extended_price) || 0), 0);
+
+  // Build combined contact name
+  const contactFirst = quote.contact_first || '';
+  const contactLast  = quote.contact_last  || '';
+  const contactFullName = [contactFirst, contactLast].filter(Boolean).join(' ');
 
   return {
     // Header
@@ -101,6 +112,14 @@ export async function getQuoteDocData(env, quoteId) {
     delivery: quote.delivery_estimate || '',
     description: quote.description || '',
 
+    // Contact info
+    contactFirstName: contactFirst,
+    contactLastName:  contactLast,
+    contactEmail: quote.contact_email || '',
+    contactPhone: quote.contact_phone || '',
+    contactTitle: quote.contact_title || '',
+    contactName:  contactFullName,
+
     // Line items
     lines: regularLines.map(fmtLine),
     options: optionLines.map(fmtLine),
@@ -108,8 +127,28 @@ export async function getQuoteDocData(env, quoteId) {
     optionHeading: 'Preferred Options',
     quoteOptionExplanation: '',
 
+    // Pricing breakdown
+    quoteSubtotal: fmtDollar(subtotalRaw),
+    quoteTax: fmtDollar(quote.tax_amount),
+
     // Totals
     quoteTotal: fmtDollar(quote.total_price),
+
+    // Quote extras
+    quoteTitle: quote.title || '',
+    incoterms: quote.incoterms || '',
+    currency: quote.currency || 'USD',
+
+    // Opportunity context
+    opportunityNumber: quote.opp_number || '',
+    opportunityTitle: quote.opp_title || '',
+    customerPO: quote.customer_po_number || '',
+
+    // Governance snapshots
+    tcRevision: quote.tc_revision || '',
+    warrantyRevision: quote.warranty_revision || '',
+    rateScheduleRevision: quote.rate_schedule_revision || '',
+    sopRevision: quote.sop_revision || '',
 
     // Notes and terms
     quoteNotes: quote.notes_customer || '',
@@ -117,7 +156,6 @@ export async function getQuoteDocData(env, quoteId) {
     deliveryTerms: quote.delivery_terms || '',
 
     // OC-specific (populated when generating OC docs)
-    customerPO: '',
     ocDate: '',
 
     // Metadata for filename/storage

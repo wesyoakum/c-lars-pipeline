@@ -1,11 +1,13 @@
 // functions/activities/[id]/index.js
 //
-// GET  /activities/:id  — Activity detail / edit form
-// POST /activities/:id  — Update activity
+// GET  /activities/:id  — Activity detail with inline-editable fields
+// POST /activities/:id  — (kept for form-based workflow actions)
+//
+// Fields auto-save via fetch POST to /activities/:id/patch.
 
 import { one, all, stmt, batch } from '../../lib/db.js';
 import { auditStmt, diff } from '../../lib/audit.js';
-import { layout, htmlResponse, html, escape } from '../../lib/layout.js';
+import { layout, htmlResponse, html, escape, raw } from '../../lib/layout.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 
@@ -17,10 +19,65 @@ const TYPE_LABELS = {
   meeting: 'Meeting',
 };
 
-const UPDATE_FIELDS = [
-  'type', 'subject', 'body', 'direction', 'status',
-  'due_at', 'assigned_user_id', 'opportunity_id',
+const TYPE_OPTIONS = [
+  { value: 'task', label: 'Task' },
+  { value: 'note', label: 'Note' },
+  { value: 'email', label: 'Email' },
+  { value: 'call', label: 'Call' },
+  { value: 'meeting', label: 'Meeting' },
 ];
+
+const STATUS_OPTIONS = [
+  { value: 'pending', label: 'Pending' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'cancelled', label: 'Cancelled' },
+];
+
+const DIRECTION_OPTIONS = [
+  { value: '', label: '—' },
+  { value: 'inbound', label: 'Inbound' },
+  { value: 'outbound', label: 'Outbound' },
+];
+
+// ---- helpers for inline-editable fields ----------------------------------
+
+function inlineText(field, value, opts = {}) {
+  const display = value || opts.placeholder || '—';
+  const displayClass = value ? '' : 'muted';
+  return html`<span class="ie" data-field="${field}" data-type="text" ${opts.inputType ? `data-input-type="${opts.inputType}"` : ''}>
+    <span class="ie-display ${displayClass}">${escape(display)}</span>
+  </span>`;
+}
+
+function inlineTextarea(field, value, opts = {}) {
+  const display = value || opts.placeholder || '—';
+  const displayClass = value ? '' : 'muted';
+  return html`<span class="ie" data-field="${field}" data-type="textarea">
+    <span class="ie-display ${displayClass}">${escape(display)}</span>
+    <span class="ie-raw" hidden>${escape(value ?? '')}</span>
+  </span>`;
+}
+
+function inlineDate(field, value) {
+  const display = value ? value.slice(0, 10) : '—';
+  const displayClass = value ? '' : 'muted';
+  return html`<span class="ie" data-field="${field}" data-type="date">
+    <span class="ie-display ${displayClass}">${escape(display)}</span>
+    <span class="ie-raw" hidden>${escape(value ? value.slice(0, 10) : '')}</span>
+  </span>`;
+}
+
+function inlineSelect(field, value, options) {
+  const selectedOpt = options.find(o => o.value === (value ?? ''));
+  const display = selectedOpt?.label || value || '—';
+  const displayClass = value ? '' : 'muted';
+  const optJson = JSON.stringify(options);
+  return html`<span class="ie" data-field="${field}" data-type="select" data-options='${escape(optJson)}'>
+    <span class="ie-display ${displayClass}">${escape(display)}</span>
+  </span>`;
+}
+
+// ---- GET handler ---------------------------------------------------------
 
 export async function onRequestGet(context) {
   const { env, data, request, params } = context;
@@ -62,13 +119,31 @@ export async function onRequestGet(context) {
       ORDER BY ae.at DESC LIMIT 50`,
     [actId]);
 
-  const isTask = act.type === 'task';
   const createdByLabel = act.created_by_name ?? act.created_by_email ?? '—';
 
+  // Build option lists for inline-edit selects
+  const oppOptions = [
+    { value: '', label: '— none —' },
+    ...opportunities.map(o => ({ value: o.id, label: `${o.number} — ${o.title}` })),
+  ];
+  const userOptions = [
+    { value: '', label: '— unassigned —' },
+    ...users.map(u => ({ value: u.id, label: u.display_name ?? u.email })),
+  ];
+
   const body = html`
-    <section class="card">
+    <section class="card" x-data="actInline('${escape(actId)}')">
       <div class="card-header">
-        <h1 class="page-title">${escape(act.subject || '(no subject)')}</h1>
+        <div>
+          <h1 class="page-title">${inlineText('subject', act.subject, { placeholder: '(no subject)' })}</h1>
+          <p class="muted" style="margin:0.15rem 0 0">
+            ${inlineSelect('type', act.type, TYPE_OPTIONS)}
+            · Created by ${escape(createdByLabel)}
+            · ${escape((act.created_at ?? '').slice(0, 16).replace('T', ' '))}
+            ${act.status === 'completed' ? html` · <span class="pill pill-success">Completed</span> ${act.completed_at ? escape(act.completed_at.slice(0, 16).replace('T', ' ')) : ''}` : ''}
+            ${act.status === 'cancelled' ? html` · <span class="pill pill-locked">Cancelled</span>` : ''}
+          </p>
+        </div>
         <div class="header-actions" style="display:flex; gap:0.5rem;">
           ${act.status === 'pending' ? html`
             <form method="post" action="/activities/${escape(actId)}/complete" style="display:inline">
@@ -81,78 +156,34 @@ export async function onRequestGet(context) {
           </form>
         </div>
       </div>
-      <p class="muted" style="margin:0.15rem 0 0">
-        <span class="pill pill-${act.type}">${escape(TYPE_LABELS[act.type] ?? act.type)}</span>
-        · Created by ${escape(createdByLabel)}
-        · ${escape((act.created_at ?? '').slice(0, 16).replace('T', ' '))}
-        ${act.status === 'completed' ? html` · <span class="pill pill-success">Completed</span> ${act.completed_at ? escape(act.completed_at.slice(0, 16).replace('T', ' ')) : ''}` : ''}
-        ${act.status === 'cancelled' ? html` · <span class="pill pill-locked">Cancelled</span>` : ''}
-      </p>
-    </section>
 
-    <section class="card">
-      <h2>Edit</h2>
-      <form method="post" action="/activities/${escape(actId)}">
-        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem;">
-          <div>
-            <label class="field-label">Type</label>
-            <select name="type" style="width:100%">
-              ${Object.entries(TYPE_LABELS).map(([k, v]) => html`
-                <option value="${k}" ${act.type === k ? 'selected' : ''}>${v}</option>
-              `)}
-            </select>
-          </div>
-          <div>
-            <label class="field-label">Status</label>
-            <select name="status" style="width:100%">
-              <option value="pending" ${act.status === 'pending' ? 'selected' : ''}>Pending</option>
-              <option value="completed" ${act.status === 'completed' ? 'selected' : ''}>Completed</option>
-              <option value="cancelled" ${act.status === 'cancelled' ? 'selected' : ''}>Cancelled</option>
-            </select>
-          </div>
-          <div style="grid-column:1/-1">
-            <label class="field-label">Subject</label>
-            <input type="text" name="subject" value="${escape(act.subject ?? '')}" required style="width:100%">
-          </div>
-          <div style="grid-column:1/-1">
-            <label class="field-label">Details</label>
-            <textarea name="body" rows="3" style="width:100%; field-sizing:content; min-height:3rem;">${escape(act.body ?? '')}</textarea>
-          </div>
-          <div>
-            <label class="field-label">Opportunity</label>
-            <select name="opportunity_id" style="width:100%">
-              <option value="">— none —</option>
-              ${opportunities.map(o => html`
-                <option value="${o.id}" ${act.opportunity_id === o.id ? 'selected' : ''}>${escape(o.number)} — ${escape(o.title)}</option>
-              `)}
-            </select>
-          </div>
-          <div>
-            <label class="field-label">Assigned to</label>
-            <select name="assigned_user_id" style="width:100%">
-              <option value="">— unassigned —</option>
-              ${users.map(u => html`
-                <option value="${u.id}" ${act.assigned_user_id === u.id ? 'selected' : ''}>${escape(u.display_name ?? u.email)}</option>
-              `)}
-            </select>
-          </div>
-          <div>
-            <label class="field-label">Due date</label>
-            <input type="date" name="due_at" value="${escape(act.due_at ? act.due_at.slice(0, 10) : '')}" style="width:100%">
-          </div>
-          <div>
-            <label class="field-label">Direction</label>
-            <select name="direction" style="width:100%">
-              <option value="" ${!act.direction ? 'selected' : ''}>—</option>
-              <option value="inbound" ${act.direction === 'inbound' ? 'selected' : ''}>Inbound</option>
-              <option value="outbound" ${act.direction === 'outbound' ? 'selected' : ''}>Outbound</option>
-            </select>
-          </div>
+      <div class="detail-grid" style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem 1rem; margin-top:0.75rem;">
+        <div>
+          <span class="field-label">Status</span>
+          ${inlineSelect('status', act.status, STATUS_OPTIONS)}
         </div>
-        <div style="margin-top:0.75rem;">
-          <button class="btn primary" type="submit">Save</button>
+        <div>
+          <span class="field-label">Direction</span>
+          ${inlineSelect('direction', act.direction, DIRECTION_OPTIONS)}
         </div>
-      </form>
+        <div>
+          <span class="field-label">Assigned to</span>
+          ${inlineSelect('assigned_user_id', act.assigned_user_id, userOptions)}
+        </div>
+        <div>
+          <span class="field-label">Due date</span>
+          ${inlineDate('due_at', act.due_at)}
+        </div>
+        <div>
+          <span class="field-label">Opportunity</span>
+          ${inlineSelect('opportunity_id', act.opportunity_id, oppOptions)}
+        </div>
+      </div>
+
+      <div style="margin-top:0.75rem;">
+        <span class="field-label">Details</span>
+        ${inlineTextarea('body', act.body, { placeholder: 'Click to add details...' })}
+      </div>
     </section>
 
     ${events.length > 0 ? html`
@@ -172,6 +203,8 @@ export async function onRequestGet(context) {
         </ul>
       </section>
     ` : ''}
+
+    <script>${raw(inlineEditScript())}</script>
   `;
 
   const breadcrumbs = [
@@ -189,6 +222,8 @@ export async function onRequestGet(context) {
     user, env: data?.env, activeNav: '/activities', flash, breadcrumbs,
   }));
 }
+
+// ---- POST handler (kept for backward compat, e.g. non-JS fallback) ------
 
 export async function onRequestPost(context) {
   const { env, data, request, params } = context;
@@ -222,6 +257,10 @@ export async function onRequestPost(context) {
     completedAt = null;
   }
 
+  const UPDATE_FIELDS = [
+    'type', 'subject', 'body', 'direction', 'status',
+    'due_at', 'assigned_user_id', 'opportunity_id',
+  ];
   const changes = diff(before, after, UPDATE_FIELDS);
 
   await batch(env.DB, [
@@ -245,4 +284,126 @@ export async function onRequestPost(context) {
   ]);
 
   return redirectWithFlash(`/activities/${actId}`, 'Saved.');
+}
+
+// ---- Client-side script -------------------------------------------------
+
+function inlineEditScript() {
+  return `
+function actInline(actId) {
+  const patchUrl = '/activities/' + actId + '/patch';
+  return {
+    saving: false,
+    init() {
+      this.$el.querySelectorAll('.ie').forEach(el => {
+        el.addEventListener('click', () => this.activate(el));
+      });
+    },
+    activate(el) {
+      if (el.querySelector('.ie-input')) return; // already active
+      const field = el.dataset.field;
+      const type = el.dataset.type;
+      const display = el.querySelector('.ie-display');
+      const rawEl = el.querySelector('.ie-raw');
+      const currentValue = rawEl ? rawEl.textContent : (display.classList.contains('muted') ? '' : display.textContent.trim());
+
+      let input;
+      if (type === 'select') {
+        input = document.createElement('select');
+        input.className = 'ie-input';
+        const options = JSON.parse(el.dataset.options || '[]');
+        options.forEach(o => {
+          const opt = document.createElement('option');
+          opt.value = o.value;
+          opt.textContent = o.label;
+          if (o.value === (currentValue || '')) opt.selected = true;
+          input.appendChild(opt);
+        });
+        input.addEventListener('change', () => this.save(el, input));
+        input.addEventListener('blur', () => {
+          setTimeout(() => this.deactivate(el, input), 150);
+        });
+      } else if (type === 'textarea') {
+        input = document.createElement('textarea');
+        input.className = 'ie-input';
+        input.rows = 3;
+        input.style.fieldSizing = 'content';
+        input.style.minHeight = '3rem';
+        input.value = currentValue;
+        input.addEventListener('blur', () => this.save(el, input));
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') { this.deactivate(el, input); }
+        });
+      } else if (type === 'date') {
+        input = document.createElement('input');
+        input.type = 'date';
+        input.className = 'ie-input';
+        input.value = currentValue;
+        input.addEventListener('change', () => this.save(el, input));
+        input.addEventListener('blur', () => this.save(el, input));
+      } else {
+        input = document.createElement('input');
+        input.type = el.dataset.inputType || 'text';
+        input.className = 'ie-input';
+        input.value = currentValue;
+        input.addEventListener('blur', () => this.save(el, input));
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); this.save(el, input); }
+          if (e.key === 'Escape') { this.deactivate(el, input); }
+        });
+      }
+
+      display.style.display = 'none';
+      el.appendChild(input);
+      input.focus();
+      if (input.select) input.select();
+    },
+    async save(el, input) {
+      const field = el.dataset.field;
+      const value = input.value;
+      this.deactivate(el, input);
+
+      el.classList.add('ie-saving');
+      try {
+        const res = await fetch(patchUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ field, value }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          el.classList.add('ie-error');
+          setTimeout(() => el.classList.remove('ie-error'), 2000);
+          return;
+        }
+        // Update display
+        const display = el.querySelector('.ie-display');
+        const rawEl = el.querySelector('.ie-raw');
+        if (el.dataset.type === 'select') {
+          const options = JSON.parse(el.dataset.options || '[]');
+          const opt = options.find(o => o.value === (data.value || ''));
+          display.textContent = opt ? opt.label : (data.value || '\\u2014');
+        } else {
+          display.textContent = data.value || '\\u2014';
+        }
+        display.classList.toggle('muted', !data.value);
+        if (rawEl) rawEl.textContent = data.value ?? '';
+
+        el.classList.add('ie-saved');
+        setTimeout(() => el.classList.remove('ie-saved'), 1200);
+      } catch (err) {
+        el.classList.add('ie-error');
+        setTimeout(() => el.classList.remove('ie-error'), 2000);
+      } finally {
+        el.classList.remove('ie-saving');
+      }
+    },
+    deactivate(el, input) {
+      if (input && input.parentNode === el) el.removeChild(input);
+      const display = el.querySelector('.ie-display');
+      if (display) display.style.display = '';
+    },
+  };
+}
+`;
 }

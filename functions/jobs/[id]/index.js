@@ -1,13 +1,12 @@
 // functions/jobs/[id]/index.js
 //
-// GET  /jobs/:id   — job detail page
-// POST /jobs/:id   — update job fields (notes, external PM, etc.)
+// GET /jobs/:id — job detail page
+//
+// Inline-editable fields auto-save via fetch to /jobs/:id/patch.
 
-import { all, one, stmt, batch } from '../../lib/db.js';
-import { auditStmt, diff } from '../../lib/audit.js';
-import { now } from '../../lib/ids.js';
+import { all, one } from '../../lib/db.js';
 import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
-import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
+import { redirectWithFlash, readFlash } from '../../lib/http.js';
 import { parseTransactionTypes } from '../../lib/validators.js';
 import { templateTypeForOC, templateManagerHtml } from '../../lib/template-catalog.js';
 
@@ -31,6 +30,25 @@ function statusClass(status) {
   if (status === 'cancelled') return 'pill-red';
   if (status === 'awaiting_authorization' || status === 'awaiting_ntp') return 'pill-yellow';
   return '';
+}
+
+// ---- helpers for inline-editable fields ----------------------------------
+
+function inlineText(field, value, opts = {}) {
+  const display = value || opts.placeholder || '—';
+  const displayClass = value ? '' : 'muted';
+  return html`<span class="ie" data-field="${field}" data-type="text" ${opts.inputType ? `data-input-type="${opts.inputType}"` : ''}>
+    <span class="ie-display ${displayClass}">${escape(display)}</span>
+  </span>`;
+}
+
+function inlineTextarea(field, value, opts = {}) {
+  const display = value || opts.placeholder || '—';
+  const displayClass = value ? '' : 'muted';
+  return html`<span class="ie" data-field="${field}" data-type="textarea">
+    <span class="ie-display ${displayClass}">${escape(display)}</span>
+    <span class="ie-raw" hidden>${escape(value ?? '')}</span>
+  </span>`;
 }
 
 export async function onRequestGet(context) {
@@ -92,11 +110,11 @@ export async function onRequestGet(context) {
   const defaultNtpNumber = job.latest_quote_number ? `NTP-${job.latest_quote_number}` : '';
 
   const body = html`
-    <section class="card">
+    <section class="card" x-data="jobInline('${escape(job.id)}')">
       <div class="card-header">
         <h1 class="page-title">
           ${escape(job.number)}
-          ${job.title ? html` — ${escape(job.title)}` : ''}
+          — ${inlineText('title', job.title, { placeholder: 'Add title' })}
         </h1>
       </div>
       <p class="muted" style="margin:0.15rem 0 0.5rem">
@@ -147,15 +165,11 @@ export async function onRequestGet(context) {
           </div>` : ''}
         <div class="detail-pair">
           <span class="detail-label">External PM System</span>
-          <span class="detail-value">${escape(job.external_pm_system || '—')}</span>
+          <span class="detail-value">${inlineText('external_pm_system', job.external_pm_system, { placeholder: 'Monday, Smartsheet...' })}</span>
         </div>
         <div class="detail-pair">
           <span class="detail-label">External Reference</span>
-          <span class="detail-value">${job.external_pm_system_ref
-            ? (job.external_pm_system_ref.startsWith('http')
-              ? html`<a href="${escape(job.external_pm_system_ref)}" target="_blank">${escape(job.external_pm_system_ref)}</a>`
-              : escape(job.external_pm_system_ref))
-            : '—'}</span>
+          <span class="detail-value">${inlineText('external_pm_system_ref', job.external_pm_system_ref, { placeholder: 'https://...' })}</span>
         </div>
         ${job.handed_off_at ? html`
           <div class="detail-pair">
@@ -164,7 +178,7 @@ export async function onRequestGet(context) {
           </div>` : ''}
         <div class="detail-pair" style="grid-column: 1/-1">
           <span class="detail-label">Notes</span>
-          <span class="detail-value">${escape(job.notes || '—')}</span>
+          <span class="detail-value">${inlineTextarea('notes', job.notes, { placeholder: 'Add notes' })}</span>
         </div>
       </div>
     </section>
@@ -220,20 +234,6 @@ export async function onRequestGet(context) {
             </fieldset>
           </form>` : ''}
 
-        <!-- Edit general fields -->
-        <form method="post" action="/jobs/${escape(job.id)}" class="action-form">
-          <fieldset>
-            <legend>Edit Details</legend>
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem;">
-              <div><label class="field-label">Title</label><input type="text" name="title" value="${escape(job.title || '')}"></div>
-              <div><label class="field-label">External PM System</label><input type="text" name="external_pm_system" value="${escape(job.external_pm_system || '')}" placeholder="Monday, Smartsheet..."></div>
-              <div style="grid-column:1/-1"><label class="field-label">External Reference (URL or ID)</label><input type="text" name="external_pm_system_ref" value="${escape(job.external_pm_system_ref || '')}" placeholder="https://..."></div>
-              <div style="grid-column:1/-1"><label class="field-label">Notes</label><textarea name="notes" rows="2" style="width:100%">${escape(job.notes || '')}</textarea></div>
-            </div>
-            <button class="btn primary" type="submit" style="margin-top:0.5rem">Save</button>
-          </fieldset>
-        </form>
-
         ${canClose ? html`
           <form method="post" action="/jobs/${escape(job.id)}/close"
                 onsubmit="return confirm('Close this job?')" class="action-form">
@@ -277,8 +277,10 @@ export async function onRequestGet(context) {
           </ul>`}
     </section>`;
 
+  const scripts = html`<script>${raw(jobInlineScript())}</script>`;
+
   return htmlResponse(
-    layout(job.number, body, {
+    layout(job.number, body + scripts, {
       user,
       env: data?.env,
       activeNav: '/jobs',
@@ -291,44 +293,94 @@ export async function onRequestGet(context) {
   );
 }
 
-// POST /jobs/:id — update general fields
-const UPDATE_FIELDS = ['title', 'notes', 'external_pm_system', 'external_pm_system_ref'];
+// ---- Inline-edit Alpine.js component ------------------------------------
 
-export async function onRequestPost(context) {
-  const { env, data, request, params } = context;
-  const user = data?.user;
-  const jobId = params.id;
+function jobInlineScript() {
+  return `
+function jobInline(jobId) {
+  const patchUrl = '/jobs/' + jobId + '/patch';
+  return {
+    saving: false,
+    init() {
+      this.$el.querySelectorAll('.ie').forEach(el => {
+        el.addEventListener('click', () => this.activate(el));
+      });
+    },
+    activate(el) {
+      if (el.querySelector('.ie-input')) return;
+      const field = el.dataset.field;
+      const type = el.dataset.type;
+      const display = el.querySelector('.ie-display');
+      const rawEl = el.querySelector('.ie-raw');
+      const currentValue = rawEl ? rawEl.textContent : (display.classList.contains('muted') ? '' : display.textContent.trim());
 
-  const before = await one(env.DB, 'SELECT * FROM jobs WHERE id = ?', [jobId]);
-  if (!before) return redirectWithFlash('/jobs', 'Job not found.', 'error');
+      let input;
+      if (type === 'textarea') {
+        input = document.createElement('textarea');
+        input.className = 'ie-input';
+        input.rows = 3;
+        input.value = currentValue;
+        input.addEventListener('blur', () => this.save(el, input));
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') { this.deactivate(el, input); }
+        });
+      } else {
+        input = document.createElement('input');
+        input.type = el.dataset.inputType || 'text';
+        input.className = 'ie-input';
+        input.value = currentValue;
+        input.addEventListener('blur', () => this.save(el, input));
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); this.save(el, input); }
+          if (e.key === 'Escape') { this.deactivate(el, input); }
+        });
+      }
 
-  const input = await formBody(request);
-  const ts = now();
+      display.style.display = 'none';
+      el.appendChild(input);
+      input.focus();
+      if (input.select) input.select();
+    },
+    async save(el, input) {
+      const field = el.dataset.field;
+      const value = input.value;
+      this.deactivate(el, input);
 
-  const after = {};
-  for (const f of UPDATE_FIELDS) {
-    after[f] = (typeof input[f] === 'string' ? input[f].trim() : input[f]) || null;
-  }
+      el.classList.add('ie-saving');
+      try {
+        const res = await fetch(patchUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ field, value }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          el.classList.add('ie-error');
+          setTimeout(() => el.classList.remove('ie-error'), 2000);
+          return;
+        }
+        // Update display
+        const display = el.querySelector('.ie-display');
+        const rawEl = el.querySelector('.ie-raw');
+        display.textContent = data.value || '—';
+        display.classList.toggle('muted', !data.value);
+        if (rawEl) rawEl.textContent = data.value ?? '';
 
-  const changes = diff(before, after, UPDATE_FIELDS);
-  if (changes) {
-    await batch(env.DB, [
-      stmt(env.DB,
-        `UPDATE jobs SET title = ?, notes = ?, external_pm_system = ?,
-                external_pm_system_ref = ?, updated_at = ?
-            WHERE id = ?`,
-        [after.title, after.notes, after.external_pm_system,
-         after.external_pm_system_ref, ts, jobId]),
-      auditStmt(env.DB, {
-        entityType: 'job',
-        entityId: jobId,
-        eventType: 'updated',
-        user,
-        summary: `Updated job ${before.number}`,
-        changes,
-      }),
-    ]);
-  }
-
-  return redirectWithFlash(`/jobs/${jobId}`, 'Saved.');
+        el.classList.add('ie-saved');
+        setTimeout(() => el.classList.remove('ie-saved'), 1200);
+      } catch (err) {
+        el.classList.add('ie-error');
+        setTimeout(() => el.classList.remove('ie-error'), 2000);
+      } finally {
+        el.classList.remove('ie-saving');
+      }
+    },
+    deactivate(el, input) {
+      const display = el.querySelector('.ie-display');
+      display.style.display = '';
+      input.remove();
+    },
+  };
+}
+`;
 }

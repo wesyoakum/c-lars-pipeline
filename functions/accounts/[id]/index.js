@@ -30,6 +30,44 @@ const UPDATE_FIELDS = [
   'owner_user_id',
 ];
 
+const SEGMENT_OPTIONS = [
+  { value: '', label: '— None —' },
+  { value: 'WROV', label: 'WROV' },
+  { value: 'Research', label: 'Research' },
+  { value: 'Defense', label: 'Defense' },
+  { value: 'Commercial', label: 'Commercial' },
+  { value: 'Other', label: 'Other' },
+];
+
+// ---- helpers for inline-editable fields ----------------------------------
+
+function inlineText(field, value, opts = {}) {
+  const display = value || opts.placeholder || '—';
+  const displayClass = value ? '' : 'muted';
+  return html`<span class="ie" data-field="${field}" data-type="text" ${opts.inputType ? `data-input-type="${opts.inputType}"` : ''}>
+    <span class="ie-display ${displayClass}">${escape(display)}</span>
+  </span>`;
+}
+
+function inlineTextarea(field, value, opts = {}) {
+  const display = value || opts.placeholder || '—';
+  const displayClass = value ? '' : 'muted';
+  return html`<span class="ie" data-field="${field}" data-type="textarea">
+    <span class="ie-display ${displayClass}">${escape(display)}</span>
+    <span class="ie-raw" hidden>${escape(value ?? '')}</span>
+  </span>`;
+}
+
+function inlineSelect(field, value, options) {
+  const selectedOpt = options.find(o => o.value === (value ?? ''));
+  const display = selectedOpt?.label || value || '—';
+  const displayClass = value ? '' : 'muted';
+  const optJson = JSON.stringify(options);
+  return html`<span class="ie" data-field="${field}" data-type="select" data-options='${escape(optJson)}'>
+    <span class="ie-display ${displayClass}">${escape(display)}</span>
+  </span>`;
+}
+
 export async function onRequestGet(context) {
   const { env, data, request, params } = context;
   const user = data?.user;
@@ -57,6 +95,16 @@ export async function onRequestGet(context) {
 
   const addresses = await loadAddresses(env.DB, accountId);
 
+  const users = await all(
+    env.DB,
+    `SELECT id, display_name, email FROM users WHERE active = 1 ORDER BY display_name`
+  );
+
+  const ownerOptions = [
+    { value: '', label: '— None —' },
+    ...users.map(u => ({ value: u.id, label: u.display_name ?? u.email })),
+  ];
+
   const events = await all(
     env.DB,
     `SELECT ae.event_type, ae.at, ae.summary, ae.changes_json,
@@ -72,23 +120,12 @@ export async function onRequestGet(context) {
   );
 
   const body = html`
-    <section class="card">
+    <section class="card" x-data="acctInline('${escape(account.id)}')">
       <div class="card-header">
         <div>
-          <h1>${account.name}</h1>
-          <p class="muted">
-            ${account.segment ? html`<span class="pill">${account.segment}</span> ` : ''}
-            ${account.phone ? html`· ${account.phone} ` : ''}
-            ${account.website
-              ? html`· <a href="${escape(ensureHttp(account.website))}" target="_blank" rel="noopener">${account.website}</a>`
-              : ''}
-            ${account.owner_user_id
-              ? html` · Owner: ${escape(account.owner_name ?? account.owner_email ?? '—')}`
-              : ''}
-          </p>
+          <h1>${inlineText('name', account.name)}</h1>
         </div>
         <div class="header-actions">
-          <a class="btn" href="/accounts/${escape(account.id)}/edit">Edit</a>
           <form method="post" action="/accounts/${escape(account.id)}/delete"
                 onsubmit="return confirm('Delete ${escape(account.name)} and all its contacts? This cannot be undone.');"
                 style="display:inline">
@@ -97,11 +134,29 @@ export async function onRequestGet(context) {
         </div>
       </div>
 
+      <div class="detail-grid">
+        <div class="detail-pair">
+          <span class="detail-label">Segment</span>
+          <span class="detail-value">${inlineSelect('segment', account.segment, SEGMENT_OPTIONS)}</span>
+        </div>
+        <div class="detail-pair">
+          <span class="detail-label">Phone</span>
+          <span class="detail-value">${inlineText('phone', account.phone)}</span>
+        </div>
+        <div class="detail-pair">
+          <span class="detail-label">Website</span>
+          <span class="detail-value">${inlineText('website', account.website)}</span>
+        </div>
+        <div class="detail-pair">
+          <span class="detail-label">Owner</span>
+          <span class="detail-value">${inlineSelect('owner_user_id', account.owner_user_id, ownerOptions)}</span>
+        </div>
+      </div>
+
       ${renderAddressView(addresses)}
 
-      ${account.notes
-        ? html`<p class="notes">${escape(account.notes)}</p>`
-        : ''}
+      <h3 style="margin-top:1rem">Notes</h3>
+      ${inlineTextarea('notes', account.notes, { placeholder: 'Click to add notes…' })}
     </section>
 
     <section class="card">
@@ -179,6 +234,117 @@ export async function onRequestGet(context) {
     </section>
 
     <script>
+    function acctInline(acctId) {
+      const patchUrl = '/accounts/' + acctId + '/patch';
+      return {
+        init() {
+          this.$el.querySelectorAll('.ie').forEach(el => {
+            el.addEventListener('click', () => this.activate(el));
+          });
+        },
+        activate(el) {
+          if (el.querySelector('.ie-input')) return;
+          const field = el.dataset.field;
+          const type = el.dataset.type;
+          const display = el.querySelector('.ie-display');
+          const rawEl = el.querySelector('.ie-raw');
+          const currentValue = rawEl ? rawEl.textContent : (display.classList.contains('muted') ? '' : display.textContent.trim());
+
+          let input;
+          if (type === 'select') {
+            input = document.createElement('select');
+            input.className = 'ie-input';
+            const options = JSON.parse(el.dataset.options || '[]');
+            options.forEach(o => {
+              const opt = document.createElement('option');
+              opt.value = o.value;
+              opt.textContent = o.label;
+              if (o.value === (currentValue || '')) opt.selected = true;
+              input.appendChild(opt);
+            });
+            input.addEventListener('change', () => this.save(el, input));
+            input.addEventListener('blur', () => {
+              setTimeout(() => this.deactivate(el, input), 150);
+            });
+          } else if (type === 'textarea') {
+            input = document.createElement('textarea');
+            input.className = 'ie-input';
+            input.rows = 3;
+            input.value = currentValue;
+            input.addEventListener('blur', () => this.save(el, input));
+            input.addEventListener('keydown', (e) => {
+              if (e.key === 'Escape') { this.deactivate(el, input); }
+            });
+          } else {
+            input = document.createElement('input');
+            input.type = el.dataset.inputType || 'text';
+            input.className = 'ie-input';
+            input.value = currentValue;
+            input.addEventListener('blur', () => this.save(el, input));
+            input.addEventListener('keydown', (e) => {
+              if (e.key === 'Enter') { e.preventDefault(); this.save(el, input); }
+              if (e.key === 'Escape') { this.deactivate(el, input); }
+            });
+          }
+
+          display.style.display = 'none';
+          el.appendChild(input);
+          input.focus();
+          if (input.select) input.select();
+        },
+        async save(el, input) {
+          const field = el.dataset.field;
+          const value = input.value;
+          this.deactivate(el, input);
+
+          el.classList.add('ie-saving');
+          try {
+            const res = await fetch(patchUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ field, value }),
+            });
+            const data = await res.json();
+            if (!data.ok) {
+              el.classList.add('ie-error');
+              setTimeout(() => el.classList.remove('ie-error'), 2000);
+              return;
+            }
+            const display = el.querySelector('.ie-display');
+            const rawEl = el.querySelector('.ie-raw');
+            if (el.dataset.type === 'select') {
+              const options = JSON.parse(el.dataset.options || '[]');
+              const opt = options.find(o => o.value === (data.value || ''));
+              display.textContent = opt ? opt.label : (data.value || '\u2014');
+            } else {
+              display.textContent = data.value || '\u2014';
+            }
+            display.classList.toggle('muted', !data.value);
+            if (rawEl) rawEl.textContent = data.value ?? '';
+
+            // Update page title if name changed
+            if (field === 'name' && data.value) {
+              document.title = data.value + ' \u2014 PMS';
+              const crumb = document.querySelector('.breadcrumbs span:last-child, .breadcrumbs a:last-child');
+            }
+
+            el.classList.add('ie-saved');
+            setTimeout(() => el.classList.remove('ie-saved'), 1200);
+          } catch (err) {
+            el.classList.add('ie-error');
+            setTimeout(() => el.classList.remove('ie-error'), 2000);
+          } finally {
+            el.classList.remove('ie-saving');
+          }
+        },
+        deactivate(el, input) {
+          if (input && input.parentNode === el) el.removeChild(input);
+          const display = el.querySelector('.ie-display');
+          if (display) display.style.display = '';
+        },
+      };
+    }
+
     function contactInline(contactId) {
       const patchUrl = '/contacts/' + contactId + '/patch';
       return {
