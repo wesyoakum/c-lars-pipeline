@@ -340,23 +340,22 @@ export async function onRequestGet(context) {
               <td class="meta-label">Expiration:</td>
               <td>
                 <div x-data="expirationPicker('${escape(quote.valid_until ?? '')}')">
-                  <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap">
-                    <select x-model="daysVal" @change="if(daysVal !== '') setDays(+daysVal)"
-                            class="meta-input" ${readOnly ? 'disabled' : ''}
-                            style="font-size:0.85em;padding:0.2rem 0.3rem;width:auto">
-                      <option value="">Days\u2026</option>
-                      <option value="7">7 days</option>
-                      <option value="14">14 days</option>
-                      <option value="21">21 days</option>
-                      <option value="30">30 days</option>
-                      <option value="45">45 days</option>
-                      <option value="60">60 days</option>
-                      <option value="90">90 days</option>
-                      <option value="120">120 days</option>
-                    </select>
-                    <input type="date" :value="dateVal" @change="setDate($event.target.value)"
-                           class="meta-input" ${readOnly ? 'disabled' : ''}
-                           style="font-size:0.85em;padding:0.2rem 0.3rem;width:auto">
+                  <div style="display:flex;gap:0.4rem;align-items:center">
+                    <input type="text" x-model="textVal" @change="onTextChange()" class="meta-input" ${readOnly ? 'disabled' : ''} placeholder="e.g. 14 days" style="flex:1">
+                    ${!readOnly ? html`
+                      <select x-model="daysVal" @change="if(daysVal) setDays(+daysVal)" style="font-size:0.85em;padding:0.2rem 0.3rem;width:auto">
+                        <option value="">Days\u2026</option>
+                        <option value="7">7 days</option>
+                        <option value="14">14 days</option>
+                        <option value="21">21 days</option>
+                        <option value="30">30 days</option>
+                        <option value="45">45 days</option>
+                        <option value="60">60 days</option>
+                        <option value="90">90 days</option>
+                        <option value="120">120 days</option>
+                      </select>
+                      <input type="date" @change="setDate($event.target.value); $event.target.value=''" class="btn-link-date" title="Pick a date">
+                    ` : ''}
                   </div>
                 </div>
               </td>
@@ -681,44 +680,93 @@ export async function onRequestGet(context) {
       });
     };
 
-    // Expiration picker — dropdown for days + date input for specific dates.
-    // daysVal shows the selected preset (e.g. "14 days") whenever the
-    // underlying valid_until matches a preset (days from today). For custom
-    // dates the dropdown falls back to "Days..." and the date input holds the
-    // raw value.
+    // Expiration picker — mirrors the delivery picker layout: a wide
+    // text input showing "N days (YYYY-MM-DD)", a days dropdown, and a
+    // small calendar icon for arbitrary dates. dateVal is the canonical
+    // valid_until (YYYY-MM-DD) that gets patched; textVal is the
+    // human-readable string the text input shows; daysVal is the select's
+    // current preset (or '' when the date doesn't match a preset).
     document.addEventListener('alpine:init', function() {
       var _expPresets = [7, 14, 21, 30, 45, 60, 90, 120];
-      var _expComputeDays = function(validUntil) {
-        if (!validUntil) return '';
-        var v = new Date(validUntil + 'T00:00:00Z');
-        if (isNaN(v.getTime())) return '';
+      var _parseISODate = function(s) {
+        if (!s || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return null;
+        var d = new Date(s + 'T00:00:00Z');
+        return isNaN(d.getTime()) ? null : d;
+      };
+      var _expComputeDays = function(dateStr) {
+        var d = _parseISODate(dateStr);
+        if (!d) return '';
         var t = new Date();
         t.setUTCHours(0, 0, 0, 0);
-        var diff = Math.round((v.getTime() - t.getTime()) / 86400000);
+        var diff = Math.round((d.getTime() - t.getTime()) / 86400000);
         return diff >= 0 ? diff : '';
       };
-      var _expInitialDaysVal = function(initial) {
-        var n = _expComputeDays(initial);
-        if (n === '' || _expPresets.indexOf(Number(n)) === -1) return '';
-        return String(n);
+      var _expFormatText = function(dateStr) {
+        if (!dateStr) return '';
+        var n = _expComputeDays(dateStr);
+        if (n === '') return dateStr;
+        return n + ' day' + (n === 1 ? '' : 's') + ' (' + dateStr + ')';
+      };
+      // Parse free-form user text into a canonical yyyy-mm-dd.
+      // Accepts "N days", "N days (anything)", yyyy-mm-dd, and
+      // US-style mm/dd/yyyy. Returns null if nothing matches.
+      var _expParseInput = function(text) {
+        if (!text) return '';
+        var trimmed = String(text).trim();
+        if (!trimmed) return '';
+        var dayMatch = trimmed.match(/^(\\d+)\\s*day/i);
+        if (dayMatch) {
+          var d = new Date();
+          d.setUTCHours(0, 0, 0, 0);
+          d.setUTCDate(d.getUTCDate() + parseInt(dayMatch[1], 10));
+          return d.toISOString().slice(0, 10);
+        }
+        if (_parseISODate(trimmed)) return trimmed;
+        var usMatch = trimmed.match(/^(\\d{1,2})\\/(\\d{1,2})\\/(\\d{4})$/);
+        if (usMatch) {
+          var mm = ('0' + usMatch[1]).slice(-2);
+          var dd = ('0' + usMatch[2]).slice(-2);
+          var iso = usMatch[3] + '-' + mm + '-' + dd;
+          if (_parseISODate(iso)) return iso;
+        }
+        return null;
+      };
+      var _expDaysValFor = function(dateStr) {
+        var n = _expComputeDays(dateStr);
+        return (n !== '' && _expPresets.indexOf(Number(n)) !== -1) ? String(n) : '';
       };
       Alpine.data('expirationPicker', function(initial) {
         return {
           dateVal: initial || '',
-          daysVal: _expInitialDaysVal(initial),
+          textVal: _expFormatText(initial || ''),
+          daysVal: _expDaysValFor(initial || ''),
           setDays: function(n) {
             var d = new Date();
             d.setUTCHours(0, 0, 0, 0);
             d.setUTCDate(d.getUTCDate() + n);
             this.dateVal = d.toISOString().slice(0, 10);
+            this.textVal = _expFormatText(this.dateVal);
             this.daysVal = String(n);
             this.save();
           },
           setDate: function(dateStr) {
             if (!dateStr) return;
             this.dateVal = dateStr;
-            var n = _expComputeDays(dateStr);
-            this.daysVal = (n !== '' && _expPresets.indexOf(Number(n)) !== -1) ? String(n) : '';
+            this.textVal = _expFormatText(dateStr);
+            this.daysVal = _expDaysValFor(dateStr);
+            this.save();
+          },
+          onTextChange: function() {
+            var parsed = _expParseInput(this.textVal);
+            if (parsed === null) {
+              // Unparseable — revert to the canonical format so the
+              // text input can't drift out of sync with dateVal.
+              this.textVal = _expFormatText(this.dateVal);
+              return;
+            }
+            this.dateVal = parsed;
+            this.textVal = _expFormatText(parsed);
+            this.daysVal = _expDaysValFor(parsed);
             this.save();
           },
           save: function() {
