@@ -11,10 +11,19 @@ import { now } from '../../lib/ids.js';
 
 const PATCHABLE = new Set([
   'name', 'alias', 'segment', 'phone', 'website', 'notes', 'owner_user_id',
-  'parent_group',
+  'parent_group', 'is_active',
 ]);
 
 function coerce(field, raw) {
+  // is_active is a NOT NULL 0/1 integer — accept 'active'/'inactive'
+  // from the inline-edit select, plus the usual 0/1/'0'/'1'/bool forms.
+  if (field === 'is_active') {
+    if (raw === 'inactive' || raw === 0 || raw === '0' || raw === false || raw === 'false' || raw === 'off') {
+      return 0;
+    }
+    if (raw === '' || raw === null || raw === undefined) return 1;
+    return 1;
+  }
   const v = typeof raw === 'string' ? raw.trim() : raw;
   if (v === '' || v === null || v === undefined) return null;
   return v;
@@ -72,7 +81,12 @@ export async function onRequestPost(context) {
     return json({ ok: false, error: String(e.message ?? e) }, 500);
   }
 
-  return json({ ok: true, field, value: newValue });
+  // For is_active we echo back the string form ('active'/'inactive')
+  // so the inline-edit client can match it against ACTIVE_OPTIONS when
+  // updating the display — matching the value the client originally sent.
+  const responseValue =
+    field === 'is_active' ? (newValue ? 'active' : 'inactive') : newValue;
+  return json({ ok: true, field, value: responseValue });
 }
 
 function json(data, status = 200) {

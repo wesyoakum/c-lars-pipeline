@@ -56,6 +56,7 @@ export async function onRequestGet(context) {
   // under `pms.oppList.v1`. The table itself is server-rendered so the
   // page is useful even without JS.
   const columns = [
+    { key: 'open',         label: '\u2197',       sort: 'text',   filter: null,     default: true },
     { key: 'number',       label: 'Number',       sort: 'number', filter: 'text',   default: true },
     { key: 'title',        label: 'Title',        sort: 'text',   filter: 'text',   default: true },
     { key: 'account_name', label: 'Account',      sort: 'text',   filter: 'text',   default: true },
@@ -126,10 +127,12 @@ export async function onRequestGet(context) {
                         data-rfq_due="${escape(r.rfq_due)}"
                         data-rfi_due="${escape(r.rfi_due)}"
                         data-quoted="${escape(r.quoted)}">
+                      <td class="col-open" data-col="open">
+                        <a class="row-open-link" href="/opportunities/${escape(r.id)}" title="Open opportunity" aria-label="Open opportunity">\u2197</a>
+                      </td>
                       <td class="col-number" data-col="number"><a href="/opportunities/${escape(r.id)}"><code>${escape(r.number)}</code></a></td>
                       <td class="col-title" data-col="title">
                         ${ieText('title', r.title)}
-                        <a class="row-open-link" href="/opportunities/${escape(r.id)}" title="Open opportunity" aria-label="Open opportunity">\u2197</a>
                       </td>
                       <td class="col-account_name" data-col="account_name">
                         ${r.account_id

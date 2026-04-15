@@ -35,6 +35,7 @@ export async function onRequestGet(context) {
   );
 
   const columns = [
+    { key: 'open',         label: '\u2197',      sort: 'text',   filter: null,     default: true },
     { key: 'number',       label: 'Number',      sort: 'text',   filter: 'text',   default: true },
     { key: 'revision',     label: 'Rev',          sort: 'text',   filter: 'text',   default: true },
     { key: 'type_label',   label: 'Type',         sort: 'text',   filter: 'select', default: true },
@@ -101,12 +102,14 @@ export async function onRequestGet(context) {
                   <tr data-row-id="${escape(r.id)}"
                       data-opp_id="${escape(r.opp_id)}"
                       ${raw(rowDataAttrs(columns, r))}>
+                    <td class="col-open" data-col="open">
+                      <a class="row-open-link" href="/opportunities/${escape(r.opp_id)}/quotes/${escape(r.id)}" title="Open quote" aria-label="Open quote">\u2197</a>
+                    </td>
                     <td class="col-number" data-col="number"><a href="/opportunities/${escape(r.opp_id)}/quotes/${escape(r.id)}"><code>${escape(r.number)}</code></a></td>
                     <td class="col-revision" data-col="revision">${escape(r.revision)}</td>
                     <td class="col-type_label" data-col="type_label">${escape(r.type_label)}</td>
                     <td class="col-title" data-col="title">
                       ${ieText('title', r.title)}
-                      <a class="row-open-link" href="/opportunities/${escape(r.opp_id)}/quotes/${escape(r.id)}" title="Open quote" aria-label="Open quote">\u2197</a>
                     </td>
                     <td class="col-opp_number" data-col="opp_number"><a href="/opportunities/${escape(r.opp_id)}"><code>${escape(r.opp_number_display)}</code> ${escape(r.opp_title)}</a></td>
                     <td class="col-account_name" data-col="account_name">

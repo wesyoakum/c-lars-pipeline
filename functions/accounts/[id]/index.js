@@ -37,6 +37,14 @@ const UPDATE_FIELDS = [
   'address_physical',
   'notes',
   'owner_user_id',
+  'is_active',
+];
+
+// Active/Inactive options for the inline-edit Status control. The
+// patch handler accepts the string forms and coerces them to 0/1.
+const ACTIVE_OPTIONS = [
+  { value: 'active',   label: 'Active' },
+  { value: 'inactive', label: 'Inactive' },
 ];
 
 const SEGMENT_OPTIONS = [
@@ -354,6 +362,10 @@ export async function onRequestGet(context) {
         <div class="detail-pair">
           <span class="detail-label">Segment</span>
           <span class="detail-value">${inlineSelect('segment', account.segment, SEGMENT_OPTIONS)}</span>
+        </div>
+        <div class="detail-pair">
+          <span class="detail-label">Status</span>
+          <span class="detail-value">${inlineSelect('is_active', account.is_active === 0 ? 'inactive' : 'active', ACTIVE_OPTIONS)}</span>
         </div>
         <div class="detail-pair">
           <span class="detail-label">Phone</span>

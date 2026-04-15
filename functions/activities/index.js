@@ -80,6 +80,7 @@ export async function onRequestGet(context) {
   ).length;
 
   const columns = [
+    { key: 'open',          label: '\u2197',      sort: 'text',   filter: null,     default: true },
     { key: 'subject',       label: 'Subject',     sort: 'text',   filter: 'text',   default: true },
     { key: 'type_label',    label: 'Type',         sort: 'text',   filter: 'select', default: true },
     { key: 'opp_number',    label: 'Opportunity',  sort: 'text',   filter: 'text',   default: true },
@@ -150,9 +151,11 @@ export async function onRequestGet(context) {
                   <tr data-row-id="${escape(r.id)}"
                       ${raw(rowDataAttrs(columns, r))}
                       class="${r.isCompleted ? 'row-muted' : ''} ${r.isOverdue ? 'row-overdue' : ''}">
+                    <td class="col-open" data-col="open">
+                      <a class="row-open-link" href="/activities/${escape(r.id)}" title="Open activity" aria-label="Open activity">\u2197</a>
+                    </td>
                     <td class="col-subject" data-col="subject">
                       ${ieText('subject', r.subject, { placeholder: '(no subject)' })}
-                      <a class="row-open-link" href="/activities/${escape(r.id)}" title="Open activity" aria-label="Open activity">\u2197</a>
                       ${r.body_preview ? html`<br><small class="muted">${escape(r.body_preview)}</small>` : ''}
                     </td>
                     <td class="col-type_label" data-col="type_label"><span class="pill pill-${r.type}">${escape(r.type_label)}</span></td>

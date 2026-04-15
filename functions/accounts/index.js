@@ -30,6 +30,14 @@ const SEGMENT_OPTIONS = [
   { value: 'Other', label: 'Other' },
 ];
 
+// Active/Inactive options for the Status inline-edit select.
+// String values (not 0/1) so list-table's select-filter dropdown shows
+// them verbatim and the patch handler's coerce() maps them back to ints.
+const ACTIVE_OPTIONS = [
+  { value: 'active',   label: 'Active' },
+  { value: 'inactive', label: 'Inactive' },
+];
+
 /**
  * GET /accounts — list accounts with full client-side sort/filter/search.
  */
@@ -41,6 +49,7 @@ export async function onRequestGet(context) {
   const rows = await all(
     env.DB,
     `SELECT a.id, a.name, a.alias, a.parent_group, a.segment, a.phone, a.website, a.updated_at,
+            a.is_active,
             (SELECT COUNT(*) FROM contacts c WHERE c.account_id = a.id) AS contact_count,
             (SELECT COUNT(*) FROM opportunities o WHERE o.account_id = a.id) AS opp_count
        FROM accounts a
@@ -62,10 +71,12 @@ export async function onRequestGet(context) {
   ];
 
   const columns = [
+    { key: 'open',          label: '\u2197',    sort: 'text',   filter: null,     default: true },
     { key: 'name',          label: 'Name',      sort: 'text',   filter: 'text',   default: true },
     { key: 'alias',         label: 'Alias',     sort: 'text',   filter: 'text',   default: true },
     { key: 'parent_group',  label: 'Group',     sort: 'text',   filter: 'select', default: false },
     { key: 'segment',       label: 'Segment',   sort: 'text',   filter: 'select', default: true },
+    { key: 'status',        label: 'Status',    sort: 'text',   filter: 'select', default: true },
     { key: 'phone',         label: 'Phone',     sort: 'text',   filter: 'text',   default: true },
     { key: 'contact_count', label: 'Contacts',  sort: 'number', filter: null,     default: true },
     { key: 'opp_count',     label: 'Opps',      sort: 'number', filter: null,     default: true },
@@ -90,6 +101,11 @@ export async function onRequestGet(context) {
     alias: r.alias ?? '',
     parent_group: r.parent_group ?? '',
     segment: r.segment ?? '',
+    // `status` is the string form ('active'/'inactive') used by the
+    // inline-edit select, the select-filter dropdown, and sort. The
+    // raw 0/1 lives on `is_active` for any callers that care.
+    is_active: r.is_active,
+    status: r.is_active === 0 ? 'inactive' : 'active',
     phone: r.phone ?? '',
     contact_count: r.contact_count ?? 0,
     opp_count: r.opp_count ?? 0,
@@ -119,9 +135,11 @@ export async function onRequestGet(context) {
                       data-name_display="${escape(r.name_display)}"
                       data-combined-name="name_display alias parent_group"
                       ${raw(rowDataAttrs(columns, r))}>
+                    <td class="col-open" data-col="open">
+                      <a class="row-open-link" href="/accounts/${escape(r.id)}" title="Open account" aria-label="Open account">\u2197</a>
+                    </td>
                     <td class="col-name" data-col="name">
                       ${ieText('name', r.name_display)}
-                      <a class="row-open-link" href="/accounts/${escape(r.id)}" title="Open account" aria-label="Open account">\u2197</a>
                     </td>
                     <td class="col-alias" data-col="alias">
                       ${ieText('alias', r.alias, { fallbackText: r.name_display })}
@@ -131,6 +149,9 @@ export async function onRequestGet(context) {
                     </td>
                     <td class="col-segment" data-col="segment">
                       ${ieSelect('segment', r.segment, SEGMENT_OPTIONS)}
+                    </td>
+                    <td class="col-status" data-col="status">
+                      ${ieSelect('is_active', r.status, ACTIVE_OPTIONS)}
                     </td>
                     <td class="col-phone" data-col="phone">
                       ${ieText('phone', r.phone, { inputType: 'tel' })}
@@ -147,7 +168,12 @@ export async function onRequestGet(context) {
             </table>
           </div>
           <script>${raw(listScript('pms.accounts.v1', 'name', 'asc'))}</script>
-          <script>${raw(listInlineEditScript('/accounts/:id/patch'))}</script>
+          <script>${raw(listInlineEditScript('/accounts/:id/patch', {
+            // Column key `status` ↔ patch field `is_active`. The patch
+            // handler accepts 'active'/'inactive' string values and
+            // coerces them to 0/1 for storage.
+            fieldAttrMap: { is_active: 'status' },
+          }))}</script>
         `}
     </section>
   `;
@@ -202,9 +228,9 @@ export async function onRequestPost(context) {
       env.DB,
       `INSERT INTO accounts
          (id, name, segment, address_billing, address_physical,
-          phone, website, notes, owner_user_id,
+          phone, website, notes, owner_user_id, is_active,
           created_at, updated_at, created_by_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         value.name,
@@ -215,6 +241,7 @@ export async function onRequestPost(context) {
         value.website,
         value.notes,
         value.owner_user_id ?? user?.id ?? null,
+        value.is_active,
         ts,
         ts,
         user?.id ?? null,

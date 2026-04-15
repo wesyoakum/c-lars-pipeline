@@ -234,8 +234,27 @@ export function validateAccount(input) {
   value.notes = trim(input.notes) || null;
   value.owner_user_id = trim(input.owner_user_id) || null;
 
+  // Active/Inactive flag (migration 0030). Accepts the string values
+  // 'active' / 'inactive' from selects, plain 0/1, or the legacy
+  // checkbox-ish 'on'/'off'. Default: active. The column is NOT NULL
+  // so we always produce a 0 or 1 — never null.
+  value.is_active = parseIsActive(input.is_active);
+
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, value };
+}
+
+/**
+ * Coerce an is_active form value to the 0|1 the DB column stores.
+ * Accepts 'active'/'inactive', 0/1, '0'/'1', true/false, 'on'/'off',
+ * and undefined (defaults to 1 = active).
+ */
+export function parseIsActive(raw) {
+  if (raw === undefined || raw === null || raw === '') return 1;
+  if (raw === 'inactive' || raw === 0 || raw === '0' || raw === false || raw === 'false' || raw === 'off') {
+    return 0;
+  }
+  return 1;
 }
 
 /**

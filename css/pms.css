@@ -2344,18 +2344,20 @@ textarea.ie-input { width: 100%; min-width: 12rem; resize: vertical; }
   white-space: nowrap;
   vertical-align: middle;
 }
-/* Name column: editable .ie on the left + open-detail link pinned right.
-   The td gets right padding to reserve room for the absolutely-positioned
-   link so the .ie width:100% doesn't overlap it. */
-.opp-list-table td.col-name {
-  position: relative;
-  padding-right: 1.75rem;
+/* Open-detail link column: a dedicated narrow column on each list table
+   (accounts/opportunities/quotes/jobs/activities) that holds just the
+   ↗ icon linking to the row's detail page. Keeping it in its own cell
+   lets the adjacent name/title cell's inline-editor fill the full
+   width without the absolute-positioning hack it used before. */
+.opp-list-table td.col-open,
+.opp-list-table th.col-open {
+  width: 1.75rem;
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+  text-align: center;
 }
 .row-open-link {
-  position: absolute;
-  right: 0.35rem;
-  top: 50%;
-  transform: translateY(-50%);
+  display: inline-block;
   color: var(--fg-muted);
   text-decoration: none;
   font-size: 0.95em;
