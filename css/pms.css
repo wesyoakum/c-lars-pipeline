@@ -752,12 +752,13 @@ code {
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--border);
   /* Now that column widths are user-adjustable, let cells wrap to fit
-     their column rather than clipping. overflow-wrap:anywhere breaks
-     long unbreakable strings (URLs, IDs) at the column boundary so
-     they don't overflow a narrowed column. */
+     their column rather than clipping. overflow-wrap:break-word wraps
+     at word boundaries normally and only breaks mid-word as a last
+     resort when a single unbreakable string (URL, ID) is wider than
+     the column. */
   vertical-align: top;
   word-break: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 .data thead th {
   background: var(--bg-alt);
@@ -2445,9 +2446,10 @@ textarea.ie-input { width: 100%; min-width: 12rem; resize: vertical; }
   max-width: 100%;
   /* Wrap instead of ellipsis — columns are user-adjustable, so long
      text should flow to multiple lines within the chosen width
-     rather than being silently clipped. */
+     rather than being silently clipped. Word-boundary wrap; only
+     breaks mid-word as a last resort for unbreakable strings. */
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   vertical-align: top;
 }
 /* Open-detail link column: a dedicated narrow column on each list table
