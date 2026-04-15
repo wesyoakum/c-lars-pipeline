@@ -321,6 +321,7 @@ export function layout(title, body, opts = {}) {
   <script defer src="/js/alpine.min.js"></script>
   <script defer src="/js/live-calc.js"></script>
   <script defer src="/js/account-picker.js"></script>
+  <script defer src="/js/table-resize.js"></script>
   ${opts.charts ? '<script defer src="/js/chart.min.js"></script>' : ''}
 </head>
 <body>
