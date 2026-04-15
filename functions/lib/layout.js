@@ -83,6 +83,86 @@ function renderValue(value) {
 
 import { VERSION } from './version.js';
 
+// T4.2 Phase 1 — in-app notifications.
+//
+// Injected into every authenticated page. Registers an Alpine store
+// named "notifications" that polls /notifications/unread every 30 seconds,
+// updates the bell-icon badge count, and pushes new (unseen) notifications
+// into a toast stack. The first poll after page load is silent — we
+// populate the badge count but don't toast existing unreads, because
+// spamming old unreads every page load would be annoying. Only truly
+// NEW notifications (arriving while the page is open) become toasts.
+//
+// Deliberately no backticks or `${}` in this script so it can be dropped
+// into a plain template literal in layout() without interpolation conflicts.
+//
+// Store method is named `start()` (not `init()`) to avoid Alpine v3's
+// auto-invocation of store.init() — we want explicit control so the
+// polling loop starts exactly once.
+const NOTIFICATION_STORE_SCRIPT = (
+  "document.addEventListener('alpine:init', function () {\n" +
+  "  Alpine.store('notifications', {\n" +
+  "    count: 0,\n" +
+  "    toasts: [],\n" +
+  "    seenIds: Object.create(null),\n" +
+  "    primed: false,\n" +
+  "    pollHandle: null,\n" +
+  "    pollMs: 30000,\n" +
+  "    start: function () {\n" +
+  "      if (this.pollHandle) return;\n" +
+  "      var self = this;\n" +
+  "      self.poll();\n" +
+  "      self.pollHandle = setInterval(function () { self.poll(); }, self.pollMs);\n" +
+  "    },\n" +
+  "    poll: function () {\n" +
+  "      var self = this;\n" +
+  "      fetch('/notifications/unread', { credentials: 'same-origin', headers: { 'accept': 'application/json' } })\n" +
+  "        .then(function (res) { return res.ok ? res.json() : null; })\n" +
+  "        .then(function (data) {\n" +
+  "          if (!data || !Array.isArray(data.unread)) return;\n" +
+  "          self.count = data.unread.length;\n" +
+  "          if (!self.primed) {\n" +
+  "            for (var i = 0; i < data.unread.length; i++) self.seenIds[data.unread[i].id] = true;\n" +
+  "            self.primed = true;\n" +
+  "            return;\n" +
+  "          }\n" +
+  "          for (var j = 0; j < data.unread.length; j++) {\n" +
+  "            var n = data.unread[j];\n" +
+  "            if (!self.seenIds[n.id]) {\n" +
+  "              self.seenIds[n.id] = true;\n" +
+  "              self.toasts.push(n);\n" +
+  "              (function (notification) {\n" +
+  "                setTimeout(function () { self.dismissToast(notification); }, 8000);\n" +
+  "              })(n);\n" +
+  "            }\n" +
+  "          }\n" +
+  "        })\n" +
+  "        .catch(function () { /* network error, ignore */ });\n" +
+  "    },\n" +
+  "    dismissToast: function (n) {\n" +
+  "      if (!n) return;\n" +
+  "      for (var i = 0; i < this.toasts.length; i++) {\n" +
+  "        if (this.toasts[i].id === n.id) { this.toasts.splice(i, 1); return; }\n" +
+  "      }\n" +
+  "    },\n" +
+  "    clickToast: function (n) {\n" +
+  "      if (!n) return;\n" +
+  "      var self = this;\n" +
+  "      var target = n.link_url;\n" +
+  "      fetch('/notifications/' + encodeURIComponent(n.id) + '/read', {\n" +
+  "        method: 'POST',\n" +
+  "        credentials: 'same-origin',\n" +
+  "        headers: { 'accept': 'application/json' }\n" +
+  "      }).catch(function () { /* ignore */ });\n" +
+  "      self.dismissToast(n);\n" +
+  "      self.count = Math.max(0, self.count - 1);\n" +
+  "      if (target) window.location.href = target;\n" +
+  "    }\n" +
+  "  });\n" +
+  "  Alpine.store('notifications').start();\n" +
+  "});\n"
+);
+
 /**
  * Full-page HTML shell: includes nav, user badge, and slot for body.
  * Vendored HTMX + Alpine from /js so Access + CSP don't fight CDN cross-origin.
@@ -133,12 +213,27 @@ export function layout(title, body, opts = {}) {
       ${navLink('/jobs', 'Jobs', activeNav)}
     </nav>
     <div class="header-right">
+      ${user ? `<a href="/notifications" class="notification-bell" aria-label="Notifications" x-data>
+        <svg class="notification-bell-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
+          <path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6V11a6 6 0 0 0-4.5-5.81V5a1.5 1.5 0 0 0-3 0v.19A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z"/>
+        </svg>
+        <span class="notification-badge" x-show="$store.notifications && $store.notifications.count > 0" x-text="$store.notifications && $store.notifications.count" x-cloak></span>
+      </a>` : ''}
       <div class="user-badge">
         ${user ? `<span class="user-name">${escape(user.display_name ?? user.email)}</span>
                    <span class="user-role">${escape(user.email ?? '')} · ${escape(user.role)}</span>` : '<span>Not signed in</span>'}
       </div>
     </div>
   </header>
+  ${user ? `<div class="notification-toast-stack" x-data x-cloak>
+    <template x-for="toast in ($store.notifications && $store.notifications.toasts) || []" :key="toast.id">
+      <div class="notification-toast" @click="$store.notifications.clickToast(toast)">
+        <button type="button" class="notification-toast-close" @click.stop="$store.notifications.dismissToast(toast)" aria-label="Dismiss">&times;</button>
+        <div class="notification-toast-title" x-text="toast.title"></div>
+        <div class="notification-toast-body" x-show="toast.body" x-text="toast.body"></div>
+      </div>
+    </template>
+  </div>` : ''}
   ${flash ? `<div class="flash flash-${escape(flash.kind ?? 'info')}">${escape(flash.message)}</div>` : ''}
   <main class="site-main">
 ${breadcrumbHtml}
@@ -148,6 +243,7 @@ ${body}
     <small>C-LARS Pipeline Management System</small>
   </footer>
   ${versionTag ? `<div class="version-badge">${versionTag}</div>` : ''}
+  ${user ? `<script>${NOTIFICATION_STORE_SCRIPT}</script>` : ''}
 </body>
 </html>`;
 }

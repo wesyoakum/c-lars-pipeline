@@ -9,12 +9,13 @@
 // but the transition always proceeds. Switch to 'enforce' in lib/stages.js
 // to make hard gates block transitions.
 
-import { one, stmt, batch } from '../../lib/db.js';
+import { one, all, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
 import { validateStageTransition, parseTransactionTypes } from '../../lib/validators.js';
 import { uuid, now, nextNumber, currentYear } from '../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../lib/http.js';
 import { stageDef, stagesFor, evaluateGate, loadGateContext, GATE_MODE } from '../../lib/stages.js';
+import { notifyStmt } from '../../lib/notify.js';
 
 export async function onRequestPost(context) {
   const { env, data, request, params } = context;
@@ -142,6 +143,39 @@ export async function onRequestPost(context) {
   ];
 
   await batch(env.DB, statements);
+
+  // T4.2 Phase 1 — fan out an in-app notification to every other active
+  // user so they see the stage change as a toast. Failures here should
+  // never roll back the stage transition — they're wrapped in a try/catch
+  // and logged instead.
+  try {
+    const recipients = await all(
+      env.DB,
+      `SELECT id FROM users
+        WHERE active = 1 AND id != ?`,
+      [user?.id ?? '']
+    );
+    if (recipients.length > 0) {
+      const actorName = user?.display_name || user?.email || 'Someone';
+      const title = `${opp.number}: ${opp.title}`;
+      const body = `${actorName} moved to ${targetDef.label}`;
+      const linkUrl = `/opportunities/${oppId}`;
+      const notifyStmts = recipients.map((r) =>
+        notifyStmt(env.DB, {
+          userId:     r.id,
+          type:       'stage_changed',
+          title,
+          body,
+          linkUrl,
+          entityType: 'opportunity',
+          entityId:   oppId,
+        })
+      );
+      await batch(env.DB, notifyStmts);
+    }
+  } catch (err) {
+    console.error('stage-change notify fan-out failed:', err?.message || err);
+  }
 
   // Auto-create Job when closing as won
   let jobNumber = null;
