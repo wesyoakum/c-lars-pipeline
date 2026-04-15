@@ -346,8 +346,8 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       });
 
       // Lock the table width to the sum of visible col widths. Without
-      // this, `table-layout: fixed` + `width: 100%` causes the browser
-      // to redistribute any freed space among other columns when one
+      // this, table-layout:fixed + width:100% causes the browser to
+      // redistribute any freed space among other columns when one
       // column shrinks — so dragging a column narrower visually widens
       // its neighbors and the drag appears not to stick. By pinning
       // the table width to the exact sum, shrinking a column simply
