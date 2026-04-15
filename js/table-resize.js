@@ -96,6 +96,13 @@
       cols[m].style.width = w + 'px';
     }
 
+    // Lock the table width to the sum of col widths. Without this,
+    // `table-layout: fixed` + `width: 100%` causes the browser to
+    // redistribute any freed space among other columns when one column
+    // shrinks — so dragging a column narrower visually widens its
+    // neighbors and the drag appears not to stick.
+    syncTableWidth();
+
     // Attach a grip to each th. The grip needs th{position:relative}.
     ths.forEach(function (th, idx) {
       if (th.querySelector('.col-resize-grip')) return;
@@ -111,16 +118,28 @@
       grip.addEventListener('mousedown', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        startResize(cols[idx], e.clientX, grip, save);
+        startResize(cols[idx], e.clientX, grip, save, syncTableWidth);
       });
       grip.addEventListener('click', function (e) { e.stopPropagation(); });
       grip.addEventListener('dblclick', function (e) {
         e.preventDefault();
         e.stopPropagation();
-        autofitColumn(table, cols[idx], idx, th, save);
+        autofitColumn(table, cols[idx], idx, th, save, syncTableWidth);
       });
       th.appendChild(grip);
     });
+
+    function syncTableWidth() {
+      var total = 0;
+      for (var i = 0; i < cols.length; i++) {
+        // Skip hidden cols so a hidden column's width doesn't
+        // inflate the table.
+        if (cols[i].style.display === 'none') continue;
+        var wpx = parseInt(cols[i].style.width, 10);
+        if (wpx > 0) total += wpx;
+      }
+      if (total > 0) table.style.width = total + 'px';
+    }
 
     function save() {
       var out = {};
@@ -132,7 +151,7 @@
     }
   }
 
-  function startResize(col, startX, grip, save) {
+  function startResize(col, startX, grip, save, syncTableWidth) {
     var startWidth = col.offsetWidth || parseInt(col.style.width, 10) || 100;
     grip.classList.add('dragging');
     document.body.classList.add('col-resizing');
@@ -141,6 +160,7 @@
       var delta = e.clientX - startX;
       var newWidth = Math.max(40, startWidth + delta);
       col.style.width = newWidth + 'px';
+      if (syncTableWidth) syncTableWidth();
     }
     function onUp() {
       document.removeEventListener('mousemove', onMove);
@@ -156,10 +176,13 @@
   // Excel-style AutoFit — briefly flip to auto layout with just this
   // column unconstrained, read offsetWidth of the widest visible cell,
   // then relock at that width.
-  function autofitColumn(table, col, idx, th, save) {
+  function autofitColumn(table, col, idx, th, save, syncTableWidth) {
     var prevColWidth = col.style.width;
+    var prevTableWidth = table.style.width;
     col.style.width = 'auto';
     table.style.tableLayout = 'auto';
+    // Let the table size to its content while we measure.
+    table.style.width = '';
 
     var max = th.offsetWidth || 0;
     var rows = table.querySelectorAll('tbody tr');
@@ -174,11 +197,13 @@
     table.style.tableLayout = 'fixed';
     if (max <= 0) {
       col.style.width = prevColWidth || '100px';
+      table.style.width = prevTableWidth;
       return;
     }
     // Tiny fudge so ellipsis doesn't re-trigger on the next paint.
     var newWidth = Math.max(40, Math.round(max) + 2);
     col.style.width = newWidth + 'px';
+    if (syncTableWidth) syncTableWidth();
     save();
   }
 

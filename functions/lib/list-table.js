@@ -225,6 +225,11 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
           el.style.display = hide ? 'none' : '';
         });
       });
+      // Resync the pinned table width so hidden columns don't leave a
+      // gap (and newly-shown ones don't spill past the pinned width).
+      // Safe to call before initColumnResize runs the first time: if
+      // there's no colgroup yet, syncTableWidth bails.
+      syncTableWidth();
     }
 
     function applyColumnOrder() {
@@ -340,6 +345,15 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         col.style.width = w + 'px';
       });
 
+      // Lock the table width to the sum of visible col widths. Without
+      // this, `table-layout: fixed` + `width: 100%` causes the browser
+      // to redistribute any freed space among other columns when one
+      // column shrinks — so dragging a column narrower visually widens
+      // its neighbors and the drag appears not to stick. By pinning
+      // the table width to the exact sum, shrinking a column simply
+      // leaves empty space on the right of the table.
+      syncTableWidth();
+
       // Add a resize grip to each header cell. Grips float over the
       // right 6px of each th and intercept mouse events before the
       // sort button underneath.
@@ -365,6 +379,23 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       });
     }
 
+    // Sum the explicit widths of all currently-visible <col> elements
+    // and pin the table width to that total. Called on init, after any
+    // resize/autofit, and after visibility changes.
+    function syncTableWidth() {
+      var table = host.querySelector('.opp-list-table');
+      if (!table) return;
+      var colgroup = table.querySelector('colgroup');
+      if (!colgroup) return;
+      var total = 0;
+      colgroup.querySelectorAll('col').forEach(function(col) {
+        if (col.style.display === 'none') return;
+        var wpx = parseInt(col.style.width, 10);
+        if (wpx > 0) total += wpx;
+      });
+      if (total > 0) table.style.width = total + 'px';
+    }
+
     function startResize(key, startX, grip) {
       var col = host.querySelector('.opp-list-table colgroup col[data-col="' + key + '"]');
       if (!col) return;
@@ -376,6 +407,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         var delta = e.clientX - startX;
         var newWidth = Math.max(40, startWidth + delta);
         col.style.width = newWidth + 'px';
+        syncTableWidth();
       }
       function onUp() {
         document.removeEventListener('mousemove', onMove);
@@ -404,9 +436,13 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
 
       var prevColWidth = col.style.width;
       var prevLayout = table.style.tableLayout;
+      var prevTableWidth = table.style.width;
 
       col.style.width = 'auto';
       table.style.tableLayout = 'auto';
+      // Let the table size to its content while we measure — a locked
+      // table width would squish the unconstrained column.
+      table.style.width = '';
 
       var max = 0;
       var th = host.querySelector('tr[data-role="header-row"] th[data-col="' + key + '"]');
@@ -421,6 +457,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       table.style.tableLayout = 'fixed';
       if (max <= 0) {
         col.style.width = prevColWidth || (naturalWidths[key] ? naturalWidths[key] + 'px' : '100px');
+        table.style.width = prevTableWidth;
         return;
       }
       // Add a tiny fudge so the browser doesn't round-trip us into
@@ -428,6 +465,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       var newWidth = Math.max(40, Math.round(max) + 2);
       col.style.width = newWidth + 'px';
       state.widths[key] = newWidth;
+      syncTableWidth();
       save();
     }
 
