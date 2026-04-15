@@ -198,12 +198,12 @@ function tplUpload() {
         <table class="data opp-list-table" style="table-layout:fixed;width:100%">
           <colgroup>
             <col data-col="label"       style="width:auto">
-            <col data-col="category"    style="width:140px">
-            <col data-col="status"      style="width:90px">
-            <col data-col="filenameTpl" style="width:320px">
-            <col data-col="size"        style="width:70px">
-            <col data-col="uploaded"    style="width:120px">
-            <col data-col="actions"     style="width:220px">
+            <col data-col="category"    style="width:125px">
+            <col data-col="status"      style="width:85px">
+            <col data-col="filenameTpl" style="width:230px">
+            <col data-col="size"        style="width:60px">
+            <col data-col="uploaded"    style="width:110px">
+            <col data-col="actions"     style="width:210px">
           </colgroup>
           ${listTableHead(columns, rowData)}
           <tbody data-role="rows">
