@@ -334,6 +334,30 @@ export function validateCostBuild(input) {
   value.use_dm_library    = input.use_dm_library    ? 1 : 0;
   value.use_labor_library = input.use_labor_library ? 1 : 0;
 
+  // T3.2 Phase 3 — build-level discount. Mirrors the validateQuoteLine
+  // discount parsing: amount wins over pct, phantom means "display only".
+  // When a build has a discount AND is linked to a line, the patch
+  // handler flows these values down onto the quote_line at autosave time.
+  const { value: discAmt, error: discAmtErr } = parseOptionalMoney(input.discount_amount);
+  if (discAmtErr) errors.discount_amount = discAmtErr;
+  value.discount_amount = discAmt === null ? null : discAmt;
+
+  const { value: discPct, error: discPctErr } = parseOptionalNumber(input.discount_pct);
+  if (discPctErr) errors.discount_pct = discPctErr;
+  if (discPct != null && (discPct < 0 || discPct > 100)) {
+    errors.discount_pct = 'Discount percent must be between 0 and 100';
+  }
+  value.discount_pct = discPct === null ? null : discPct;
+
+  value.discount_description = trim(input.discount_description) || null;
+  value.discount_is_phantom =
+    input.discount_is_phantom === '1' ||
+    input.discount_is_phantom === 'on' ||
+    input.discount_is_phantom === 1 ||
+    input.discount_is_phantom === true
+      ? 1
+      : 0;
+
   // Status is not user-editable through this validator — lock/unlock
   // endpoints set it directly. We leave it out of `value` so a caller
   // running an UPDATE won't accidentally clobber it.

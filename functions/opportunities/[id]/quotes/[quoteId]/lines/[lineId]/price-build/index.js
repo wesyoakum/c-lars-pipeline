@@ -18,6 +18,8 @@ import {
   loadCostBuildBundle,
   computeFromBundle,
   workcenterEntryCost,
+  computeLineExtendedPrice,
+  quoteTotalsRecomputeStmt,
   fmtDollar,
   fmtPct,
 } from '../../../../../../../lib/pricing.js';
@@ -430,6 +432,14 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
           if (el) data[name] = el.value;
         });
 
+        // T3.2 Phase 3 — build-level discount fields
+        ['discount_amount', 'discount_pct', 'discount_description'].forEach(function(name) {
+          var el = form.querySelector('input[name="' + name + '"]');
+          if (el) data[name] = el.value;
+        });
+        var phantomEl = form.querySelector('input[name="discount_is_phantom"]');
+        if (phantomEl) data.discount_is_phantom = phantomEl.checked ? '1' : '';
+
         // Checkboxes
         var useDm = form.querySelector('input[name="use_dm_library"]');
         if (useDm) data.use_dm_library = useDm.checked ? '1' : '';
@@ -619,6 +629,77 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
 
 // ── Sub-tab renderers (same as old price build editor) ───────────
 
+// T3.2 Phase 3 — build-level discount editor. Renders a collapsible
+// section under the Pricing cost-summary table. When the build carries
+// a discount it flows through to the linked quote_line on save (see
+// patch.js / handleSave in this file).
+function renderBuildDiscountEditor({ build, locked, errText }) {
+  const hasDiscount =
+    (build.discount_amount !== null && build.discount_amount !== undefined && build.discount_amount !== '' && Number(build.discount_amount) > 0) ||
+    (build.discount_pct    !== null && build.discount_pct    !== undefined && build.discount_pct    !== '' && Number(build.discount_pct)    > 0) ||
+    !!build.discount_is_phantom ||
+    (build.discount_description !== null && build.discount_description !== undefined && build.discount_description !== '');
+  const amtVal = build.discount_amount == null || build.discount_amount === '' ? '' : String(build.discount_amount);
+  const pctVal = build.discount_pct    == null || build.discount_pct    === '' ? '' : String(build.discount_pct);
+  const descVal = build.discount_description == null ? '' : String(build.discount_description);
+  const phantomChecked = !!build.discount_is_phantom;
+
+  return html`
+    <div class="build-discount" x-data="buildDiscount(${hasDiscount ? 'true' : 'false'})" style="margin-top:1rem">
+      <div x-show="!open" x-cloak>
+        <a href="#" @click.prevent="open = true" class="muted" style="font-size:0.85rem; text-decoration:underline dotted; cursor:pointer">
+          + Add build discount
+        </a>
+      </div>
+      <div x-show="open" x-cloak style="border:1px solid var(--border); border-radius:var(--radius); padding:0.6rem 0.75rem; background:var(--bg-subtle, transparent)">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem">
+          <strong style="font-size:0.85rem">Build discount</strong>
+          <a href="#" @click.prevent="open = false" class="muted" style="font-size:0.75rem" x-show="!${hasDiscount ? 'true' : 'false'}">collapse</a>
+        </div>
+        <p class="muted" style="font-size:0.75rem; margin:0 0 0.5rem 0">
+          Applies to the linked quote line when this build saves. Amount wins over percent. Phantom discounts don't reduce the stored extended price — they mark up at render time on the PDF.
+        </p>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:0.5rem">
+          <label style="font-size:0.8rem">
+            Discount amount ($)
+            <input type="text" name="discount_amount" value="${escape(amtVal)}"
+                   class="num-input"
+                   ${locked ? 'disabled' : ''}
+                   placeholder="$0">
+            ${errText('discount_amount')}
+          </label>
+          <label style="font-size:0.8rem">
+            Discount percent (%)
+            <input type="text" name="discount_pct" value="${escape(pctVal)}"
+                   class="num-input"
+                   ${locked ? 'disabled' : ''}
+                   placeholder="0">
+            ${errText('discount_pct')}
+          </label>
+        </div>
+        <label style="display:block; margin-top:0.4rem; font-size:0.8rem">
+          Description (optional)
+          <input type="text" name="discount_description" value="${escape(descVal)}"
+                 ${locked ? 'disabled' : ''}
+                 placeholder="Shown on the PDF as the discount line label"
+                 style="width:100%; padding:0.3rem 0.4rem; border:1px solid var(--border); border-radius:var(--radius); font:inherit; background:var(--bg)">
+        </label>
+        <label class="checkbox" style="display:flex; align-items:center; gap:0.4rem; margin-top:0.4rem; font-size:0.8rem">
+          <input type="checkbox" name="discount_is_phantom" value="1" ${phantomChecked ? 'checked' : ''} ${locked ? 'disabled' : ''}>
+          Phantom (display only — markup to list price at render time)
+        </label>
+      </div>
+    </div>
+    <script>
+    document.addEventListener('alpine:init', function() {
+      Alpine.data('buildDiscount', function(initialOpen) {
+        return { open: !!initialOpen };
+      });
+    });
+    </script>
+  `;
+}
+
 function renderPricingSubtab({ build, pricing, totals, settings, errText, locked }) {
   const eff = pricing.effective;
   const auto = pricing.auto;
@@ -729,6 +810,8 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
           </tr>
         </tfoot>
       </table>
+
+      ${renderBuildDiscountEditor({ build, locked, errText })}
 
       <div class="reference-estimates">
         <div class="ref-heading">Reference Estimates</div>
@@ -1037,11 +1120,15 @@ async function handleSave(context, ctx, input) {
               dm_user_cost = ?, dl_user_cost = ?, imoh_user_cost = ?, other_user_cost = ?,
               quote_price_user = ?,
               use_dm_library = ?, use_labor_library = ?,
+              discount_amount = ?, discount_pct = ?,
+              discount_description = ?, discount_is_phantom = ?,
               updated_at = ?
         WHERE id = ?`,
       [value.label, value.notes,
        value.dm_user_cost, value.dl_user_cost, value.imoh_user_cost, value.other_user_cost,
        value.quote_price_user, value.use_dm_library, value.use_labor_library,
+       value.discount_amount, value.discount_pct,
+       value.discount_description, value.discount_is_phantom,
        ts, buildId]
     ),
     stmt(env.DB, 'DELETE FROM cost_build_labor WHERE cost_build_id = ?', [buildId]),
@@ -1070,16 +1157,63 @@ async function handleSave(context, ctx, input) {
     bundle.build.use_dm_library = value.use_dm_library;
     bundle.build.use_labor_library = value.use_labor_library;
     const { pricing } = computeFromBundle(bundle, settings);
+
+    // T3.2 Phase 3 — mirror the JSON patch handler: push unit_price
+    // (+ optionally the build's discount) down to the linked line and
+    // recompute the parent quote's totals. Discount flows through when
+    // the build previously had one OR now has one — see patch.js for
+    // the full rule derivation.
     if (pricing.effective.quote !== null) {
       const unitPrice = pricing.effective.quote;
       const qty = Number(line.quantity) || 1;
-      const extended = qty * unitPrice;
-      statements.push(
-        stmt(env.DB,
-          'UPDATE quote_lines SET unit_price = ?, extended_price = ?, updated_at = ? WHERE id = ?',
-          [unitPrice, extended, ts, lineId]
-        )
-      );
+
+      const hasDiscount = (row) =>
+        (row.discount_amount !== null && row.discount_amount !== undefined && Number(row.discount_amount) > 0) ||
+        (row.discount_pct    !== null && row.discount_pct    !== undefined && Number(row.discount_pct)    > 0) ||
+        Number(row.discount_is_phantom) === 1;
+
+      const buildPrevHasDiscount = hasDiscount(ctx.build);
+      const buildNowHasDiscount  = hasDiscount(value);
+      const shouldPushDiscount   = buildPrevHasDiscount || buildNowHasDiscount;
+
+      const effDiscAmt  = shouldPushDiscount ? value.discount_amount      : line.discount_amount;
+      const effDiscPct  = shouldPushDiscount ? value.discount_pct         : line.discount_pct;
+      const effDiscDesc = shouldPushDiscount ? value.discount_description : line.discount_description;
+      const effDiscPh   = shouldPushDiscount ? value.discount_is_phantom  : line.discount_is_phantom;
+
+      const extended = computeLineExtendedPrice({
+        quantity: qty,
+        unit_price: unitPrice,
+        discount_amount:     effDiscAmt,
+        discount_pct:        effDiscPct,
+        discount_is_phantom: effDiscPh,
+      });
+
+      if (shouldPushDiscount) {
+        statements.push(
+          stmt(env.DB,
+            `UPDATE quote_lines
+                SET unit_price = ?, extended_price = ?,
+                    discount_amount = ?, discount_pct = ?,
+                    discount_description = ?, discount_is_phantom = ?,
+                    updated_at = ?
+              WHERE id = ?`,
+            [unitPrice, extended,
+             value.discount_amount, value.discount_pct,
+             value.discount_description, value.discount_is_phantom,
+             ts, lineId]
+          )
+        );
+      } else {
+        statements.push(
+          stmt(env.DB,
+            'UPDATE quote_lines SET unit_price = ?, extended_price = ?, updated_at = ? WHERE id = ?',
+            [unitPrice, extended, ts, lineId]
+          )
+        );
+      }
+
+      statements.push(quoteTotalsRecomputeStmt(env.DB, quoteId, ts));
     }
   }
 

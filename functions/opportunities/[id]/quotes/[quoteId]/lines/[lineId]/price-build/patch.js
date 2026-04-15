@@ -15,6 +15,8 @@ import {
   loadCostBuildBundle,
   computeFromBundle,
   workcenterEntryCost,
+  computeLineExtendedPrice,
+  quoteTotalsRecomputeStmt,
 } from '../../../../../../../lib/pricing.js';
 
 function json(data, status = 200) {
@@ -77,11 +79,15 @@ export async function onRequestPost(context) {
               dm_user_cost = ?, dl_user_cost = ?, imoh_user_cost = ?, other_user_cost = ?,
               quote_price_user = ?,
               use_dm_library = ?, use_labor_library = ?,
+              discount_amount = ?, discount_pct = ?,
+              discount_description = ?, discount_is_phantom = ?,
               updated_at = ?
         WHERE id = ?`,
       [value.label, value.notes,
        value.dm_user_cost, value.dl_user_cost, value.imoh_user_cost, value.other_user_cost,
        value.quote_price_user, value.use_dm_library, value.use_labor_library,
+       value.discount_amount, value.discount_pct,
+       value.discount_description, value.discount_is_phantom,
        ts, buildId]
     ),
     stmt(env.DB, 'DELETE FROM cost_build_labor WHERE cost_build_id = ?', [buildId]),
@@ -134,17 +140,77 @@ export async function onRequestPost(context) {
 
     const { pricing, totals } = computeFromBundle(bundle, settings);
 
-    // Update the quote line's unit_price from the computed quote price
+    // T3.2 Phase 3 — push unit_price (+ optionally the build's discount)
+    // down to the linked quote_line, then recompute the parent quote's
+    // totals so the header figures stay in sync after every build save.
+    //
+    // Discount flow-through rule:
+    //   - If the build NOW has a discount, push all four discount columns
+    //     to the line (the build owns the discount when linked).
+    //   - If the build PREVIOUSLY had a discount but the user just cleared
+    //     it, also push the (now-null) values so the clear propagates.
+    //   - Otherwise leave the line's discount alone — the user may have
+    //     set a line-level discount via the quote detail page and we
+    //     shouldn't clobber it when the build has no opinion.
+    let pushedLineExtended = null;
+    let pushedLineDiscountApplied = null;
     if (pricing.effective.quote !== null) {
       const unitPrice = pricing.effective.quote;
       const qty = Number(line.quantity) || 1;
-      const extended = qty * unitPrice;
-      statements.push(
-        stmt(env.DB,
-          'UPDATE quote_lines SET unit_price = ?, extended_price = ?, updated_at = ? WHERE id = ?',
-          [unitPrice, extended, ts, lineId]
-        )
-      );
+
+      const hasDiscount = (row) =>
+        (row.discount_amount !== null && row.discount_amount !== undefined && Number(row.discount_amount) > 0) ||
+        (row.discount_pct    !== null && row.discount_pct    !== undefined && Number(row.discount_pct)    > 0) ||
+        Number(row.discount_is_phantom) === 1;
+
+      const buildPrevHasDiscount = hasDiscount(build);       // pre-UPDATE row
+      const buildNowHasDiscount  = hasDiscount(value);        // validated input
+      const shouldPushDiscount   = buildPrevHasDiscount || buildNowHasDiscount;
+
+      const effDiscAmt  = shouldPushDiscount ? value.discount_amount      : line.discount_amount;
+      const effDiscPct  = shouldPushDiscount ? value.discount_pct         : line.discount_pct;
+      const effDiscDesc = shouldPushDiscount ? value.discount_description : line.discount_description;
+      const effDiscPh   = shouldPushDiscount ? value.discount_is_phantom  : line.discount_is_phantom;
+
+      const extended = computeLineExtendedPrice({
+        quantity: qty,
+        unit_price: unitPrice,
+        discount_amount:     effDiscAmt,
+        discount_pct:        effDiscPct,
+        discount_is_phantom: effDiscPh,
+      });
+      pushedLineExtended = extended;
+      pushedLineDiscountApplied = Math.max(0, qty * unitPrice - extended);
+
+      if (shouldPushDiscount) {
+        statements.push(
+          stmt(env.DB,
+            `UPDATE quote_lines
+                SET unit_price = ?, extended_price = ?,
+                    discount_amount = ?, discount_pct = ?,
+                    discount_description = ?, discount_is_phantom = ?,
+                    updated_at = ?
+              WHERE id = ?`,
+            [unitPrice, extended,
+             value.discount_amount, value.discount_pct,
+             value.discount_description, value.discount_is_phantom,
+             ts, lineId]
+          )
+        );
+      } else {
+        statements.push(
+          stmt(env.DB,
+            'UPDATE quote_lines SET unit_price = ?, extended_price = ?, updated_at = ? WHERE id = ?',
+            [unitPrice, extended, ts, lineId]
+          )
+        );
+      }
+
+      // Keep the parent quote's subtotal/total in sync with the new
+      // extended_price. (Pre-Phase-3 the build autosave left these
+      // stale until something else touched the quote; now they update
+      // on every build save.)
+      statements.push(quoteTotalsRecomputeStmt(env.DB, quoteId, ts));
     }
 
     statements.push(
@@ -178,6 +244,10 @@ export async function onRequestPost(context) {
       },
       totals,
       wcCosts,
+      line: {
+        extended_price: pushedLineExtended,
+        discount_applied: pushedLineDiscountApplied,
+      },
     });
   }
 
