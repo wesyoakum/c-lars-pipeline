@@ -16,6 +16,7 @@ import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
 import { loadStageCatalog } from '../lib/stages.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
+import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
@@ -127,7 +128,8 @@ export async function onRequestGet(context) {
                         data-quoted="${escape(r.quoted)}">
                       <td class="col-number" data-col="number"><a href="/opportunities/${escape(r.id)}"><code>${escape(r.number)}</code></a></td>
                       <td class="col-title" data-col="title">
-                        <a href="/opportunities/${escape(r.id)}"><strong>${escape(r.title)}</strong></a>
+                        ${ieText('title', r.title)}
+                        <a class="row-open-link" href="/opportunities/${escape(r.id)}" title="Open opportunity" aria-label="Open opportunity">\u2197</a>
                       </td>
                       <td class="col-account_name" data-col="account_name">
                         ${r.account_id
@@ -136,20 +138,47 @@ export async function onRequestGet(context) {
                       </td>
                       <td class="col-type_label" data-col="type_label">${escape(r.type_label)}</td>
                       <td class="col-stage_label" data-col="stage_label">${escape(r.stage_label)}</td>
-                      <td class="col-value" data-col="value">${escape(r.value_display)}</td>
-                      <td class="col-close" data-col="close"><small class="muted">${escape(r.close)}</small></td>
+                      <td class="col-value num" data-col="value">
+                        ${ieText('estimated_value_usd', r.value === '' ? '' : String(r.value), {
+                          inputType: 'number',
+                          displayText: r.value_display,
+                        })}
+                      </td>
+                      <td class="col-close" data-col="close">
+                        ${ieText('expected_close_date', r.close, { inputType: 'date' })}
+                      </td>
                       <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
                       <td class="col-created" data-col="created"><small class="muted">${escape(r.created)}</small></td>
-                      <td class="col-rfq_received" data-col="rfq_received"><small class="muted">${escape(r.rfq_received)}</small></td>
-                      <td class="col-rfq_due" data-col="rfq_due"><small class="muted">${escape(r.rfq_due)}</small></td>
-                      <td class="col-rfi_due" data-col="rfi_due"><small class="muted">${escape(r.rfi_due)}</small></td>
-                      <td class="col-quoted" data-col="quoted"><small class="muted">${escape(r.quoted)}</small></td>
+                      <td class="col-rfq_received" data-col="rfq_received">
+                        ${ieText('rfq_received_date', r.rfq_received, { inputType: 'date' })}
+                      </td>
+                      <td class="col-rfq_due" data-col="rfq_due">
+                        ${ieText('rfq_due_date', r.rfq_due, { inputType: 'date' })}
+                      </td>
+                      <td class="col-rfi_due" data-col="rfi_due">
+                        ${ieText('rfi_due_date', r.rfi_due, { inputType: 'date' })}
+                      </td>
+                      <td class="col-quoted" data-col="quoted">
+                        ${ieText('quoted_date', r.quoted, { inputType: 'date' })}
+                      </td>
                     </tr>`
                 )}
               </tbody>
             </table>
           </div>
           <script>${raw(listScript('pms.oppList.v1'))}</script>
+          <script>${raw(listInlineEditScript('/opportunities/:id/patch', {
+            // Column keys → patch field names differ here, so tell the
+            // client which data-<attr> to update after each save.
+            fieldAttrMap: {
+              estimated_value_usd: 'value',
+              expected_close_date: 'close',
+              rfq_received_date: 'rfq_received',
+              rfq_due_date: 'rfq_due',
+              rfi_due_date: 'rfi_due',
+              quoted_date: 'quoted',
+            },
+          }))}</script>
         `}
     </section>
   `;

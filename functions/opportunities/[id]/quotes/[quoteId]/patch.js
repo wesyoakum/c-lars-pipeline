@@ -45,6 +45,18 @@ export async function onRequestPost(context) {
   let body;
   try { body = await request.json(); } catch { return json({ ok: false, error: 'Invalid JSON' }, 400); }
 
+  // Support the shared list-inline-edit body shape {field, value} by
+  // normalizing it to the multi-field object shape this endpoint was
+  // originally designed for. The list quicksearch/sort client uses
+  // the former; the quote detail page uses the latter.
+  const isSingleFieldShape = body && typeof body === 'object'
+    && typeof body.field === 'string'
+    && 'value' in body
+    && Object.keys(body).length === 2;
+  if (isSingleFieldShape) {
+    body = { [body.field]: body.value };
+  }
+
   // show_discounts is a display-only toggle — allow it on locked
   // quotes too. Everything else is blocked for read-only statuses.
   const onlyDisplayFields = Object.keys(body).every((k) => k === 'show_discounts');

@@ -17,6 +17,18 @@ import {
 } from '../lib/http.js';
 import { parseAddressForm, buildAddressStatements } from '../lib/address_editor.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
+import { ieText, ieSelect, listInlineEditScript } from '../lib/list-inline-edit.js';
+
+// Keep in sync with functions/accounts/[id]/index.js::SEGMENT_OPTIONS.
+// Used by the inline-edit select in the segment column.
+const SEGMENT_OPTIONS = [
+  { value: '', label: '— None —' },
+  { value: 'WROV', label: 'WROV' },
+  { value: 'Research', label: 'Research' },
+  { value: 'Defense', label: 'Defense' },
+  { value: 'Commercial', label: 'Commercial' },
+  { value: 'Other', label: 'Other' },
+];
 
 /**
  * GET /accounts — list accounts with full client-side sort/filter/search.
@@ -36,8 +48,22 @@ export async function onRequestGet(context) {
       LIMIT 500`
   );
 
+  // Collect the set of distinct parent_group labels already in use so
+  // the inline-edit select for that column can offer them as options.
+  // Includes a trailing "+ Add new group…" sentinel that the client
+  // controller swaps for a free-text input when picked.
+  const existingGroupLabels = Array.from(
+    new Set(rows.map((r) => r.parent_group).filter(Boolean))
+  ).sort();
+  const groupOptions = [
+    { value: '', label: '— None —' },
+    ...existingGroupLabels.map((g) => ({ value: g, label: g })),
+    { value: '__new__', label: '+ Add new group\u2026' },
+  ];
+
   const columns = [
     { key: 'name',          label: 'Name',      sort: 'text',   filter: 'text',   default: true },
+    { key: 'alias',         label: 'Alias',     sort: 'text',   filter: 'text',   default: true },
     { key: 'parent_group',  label: 'Group',     sort: 'text',   filter: 'select', default: false },
     { key: 'segment',       label: 'Segment',   sort: 'text',   filter: 'select', default: true },
     { key: 'phone',         label: 'Phone',     sort: 'text',   filter: 'text',   default: true },
@@ -49,13 +75,18 @@ export async function onRequestGet(context) {
 
   const rowData = rows.map(r => ({
     id: r.id,
-    // Combine name + alias + parent group into the filter data so the
-    // quicksearch matches any of them — typing "helix", "HR" (alias),
-    // or "Super Big Corp" (group) all find Helix Robotics Inc.
+    // `name` is the quicksearch text blob (name + alias + parent_group
+    // joined) so typing "helix", "HR" (alias), or "Super Big Corp"
+    // (group) all find Helix Robotics Inc. After an inline edit the
+    // client rebuilds this from data-name_display / data-alias /
+    // data-parent_group via the data-combined-name hint on the row.
     name: [r.name ?? '', r.alias ?? '', r.parent_group ?? '']
       .filter(Boolean)
       .join(' '),
     name_display: r.name ?? '',
+    // Raw alias. Unaliased rows sort as empty strings (list-table.js
+    // pushes empty/null to the end). Display uses a muted fallback to
+    // the name, handled by ieText({ fallbackText }).
     alias: r.alias ?? '',
     parent_group: r.parent_group ?? '',
     segment: r.segment ?? '',
@@ -85,17 +116,29 @@ export async function onRequestGet(context) {
               <tbody data-role="rows">
                 ${rowData.map(r => html`
                   <tr data-row-id="${escape(r.id)}"
+                      data-name_display="${escape(r.name_display)}"
+                      data-combined-name="name_display alias parent_group"
                       ${raw(rowDataAttrs(columns, r))}>
                     <td class="col-name" data-col="name">
-                      <a href="/accounts/${escape(r.id)}">${escape(r.name_display)}</a>${r.alias ? html` <span class="muted">(${escape(r.alias)})</span>` : ''}
+                      ${ieText('name', r.name_display)}
+                      <a class="row-open-link" href="/accounts/${escape(r.id)}" title="Open account" aria-label="Open account">\u2197</a>
                     </td>
-                    <td class="col-parent_group" data-col="parent_group">${escape(r.parent_group)}</td>
-                    <td class="col-segment" data-col="segment">${escape(r.segment)}</td>
-                    <td class="col-phone" data-col="phone">${escape(r.phone)}</td>
+                    <td class="col-alias" data-col="alias">
+                      ${ieText('alias', r.alias, { fallbackText: r.name_display })}
+                    </td>
+                    <td class="col-parent_group" data-col="parent_group">
+                      ${ieSelect('parent_group', r.parent_group, groupOptions, { allowNew: true })}
+                    </td>
+                    <td class="col-segment" data-col="segment">
+                      ${ieSelect('segment', r.segment, SEGMENT_OPTIONS)}
+                    </td>
+                    <td class="col-phone" data-col="phone">
+                      ${ieText('phone', r.phone, { inputType: 'tel' })}
+                    </td>
                     <td class="col-contact_count num" data-col="contact_count">${r.contact_count}</td>
                     <td class="col-opp_count num" data-col="opp_count">${r.opp_count}</td>
                     <td class="col-website" data-col="website">
-                      ${r.website ? html`<a href="${escape(r.website)}" target="_blank" rel="noopener">${escape(r.website.replace(/^https?:\/\//, ''))}</a>` : ''}
+                      ${ieText('website', r.website, { inputType: 'url' })}
                     </td>
                     <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
                   </tr>
@@ -104,6 +147,7 @@ export async function onRequestGet(context) {
             </table>
           </div>
           <script>${raw(listScript('pms.accounts.v1', 'name', 'asc'))}</script>
+          <script>${raw(listInlineEditScript('/accounts/:id/patch'))}</script>
         `}
     </section>
   `;

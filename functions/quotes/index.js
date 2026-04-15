@@ -12,6 +12,7 @@ import {
   quoteTypeDisplayLabel,
 } from '../lib/validators.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
+import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
 
 export async function onRequestGet(context) {
   const { env, data, request } = context;
@@ -98,20 +99,14 @@ export async function onRequestGet(context) {
               <tbody data-role="rows">
                 ${rowData.map(r => html`
                   <tr data-row-id="${escape(r.id)}"
+                      data-opp_id="${escape(r.opp_id)}"
                       ${raw(rowDataAttrs(columns, r))}>
                     <td class="col-number" data-col="number"><a href="/opportunities/${escape(r.opp_id)}/quotes/${escape(r.id)}"><code>${escape(r.number)}</code></a></td>
                     <td class="col-revision" data-col="revision">${escape(r.revision)}</td>
                     <td class="col-type_label" data-col="type_label">${escape(r.type_label)}</td>
-                    <td class="col-title" data-col="title"
-                        x-data="qTitle('${escape(r.opp_id)}', '${escape(r.id)}', ${raw(JSON.stringify(r.title || ''))})">
-                      <span x-show="!editing" @click="editing = true" style="cursor:pointer" :class="{ 'muted': !val }">
-                        <span x-text="val || '(no title)'" style="border-bottom:1px dashed var(--border)"></span>
-                      </span>
-                      <input x-show="editing" x-cloak type="text" :value="val"
-                             @blur="save($event.target.value)" @keydown.enter="save($event.target.value)"
-                             @keydown.escape="editing = false"
-                             x-ref="inp" style="width:100%;font:inherit;padding:0.15rem 0.3rem"
-                             x-effect="if(editing) $nextTick(() => $refs.inp?.focus())">
+                    <td class="col-title" data-col="title">
+                      ${ieText('title', r.title)}
+                      <a class="row-open-link" href="/opportunities/${escape(r.opp_id)}/quotes/${escape(r.id)}" title="Open quote" aria-label="Open quote">\u2197</a>
                     </td>
                     <td class="col-opp_number" data-col="opp_number"><a href="/opportunities/${escape(r.opp_id)}"><code>${escape(r.opp_number_display)}</code> ${escape(r.opp_title)}</a></td>
                     <td class="col-account_name" data-col="account_name">
@@ -121,7 +116,9 @@ export async function onRequestGet(context) {
                     </td>
                     <td class="col-status_label" data-col="status_label"><span class="pill ${statusPillClass(r.status)}">${escape(r.status_label)}</span></td>
                     <td class="col-total num" data-col="total">${escape(r.total_display)}</td>
-                    <td class="col-valid_until" data-col="valid_until"><small class="muted">${escape(r.valid_until)}</small></td>
+                    <td class="col-valid_until" data-col="valid_until">
+                      ${ieText('valid_until', r.valid_until, { inputType: 'date' })}
+                    </td>
                     <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
                     <td class="col-created" data-col="created"><small class="muted">${escape(r.created)}</small></td>
                   </tr>
@@ -130,26 +127,7 @@ export async function onRequestGet(context) {
             </table>
           </div>
           <script>${raw(listScript('pms.quotes.v1'))}</script>
-          <script>
-          document.addEventListener('alpine:init', function() {
-            Alpine.data('qTitle', function(oppId, quoteId, initial) {
-              return {
-                val: initial,
-                editing: false,
-                save: function(newVal) {
-                  this.editing = false;
-                  if (newVal === this.val) return;
-                  this.val = newVal;
-                  fetch('/opportunities/' + oppId + '/quotes/' + quoteId + '/patch', {
-                    method: 'POST',
-                    headers: { 'content-type': 'application/json' },
-                    body: JSON.stringify({ title: newVal }),
-                  });
-                },
-              };
-            });
-          });
-          </script>
+          <script>${raw(listInlineEditScript('/opportunities/:opp_id/quotes/:id/patch'))}</script>
         `}
     </section>
   `;

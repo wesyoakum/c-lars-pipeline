@@ -10,6 +10,7 @@ import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
 import { parseTransactionTypes } from '../lib/validators.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
+import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
@@ -90,7 +91,10 @@ export async function onRequestGet(context) {
                   <tr data-row-id="${escape(r.id)}"
                       ${raw(rowDataAttrs(columns, r))}>
                     <td class="col-number" data-col="number"><a href="/jobs/${escape(r.id)}"><strong>${escape(r.number)}</strong></a></td>
-                    <td class="col-title" data-col="title">${escape(r.title)}</td>
+                    <td class="col-title" data-col="title">
+                      ${ieText('title', r.title)}
+                      <a class="row-open-link" href="/jobs/${escape(r.id)}" title="Open job" aria-label="Open job">\u2197</a>
+                    </td>
                     <td class="col-account_name" data-col="account_name">${r.opp_id ? html`<a href="/opportunities/${escape(r.opp_id)}">${escape(r.account_name)}</a>` : escape(r.account_name)}</td>
                     <td class="col-opp_number" data-col="opp_number">${r.opp_id ? html`<a href="/opportunities/${escape(r.opp_id)}">${escape(r.opp_number)}</a>` : escape(r.opp_number)}</td>
                     <td class="col-type_label" data-col="type_label">${escape(r.type_label)}</td>
@@ -102,7 +106,8 @@ export async function onRequestGet(context) {
               </tbody>
             </table>
           </div>
-          <script>${raw(listScript('pms.jobs.v1'))}</script>`}
+          <script>${raw(listScript('pms.jobs.v1'))}</script>
+          <script>${raw(listInlineEditScript('/jobs/:id/patch'))}</script>`}
     </section>`;
 
   return htmlResponse(

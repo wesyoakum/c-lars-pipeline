@@ -9,6 +9,7 @@ import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { uuid, now } from '../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
+import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
 
 const TYPE_LABELS = {
   task: 'Task',
@@ -150,9 +151,8 @@ export async function onRequestGet(context) {
                       ${raw(rowDataAttrs(columns, r))}
                       class="${r.isCompleted ? 'row-muted' : ''} ${r.isOverdue ? 'row-overdue' : ''}">
                     <td class="col-subject" data-col="subject">
-                      <a href="/activities/${escape(r.id)}" class="${r.isCompleted ? 'completed-text' : ''}">
-                        <strong>${escape(r.subject || '(no subject)')}</strong>
-                      </a>
+                      ${ieText('subject', r.subject, { placeholder: '(no subject)' })}
+                      <a class="row-open-link" href="/activities/${escape(r.id)}" title="Open activity" aria-label="Open activity">\u2197</a>
                       ${r.body_preview ? html`<br><small class="muted">${escape(r.body_preview)}</small>` : ''}
                     </td>
                     <td class="col-type_label" data-col="type_label"><span class="pill pill-${r.type}">${escape(r.type_label)}</span></td>
@@ -163,7 +163,7 @@ export async function onRequestGet(context) {
                     </td>
                     <td class="col-assigned_name" data-col="assigned_name">${escape(r.assigned_name)}</td>
                     <td class="col-due ${r.isOverdue ? 'overdue-text' : ''}" data-col="due">
-                      ${r.due ? escape(r.due) : html`<span class="muted">\u2014</span>`}
+                      ${ieText('due_at', r.due, { inputType: 'date' })}
                     </td>
                     <td class="col-status_label" data-col="status_label"><span class="pill ${r.status === 'completed' ? 'pill-success' : r.status === 'cancelled' ? 'pill-locked' : ''}">${escape(r.status_label)}</span></td>
                   </tr>
@@ -172,6 +172,10 @@ export async function onRequestGet(context) {
             </table>
           </div>
           <script>${raw(listScript('pms.activities.v1', 'due', 'asc'))}</script>
+          <script>${raw(listInlineEditScript('/activities/:id/patch', {
+            // Column key `due` maps to patch field `due_at`.
+            fieldAttrMap: { due_at: 'due' },
+          }))}</script>
         `}
     </section>
   `;
