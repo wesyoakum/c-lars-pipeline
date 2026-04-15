@@ -4,7 +4,7 @@
 // template from R2, and optionally converts .docx → PDF via ConvertAPI.
 
 import { one, all } from './db.js';
-import { fmtDollar } from './pricing.js';
+import { fmtDollar, computeDiscountApplied, readDiscountFromRow } from './pricing.js';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import { TEMPLATE_CATALOG, templateTypeForQuote } from './template-catalog.js';
@@ -98,6 +98,15 @@ export async function getQuoteDocData(env, quoteId) {
   // Compute subtotal from lines (sum of extended_price)
   const subtotalRaw = lines.reduce((sum, l) => sum + (Number(l.extended_price) || 0), 0);
 
+  // Header-level discount. For Phase 1 we only support real (non-phantom)
+  // discounts at the header level. Phantom rendering (Phase 2) will
+  // additionally mark up each line's unit price before formatting.
+  const headerDiscount = readDiscountFromRow(quote);
+  const headerDiscountApplied = computeDiscountApplied(headerDiscount, subtotalRaw);
+  const hasHeaderDiscount = headerDiscountApplied > 0 || !!headerDiscount?.description;
+  const taxRaw = Number(quote.tax_amount) || 0;
+  const totalAfterDiscount = subtotalRaw - headerDiscountApplied + taxRaw;
+
   // Build combined contact name
   const contactFirst = quote.contact_first || '';
   const contactLast  = quote.contact_last  || '';
@@ -158,6 +167,26 @@ export async function getQuoteDocData(env, quoteId) {
     quoteTax: fmtDollar(quote.tax_amount),
     quoteTotal: fmtDollar(quote.total_price),
 
+    // Header-level discount (T3.2 Phase 1)
+    // Templates can conditionally render a discount row with:
+    //   {#hasDiscount} Discount: -{quoteDiscountAmount} {/hasDiscount}
+    hasDiscount: hasHeaderDiscount,
+    quoteDiscountDescription: headerDiscount?.description || 'Discount',
+    quoteDiscountAmount: fmtDollar(headerDiscountApplied),
+    quoteDiscountPct:
+      headerDiscount?.pct != null ? `${Number(headerDiscount.pct).toFixed(1)}%` : '',
+    // Pre-discount subtotal — same as quoteSubtotal for real discounts.
+    // (Phantom rendering in Phase 2 will substitute a marked-up figure
+    // so the "list price" row reads higher than the stored subtotal.)
+    quoteSubtotalPreDiscount: fmtDollar(subtotalRaw),
+    // Post-discount, pre-tax figure. Useful for templates that want to
+    // show a "Net total" line above tax.
+    quoteNetAfterDiscount: fmtDollar(subtotalRaw - headerDiscountApplied),
+    // Grand total with discount applied (matches stored total_price for
+    // real discounts — belt and suspenders in case the stored value is
+    // momentarily stale).
+    quoteTotalAfterDiscount: fmtDollar(totalAfterDiscount),
+
     // Quote extras
     quoteTitle: quote.title || '',
     incoterms: quote.incoterms || '',
@@ -205,6 +234,13 @@ export async function getQuoteDocData(env, quoteId) {
     QuoteSubTotal: fmtDollar(subtotalRaw),
     QuoteTaxTotal: fmtDollar(quote.tax_amount),
     QuoteTotal: fmtDollar(quote.total_price),
+
+    // WFM-compatible discount aliases
+    HasDiscount: hasHeaderDiscount,
+    QuoteDiscountDescription: headerDiscount?.description || 'Discount',
+    QuoteDiscountAmount: fmtDollar(headerDiscountApplied),
+    QuoteSubTotalPreDiscount: fmtDollar(subtotalRaw),
+    QuoteNetAfterDiscount: fmtDollar(subtotalRaw - headerDiscountApplied),
 
     // Job context
     JobName: quote.opp_title || '',

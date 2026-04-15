@@ -25,7 +25,12 @@ import {
   QUOTE_TYPE_LABELS,
   QUOTE_STATUS_LABELS,
 } from '../../../../lib/validators.js';
-import { fmtDollar } from '../../../../lib/pricing.js';
+import {
+  fmtDollar,
+  quoteTotalsRecomputeStmt,
+  computeDiscountApplied,
+  readDiscountFromRow,
+} from '../../../../lib/pricing.js';
 import { templateTypeForQuote, templateManagerHtml } from '../../../../lib/template-catalog.js';
 
 const READ_ONLY_STATUSES = new Set([
@@ -109,7 +114,13 @@ export async function onRequestGet(context) {
 
   const readOnly = READ_ONLY_STATUSES.has(quote.status);
   const subtotal = lines.reduce((a, l) => a + Number(l.extended_price ?? 0), 0);
-  const total = subtotal + Number(quote.tax_amount ?? 0);
+  // T3.2 Phase 1 — header-level discount is applied to the full subtotal
+  // (same base the server-side recompute uses via SUM(extended_price)).
+  // Phantom discounts don't reduce the stored total — they're a
+  // render-time markup only. See pricing.js for the details.
+  const headerDiscount = readDiscountFromRow(quote);
+  const headerDiscountApplied = computeDiscountApplied(headerDiscount, subtotal);
+  const total = subtotal - headerDiscountApplied + Number(quote.tax_amount ?? 0);
   const highlightDocId = url.searchParams.get('highlight');
   const flash = highlightDocId ? null : readFlash(url);
 
@@ -481,6 +492,7 @@ export async function onRequestGet(context) {
               <td></td>
             </tr>
           ` : ''}
+          ${renderDiscountRow({ quote, readOnly, headerDiscountApplied })}
           <tr class="totals-row">
             <td colspan="5" class="num"><strong>Total</strong></td>
             <td class="num" id="q-total"><strong>${fmtDollar(total)}</strong></td>
@@ -558,16 +570,25 @@ export async function onRequestGet(context) {
   // ── Scripts ────────────────────────────────────────────────────────
   const scripts = html`
     <script>
-    // Global patch helper — auto-saves quote fields via fetch
-    window._qPatch = function(field, value) {
-      var body = {};
-      body[field] = value;
+    // Global patch helper — auto-saves quote fields via fetch.
+    // Accepts either a single (field, value) pair or an object of many
+    // fields. Fires the _qPatchPayload custom event on completion so
+    // listeners (e.g. the totals renderer) can react to returned totals.
+    window._qPatch = function(fieldOrBody, value) {
+      var body;
+      if (typeof fieldOrBody === 'string') {
+        body = {};
+        body[fieldOrBody] = value;
+      } else {
+        body = fieldOrBody || {};
+      }
       fetch('${raw(patchUrl)}', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
       }).then(function(r) { return r.json(); }).then(function(d) {
-        if (!d.ok) console.error('Patch failed:', d.error);
+        if (!d.ok) { console.error('Patch failed:', d.error); return; }
+        document.dispatchEvent(new CustomEvent('_qPatchPayload', { detail: d }));
       });
     };
 
@@ -741,6 +762,19 @@ export async function onRequestGet(context) {
         };
       });
 
+      // Header-level discount component — thin wrapper around _qPatch so
+      // the phantom checkbox ships a proper 0/1 int.
+      Alpine.data('quoteDiscount', function() {
+        return {
+          patchField: function(field, value) {
+            window._qPatch(field, value);
+          },
+          patchPhantom: function(checked) {
+            window._qPatch('discount_is_phantom', checked ? 1 : 0);
+          },
+        };
+      });
+
       // Details card: address selector + description auto-save
       Alpine.data('quoteDetails', function() {
         return {
@@ -815,7 +849,27 @@ export async function onRequestGet(context) {
         if (totalEl) totalEl.innerHTML = '<strong>' + fmtDollar(data.total_price) + '</strong>';
         var headerTotal = document.getElementById('q-header-total');
         if (headerTotal) headerTotal.textContent = fmtDollar(data.total_price);
+        // Discount applied cell is implied by (subtotal - total + tax) but
+        // we don't know tax from the line-save payload, so leave it alone
+        // here. The discount-field patch path updates it directly below.
       }
+
+      // Listen for _qPatch responses that include recomputed totals (e.g.
+      // from discount or tax_amount changes) and update the visible figures.
+      document.addEventListener('_qPatchPayload', function(e) {
+        var d = (e.detail || {});
+        if (d.totals) {
+          updateTotals({
+            subtotal_price: d.totals.subtotal_price,
+            total_price: d.totals.total_price,
+          });
+          var discEl = document.getElementById('q-discount-applied');
+          if (discEl) {
+            var amt = Number(d.totals.discount_applied || 0);
+            discEl.innerHTML = '<em>' + (amt > 0 ? '-' + fmtDollar(amt) : '') + '</em>';
+          }
+        }
+      });
       function saveForm(form) {
         var formData = new FormData(form);
         fetch(form.action, {
@@ -930,14 +984,6 @@ export async function onRequestPost(context) {
   const after = { ...before, ...value };
   const changes = diff(before, after, UPDATE_FIELDS);
 
-  const lineTotals = await one(
-    env.DB,
-    `SELECT COALESCE(SUM(extended_price), 0) AS subtotal FROM quote_lines WHERE quote_id = ?`,
-    [quoteId]
-  );
-  const subtotal = Number(lineTotals?.subtotal ?? 0);
-  const total = subtotal + Number(value.tax_amount ?? 0);
-
   await batch(env.DB, [
     stmt(
       env.DB,
@@ -951,8 +997,6 @@ export async function onRequestPost(context) {
               delivery_terms = ?,
               delivery_estimate = ?,
               tax_amount = ?,
-              subtotal_price = ?,
-              total_price = ?,
               notes_internal = ?,
               notes_customer = ?,
               updated_at = ?
@@ -960,10 +1004,13 @@ export async function onRequestPost(context) {
       [
         value.quote_type, value.title, value.description, value.valid_until,
         value.incoterms, value.payment_terms, value.delivery_terms,
-        value.delivery_estimate, value.tax_amount, subtotal, total,
+        value.delivery_estimate, value.tax_amount,
         value.notes_internal, value.notes_customer, ts, quoteId,
       ]
     ),
+    // Always recompute totals — tax_amount may have changed, and the
+    // shared helper pulls the up-to-date discount fields out of the row.
+    quoteTotalsRecomputeStmt(env.DB, quoteId, ts),
     auditStmt(env.DB, {
       entityType: 'quote',
       entityId: quoteId,
@@ -1006,6 +1053,75 @@ function formatSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Render the discount rows inside the line-items table totals section.
+ * Always rendered so editors can toggle a discount on an existing quote
+ * even when none was set before. Collapses to a single "Add discount"
+ * affordance row when no discount is set and the quote is editable; when
+ * the quote is read-only and has no discount, returns nothing.
+ */
+function renderDiscountRow({ quote, readOnly, headerDiscountApplied }) {
+  const hasDiscount =
+    quote.discount_amount != null ||
+    quote.discount_pct != null ||
+    (quote.discount_description && quote.discount_description.trim() !== '') ||
+    quote.discount_is_phantom === 1;
+
+  if (readOnly && !hasDiscount) return '';
+
+  const amtVal = quote.discount_amount != null ? quote.discount_amount : '';
+  const pctVal = quote.discount_pct != null ? quote.discount_pct : '';
+  const descVal = quote.discount_description ?? '';
+  const phantomChecked = quote.discount_is_phantom === 1 ? 'checked' : '';
+
+  // Read-only rendering (issued/accepted/etc): just show the discount line.
+  if (readOnly) {
+    return html`
+      <tr class="totals-row discount-row">
+        <td colspan="5" class="num"><em>${escape(descVal || 'Discount')}</em></td>
+        <td class="num"><em>-${fmtDollar(headerDiscountApplied)}</em></td>
+        <td></td>
+      </tr>
+    `;
+  }
+
+  // Editable rendering: inline inputs for description / amount / pct / phantom.
+  return html`
+    <tr class="totals-row discount-row" x-data="quoteDiscount()">
+      <td colspan="5" class="num" style="text-align:right">
+        <div class="discount-editor" style="display:inline-flex;gap:0.5rem;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+          <label class="muted" style="font-size:0.85em">
+            <input type="checkbox" name="discount_is_phantom"
+                   ${phantomChecked}
+                   @change="patchPhantom($event.target.checked)"
+                   title="When checked, unit prices on the PDF are marked up to show a 'list price' with a matching discount line — the revenue figure doesn't change.">
+            Phantom
+          </label>
+          <input type="text" placeholder="Discount description"
+                 value="${escape(descVal)}"
+                 @change="patchField('discount_description', $event.target.value)"
+                 style="width:16rem">
+          <span class="muted" style="font-size:0.85em">$</span>
+          <input type="text" placeholder="Amount"
+                 value="${escape(String(amtVal))}"
+                 @change="patchField('discount_amount', $event.target.value)"
+                 class="num-input" style="width:5rem">
+          <span class="muted" style="font-size:0.85em">or</span>
+          <input type="text" placeholder="%"
+                 value="${escape(String(pctVal))}"
+                 @change="patchField('discount_pct', $event.target.value)"
+                 class="num-input" style="width:3.5rem">
+          <span class="muted" style="font-size:0.85em">%</span>
+        </div>
+      </td>
+      <td class="num" id="q-discount-applied">
+        <em>${headerDiscountApplied > 0 ? html`-${fmtDollar(headerDiscountApplied)}` : ''}</em>
+      </td>
+      <td></td>
+    </tr>
+  `;
 }
 
 function notFound(context) {

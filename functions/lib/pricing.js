@@ -28,7 +28,7 @@
 // All functions here are pure — no HTML/DOM, no D1 side effects except in
 // the loaders at the bottom (which are thin wrappers over one/all).
 
-import { one, all } from './db.js';
+import { one, all, stmt } from './db.js';
 
 // =====================================================================
 // 1. Pricing settings loader
@@ -451,4 +451,141 @@ export function computeFromBundle(bundle, settings) {
       laborCalcTotal,
     },
   };
+}
+
+// =====================================================================
+// 6. Discount helpers (header-level, line-level, build-level)
+// =====================================================================
+//
+// Three tables (quotes, quote_lines, cost_builds) all share the same four
+// columns: discount_amount, discount_pct, discount_description,
+// discount_is_phantom — so these helpers are scope-agnostic.
+//
+// Semantics:
+//   - discount_amount wins over discount_pct when both are set.
+//   - A phantom discount (`isPhantom` truthy) never reduces stored totals.
+//     The unit_price (or subtotal) is already set to the real revenue
+//     figure; a phantom discount only matters at render time, where the
+//     PDF shows an inflated "list price" and a matching discount line that
+//     lands back at the stored total. See the PDF generator for the
+//     render-time markup.
+//   - A real discount is subtracted from the scope value before tax.
+//
+// All inputs are null-tolerant so callers can pass raw D1 row fields.
+
+/**
+ * Compute the dollar value of a REAL (non-phantom) discount against a
+ * scope amount. Returns 0 when the discount is phantom, missing, or not
+ * applicable (negative or > scope).
+ *
+ *   computeDiscountApplied({amount: 500}, 2000)       → 500
+ *   computeDiscountApplied({pct: 10}, 2000)           → 200
+ *   computeDiscountApplied({amount: 5, isPhantom:1}, 2000) → 0
+ *   computeDiscountApplied({}, 2000)                  → 0
+ *   computeDiscountApplied({pct: 10}, 0)              → 0
+ */
+export function computeDiscountApplied(discount, scopeValue) {
+  if (!discount) return 0;
+  if (discount.isPhantom) return 0;
+  const scope = Number(scopeValue) || 0;
+  if (scope <= 0) return 0;
+
+  const amt = normNum(discount.amount);
+  if (amt !== null && amt > 0) {
+    return Math.min(amt, scope);
+  }
+  const pct = normNum(discount.pct);
+  if (pct !== null && pct > 0) {
+    const ratio = Math.min(pct, 100) / 100;
+    return scope * ratio;
+  }
+  return 0;
+}
+
+/**
+ * Build a normalized discount object from a D1 row. Accepts either the
+ * raw column names (discount_amount, discount_pct, discount_is_phantom)
+ * or the short form (amount, pct, isPhantom). Returns null if the row
+ * has no discount fields at all (so callers can cheaply early-out).
+ */
+export function readDiscountFromRow(row) {
+  if (!row) return null;
+  const amount = row.discount_amount ?? row.amount ?? null;
+  const pct = row.discount_pct ?? row.pct ?? null;
+  const description = row.discount_description ?? row.description ?? null;
+  const isPhantom = !!(row.discount_is_phantom ?? row.isPhantom ?? 0);
+  if (amount == null && pct == null && !description && !isPhantom) return null;
+  return { amount, pct, description, isPhantom };
+}
+
+/**
+ * Apply a quote header discount to a subtotal, returning the post-discount
+ * subtotal (tax is added on top of this by the caller).
+ *
+ *   applyHeaderDiscount(row, subtotal) → { subtotalAfter, discountApplied }
+ */
+export function applyHeaderDiscount(quoteRow, subtotal) {
+  const d = readDiscountFromRow(quoteRow);
+  const applied = computeDiscountApplied(d, subtotal);
+  return {
+    subtotalAfter: (Number(subtotal) || 0) - applied,
+    discountApplied: applied,
+    isPhantom: !!(d && d.isPhantom),
+  };
+}
+
+// =====================================================================
+// 7. Quote totals recompute (subtotal, total, with discount)
+// =====================================================================
+//
+// All line-mutation sites (add/edit/delete) and the tax-changed path in
+// the quote patch handler recompute the parent quote's subtotal_price
+// and total_price. The formula is:
+//
+//   subtotal_price = SUM(extended_price of all lines)
+//   total_price    = subtotal_price - header_discount_applied + tax_amount
+//
+// Where header_discount_applied is:
+//   - 0 if discount_is_phantom = 1 (phantom discounts don't reduce stored
+//     totals; they're a render-time markup only)
+//   - min(discount_amount, subtotal) if discount_amount is set
+//   - subtotal * (min(discount_pct, 100) / 100) if discount_pct is set
+//   - 0 otherwise
+//
+// This SQL uses SQLite's multi-arg min() which is scalar (not aggregate)
+// when given 2+ arguments. The four correlated subqueries all resolve to
+// the same value (the new subtotal) — SQLite will evaluate them each
+// time but the overhead is negligible for the line counts we see on
+// real quotes (<< 100).
+
+/**
+ * Return a batch-friendly stmt that recomputes subtotal_price and
+ * total_price for the given quote, taking any header discount into
+ * account. Callers push this into their existing batch alongside the
+ * INSERT/UPDATE/DELETE of the line that triggered the recompute.
+ */
+export function quoteTotalsRecomputeStmt(db, quoteId, ts) {
+  return stmt(
+    db,
+    `UPDATE quotes
+        SET subtotal_price = (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ?),
+            total_price    =
+              (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ?)
+              - CASE
+                  WHEN COALESCE(discount_is_phantom, 0) = 1 THEN 0
+                  WHEN discount_amount IS NOT NULL AND discount_amount > 0 THEN
+                    MIN(
+                      discount_amount,
+                      (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ?)
+                    )
+                  WHEN discount_pct IS NOT NULL AND discount_pct > 0 THEN
+                    (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ?)
+                      * (MIN(discount_pct, 100.0) / 100.0)
+                  ELSE 0
+                END
+              + COALESCE(tax_amount, 0),
+            updated_at     = ?
+      WHERE id = ?`,
+    [quoteId, quoteId, quoteId, quoteId, ts, quoteId]
+  );
 }

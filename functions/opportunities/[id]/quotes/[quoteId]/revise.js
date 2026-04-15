@@ -17,6 +17,7 @@ import { one, all, stmt, batch } from '../../../../lib/db.js';
 import { auditStmt } from '../../../../lib/audit.js';
 import { uuid, now } from '../../../../lib/ids.js';
 import { redirectWithFlash } from '../../../../lib/http.js';
+import { quoteTotalsRecomputeStmt } from '../../../../lib/pricing.js';
 
 const CUSTOMER_FACING = new Set(['issued', 'revision_issued', 'accepted', 'rejected', 'expired']);
 
@@ -89,6 +90,7 @@ export async function onRequestPost(context) {
           incoterms, payment_terms, delivery_terms, delivery_estimate,
           cost_build_id, supersedes_quote_id,
           notes_internal, notes_customer,
+          discount_amount, discount_pct, discount_description, discount_is_phantom,
           created_at, updated_at, created_by_user_id)
        VALUES (?, ?, ?, ?, ?, ?, 'revision_draft',
                ?, ?, ?, ?,
@@ -96,6 +98,7 @@ export async function onRequestPost(context) {
                ?, ?, ?, ?,
                ?, ?,
                ?, ?,
+               ?, ?, ?, ?,
                ?, ?, ?)`,
       [
         newId,
@@ -119,6 +122,11 @@ export async function onRequestPost(context) {
         source.id,
         source.notes_internal,
         source.notes_customer,
+        // T3.2 Phase 1 — carry over the header discount onto the new revision
+        source.discount_amount ?? null,
+        source.discount_pct ?? null,
+        source.discount_description ?? null,
+        source.discount_is_phantom ?? 0,
         ts,
         ts,
         user?.id ?? null,
@@ -180,6 +188,11 @@ export async function onRequestPost(context) {
       })
     );
   }
+
+  // Recompute the new revision's totals from the fresh copy of the lines
+  // and the carried-over discount. This replaces the INSERTed snapshot so
+  // future readers see a consistent (subtotal - discount + tax) total.
+  statements.push(quoteTotalsRecomputeStmt(env.DB, newId, ts));
 
   statements.push(
     auditStmt(env.DB, {

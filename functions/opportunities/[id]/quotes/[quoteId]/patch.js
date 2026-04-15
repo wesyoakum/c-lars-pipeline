@@ -8,6 +8,7 @@
 import { one, stmt, batch } from '../../../../lib/db.js';
 import { auditStmt, diff } from '../../../../lib/audit.js';
 import { now } from '../../../../lib/ids.js';
+import { quoteTotalsRecomputeStmt } from '../../../../lib/pricing.js';
 
 const READ_ONLY_STATUSES = new Set([
   'issued', 'revision_issued', 'accepted', 'rejected', 'expired', 'dead',
@@ -17,6 +18,15 @@ const PATCHABLE = new Set([
   'quote_type', 'title', 'description', 'valid_until', 'incoterms',
   'payment_terms', 'delivery_terms', 'delivery_estimate',
   'tax_amount', 'notes_internal', 'notes_customer',
+  // T3.2 Phase 1 — header-level discount
+  'discount_amount', 'discount_pct', 'discount_description', 'discount_is_phantom',
+]);
+
+// Fields that affect the stored quote totals; changing any of them
+// triggers a subtotal/total recompute via the shared helper in pricing.js.
+const RECOMPUTE_FIELDS = new Set([
+  'tax_amount',
+  'discount_amount', 'discount_pct', 'discount_is_phantom',
 ]);
 
 export async function onRequestPost(context) {
@@ -43,7 +53,17 @@ export async function onRequestPost(context) {
   for (const [k, v] of Object.entries(body)) {
     if (!PATCHABLE.has(k)) continue;
     sets.push(`${k} = ?`);
-    vals.push(v === '' ? null : v);
+    // Numeric coercion for the toggle so checkbox-style inputs ('on'/'off'
+    // or '1'/'0') land as 0/1 integers in D1.
+    let storedVal;
+    if (v === '' || v === null || v === undefined) {
+      storedVal = null;
+    } else if (k === 'discount_is_phantom') {
+      storedVal = (v === 1 || v === '1' || v === true || v === 'true' || v === 'on') ? 1 : 0;
+    } else {
+      storedVal = v;
+    }
+    vals.push(storedVal);
     fields.push(k);
   }
 
@@ -55,24 +75,26 @@ export async function onRequestPost(context) {
   vals.push(quoteId);
 
   const after = { ...before };
-  for (const f of fields) after[f] = body[f] === '' ? null : body[f];
+  for (let i = 0; i < fields.length; i++) {
+    // vals is shaped like [val0, val1, ..., ts, quoteId] — the first
+    // `fields.length` entries correspond to PATCHABLE fields in order.
+    after[fields[i]] = vals[i];
+  }
   const changes = diff(before, after, fields);
 
-  // Recompute totals if tax changed
-  if (fields.includes('tax_amount')) {
-    const lineTotals = await one(
-      env.DB,
-      `SELECT COALESCE(SUM(extended_price), 0) AS subtotal FROM quote_lines WHERE quote_id = ?`,
-      [quoteId]
-    );
-    const sub = Number(lineTotals?.subtotal ?? 0);
-    const tot = sub + Number(after.tax_amount ?? 0);
-    sets.splice(sets.length - 1, 0, 'subtotal_price = ?', 'total_price = ?');
-    vals.splice(vals.length - 1, 0, sub, tot);
+  const statements = [
+    stmt(env.DB, `UPDATE quotes SET ${sets.join(', ')} WHERE id = ?`, vals),
+  ];
+
+  // If any field that affects totals changed, run the shared recompute
+  // AFTER the UPDATE. The recompute reads discount_* and tax_amount from
+  // the row so it must see the new values.
+  const needsRecompute = fields.some((f) => RECOMPUTE_FIELDS.has(f));
+  if (needsRecompute) {
+    statements.push(quoteTotalsRecomputeStmt(env.DB, quoteId, ts));
   }
 
-  await batch(env.DB, [
-    stmt(env.DB, `UPDATE quotes SET ${sets.join(', ')} WHERE id = ?`, vals),
+  statements.push(
     auditStmt(env.DB, {
       entityType: 'quote',
       entityId: quoteId,
@@ -80,10 +102,35 @@ export async function onRequestPost(context) {
       user,
       summary: `Updated ${before.number} Rev ${before.revision}`,
       changes,
-    }),
-  ]);
+    })
+  );
 
-  return json({ ok: true });
+  await batch(env.DB, statements);
+
+  // Fetch the recomputed totals so the client can update its display
+  // without a full page reload. Include discount_applied so the visible
+  // "Discount $X" cell updates live when the user edits the fields.
+  let totals = null;
+  if (needsRecompute) {
+    const row = await one(
+      env.DB,
+      `SELECT subtotal_price, total_price, tax_amount,
+              discount_amount, discount_pct, discount_is_phantom
+         FROM quotes WHERE id = ?`,
+      [quoteId]
+    );
+    const sub = Number(row?.subtotal_price ?? 0);
+    const tot = Number(row?.total_price ?? 0);
+    const tax = Number(row?.tax_amount ?? 0);
+    const discountApplied = Math.max(0, sub - (tot - tax));
+    totals = {
+      subtotal_price: sub,
+      total_price: tot,
+      discount_applied: discountApplied,
+    };
+  }
+
+  return json({ ok: true, totals });
 }
 
 function json(data, status = 200) {

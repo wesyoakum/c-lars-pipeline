@@ -8,6 +8,7 @@ import { auditStmt } from '../../../../../lib/audit.js';
 import { uuid, now } from '../../../../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../../../../lib/http.js';
 import { validateQuoteLine } from '../../../../../lib/validators.js';
+import { quoteTotalsRecomputeStmt } from '../../../../../lib/pricing.js';
 
 const READ_ONLY_STATUSES = new Set([
   'accepted',
@@ -87,15 +88,7 @@ export async function onRequestPost(context) {
         ts,
       ]
     ),
-    stmt(
-      env.DB,
-      `UPDATE quotes
-          SET subtotal_price = (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ?),
-              total_price    = (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ?) + COALESCE(tax_amount, 0),
-              updated_at     = ?
-        WHERE id = ?`,
-      [quoteId, quoteId, ts, quoteId]
-    ),
+    quoteTotalsRecomputeStmt(env.DB, quoteId, ts),
     auditStmt(env.DB, {
       entityType: 'quote_line',
       entityId: id,
