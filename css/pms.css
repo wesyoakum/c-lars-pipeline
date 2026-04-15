@@ -1326,6 +1326,39 @@ table.data.compact td {
   vertical-align: middle;
 }
 
+/* Account picker "Group" toggle pill — sits next to the Account label
+   on opportunity forms. Dimmed by default, accent-filled when grouping
+   is on. Tiny so it doesn't dominate the label. Shared localStorage
+   state across pills, wired up by js/account-picker.js. */
+.account-group-pill {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05em 0.55em;
+  font-size: 0.7em;
+  font-weight: 500;
+  line-height: 1.4;
+  background: var(--bg-alt, #f6f8fa);
+  border: 1px solid var(--border, #d0d7de);
+  border-radius: 999px;
+  color: var(--fg-muted, #656d76);
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.account-group-pill:hover {
+  background: var(--border, #d0d7de);
+  color: var(--fg, #24292f);
+}
+.account-group-pill.is-active {
+  background: var(--accent, #0969da);
+  border-color: var(--accent, #0969da);
+  color: #fff;
+}
+.account-group-pill.is-active:hover {
+  background: #0757ba;
+  border-color: #0757ba;
+}
+
 /* Checkbox row for create/edit forms */
 .checkbox-row {
   display: flex;

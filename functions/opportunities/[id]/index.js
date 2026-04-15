@@ -13,6 +13,7 @@ import { layout, htmlResponse, html, escape, raw } from '../../lib/layout.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 import { loadStageCatalog } from '../../lib/stages.js';
+import { buildAccountPickerItems } from '../../lib/account-groups.js';
 import {
   loadPricingSettings,
   loadCostBuildBundle,
@@ -117,12 +118,16 @@ function inlineDate(field, value) {
   </span>`;
 }
 
-function inlineSelect(field, value, options) {
+function inlineSelect(field, value, options, opts = {}) {
   const selectedOpt = options.find(o => o.value === (value ?? ''));
   const display = selectedOpt?.label || value || '—';
   const displayClass = value ? '' : 'muted';
   const optJson = JSON.stringify(options);
-  return html`<span class="ie" data-field="${field}" data-type="select" data-options='${escape(optJson)}'>
+  // When `opts.groupable` is set, the client-side activator (oppInline)
+  // will route through window.pmsAccountPicker.buildSelectOptions and
+  // respect the global "group accounts" localStorage toggle.
+  const groupableAttr = opts.groupable ? ' data-groupable="true"' : '';
+  return html`<span class="ie" data-field="${field}" data-type="select" data-options='${escape(optJson)}'${raw(groupableAttr)}>
     <span class="ie-display ${displayClass}">${escape(display)}</span>
   </span>`;
 }
@@ -185,8 +190,13 @@ export async function onRequestGet(context) {
     `SELECT id, display_name, email FROM users WHERE active = 1 ORDER BY display_name`
   );
 
-  // Accounts for account select
-  const accounts = await all(env.DB, 'SELECT id, name, alias FROM accounts ORDER BY name');
+  // Accounts for account select — include parent_group so the optgroup
+  // toggle (js/account-picker.js) can reshuffle the picker into groups
+  // without re-querying.
+  const accounts = await all(
+    env.DB,
+    'SELECT id, name, alias, parent_group FROM accounts ORDER BY name'
+  );
 
   // Price builds
   let priceBuildRows = [];
@@ -359,9 +369,12 @@ export async function onRequestGet(context) {
     { value: '', label: '— None —' },
     ...users.map(u => ({ value: u.id, label: u.display_name ?? u.email })),
   ];
+  // Account picker items carry a `group` field (parent_group label or
+  // null) so the shared account-picker toggle can reshuffle them into
+  // <optgroup>s without a round-trip.
   const accountOptions = [
-    { value: '', label: '— Select —' },
-    ...accounts.map(a => ({ value: a.id, label: a.alias ? `${a.name} (${a.alias})` : a.name })),
+    { value: '', label: '— Select —', group: null },
+    ...buildAccountPickerItems(accounts),
   ];
 
   // ---- Shared labels -----------------------------------------------------
@@ -447,8 +460,13 @@ export async function onRequestGet(context) {
       <div x-data="{ more: false }" >
         <div class="detail-grid">
           <div class="detail-pair">
-            <span class="detail-label">Account</span>
-            <span class="detail-value">${inlineSelect('account_id', opp.account_id, accountOptions)}</span>
+            <span class="detail-label">
+              Account
+              <button type="button" class="account-group-pill"
+                      data-role="account-picker-toggle"
+                      title="Toggle parent-group rollup in the account picker">Group</button>
+            </span>
+            <span class="detail-value">${inlineSelect('account_id', opp.account_id, accountOptions, { groupable: true })}</span>
           </div>
           <div class="detail-pair">
             <span class="detail-label">Primary contact</span>
@@ -1258,13 +1276,32 @@ function oppInline(oppId, accountId) {
         input = document.createElement('select');
         input.className = 'ie-input';
         const options = JSON.parse(el.dataset.options || '[]');
-        options.forEach(o => {
-          const opt = document.createElement('option');
-          opt.value = o.value;
-          opt.textContent = o.label;
-          if (o.value === (currentValue || '')) opt.selected = true;
-          input.appendChild(opt);
-        });
+        // Route account pickers through the shared grouping helper so
+        // the optgroup toggle (pmsAccountPicker) applies consistently.
+        const groupable = el.dataset.groupable === 'true';
+        if (groupable && window.pmsAccountPicker) {
+          const items = options.map(o => ({
+            value: o.value,
+            label: o.label,
+            group: o.group || '',
+            selected: o.value === (currentValue || ''),
+            isPlaceholder: o.value === '',
+            isAddNew: o.value === '__new__',
+          }));
+          window.pmsAccountPicker.buildSelectOptions(input, items);
+          // buildSelectOptions restores `input.value` from what's
+          // already on the <select>, but we haven't set anything yet.
+          // Force the current value explicitly.
+          input.value = currentValue || '';
+        } else {
+          options.forEach(o => {
+            const opt = document.createElement('option');
+            opt.value = o.value;
+            opt.textContent = o.label;
+            if (o.value === (currentValue || '')) opt.selected = true;
+            input.appendChild(opt);
+          });
+        }
         input.addEventListener('change', () => {
           if (input.value === '__new__') {
             this.showNewContactForm(el, input);

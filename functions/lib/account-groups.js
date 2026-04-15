@@ -63,6 +63,22 @@ export async function listGroupLabels(env) {
 }
 
 /**
+ * Shape a `SELECT id, name, alias, parent_group ...` row list into the
+ * `{ value, label, group }` shape used by the account-picker client
+ * script (js/account-picker.js). Alias, when present, is appended in
+ * parentheses so it shows up in the picker's flat mode. `group` is
+ * null when the account has no parent_group label; the client treats
+ * those as "Ungrouped".
+ */
+export function buildAccountPickerItems(accounts) {
+  return (accounts || []).map((a) => ({
+    value: a.id,
+    label: a.alias ? `${a.name} (${a.alias})` : a.name,
+    group: a.parent_group || null,
+  }));
+}
+
+/**
  * Given an account, load every OTHER account in the same parent_group
  * (minimum fields for the "Siblings in group" strip on the account
  * detail page). Returns `[]` when the account has no group or is the

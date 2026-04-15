@@ -63,8 +63,13 @@ export async function renderNewForm(context, opts = {}) {
   }
 
   // Accounts dropdown. In P0 we load the whole list (solo-user system,
-  // never going to be huge). Later this could become an HTMX autocomplete.
-  const accounts = await all(env.DB, 'SELECT id, name, alias FROM accounts ORDER BY name');
+  // never going to be huge). `parent_group` rides along so the shared
+  // account-picker toggle (js/account-picker.js) can rebuild the <select>
+  // with <optgroup>s on the fly.
+  const accounts = await all(
+    env.DB,
+    'SELECT id, name, alias, parent_group FROM accounts ORDER BY name'
+  );
 
   // Allow ?account=<id> to preselect (e.g. "new opp" link from an account page).
   const preselectAccount = values.account_id ?? url.searchParams.get('account') ?? '';
@@ -112,12 +117,19 @@ export async function renderNewForm(context, opts = {}) {
 
         <div class="row">
           <label style="flex:1">
-            <span>Account <em>*</em></span>
-            <select name="account_id" required data-role="account-select">
+            <span>
+              Account <em>*</em>
+              <button type="button" class="account-group-pill"
+                      data-role="account-picker-toggle"
+                      title="Toggle parent-group rollup in the account picker">Group</button>
+            </span>
+            <select name="account_id" required data-role="account-select" data-groupable="true">
               <option value="">— Select account —</option>
               ${accounts.map(
                 (a) =>
-                  html`<option value="${escape(a.id)}" ${preselectAccount === a.id ? 'selected' : ''}>${escape(a.alias ? `${a.name} (${a.alias})` : a.name)}</option>`
+                  html`<option value="${escape(a.id)}"
+                               ${a.parent_group ? `data-group="${escape(a.parent_group)}"` : ''}
+                               ${preselectAccount === a.id ? 'selected' : ''}>${escape(a.alias ? `${a.name} (${a.alias})` : a.name)}</option>`
               )}
               <option value="__new__">+ Add new account</option>
             </select>
