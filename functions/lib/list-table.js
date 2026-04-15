@@ -8,10 +8,12 @@
 // HTML conventions:
 //   Container: <div class="opp-list" data-columns='[...]'>
 //   Header:    <tr data-role="header-row"> with <th data-col="KEY">
-//   Filter:    <tr data-role="filter-row"> with filter inputs
 //   Body:      <tbody data-role="rows"> with <tr data-row-id="ID" data-KEY="VALUE">
 //   Cells:     <td data-col="KEY">
 //   Toolbar:   data-role="quicksearch", data-role="count", data-role="columns-menu"
+//
+// Per-column filters are rendered client-side as a popover (not a
+// persistent filter row) — see showPopoverForColumn in listScript.
 //
 // Usage:
 //   import { listScript, listTableHead, listToolbar } from '../lib/list-table.js';
@@ -91,30 +93,16 @@ export function listToolbar({ id, count, columns = null, newHref, newLabel = 'Ne
 }
 
 /**
- * Render a filter cell (<th>) for a column based on its filter type.
- */
-function filterCell(col, rowData) {
-  if (col.filter === 'text') {
-    return html`<th class="col-${col.key}" data-col="${col.key}"><input type="text" data-filter="${col.key}" data-filter-type="text" placeholder="Filter\u2026"></th>`;
-  }
-  if (col.filter === 'select') {
-    const vals = Array.from(
-      new Set(rowData.map(r => r[col.key]).filter(v => v != null && v !== ''))
-    ).sort();
-    return html`<th class="col-${col.key}" data-col="${col.key}"><select data-filter="${col.key}" data-filter-type="select"><option value="">All</option>${vals.map(v => html`<option value="${escape(v)}">${v}</option>`)}</select></th>`;
-  }
-  if (col.filter === 'range') {
-    return html`<th class="col-${col.key}" data-col="${col.key}"><div class="filter-range"><input type="number" data-filter="${col.key}" data-filter-type="min" placeholder="min"><input type="number" data-filter="${col.key}" data-filter-type="max" placeholder="max"></div></th>`;
-  }
-  return html`<th class="col-${col.key}" data-col="${col.key}"></th>`;
-}
-
-/**
- * Render the <thead> with a sortable header row and a filter row.
+ * Render the <thead> with a sortable header row.
  *
  *   listTableHead(columns, rowData)
+ *
+ * The `rowData` argument is retained for backward-compatibility with
+ * existing call sites but is no longer used — per-column filters are
+ * now rendered client-side in a popover by listScript(), which computes
+ * distinct values on the fly from the rendered row data attributes.
  */
-export function listTableHead(columns, rowData) {
+export function listTableHead(columns /* , rowData */) {
   return html`
     <thead>
       <tr data-role="header-row">
@@ -125,9 +113,6 @@ export function listTableHead(columns, rowData) {
               <span class="sort-indicator" data-role="sort-indicator"></span>
             </button>
           </th>`)}
-      </tr>
-      <tr class="opp-list-filter-row filters-hidden" data-role="filter-row">
-        ${columns.map(c => filterCell(c, rowData))}
       </tr>
     </thead>`;
 }
@@ -243,9 +228,13 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     }
 
     function applyColumnOrder() {
+      // Reorder header <th>, colgroup <col>, and each tbody <tr>'s cells
+      // to match state.order. Reordering the <col> elements is what
+      // keeps column widths glued to columns (not positions) when the
+      // user moves a column via the columns menu.
       var parents = [
         host.querySelector('[data-role="header-row"]'),
-        host.querySelector('[data-role="filter-row"]'),
+        host.querySelector('.opp-list-table colgroup'),
       ].concat(allRows);
       parents.forEach(function(parent) {
         if (!parent) return;
@@ -360,7 +349,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         var grip = document.createElement('div');
         grip.className = 'col-resize-grip';
         grip.dataset.col = key;
-        grip.title = 'Drag to resize \u2014 double-click to reset';
+        grip.title = 'Drag to resize \u2014 double-click to autofit';
         grip.addEventListener('mousedown', function(e) {
           e.preventDefault();
           e.stopPropagation();
@@ -370,7 +359,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         grip.addEventListener('dblclick', function(e) {
           e.preventDefault();
           e.stopPropagation();
-          resetColumnWidth(key);
+          autofitColumn(key);
         });
         th.appendChild(grip);
       });
@@ -400,16 +389,66 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       document.addEventListener('mouseup', onUp);
     }
 
-    function resetColumnWidth(key) {
-      var col = host.querySelector('.opp-list-table colgroup col[data-col="' + key + '"]');
-      if (!col) return;
-      var natural = naturalWidths[key];
-      if (natural) col.style.width = natural + 'px';
-      delete state.widths[key];
+    // Excel-style AutoFit: measure the widest currently-visible cell in
+    // the column and shrink/grow the column to match. We briefly switch
+    // the table back to table-layout:auto with this column unconstrained,
+    // read the browser-computed offsetWidth of the header cell and every
+    // visible <td>, take the max, then restore table-layout:fixed and
+    // lock the column to that width. Other columns are not touched
+    // because their <col> elements still carry explicit widths, which
+    // auto layout respects as hints.
+    function autofitColumn(key) {
+      var table = host.querySelector('.opp-list-table');
+      var col = table && table.querySelector('colgroup col[data-col="' + key + '"]');
+      if (!table || !col) return;
+
+      var prevColWidth = col.style.width;
+      var prevLayout = table.style.tableLayout;
+
+      col.style.width = 'auto';
+      table.style.tableLayout = 'auto';
+
+      var max = 0;
+      var th = host.querySelector('tr[data-role="header-row"] th[data-col="' + key + '"]');
+      if (th && th.offsetWidth > max) max = th.offsetWidth;
+      tbody.querySelectorAll('tr[data-row-id] td[data-col="' + key + '"]').forEach(function(td) {
+        // offsetParent === null means hidden (display:none row or cell).
+        if (td.offsetParent !== null && td.offsetWidth > max) max = td.offsetWidth;
+      });
+
+      // Restore layout before committing the new width so we don't leave
+      // the table in auto layout if the measurement returned nothing.
+      table.style.tableLayout = 'fixed';
+      if (max <= 0) {
+        col.style.width = prevColWidth || (naturalWidths[key] ? naturalWidths[key] + 'px' : '100px');
+        return;
+      }
+      // Add a tiny fudge so the browser doesn't round-trip us into
+      // ellipsis truncation on the very next paint.
+      var newWidth = Math.max(40, Math.round(max) + 2);
+      col.style.width = newWidth + 'px';
+      state.widths[key] = newWidth;
       save();
     }
 
     // -- Filtering + quick search ----------------------------------------
+    //
+    // Per-column filter state lives in this in-memory object. The UI
+    // for editing it is a popover (see showPopoverForColumn below), not
+    // a persistent filter row. Shape per column key:
+    //   text  -> { text: 'foo' }
+    //   select-> { values: ['a','b'] }   (empty array = no filter)
+    //   range -> { min: '5', max: '100' } (strings from <input type=number>)
+    var filterState = {};
+
+    function isFilterActive(key) {
+      var fs = filterState[key];
+      if (!fs) return false;
+      if (fs.text) return true;
+      if (fs.values && fs.values.length > 0) return true;
+      if ((fs.min != null && fs.min !== '') || (fs.max != null && fs.max !== '')) return true;
+      return false;
+    }
 
     function rowMatches(tr) {
       var data = tr.dataset;
@@ -426,25 +465,24 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       }
       for (var k = 0; k < columns.length; k++) {
         var col = columns[k];
+        var fs = filterState[col.key];
+        if (!fs) continue;
         if (col.filter === 'text') {
-          var input = host.querySelector('input[data-filter="' + col.key + '"][data-filter-type="text"]');
-          if (!input) continue;
-          var f = input.value.trim().toLowerCase();
-          if (!f) continue;
-          var v2 = data[col.key];
-          if (v2 == null || String(v2).toLowerCase().indexOf(f) === -1) return false;
+          if (fs.text) {
+            var needle = String(fs.text).trim().toLowerCase();
+            if (needle) {
+              var v2 = data[col.key];
+              if (v2 == null || String(v2).toLowerCase().indexOf(needle) === -1) return false;
+            }
+          }
         } else if (col.filter === 'select') {
-          var sel = host.querySelector('select[data-filter="' + col.key + '"]');
-          if (!sel) continue;
-          var sv = sel.value;
-          if (!sv) continue;
-          if (String(data[col.key] || '') !== String(sv)) return false;
+          if (fs.values && fs.values.length > 0) {
+            if (fs.values.indexOf(String(data[col.key] || '')) === -1) return false;
+          }
         } else if (col.filter === 'range') {
-          var minI = host.querySelector('input[data-filter="' + col.key + '"][data-filter-type="min"]');
-          var maxI = host.querySelector('input[data-filter="' + col.key + '"][data-filter-type="max"]');
           var rv = data[col.key];
-          if (minI && minI.value !== '' && (rv === '' || Number(rv) < Number(minI.value))) return false;
-          if (maxI && maxI.value !== '' && (rv === '' || Number(rv) > Number(maxI.value))) return false;
+          if (fs.min != null && fs.min !== '' && (rv === '' || Number(rv) < Number(fs.min))) return false;
+          if (fs.max != null && fs.max !== '' && (rv === '' || Number(rv) > Number(fs.max))) return false;
         }
       }
       return true;
@@ -458,6 +496,222 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         if (match) shown++;
       });
       if (countEl) countEl.textContent = 'Showing ' + shown + ' of ' + totalRows;
+      updateFilterIndicators();
+    }
+
+    function updateFilterIndicators() {
+      columns.forEach(function(c) {
+        var th = host.querySelector('tr[data-role="header-row"] th[data-col="' + c.key + '"]');
+        if (!th) return;
+        th.classList.toggle('col-filter-active', isFilterActive(c.key));
+      });
+    }
+
+    function distinctValuesForColumn(key) {
+      var set = {};
+      allRows.forEach(function(tr) {
+        var v = tr.dataset[key];
+        if (v != null && v !== '') set[v] = true;
+      });
+      var arr = Object.keys(set);
+      arr.sort(function(a, b) { return String(a).localeCompare(String(b)); });
+      return arr;
+    }
+
+    // -- Filter popover --------------------------------------------------
+    //
+    // Single shared popover element attached to <body>. Only one column's
+    // filter UI is shown at a time. Mouseleave from either the anchor
+    // <th> or the popover itself schedules a 250ms hide; mouseenter on
+    // either cancels the hide, so moving the cursor between the header
+    // and the popover doesn't dismiss it.
+
+    var popover = null;
+    var popContent = null;
+    var currentPopoverKey = null;
+    var currentAnchor = null;
+    var hideTimer = null;
+
+    function escHtml(s) {
+      return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function ensurePopover() {
+      if (popover) return popover;
+      popover = document.createElement('div');
+      popover.className = 'col-filter-popover';
+      popover.style.display = 'none';
+      popContent = document.createElement('div');
+      popover.appendChild(popContent);
+      document.body.appendChild(popover);
+      popover.addEventListener('mouseenter', cancelHide);
+      popover.addEventListener('mouseleave', scheduleHide);
+      // Stop clicks inside the popover from bubbling to document listeners
+      // (e.g. details toggles, outside-click handlers).
+      popover.addEventListener('mousedown', function(e) { e.stopPropagation(); });
+      popover.addEventListener('click',     function(e) { e.stopPropagation(); });
+      return popover;
+    }
+
+    function scheduleHide() {
+      cancelHide();
+      hideTimer = setTimeout(hidePopover, 250);
+    }
+    function cancelHide() {
+      if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    }
+    function hidePopover() {
+      if (!popover) return;
+      popover.style.display = 'none';
+      if (currentAnchor) {
+        currentAnchor.removeEventListener('mouseleave', scheduleHide);
+        currentAnchor.removeEventListener('mouseenter', cancelHide);
+        currentAnchor = null;
+      }
+      currentPopoverKey = null;
+    }
+
+    function showPopoverForColumn(key) {
+      var col = columnMeta(key);
+      if (!col || !col.filter) return;
+      var th = host.querySelector('tr[data-role="header-row"] th[data-col="' + key + '"]');
+      if (!th) return;
+      ensurePopover();
+      cancelHide();
+
+      // Re-clicking the already-open column just re-focuses.
+      if (currentPopoverKey === key && popover.style.display !== 'none') {
+        var inp = popContent.querySelector('input, select, textarea');
+        if (inp) inp.focus();
+        return;
+      }
+
+      // Detach from previous anchor, if any.
+      if (currentAnchor) {
+        currentAnchor.removeEventListener('mouseleave', scheduleHide);
+        currentAnchor.removeEventListener('mouseenter', cancelHide);
+      }
+
+      popContent.innerHTML = buildPopoverContent(col);
+      popover.style.display = '';
+
+      // Position the popover below the th, left-aligned. Clamp to
+      // viewport so it doesn't spill off the right edge.
+      var rect = th.getBoundingClientRect();
+      var top = rect.bottom + window.scrollY + 2;
+      var left = rect.left + window.scrollX;
+      popover.style.left = '0px';
+      popover.style.top = top + 'px';
+      // Measure actual popover width after content is rendered, then
+      // clamp horizontally.
+      var popWidth = popover.offsetWidth;
+      var viewportRight = window.scrollX + document.documentElement.clientWidth;
+      if (left + popWidth > viewportRight - 8) {
+        left = Math.max(8, viewportRight - popWidth - 8);
+      }
+      popover.style.left = left + 'px';
+
+      currentPopoverKey = key;
+      currentAnchor = th;
+      th.addEventListener('mouseleave', scheduleHide);
+      th.addEventListener('mouseenter', cancelHide);
+
+      wirePopoverInputs(col);
+
+      // Focus the first input for keyboard users.
+      var firstInput = popContent.querySelector('input, select, textarea');
+      if (firstInput && firstInput.type !== 'checkbox') {
+        setTimeout(function() { firstInput.focus(); }, 0);
+      }
+    }
+
+    function buildPopoverContent(col) {
+      var fs = filterState[col.key] || {};
+      var out = '<div class="col-filter-title">' + escHtml(col.label) + '</div>';
+      if (col.filter === 'text') {
+        var cur = fs.text || '';
+        out += '<input type="text" class="col-filter-text" placeholder="Contains\u2026" value="' + escHtml(cur) + '">';
+      } else if (col.filter === 'select') {
+        var vals = distinctValuesForColumn(col.key);
+        var selected = fs.values || [];
+        var selSet = {};
+        selected.forEach(function(v) { selSet[v] = true; });
+        out += '<div class="col-filter-actions">' +
+               '<button type="button" data-action="all">Select all</button>' +
+               '<button type="button" data-action="none">Clear</button>' +
+               '</div>';
+        out += '<div class="col-filter-list">';
+        if (vals.length === 0) {
+          out += '<div class="muted" style="padding:0.3rem 0.25rem">No values</div>';
+        } else {
+          vals.forEach(function(v) {
+            var checked = selSet[v] ? ' checked' : '';
+            out += '<label class="col-filter-item">' +
+                   '<input type="checkbox" value="' + escHtml(v) + '"' + checked + '>' +
+                   '<span>' + escHtml(v) + '</span>' +
+                   '</label>';
+          });
+        }
+        out += '</div>';
+      } else if (col.filter === 'range') {
+        out += '<div class="col-filter-range">' +
+               '<input type="number" class="col-filter-min" placeholder="min" value="' + escHtml(fs.min != null ? fs.min : '') + '">' +
+               '<input type="number" class="col-filter-max" placeholder="max" value="' + escHtml(fs.max != null ? fs.max : '') + '">' +
+               '</div>';
+      }
+      return out;
+    }
+
+    function wirePopoverInputs(col) {
+      var key = col.key;
+      if (col.filter === 'text') {
+        var textInput = popContent.querySelector('.col-filter-text');
+        if (textInput) {
+          textInput.addEventListener('input', function() {
+            filterState[key] = { text: textInput.value };
+            applyFilters();
+          });
+        }
+      } else if (col.filter === 'select') {
+        var checkboxes = Array.prototype.slice.call(
+          popContent.querySelectorAll('.col-filter-list input[type="checkbox"]')
+        );
+        function readSelected() {
+          var arr = [];
+          checkboxes.forEach(function(cb) { if (cb.checked) arr.push(cb.value); });
+          filterState[key] = { values: arr };
+          applyFilters();
+        }
+        checkboxes.forEach(function(cb) { cb.addEventListener('change', readSelected); });
+        var allBtn = popContent.querySelector('[data-action="all"]');
+        var noneBtn = popContent.querySelector('[data-action="none"]');
+        if (allBtn) allBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          checkboxes.forEach(function(cb) { cb.checked = true; });
+          readSelected();
+        });
+        if (noneBtn) noneBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          checkboxes.forEach(function(cb) { cb.checked = false; });
+          readSelected();
+        });
+      } else if (col.filter === 'range') {
+        var minInput = popContent.querySelector('.col-filter-min');
+        var maxInput = popContent.querySelector('.col-filter-max');
+        function readRange() {
+          filterState[key] = {
+            min: minInput ? minInput.value : '',
+            max: maxInput ? maxInput.value : '',
+          };
+          applyFilters();
+        }
+        if (minInput) minInput.addEventListener('input', readRange);
+        if (maxInput) maxInput.addEventListener('input', readRange);
+      }
     }
 
     // -- Sorting ---------------------------------------------------------
@@ -495,35 +749,29 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       });
     }
 
-    function showFilterForColumn(key) {
-      var filterRow = host.querySelector('[data-role="filter-row"]');
-      if (!filterRow) return;
-      filterRow.classList.remove('filters-hidden');
-      var input = filterRow.querySelector('[data-filter="' + key + '"]');
-      if (input) setTimeout(function() { input.focus(); }, 50);
-    }
-
     // -- Wire events -----------------------------------------------------
 
     host.querySelectorAll('[data-sort]').forEach(function(btn) {
       var indicator = btn.querySelector('[data-role="sort-indicator"]');
       var labelSpan = btn.querySelector('span:not([data-role])');
+      var colKey = btn.dataset.sort;
+      var meta = columnMeta(colKey);
+      var hasFilter = meta && !!meta.filter;
 
-      if (labelSpan) {
+      if (labelSpan && hasFilter) {
         labelSpan.style.cursor = 'pointer';
         labelSpan.addEventListener('click', function(e) {
           e.stopPropagation();
-          showFilterForColumn(btn.dataset.sort);
+          showPopoverForColumn(colKey);
         });
       }
 
       btn.addEventListener('click', function(e) {
-        if (e.target === labelSpan || (labelSpan && labelSpan.contains(e.target))) return;
-        var key = btn.dataset.sort;
-        if (state.sort.key === key) {
+        if (hasFilter && (e.target === labelSpan || (labelSpan && labelSpan.contains(e.target)))) return;
+        if (state.sort.key === colKey) {
           state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc';
         } else {
-          state.sort = { key: key, dir: 'asc' };
+          state.sort = { key: colKey, dir: 'asc' };
         }
         updateSortIndicators();
         applySort();
@@ -531,12 +779,19 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       });
     });
 
-    host.querySelectorAll('[data-filter]').forEach(function(input) {
-      var ev = input.tagName === 'SELECT' ? 'change' : 'input';
-      input.addEventListener(ev, applyFilters);
-    });
-
     if (quickSearchInput) quickSearchInput.addEventListener('input', applyFilters);
+
+    // Dismiss the filter popover when clicking anywhere else on the page.
+    document.addEventListener('mousedown', function(e) {
+      if (!popover || popover.style.display === 'none') return;
+      if (popover.contains(e.target)) return;
+      if (currentAnchor && currentAnchor.contains(e.target)) return;
+      hidePopover();
+    });
+    // Also hide on scroll so the popover doesn't drift away from its anchor.
+    window.addEventListener('scroll', function() {
+      if (popover && popover.style.display !== 'none') hidePopover();
+    }, true);
 
     menuScope.querySelectorAll('[data-column-toggle]').forEach(function(cb) {
       var key = cb.dataset.columnToggle;

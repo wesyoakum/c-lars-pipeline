@@ -1319,24 +1319,139 @@ fieldset.qualification-box select {
 
 .opp-list-table thead th { padding: 0; position: relative; }
 
-/* Draggable column resize grip. Floats over the right edge of each
-   header cell. listScript wires up mousedown/dblclick handlers. */
+/* Draggable column resize grip. Straddles the column boundary so the
+   hit target is 10px wide (5px on each side of the divider). The grip
+   itself is invisible; a 1px pseudo-element in the middle shows the
+   divider line so users can see where to click. listScript wires up
+   mousedown/dblclick handlers (dblclick = AutoFit to content). */
 .col-resize-grip {
   position: absolute;
-  right: 0;
+  right: -5px;
   top: 0;
   bottom: 0;
-  width: 6px;
+  width: 10px;
   cursor: col-resize;
   background: transparent;
   z-index: 3;
   user-select: none;
   touch-action: none;
 }
-.col-resize-grip:hover   { background: var(--accent); opacity: 0.35; }
-.col-resize-grip.dragging { background: var(--accent); opacity: 0.6; }
+.col-resize-grip::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 22%;
+  bottom: 22%;
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
+  transition: background 0.12s, width 0.12s, top 0.12s, bottom 0.12s;
+}
+.col-resize-grip:hover   { background: rgba(99, 102, 241, 0.08); }
+.col-resize-grip:hover::before {
+  background: var(--accent);
+  width: 2px;
+  left: calc(50% - 1px);
+  top: 10%;
+  bottom: 10%;
+}
+.col-resize-grip.dragging { background: rgba(99, 102, 241, 0.16); }
+.col-resize-grip.dragging::before {
+  background: var(--accent);
+  width: 2px;
+  left: calc(50% - 1px);
+  top: 0;
+  bottom: 0;
+}
 body.col-resizing,
 body.col-resizing * { cursor: col-resize !important; user-select: none; }
+
+/* ---------- Per-column filter popover ---------- */
+
+.col-filter-popover {
+  position: absolute;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.14);
+  padding: 0.55rem 0.6rem;
+  z-index: 1000;
+  min-width: 200px;
+  max-width: 320px;
+  font-size: 0.85em;
+  color: var(--fg);
+}
+.col-filter-popover .col-filter-title {
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  font-size: 0.7em;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.45rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--border);
+}
+.col-filter-popover input[type="text"],
+.col-filter-popover input[type="number"] {
+  width: 100%;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font: inherit;
+  font-size: 0.95em;
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--fg);
+}
+.col-filter-popover .col-filter-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-bottom: 0.4rem;
+}
+.col-filter-popover .col-filter-actions button {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.15rem 0.5rem;
+  font: inherit;
+  font-size: 0.75em;
+  cursor: pointer;
+  color: var(--fg);
+}
+.col-filter-popover .col-filter-actions button:hover { background: var(--bg-alt); }
+.col-filter-popover .col-filter-list {
+  max-height: 260px;
+  overflow-y: auto;
+}
+.col-filter-popover .col-filter-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.18rem 0.25rem;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.col-filter-popover .col-filter-item:hover { background: var(--bg-alt); }
+.col-filter-popover .col-filter-item input { margin: 0; flex-shrink: 0; }
+.col-filter-popover .col-filter-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.col-filter-popover .col-filter-range {
+  display: flex;
+  gap: 0.3rem;
+}
+.col-filter-popover .col-filter-range input { width: 50%; }
+
+/* Active filter indicator on the column header. */
+.opp-list-table thead th.col-filter-active {
+  background: rgba(99, 102, 241, 0.10);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.opp-list-table thead th.col-filter-active .col-sort span:first-child {
+  color: var(--accent);
+}
 
 .opp-list-table .col-sort {
   display: flex;
@@ -1364,26 +1479,8 @@ body.col-resizing * { cursor: col-resize !important; user-select: none; }
   text-align: right;
 }
 
-.opp-list-filter-row th {
-  background: var(--bg);
-  padding: 0.3rem 0.5rem;
-  border-bottom: 2px solid var(--border);
-}
-.opp-list-filter-row input,
-.opp-list-filter-row select {
-  font: inherit;
-  width: 100%;
-  padding: 0.25rem 0.4rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg);
-  font-size: 0.85em;
-}
-.filter-range {
-  display: flex;
-  gap: 0.2rem;
-}
-.filter-range input { width: 50%; }
+/* Legacy .opp-list-filter-row and .filter-range rules removed —
+   per-column filters now live in the .col-filter-popover above. */
 
 /* =====================================================================
    M4 — Library + price build editor
@@ -2491,19 +2588,6 @@ textarea.ie-input { width: 100%; min-width: 12rem; resize: vertical; }
   box-shadow: 0 4px 12px rgba(0,0,0,0.08);
   min-width: 300px;
   margin-top: 0.25rem;
-}
-
-/* ---------- Filters hidden by default on opp list ---------- */
-
-.opp-list-filter-row.filters-hidden th {
-  padding: 0;
-  border: 0;
-  height: 0;
-  overflow: hidden;
-}
-.opp-list-filter-row.filters-hidden input,
-.opp-list-filter-row.filters-hidden select {
-  display: none;
 }
 
 /* ---------- Column header sort arrow on hover ---------- */
