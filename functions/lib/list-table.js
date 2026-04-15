@@ -188,6 +188,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     var state = {
       order: columns.map(function(c) { return c.key; }),
       visible: {},
+      widths: {},
       sort: { key: '${defaultSortKey}', dir: '${defaultSortDir}' },
     };
     columns.forEach(function(c) { state.visible[c.key] = c.default !== false; });
@@ -207,6 +208,12 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         if (saved.visible && typeof saved.visible === 'object') {
           columns.forEach(function(c) {
             if (saved.visible[c.key] !== undefined) state.visible[c.key] = !!saved.visible[c.key];
+          });
+        }
+        if (saved.widths && typeof saved.widths === 'object') {
+          columns.forEach(function(c) {
+            var w = Number(saved.widths[c.key]);
+            if (w > 0) state.widths[c.key] = w;
           });
         }
         if (saved.sort && saved.sort.key) state.sort = saved.sort;
@@ -271,6 +278,134 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       state.order.splice(idx, 1);
       state.order.splice(j, 0, key);
       applyColumnOrder();
+      save();
+    }
+
+    // -- Column resizing -------------------------------------------------
+    //
+    // Drag the right edge of any header cell to resize its column. On
+    // first load we measure the browser-computed natural widths, create
+    // a <colgroup> if none exists, lock the table into table-layout:
+    // fixed, and apply saved/natural widths. Widths persist in
+    // state.widths (localStorage). Double-click a grip to reset to
+    // the originally-measured natural width.
+
+    var naturalWidths = {};
+
+    function ensureColgroup() {
+      var table = host.querySelector('.opp-list-table');
+      if (!table) return null;
+      var colgroup = table.querySelector('colgroup');
+      if (!colgroup) {
+        colgroup = document.createElement('colgroup');
+        var thead = table.querySelector('thead');
+        table.insertBefore(colgroup, thead || table.firstChild);
+        state.order.forEach(function(key) {
+          var col = document.createElement('col');
+          col.dataset.col = key;
+          colgroup.appendChild(col);
+        });
+      } else {
+        // Ensure every column in state.order has a <col>. Pages that
+        // declared their own <colgroup> may be missing data-col attrs
+        // on some entries; add them where needed, creating cols for
+        // unknown keys at the end so visibility toggling works.
+        var byKey = {};
+        colgroup.querySelectorAll('col').forEach(function(col) {
+          if (col.dataset.col) byKey[col.dataset.col] = col;
+        });
+        state.order.forEach(function(key) {
+          if (!byKey[key]) {
+            var col = document.createElement('col');
+            col.dataset.col = key;
+            colgroup.appendChild(col);
+          }
+        });
+      }
+      return colgroup;
+    }
+
+    function initColumnResize() {
+      var table = host.querySelector('.opp-list-table');
+      if (!table) return;
+
+      // Measure natural widths BEFORE switching layout mode or hiding
+      // columns. Every column is still visible at this point.
+      columns.forEach(function(c) {
+        var th = host.querySelector('tr[data-role="header-row"] th[data-col="' + c.key + '"]');
+        if (th && th.offsetWidth > 0) naturalWidths[c.key] = th.offsetWidth;
+      });
+
+      var colgroup = ensureColgroup();
+      if (!colgroup) return;
+
+      // Switch to fixed layout so explicit col widths are honored.
+      table.style.tableLayout = 'fixed';
+
+      // Apply widths: saved > natural > 100px (with a 40px floor).
+      columns.forEach(function(c) {
+        var col = colgroup.querySelector('col[data-col="' + c.key + '"]');
+        if (!col) return;
+        var w = state.widths[c.key] || naturalWidths[c.key] || 100;
+        if (w < 40) w = 40;
+        col.style.width = w + 'px';
+      });
+
+      // Add a resize grip to each header cell. Grips float over the
+      // right 6px of each th and intercept mouse events before the
+      // sort button underneath.
+      host.querySelectorAll('tr[data-role="header-row"] th[data-col]').forEach(function(th) {
+        if (th.querySelector('.col-resize-grip')) return;
+        var key = th.dataset.col;
+        var grip = document.createElement('div');
+        grip.className = 'col-resize-grip';
+        grip.dataset.col = key;
+        grip.title = 'Drag to resize \u2014 double-click to reset';
+        grip.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          startResize(key, e.clientX, grip);
+        });
+        grip.addEventListener('click', function(e) { e.stopPropagation(); });
+        grip.addEventListener('dblclick', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          resetColumnWidth(key);
+        });
+        th.appendChild(grip);
+      });
+    }
+
+    function startResize(key, startX, grip) {
+      var col = host.querySelector('.opp-list-table colgroup col[data-col="' + key + '"]');
+      if (!col) return;
+      var startWidth = col.offsetWidth || parseInt(col.style.width, 10) || 100;
+      grip.classList.add('dragging');
+      document.body.classList.add('col-resizing');
+
+      function onMove(e) {
+        var delta = e.clientX - startX;
+        var newWidth = Math.max(40, startWidth + delta);
+        col.style.width = newWidth + 'px';
+      }
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        grip.classList.remove('dragging');
+        document.body.classList.remove('col-resizing');
+        state.widths[key] = parseInt(col.style.width, 10);
+        save();
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    }
+
+    function resetColumnWidth(key) {
+      var col = host.querySelector('.opp-list-table colgroup col[data-col="' + key + '"]');
+      if (!col) return;
+      var natural = naturalWidths[key];
+      if (natural) col.style.width = natural + 'px';
+      delete state.widths[key];
       save();
     }
 
@@ -434,6 +569,9 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     if (menuScope.querySelector('[data-role="columns-list"]')) {
       applyColumnOrder();
     }
+    // Column resize must run BEFORE applyColumnVisibility so natural
+    // widths can be measured from fully-rendered header cells.
+    initColumnResize();
     applyColumnVisibility();
     updateSortIndicators();
     applySort();

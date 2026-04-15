@@ -895,7 +895,27 @@ fieldset.qualification-box select {
   font-size: 0.75em;
 }
 
-.opp-list-table thead th { padding: 0; }
+.opp-list-table thead th { padding: 0; position: relative; }
+
+/* Draggable column resize grip. Floats over the right edge of each
+   header cell. listScript wires up mousedown/dblclick handlers. */
+.col-resize-grip {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  z-index: 3;
+  user-select: none;
+  touch-action: none;
+}
+.col-resize-grip:hover   { background: var(--accent); opacity: 0.35; }
+.col-resize-grip.dragging { background: var(--accent); opacity: 0.6; }
+body.col-resizing,
+body.col-resizing * { cursor: col-resize !important; user-select: none; }
+
 .opp-list-table .col-sort {
   display: flex;
   align-items: center;
