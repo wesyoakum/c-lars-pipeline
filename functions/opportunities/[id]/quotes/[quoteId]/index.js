@@ -782,10 +782,12 @@ export async function onRequestGet(context) {
         };
       });
 
-      // Per-line discount editor — `open` controls the collapsed/expanded
-      // state; once a discount is set on a line, it's expanded on load.
-      // Inputs inside the editor use data-autosave + form="line-form-..."
-      // so the existing line autosave machinery picks up changes.
+      // Per-line discount editor — the "open" flag controls the
+      // collapsed/expanded state; once a discount is set on a line,
+      // it is expanded on load. Inputs inside the editor use data-autosave
+      // plus form="line-form-..." so the existing line autosave machinery
+      // picks up changes.
+      // NOTE: no backticks allowed in comments inside this template literal.
       Alpine.data('lineDiscount', function(initialOpen) {
         return {
           open: !!initialOpen,

@@ -27,11 +27,12 @@
     // (wes.yoakum@c-lars.com) when PMS_ENV !== 'production' and no Access
     // header is present. Set to 'production' once Cloudflare Access is
     // configured in front of the site.
+    //
+    // ConvertAPI secret for .docx → PDF conversion is set via
+    // `wrangler pages secret put CONVERTAPI_SECRET` (not listed here
+    // to avoid binding name conflict).
     "PMS_ENV": "development",
     "CF_ACCESS_TEAM_DOMAIN": "c-lars.cloudflareaccess.com",
-    "CF_ACCESS_AUD": "",
-    // ConvertAPI secret for .docx → PDF conversion.
-    // Set via: wrangler pages secret put CONVERTAPI_SECRET
-    // (not listed here to avoid binding name conflict)
+    "CF_ACCESS_AUD": ""
   }
 }
