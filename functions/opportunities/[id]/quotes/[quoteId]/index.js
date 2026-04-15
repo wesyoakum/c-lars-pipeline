@@ -610,29 +610,36 @@ export async function onRequestGet(context) {
       ${quote.quote_type === 'eps'
         ? html`
           <div x-data="epsTerms()" style="margin-top:0.75rem">
-            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.2rem">
-              <strong>Terms</strong>
-              <span style="flex:1"></span>
-              <span style="font-size:0.75rem;color:var(--fg-muted)">
-                EPS payment terms are computed from delivery weeks
-              </span>
-            </div>
+            <strong>Terms</strong>
             <textarea class="desc-textarea" data-field="payment_terms" placeholder="Payment terms, conditions..."
                       ${readOnly ? 'disabled' : ''}
                       x-model="termsVal"
                       @input="onInput()"
                       @change="onSave()"></textarea>
-            <label style="font-size:0.8rem; color:var(--fg-muted); cursor:pointer; display:inline-flex; align-items:center; gap:0.3rem; user-select:none; margin-top:0.25rem">
-              <input type="checkbox" x-model="useDefault" ${readOnly ? 'disabled' : ''}>
-              Default EPS Terms
-            </label>
+            <div class="terms-below-row">
+              <label class="terms-default-check">
+                <input type="checkbox" x-model="useDefault" ${readOnly ? 'disabled' : ''}>
+                Default EPS Terms
+              </label>
+              <span style="font-size:0.72rem;color:var(--fg-muted);font-style:italic">
+                computed from delivery weeks
+              </span>
+            </div>
           </div>`
         : (quote.quote_type === 'spares' || quote.quote_type === 'service')
           ? html`
             <div x-data="flatTerms()" style="margin-top:0.75rem">
-              <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.2rem">
-                <strong>Terms</strong>
-                <span style="flex:1"></span>
+              <strong>Terms</strong>
+              <textarea class="desc-textarea" data-field="payment_terms" placeholder="Payment terms, conditions..."
+                        ${readOnly ? 'disabled' : ''}
+                        x-model="termsVal"
+                        @input="onInput()"
+                        @change="onSave()"></textarea>
+              <div class="terms-below-row">
+                <label class="terms-default-check">
+                  <input type="checkbox" x-model="useDefault" ${readOnly ? 'disabled' : ''}>
+                  Default ${quote.quote_type === 'spares' ? 'Spares' : 'Service'} Terms
+                </label>
                 ${!readOnly ? html`
                   <button type="button" class="btn-tiny"
                           @click="saveAsDefault()"
@@ -641,50 +648,53 @@ export async function onRequestGet(context) {
                           title="Save the current text as the default for ${quote.quote_type === 'spares' ? 'Spares' : 'Service'} quotes"></button>
                 ` : ''}
               </div>
-              <textarea class="desc-textarea" data-field="payment_terms" placeholder="Payment terms, conditions..."
-                        ${readOnly ? 'disabled' : ''}
-                        x-model="termsVal"
-                        @input="onInput()"
-                        @change="onSave()"></textarea>
-              <label style="font-size:0.8rem; color:var(--fg-muted); cursor:pointer; display:inline-flex; align-items:center; gap:0.3rem; user-select:none; margin-top:0.25rem">
-                <input type="checkbox" x-model="useDefault" ${readOnly ? 'disabled' : ''}>
-                Default ${quote.quote_type === 'spares' ? 'Spares' : 'Service'} Terms
-              </label>
             </div>`
           : html`
             <div x-data="plainTerms('payment_terms')" style="margin-top:0.75rem">
-              <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.2rem">
-                <strong>Terms</strong>
-                <span style="flex:1"></span>
-                ${(!readOnly && !isHybrid) ? html`
-                  <button type="button" class="btn-tiny"
-                          @click="saveAsDefault()"
-                          :disabled="saving"
-                          x-text="saveLabel"
-                          title="Save the current text as the default for ${escape(quoteTypeDisplayLabel(quote.quote_type))} quotes"></button>
-                ` : ''}
-              </div>
+              <strong>Terms</strong>
               <textarea class="desc-textarea" data-field="payment_terms" placeholder="Payment terms, conditions..."
                         ${readOnly ? 'disabled' : ''}
                         x-model="val"
+                        @input="onInput()"
                         @change="onSave()">${escape(quote.payment_terms ?? '')}</textarea>
+              ${!isHybrid ? html`
+                <div class="terms-below-row">
+                  <label class="terms-default-check">
+                    <input type="checkbox" x-model="useDefault" ${readOnly ? 'disabled' : ''}>
+                    Default ${escape(quoteTypeDisplayLabel(quote.quote_type))} Terms
+                  </label>
+                  ${!readOnly ? html`
+                    <button type="button" class="btn-tiny"
+                            @click="saveAsDefault()"
+                            :disabled="saving"
+                            x-text="saveLabel"
+                            title="Save the current text as the default for ${escape(quoteTypeDisplayLabel(quote.quote_type))} quotes"></button>
+                  ` : ''}
+                </div>
+              ` : ''}
             </div>`}
       <div x-data="plainTerms('delivery_terms')" style="margin-top:0.75rem">
-        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.2rem">
-          <strong>Delivery terms</strong>
-          <span style="flex:1"></span>
-          ${(!readOnly && !isHybrid) ? html`
-            <button type="button" class="btn-tiny"
-                    @click="saveAsDefault()"
-                    :disabled="saving"
-                    x-text="saveLabel"
-                    title="Save the current text as the default for ${escape(quoteTypeDisplayLabel(quote.quote_type))} quotes"></button>
-          ` : ''}
-        </div>
+        <strong>Delivery terms</strong>
         <textarea class="desc-textarea" placeholder="EXW, FCA, FOB, DAP..."
                   ${readOnly ? 'disabled' : ''}
                   x-model="val"
+                  @input="onInput()"
                   @change="onSave()">${escape(quote.delivery_terms ?? '')}</textarea>
+        ${!isHybrid ? html`
+          <div class="terms-below-row">
+            <label class="terms-default-check">
+              <input type="checkbox" x-model="useDefault" ${readOnly ? 'disabled' : ''}>
+              Default ${escape(quoteTypeDisplayLabel(quote.quote_type))} Delivery Terms
+            </label>
+            ${!readOnly ? html`
+              <button type="button" class="btn-tiny"
+                      @click="saveAsDefault()"
+                      :disabled="saving"
+                      x-text="saveLabel"
+                      title="Save the current text as the default delivery terms for ${escape(quoteTypeDisplayLabel(quote.quote_type))} quotes"></button>
+            ` : ''}
+          </div>
+        ` : ''}
       </div>
 
       ${quote.notes_internal || !readOnly ? html`
@@ -1039,15 +1049,19 @@ export async function onRequestGet(context) {
         };
       });
 
-      // Plain terms component — used for the refurb_* payment-terms
-      // branch and for every quote's delivery-terms textarea. Provides
-      // the same "Save as default" affordance as flatTerms but without
-      // the default-checkbox machinery (the plain branch doesn't have
-      // a one-click revert since there's no hardcoded template to flip
-      // back to). Field is passed in as an argument — 'payment_terms'
-      // or 'delivery_terms'. Initial value is pulled from closure
-      // scope so Alpine's x-model doesn't blank out the textarea on
-      // mount (x-model assigns data → element on first render).
+      // Plain terms component — used for refurb_* payment-terms and
+      // every non-hybrid delivery-terms textarea. Mirrors flatTerms'
+      // checkbox/default machinery but parameterized by field.
+      //
+      //   - `val` tracks the textarea content via x-model
+      //   - `useDefault` is the checkbox state; flipping it on re-applies
+      //     the saved default for this (quote_type, field) pair
+      //   - `saveAsDefault()` POSTs the current text as the new default
+      //     and flips useDefault to true on success
+      //
+      // Initial value comes from closure scope so Alpine's x-model
+      // doesn't blank the textarea on mount (x-model assigns data →
+      // element on first render).
       Alpine.data('plainTerms', function(field) {
         var initial = (field === 'payment_terms')  ? _initialPaymentTerms
                     : (field === 'delivery_terms') ? _initialDeliveryTerms
@@ -1055,9 +1069,43 @@ export async function onRequestGet(context) {
         return {
           val: initial,
           field: field,
+          useDefault: true,
           saving: false,
           saveLabel: 'Save as default',
+          _skipWatch: false,
+          init: function() {
+            var self = this;
+            var trimmed = (this.val || '').trim();
+            var deflt = _defaultFor(_quoteType, this.field);
+            if (!trimmed) {
+              this.useDefault = true;
+              if (deflt) this.applyDefault();
+            } else if (deflt && trimmed === deflt) {
+              this.useDefault = true;
+            } else {
+              this.useDefault = false;
+            }
+            this.$watch('useDefault', function(val) {
+              if (self._skipWatch) return;
+              if (val) self.applyDefault();
+            });
+          },
+          applyDefault: function() {
+            var deflt = _defaultFor(_quoteType, this.field);
+            if (!deflt) return;
+            this.val = deflt;
+            window._qPatch(this.field, this.val);
+          },
+          onInput: function() {
+            this._skipWatch = true;
+            this.useDefault = false;
+            this._skipWatch = false;
+          },
           onSave: function() {
+            if (!(this.val || '').trim()) {
+              this.useDefault = true;
+              if (_defaultFor(_quoteType, this.field)) { this.applyDefault(); return; }
+            }
             window._qPatch(this.field, this.val);
           },
           saveAsDefault: function() {
@@ -1066,6 +1114,12 @@ export async function onRequestGet(context) {
             self.saveLabel = 'Saving\u2026';
             _saveTermDefault(_quoteType, self.field, self.val).then(function(d) {
               if (d && d.ok) {
+                // Saved default now matches current text — reflect in
+                // the checkbox (skip the watcher so we don't bounce
+                // back through applyDefault).
+                self._skipWatch = true;
+                self.useDefault = true;
+                self._skipWatch = false;
                 self.saveLabel = d.changed ? 'Saved \u2713' : 'Already saved';
               } else {
                 self.saveLabel = 'Save failed';

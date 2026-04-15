@@ -1453,6 +1453,26 @@ table.data.compact td {
   cursor: default;
 }
 
+/* Row below a terms textarea — default-checkbox on the left, save
+   button on the right. Shared by epsTerms / flatTerms / plainTerms. */
+.terms-below-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  min-height: 1.4rem;
+}
+.terms-default-check {
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  user-select: none;
+}
+
 /* Description auto-sizing textarea (full-width). */
 .desc-label { display: block; font-weight: 500; font-size: 0.9em; }
 .desc-input {
