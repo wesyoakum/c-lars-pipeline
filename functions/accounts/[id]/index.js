@@ -8,7 +8,12 @@
 
 import { one, all, stmt, batch } from '../../lib/db.js';
 import { auditStmt, diff } from '../../lib/audit.js';
-import { validateAccount } from '../../lib/validators.js';
+import {
+  validateAccount,
+  parseTransactionTypes,
+  QUOTE_TYPE_LABELS,
+  QUOTE_STATUS_LABELS,
+} from '../../lib/validators.js';
 import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
@@ -20,6 +25,8 @@ import {
   buildAddressStatements,
 } from '../../lib/address_editor.js';
 import { slugifyGroup, loadSiblingAccounts, listGroupLabels } from '../../lib/account-groups.js';
+import { loadStageCatalog } from '../../lib/stages.js';
+import { fmtDollar } from '../../lib/pricing.js';
 
 const UPDATE_FIELDS = [
   'name',
@@ -40,6 +47,61 @@ const SEGMENT_OPTIONS = [
   { value: 'Commercial', label: 'Commercial' },
   { value: 'Other', label: 'Other' },
 ];
+
+// Kept in sync with functions/documents/library.js — duplicated here
+// rather than exported so this page has no extra coupling across the
+// documents feature.
+const DOC_KIND_LABELS = {
+  rfq: 'RFQ',
+  rfi: 'RFI',
+  quote_pdf: 'Quote PDF',
+  quote_docx: 'Quote DOCX',
+  po: 'PO',
+  oc_pdf: 'OC PDF',
+  ntp_pdf: 'NTP PDF',
+  drawing: 'Drawing',
+  specification: 'Specification',
+  supplier_quote: 'Vendor Quote',
+  image: 'Image / Photo',
+  other: 'Other',
+};
+
+function formatSize(bytes) {
+  if (!bytes) return '\u2014';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function stageLabelFor(catalog, txType, stageKey) {
+  const list = catalog.get(txType) ?? [];
+  const def = list.find((s) => s.stage_key === stageKey);
+  return def?.label ?? stageKey ?? '';
+}
+
+function oppTypeDisplay(transactionType) {
+  const parts = parseTransactionTypes(transactionType);
+  if (!parts.length) return '';
+  return parts.map((t) => QUOTE_TYPE_LABELS[t] ?? t).join(' + ');
+}
+
+function quoteStatusPillClass(s) {
+  switch (s) {
+    case 'draft':
+    case 'revision_draft':
+      return '';
+    case 'issued':
+    case 'revision_issued':
+    case 'accepted':
+      return 'pill-success';
+    case 'rejected':
+    case 'expired':
+    case 'dead':
+      return 'pill-locked';
+    default:
+      return '';
+  }
+}
 
 // ---- helpers for inline-editable fields ----------------------------------
 
@@ -130,6 +192,121 @@ export async function onRequestGet(context) {
     ...users.map(u => ({ value: u.id, label: u.display_name ?? u.email })),
   ];
 
+  // Related-records sections: opportunities, quotes, and documents for
+  // this account. Quotes reach the account via the opportunities join;
+  // documents can be attached directly to the account, to an opp, or
+  // to a quote on one of its opps. Note-attachment documents (those
+  // with `activity_id` set) are excluded — they render inline with
+  // their note. All four queries run in parallel so the page does not
+  // serialize on database latency.
+  const [accountOpps, accountQuotes, accountDocs, stageCatalog] = await Promise.all([
+    all(
+      env.DB,
+      `SELECT id, number, title, transaction_type, stage,
+              estimated_value_usd, owner_user_id, updated_at, created_at
+         FROM opportunities
+        WHERE account_id = ?
+        ORDER BY updated_at DESC
+        LIMIT 100`,
+      [accountId]
+    ),
+    all(
+      env.DB,
+      `SELECT q.id, q.number, q.revision, q.quote_type, q.status,
+              q.title, q.total_price, q.valid_until, q.updated_at,
+              q.opportunity_id,
+              o.number AS opp_number, o.title AS opp_title
+         FROM quotes q
+         JOIN opportunities o ON o.id = q.opportunity_id
+        WHERE o.account_id = ?
+        ORDER BY q.updated_at DESC
+        LIMIT 100`,
+      [accountId]
+    ),
+    all(
+      env.DB,
+      `SELECT d.id, d.kind, d.title, d.original_filename, d.mime_type,
+              d.size_bytes, d.uploaded_at,
+              d.account_id, d.opportunity_id, d.quote_id,
+              o.number AS opp_number,
+              q.number AS quote_number, q.revision AS quote_revision
+         FROM documents d
+         LEFT JOIN opportunities o ON o.id = d.opportunity_id
+         LEFT JOIN quotes q        ON q.id = d.quote_id
+        WHERE (d.account_id = ?
+            OR d.opportunity_id IN (SELECT id FROM opportunities WHERE account_id = ?)
+            OR d.quote_id IN (SELECT q2.id FROM quotes q2
+                               JOIN opportunities o2 ON o2.id = q2.opportunity_id
+                              WHERE o2.account_id = ?))
+          AND d.activity_id IS NULL
+        ORDER BY d.uploaded_at DESC
+        LIMIT 100`,
+      [accountId, accountId, accountId]
+    ),
+    loadStageCatalog(env.DB),
+  ]);
+
+  // Pre-format rows so the template stays simple.
+  const userDisplayById = new Map(users.map((u) => [u.id, u.display_name ?? u.email]));
+  const oppRows = accountOpps.map((o) => {
+    const firstType = parseTransactionTypes(o.transaction_type)[0] ?? 'spares';
+    return {
+      id: o.id,
+      number: o.number ?? '',
+      title: o.title ?? '',
+      typeLabel: oppTypeDisplay(o.transaction_type),
+      stageLabel: stageLabelFor(stageCatalog, firstType, o.stage),
+      value: o.estimated_value_usd,
+      owner: userDisplayById.get(o.owner_user_id) ?? '',
+      updated: (o.updated_at ?? '').slice(0, 10),
+    };
+  });
+  const quoteRows = accountQuotes.map((q) => ({
+    id: q.id,
+    opportunity_id: q.opportunity_id,
+    number: q.number ?? '',
+    revision: q.revision ?? '',
+    typeLabel: QUOTE_TYPE_LABELS[q.quote_type] ?? q.quote_type ?? '',
+    status: q.status ?? '',
+    statusLabel: QUOTE_STATUS_LABELS[q.status] ?? q.status ?? '',
+    title: q.title ?? '',
+    oppNumber: q.opp_number ?? '',
+    oppTitle: q.opp_title ?? '',
+    total: q.total_price,
+    validUntil: q.valid_until ?? '',
+    updated: (q.updated_at ?? '').slice(0, 10),
+  }));
+  const docRows = accountDocs.map((d) => {
+    // Render a short "Linked to" hint so the user can tell if a doc
+    // is attached to the account itself, to an opportunity, or to a
+    // specific quote.
+    let linkedTo = '';
+    let linkedHref = '';
+    if (d.quote_number) {
+      linkedTo = `Quote ${d.quote_number}${d.quote_revision && d.quote_revision !== 'v1' ? ` ${d.quote_revision}` : ''}`;
+      linkedHref = d.opportunity_id && d.quote_id
+        ? `/opportunities/${d.opportunity_id}/quotes/${d.quote_id}`
+        : '';
+    } else if (d.opp_number) {
+      linkedTo = `Opp ${d.opp_number}`;
+      linkedHref = d.opportunity_id ? `/opportunities/${d.opportunity_id}` : '';
+    } else if (d.account_id) {
+      linkedTo = 'Account';
+      linkedHref = '';
+    }
+    return {
+      id: d.id,
+      kind: d.kind ?? '',
+      kindLabel: DOC_KIND_LABELS[d.kind] ?? d.kind ?? '',
+      title: d.title || d.original_filename || '(untitled)',
+      filename: d.original_filename ?? '',
+      size: formatSize(d.size_bytes),
+      uploaded: (d.uploaded_at ?? '').slice(0, 10),
+      linkedTo,
+      linkedHref,
+    };
+  });
+
   const events = await all(
     env.DB,
     `SELECT ae.event_type, ae.at, ae.summary, ae.changes_json,
@@ -218,6 +395,120 @@ export async function onRequestGet(context) {
           </ul>
         </section>`
       : ''}
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Opportunities (${oppRows.length})</h2>
+        <a class="btn primary" href="/opportunities/new?account=${escape(account.id)}">New opportunity</a>
+      </div>
+      ${oppRows.length === 0
+        ? html`<p class="muted">No opportunities yet.</p>`
+        : html`
+          <table class="data compact">
+            <thead>
+              <tr>
+                <th>Number</th>
+                <th>Title</th>
+                <th>Type</th>
+                <th>Stage</th>
+                <th class="num">Value</th>
+                <th>Owner</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${oppRows.map((o) => html`
+                <tr>
+                  <td><a href="/opportunities/${escape(o.id)}"><code>${escape(o.number)}</code></a></td>
+                  <td><a href="/opportunities/${escape(o.id)}">${escape(o.title || '(untitled)')}</a></td>
+                  <td>${escape(o.typeLabel)}</td>
+                  <td><span class="pill">${escape(o.stageLabel)}</span></td>
+                  <td class="num">${escape(o.value != null ? fmtDollar(o.value) : '\u2014')}</td>
+                  <td>${escape(o.owner)}</td>
+                  <td><small class="muted">${escape(o.updated)}</small></td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        `}
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Quotes (${quoteRows.length})</h2>
+      </div>
+      ${quoteRows.length === 0
+        ? html`<p class="muted">No quotes yet.</p>`
+        : html`
+          <table class="data compact">
+            <thead>
+              <tr>
+                <th>Number</th>
+                <th>Rev</th>
+                <th>Type</th>
+                <th>Title</th>
+                <th>Opportunity</th>
+                <th>Status</th>
+                <th class="num">Total</th>
+                <th>Valid until</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${quoteRows.map((q) => html`
+                <tr>
+                  <td><a href="/opportunities/${escape(q.opportunity_id)}/quotes/${escape(q.id)}"><code>${escape(q.number)}</code></a></td>
+                  <td>${escape(q.revision)}</td>
+                  <td>${escape(q.typeLabel)}</td>
+                  <td>${escape(q.title || '(no title)')}</td>
+                  <td><a href="/opportunities/${escape(q.opportunity_id)}"><code>${escape(q.oppNumber)}</code> ${escape(q.oppTitle)}</a></td>
+                  <td><span class="pill ${quoteStatusPillClass(q.status)}">${escape(q.statusLabel)}</span></td>
+                  <td class="num">${escape(q.total != null ? fmtDollar(q.total) : '\u2014')}</td>
+                  <td><small class="muted">${escape(q.validUntil)}</small></td>
+                  <td><small class="muted">${escape(q.updated)}</small></td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        `}
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Documents (${docRows.length})</h2>
+        <a class="btn" href="/documents/library">Open library</a>
+      </div>
+      ${docRows.length === 0
+        ? html`<p class="muted">No documents yet.</p>`
+        : html`
+          <table class="data compact">
+            <thead>
+              <tr>
+                <th>Kind</th>
+                <th>Title</th>
+                <th>Linked to</th>
+                <th class="num">Size</th>
+                <th>Uploaded</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${docRows.map((d) => html`
+                <tr>
+                  <td><span class="pill">${escape(d.kindLabel)}</span></td>
+                  <td><a href="/documents/${escape(d.id)}/download">${escape(d.title)}</a></td>
+                  <td>${d.linkedHref
+                    ? html`<a href="${escape(d.linkedHref)}">${escape(d.linkedTo)}</a>`
+                    : html`<small class="muted">${escape(d.linkedTo)}</small>`}</td>
+                  <td class="num"><small class="muted">${escape(d.size)}</small></td>
+                  <td><small class="muted">${escape(d.uploaded)}</small></td>
+                  <td class="row-actions"><a class="btn btn-sm" href="/documents/${escape(d.id)}/download">Download</a></td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        `}
+    </section>
 
     <section class="card">
       <div class="card-header">
