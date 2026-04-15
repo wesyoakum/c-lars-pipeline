@@ -57,6 +57,7 @@ code {
   padding: 0.75rem 1.5rem;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
+  position: relative; /* anchor for .beta-banner */
 }
 
 .brand {
@@ -67,6 +68,24 @@ code {
 .brand a { color: var(--fg); display: flex; align-items: center; gap: 0.4rem; }
 .brand a:hover { text-decoration: none; }
 .brand-logo { height: 28px; width: auto; }
+
+/* Ribbon-style "BETA VERSION" banner that hangs below the top bar,
+   aligned with the left edge of the brand (logo + PMS). Taken out
+   of the header's flex flow with position:absolute so it does not
+   push nav links around. Pointer-events:none keeps it from stealing
+   clicks — it is purely decorative. Remove the <img> tag in
+   layout.js (or delete img/beta_banner.png) when the app ships. */
+.beta-banner {
+  position: absolute;
+  top: 100%;
+  left: 1.5rem;
+  width: 72px;
+  height: auto;
+  z-index: 5;
+  pointer-events: none;
+  /* Subtle drop shadow so the ribbon reads against light cards. */
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+}
 
 .env-badge {
   font-size: 0.7rem;

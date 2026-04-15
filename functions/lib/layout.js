@@ -225,6 +225,7 @@ export function layout(title, body, opts = {}) {
                    <span class="user-role">${escape(user.email ?? '')} · ${escape(user.role)}</span>` : '<span>Not signed in</span>'}
       </div>
     </div>
+    <img src="/img/beta_banner.png" alt="BETA VERSION" class="beta-banner">
   </header>
   ${user ? `<div class="notification-toast-stack" x-data x-cloak>
     <template x-for="toast in ($store.notifications && $store.notifications.toasts) || []" :key="toast.id">
