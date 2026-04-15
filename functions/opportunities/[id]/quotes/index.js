@@ -18,6 +18,7 @@ import {
   allowedQuoteTypes,
   parseQuoteTypes,
 } from '../../../lib/validators.js';
+import { getQuoteTermDefault } from '../../../lib/quote-term-defaults.js';
 import { formBody } from '../../../lib/http.js';
 
 export async function onRequestGet(context) {
@@ -55,9 +56,12 @@ export async function onRequestPost(context) {
     );
   }
 
-  // Seed type-specific defaults when the user didn't supply them. These
-  // strings match the quote detail page's "Default XXX Terms" checkbox so
-  // that the seeded value round-trips as "still the default" on load.
+  // Seed type-specific defaults when the user didn't supply them.
+  // Payment/delivery-term defaults are user-editable per quote_type —
+  // they live in the `quote_term_defaults` table (migration 0024) and
+  // are written via the "Save as default" button on the quote detail
+  // page. The hardcoded strings that used to live here still seed the
+  // table on launch so behavior is unchanged for new installs.
   //
   // T3.4 Sub-feature A — hybrid quotes combine parts (e.g. spares +
   // service). The plan says "apply the most-conservative default —
@@ -68,8 +72,8 @@ export async function onRequestPost(context) {
   //     terms when it's the only non-EPS/refurb part. EPS terms are
   //     computed client-side from delivery weeks so we don't seed
   //     payment_terms for EPS-only quotes.
-  //   - Delivery terms default to "EXW, C-LARS facility" whenever any
-  //     part is EPS or refurb.
+  //   - Delivery terms default to the EPS / refurb saved default
+  //     whenever any part is EPS or refurb — same table, same helper.
   const parts = parseQuoteTypes(value.quote_type);
   const hasSpares  = parts.includes('spares');
   const hasService = parts.includes('service');
@@ -84,16 +88,22 @@ export async function onRequestPost(context) {
   }
   if (!value.payment_terms) {
     if (hasSpares) {
-      value.payment_terms =
-        '50% Due upon receipt of purchase order\n50% Due upon delivery, payable Net 15';
+      value.payment_terms = await getQuoteTermDefault(env, 'spares', 'payment_terms', '');
     } else if (hasService) {
-      value.payment_terms =
-        '50% of estimated price Due upon receipt of purchase order\nRemainder Due upon completion of work, payable Net 15';
+      value.payment_terms = await getQuoteTermDefault(env, 'service', 'payment_terms', '');
     }
     // EPS terms are computed client-side from delivery_estimate — don't seed here.
   }
-  if (!value.delivery_terms && (hasEps || hasRefurb)) {
-    value.delivery_terms = 'EXW, C-LARS facility';
+  if (!value.delivery_terms) {
+    // Pick whichever part has a saved delivery default. Refurb variants
+    // each have their own row so we honor the specific type the user
+    // chose; EPS falls back to its dedicated row.
+    let deliveryType = null;
+    if (hasEps) deliveryType = 'eps';
+    else if (hasRefurb) deliveryType = parts.find(p => p.startsWith('refurb_')) ?? null;
+    if (deliveryType) {
+      value.delivery_terms = await getQuoteTermDefault(env, deliveryType, 'delivery_terms', '');
+    }
   }
 
   // Validate cost_build_id belongs to this opportunity (if supplied).

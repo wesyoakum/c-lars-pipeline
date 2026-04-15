@@ -35,6 +35,7 @@ import {
   readDiscountFromRow,
 } from '../../../../lib/pricing.js';
 import { templateTypeForQuote, templateManagerHtml } from '../../../../lib/template-catalog.js';
+import { loadQuoteTermDefaultsMap } from '../../../../lib/quote-term-defaults.js';
 
 const READ_ONLY_STATUSES = new Set([
   'issued', 'revision_issued', 'accepted', 'rejected', 'expired', 'dead',
@@ -114,6 +115,12 @@ export async function onRequestGet(context) {
       ORDER BY uploaded_at DESC`,
     [quoteId]
   );
+
+  // User-editable term defaults (migration 0024). Flat map like
+  //   { spares: { payment_terms: '...' }, eps: { delivery_terms: '...' } }
+  // Serialized into JS below so the flatTerms / plainTerms Alpine
+  // components can consult (or save) defaults without a round-trip.
+  const termDefaults = await loadQuoteTermDefaultsMap(env);
 
   const readOnly = READ_ONLY_STATUSES.has(quote.status);
   const subtotal = lines.reduce((a, l) => a + Number(l.extended_price ?? 0), 0);
@@ -603,7 +610,13 @@ export async function onRequestGet(context) {
       ${quote.quote_type === 'eps'
         ? html`
           <div x-data="epsTerms()" style="margin-top:0.75rem">
-            <strong>Terms</strong>
+            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.2rem">
+              <strong>Terms</strong>
+              <span style="flex:1"></span>
+              <span style="font-size:0.75rem;color:var(--fg-muted)">
+                EPS payment terms are computed from delivery weeks
+              </span>
+            </div>
             <textarea class="desc-textarea" data-field="payment_terms" placeholder="Payment terms, conditions..."
                       ${readOnly ? 'disabled' : ''}
                       x-model="termsVal"
@@ -617,7 +630,17 @@ export async function onRequestGet(context) {
         : (quote.quote_type === 'spares' || quote.quote_type === 'service')
           ? html`
             <div x-data="flatTerms()" style="margin-top:0.75rem">
-              <strong>Terms</strong>
+              <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.2rem">
+                <strong>Terms</strong>
+                <span style="flex:1"></span>
+                ${!readOnly ? html`
+                  <button type="button" class="btn-tiny"
+                          @click="saveAsDefault()"
+                          :disabled="saving"
+                          x-text="saveLabel"
+                          title="Save the current text as the default for ${quote.quote_type === 'spares' ? 'Spares' : 'Service'} quotes"></button>
+                ` : ''}
+              </div>
               <textarea class="desc-textarea" data-field="payment_terms" placeholder="Payment terms, conditions..."
                         ${readOnly ? 'disabled' : ''}
                         x-model="termsVal"
@@ -629,18 +652,40 @@ export async function onRequestGet(context) {
               </label>
             </div>`
           : html`
-            <label style="margin-top:0.75rem">
-              <strong>Terms</strong>
+            <div x-data="plainTerms('payment_terms')" style="margin-top:0.75rem">
+              <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.2rem">
+                <strong>Terms</strong>
+                <span style="flex:1"></span>
+                ${(!readOnly && !isHybrid) ? html`
+                  <button type="button" class="btn-tiny"
+                          @click="saveAsDefault()"
+                          :disabled="saving"
+                          x-text="saveLabel"
+                          title="Save the current text as the default for ${escape(quoteTypeDisplayLabel(quote.quote_type))} quotes"></button>
+                ` : ''}
+              </div>
               <textarea class="desc-textarea" data-field="payment_terms" placeholder="Payment terms, conditions..."
                         ${readOnly ? 'disabled' : ''}
-                        @change="window._qPatch('payment_terms', $event.target.value)">${escape(quote.payment_terms ?? '')}</textarea>
-            </label>`}
-      <label style="margin-top:0.75rem">
-        <strong>Delivery terms</strong>
+                        x-model="val"
+                        @change="onSave()">${escape(quote.payment_terms ?? '')}</textarea>
+            </div>`}
+      <div x-data="plainTerms('delivery_terms')" style="margin-top:0.75rem">
+        <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.2rem">
+          <strong>Delivery terms</strong>
+          <span style="flex:1"></span>
+          ${(!readOnly && !isHybrid) ? html`
+            <button type="button" class="btn-tiny"
+                    @click="saveAsDefault()"
+                    :disabled="saving"
+                    x-text="saveLabel"
+                    title="Save the current text as the default for ${escape(quoteTypeDisplayLabel(quote.quote_type))} quotes"></button>
+          ` : ''}
+        </div>
         <textarea class="desc-textarea" placeholder="EXW, FCA, FOB, DAP..."
                   ${readOnly ? 'disabled' : ''}
-                  @change="window._qPatch('delivery_terms', $event.target.value)">${escape(quote.delivery_terms ?? '')}</textarea>
-      </label>
+                  x-model="val"
+                  @change="onSave()">${escape(quote.delivery_terms ?? '')}</textarea>
+      </div>
 
       ${quote.notes_internal || !readOnly ? html`
         <div style="margin-top:0.75rem;padding:0.5rem 0.7rem;background:#fff8c5;border:1px solid #d4a72c;border-radius:var(--radius)">
@@ -779,6 +824,18 @@ export async function onRequestGet(context) {
       var _quoteType = ${raw(JSON.stringify(quote.quote_type || ''))};
       var _deliveryWeeks = null;
       var _initialPaymentTerms = ${raw(JSON.stringify(quote.payment_terms || ''))};
+      var _initialDeliveryTerms = ${raw(JSON.stringify(quote.delivery_terms || ''))};
+
+      // User-editable term defaults from migration 0024 — flat map of
+      //   { [quoteType]: { payment_terms: '...', delivery_terms: '...' } }
+      // The flatTerms / plainTerms components consult this map to
+      // drive the "Default X Terms" checkbox and the "Save as default"
+      // button. A click on "Save as default" updates both the DB row
+      // and this local map so a second save shows "Saved" immediately.
+      var _savedDefaults = ${raw(JSON.stringify(termDefaults || {}))};
+      function _defaultFor(type, field) {
+        return (_savedDefaults[type] && _savedDefaults[type][field]) || '';
+      }
 
       // Parse initial delivery weeks
       var _initDeliveryMatch = (${raw(JSON.stringify(quote.delivery_estimate || ''))}).match(/^(\\d+)\\s*week/);
@@ -795,17 +852,32 @@ export async function onRequestGet(context) {
              + '10% Due upon delivery of final documentation';
       }
 
-      // --- Static default payment terms for Spares and Service ---
-      // Keep these in lockstep with the seeded defaults in
-      // functions/opportunities/[id]/quotes/index.js (quote create handler).
-      var _sparesDefaultTerms = '50% Due upon receipt of purchase order' + '\\n'
-                              + '50% Due upon delivery, payable Net 15';
-      var _serviceDefaultTerms = '50% of estimated price Due upon receipt of purchase order' + '\\n'
-                               + 'Remainder Due upon completion of work, payable Net 15';
+      // Spares / Service payment terms come straight from the saved
+      // defaults map. Empty string when nothing is saved yet — the
+      // checkbox still works, it just starts off unchecked.
       function flatDefaultTerms() {
-        if (_quoteType === 'spares') return _sparesDefaultTerms;
-        if (_quoteType === 'service') return _serviceDefaultTerms;
-        return '';
+        return _defaultFor(_quoteType, 'payment_terms');
+      }
+
+      // POST to the save-as-default endpoint. Returns a Promise that
+      // resolves with { ok, changed } from the server. Shared by the
+      // flatTerms and plainTerms Alpine components.
+      function _saveTermDefault(type, field, value) {
+        return fetch('/quotes/term-defaults', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ quote_type: type, field: field, value: value }),
+        }).then(function(r) { return r.json(); }).then(function(d) {
+          if (d && d.ok) {
+            // Mirror the saved value into our local map so a subsequent
+            // load on the same page sees the new default without a
+            // reload. Use the string we sent, not d.value (the endpoint
+            // doesn't echo it back).
+            if (!_savedDefaults[type]) _savedDefaults[type] = {};
+            _savedDefaults[type][field] = value;
+          }
+          return d;
+        });
       }
 
       // Delivery picker with text, calendar, and weeks dropdown.
@@ -896,12 +968,16 @@ export async function onRequestGet(context) {
       });
 
       // Spares / Service terms component — mirrors epsTerms but uses a
-      // static default (no delivery-weeks dependency). The default text is
-      // chosen by quote_type via flatDefaultTerms().
+      // static default (no delivery-weeks dependency). The default text
+      // is whatever the user last saved for this quote_type via the
+      // "Save as default" button (backed by the quote_term_defaults
+      // table from migration 0024).
       Alpine.data('flatTerms', function() {
         return {
           termsVal: _initialPaymentTerms,
           useDefault: true,
+          saving: false,
+          saveLabel: 'Save as default',
           _skipWatch: false,
           init: function() {
             var self = this;
@@ -937,6 +1013,69 @@ export async function onRequestGet(context) {
               if (flatDefaultTerms()) { this.applyDefault(); return; }
             }
             window._qPatch('payment_terms', this.termsVal);
+          },
+          saveAsDefault: function() {
+            var self = this;
+            self.saving = true;
+            self.saveLabel = 'Saving\u2026';
+            _saveTermDefault(_quoteType, 'payment_terms', self.termsVal).then(function(d) {
+              if (d && d.ok) {
+                // Now that the saved default matches the current text,
+                // the checkbox should show as "on".
+                self._skipWatch = true;
+                self.useDefault = true;
+                self._skipWatch = false;
+                self.saveLabel = d.changed ? 'Saved \u2713' : 'Already saved';
+              } else {
+                self.saveLabel = 'Save failed';
+                console.error('Save default failed:', d && d.error);
+              }
+              setTimeout(function() {
+                self.saving = false;
+                self.saveLabel = 'Save as default';
+              }, 1500);
+            });
+          },
+        };
+      });
+
+      // Plain terms component — used for the refurb_* payment-terms
+      // branch and for every quote's delivery-terms textarea. Provides
+      // the same "Save as default" affordance as flatTerms but without
+      // the default-checkbox machinery (the plain branch doesn't have
+      // a one-click revert since there's no hardcoded template to flip
+      // back to). Field is passed in as an argument — 'payment_terms'
+      // or 'delivery_terms'. Initial value is pulled from closure
+      // scope so Alpine's x-model doesn't blank out the textarea on
+      // mount (x-model assigns data → element on first render).
+      Alpine.data('plainTerms', function(field) {
+        var initial = (field === 'payment_terms')  ? _initialPaymentTerms
+                    : (field === 'delivery_terms') ? _initialDeliveryTerms
+                    : '';
+        return {
+          val: initial,
+          field: field,
+          saving: false,
+          saveLabel: 'Save as default',
+          onSave: function() {
+            window._qPatch(this.field, this.val);
+          },
+          saveAsDefault: function() {
+            var self = this;
+            self.saving = true;
+            self.saveLabel = 'Saving\u2026';
+            _saveTermDefault(_quoteType, self.field, self.val).then(function(d) {
+              if (d && d.ok) {
+                self.saveLabel = d.changed ? 'Saved \u2713' : 'Already saved';
+              } else {
+                self.saveLabel = 'Save failed';
+                console.error('Save default failed:', d && d.error);
+              }
+              setTimeout(function() {
+                self.saving = false;
+                self.saveLabel = 'Save as default';
+              }, 1500);
+            });
           },
         };
       });
