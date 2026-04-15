@@ -50,9 +50,6 @@ const UPDATE_FIELDS = [
 export async function onRequestGet(context) {
   const { env, data, request, params } = context;
   const user = data?.user;
-  // Per-user preference (migration 0026) — hides the discount UI when
-  // false but stored data is preserved and still applied to totals.
-  const showDiscounts = user?.show_discounts === 1 || user?.show_discounts === true;
   const url = new URL(request.url);
   const oppId = params.id;
   const quoteId = params.quoteId;
@@ -126,6 +123,10 @@ export async function onRequestGet(context) {
   const termDefaults = await loadQuoteTermDefaultsMap(env);
 
   const readOnly = READ_ONLY_STATUSES.has(quote.status);
+  // Per-quote display toggle (migration 0027) — hides the discount
+  // editors on this quote when false. Stored discount data is still
+  // applied to totals / PDFs regardless.
+  const showDiscounts = quote.show_discounts === 1 || quote.show_discounts === true;
   const subtotal = lines.reduce((a, l) => a + Number(l.extended_price ?? 0), 0);
   // T3.2 Phase 1 — header-level discount is applied to the full subtotal
   // (same base the server-side recompute uses via SUM(extended_price)).
@@ -207,6 +208,25 @@ export async function onRequestGet(context) {
             <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/generate-docx" class="inline-form">
               <button class="btn" type="submit">Download Word</button>
             </form>
+            <div class="quote-settings" x-data="quoteSettings(${showDiscounts ? 'true' : 'false'})" @click.outside="open = false">
+              <button type="button" class="quote-settings-btn" @click="open = !open" aria-label="Quote settings" title="Quote settings">
+                <svg class="quote-settings-icon" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+                  <path d="M19.14 12.94c.04-.31.06-.62.06-.94 0-.32-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.5.5 0 0 0-.58-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.58.22L2.74 8.87a.49.49 0 0 0 .12.61l2.03 1.58c-.04.31-.06.62-.06.94 0 .32.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.39.31.6.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.25.41.49.41h3.84c.24 0 .45-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.23.09.5 0 .6-.22l1.92-3.32c.12-.22.07-.49-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 0 1 8.4 12 3.6 3.6 0 0 1 12 8.4a3.6 3.6 0 0 1 3.6 3.6 3.6 3.6 0 0 1-3.6 3.6z"/>
+                </svg>
+              </button>
+              <div class="quote-settings-panel" x-show="open" x-cloak @click.stop>
+                <div class="quote-settings-row">
+                  <div class="quote-settings-label">
+                    <strong>Show discount fields</strong>
+                    <span>Toggle the header and per-line discount editors. Existing discount data is preserved.</span>
+                  </div>
+                  <label class="toggle-switch" :class="{ 'toggle-switch--on': value }">
+                    <input type="checkbox" :checked="value" @change="save($event.target.checked)">
+                    <span class="toggle-slider"></span>
+                  </label>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1150,6 +1170,40 @@ export async function onRequestGet(context) {
           },
           patchPhantom: function(checked) {
             window._qPatch('discount_is_phantom', checked ? 1 : 0);
+          },
+        };
+      });
+
+      // Per-quote settings popover (gear icon in the quote header).
+      // Currently one toggle — show/hide discount UI. Saves via _qPatch
+      // and reloads so the server-rendered discount rows reflect the
+      // new value immediately.
+      Alpine.data('quoteSettings', function(initial) {
+        return {
+          open: false,
+          value: !!initial,
+          saving: false,
+          save: function(next) {
+            var self = this;
+            self.value = !!next;
+            self.saving = true;
+            fetch('${raw(patchUrl)}', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ show_discounts: next ? 1 : 0 }),
+            }).then(function(r) { return r.json(); }).then(function(d) {
+              if (!d.ok) {
+                self.value = !next;
+                alert('Save failed: ' + (d.error || 'unknown error'));
+                self.saving = false;
+                return;
+              }
+              window.location.reload();
+            }).catch(function(err) {
+              self.value = !next;
+              alert('Save failed: ' + err.message);
+              self.saving = false;
+            });
           },
         };
       });

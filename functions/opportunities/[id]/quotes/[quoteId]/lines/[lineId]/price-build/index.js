@@ -30,6 +30,7 @@ async function loadContext(env, params) {
   const line = await one(
     env.DB,
     `SELECT ql.*, q.opportunity_id, q.number AS quote_number, q.revision,
+            q.show_discounts AS quote_show_discounts,
             o.number AS opp_number, o.title AS opp_title
        FROM quote_lines ql
        JOIN quotes q ON q.id = ql.quote_id
@@ -149,9 +150,10 @@ async function renderCreatePrompt(context, ctx) {
 async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
   const { env, data, request, params } = context;
   const user = data?.user;
-  // Per-user preference (migration 0026) — hides the build discount
-  // editor when false, same toggle as the quote page discount UI.
-  const showDiscounts = user?.show_discounts === 1 || user?.show_discounts === true;
+  // Per-quote display toggle (migration 0027) — hides the build
+  // discount editor when the parent quote has show_discounts off.
+  const showDiscounts =
+    ctx.line.quote_show_discounts === 1 || ctx.line.quote_show_discounts === true;
   const url = new URL(request.url);
   const sub = url.searchParams.get('sub') || 'pricing';
   const { line, oppId, quoteId, lineId } = ctx;

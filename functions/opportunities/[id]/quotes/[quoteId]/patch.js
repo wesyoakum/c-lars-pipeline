@@ -20,6 +20,8 @@ const PATCHABLE = new Set([
   'tax_amount', 'notes_internal', 'notes_customer',
   // T3.2 Phase 1 — header-level discount
   'discount_amount', 'discount_pct', 'discount_description', 'discount_is_phantom',
+  // Per-quote show/hide toggle for the discount UI (migration 0027)
+  'show_discounts',
 ]);
 
 // Fields that affect the stored quote totals; changing any of them
@@ -39,12 +41,16 @@ export async function onRequestPost(context) {
   if (!before || before.opportunity_id !== oppId) {
     return json({ ok: false, error: 'Not found' }, 404);
   }
-  if (READ_ONLY_STATUSES.has(before.status)) {
-    return json({ ok: false, error: `Cannot edit a ${before.status} quote` }, 400);
-  }
 
   let body;
   try { body = await request.json(); } catch { return json({ ok: false, error: 'Invalid JSON' }, 400); }
+
+  // show_discounts is a display-only toggle — allow it on locked
+  // quotes too. Everything else is blocked for read-only statuses.
+  const onlyDisplayFields = Object.keys(body).every((k) => k === 'show_discounts');
+  if (READ_ONLY_STATUSES.has(before.status) && !onlyDisplayFields) {
+    return json({ ok: false, error: `Cannot edit a ${before.status} quote` }, 400);
+  }
 
   const sets = [];
   const vals = [];
@@ -58,7 +64,7 @@ export async function onRequestPost(context) {
     let storedVal;
     if (v === '' || v === null || v === undefined) {
       storedVal = null;
-    } else if (k === 'discount_is_phantom') {
+    } else if (k === 'discount_is_phantom' || k === 'show_discounts') {
       storedVal = (v === 1 || v === '1' || v === true || v === 'true' || v === 'on') ? 1 : 0;
     } else {
       storedVal = v;

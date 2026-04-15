@@ -147,61 +147,68 @@ code {
   box-shadow: 0 0 0 2px var(--bg);
 }
 
-/* ---------- Header settings (gear) ---------- */
+/* ---------- Quote settings popover (gear) ---------- */
 
-.header-settings {
+.quote-settings {
+  position: relative;
+  display: inline-block;
+}
+.quote-settings-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--fg);
+  cursor: pointer;
   transition: background 0.15s ease, transform 0.2s ease;
 }
-.header-settings:hover {
+.quote-settings-btn:hover,
+.quote-settings[open] .quote-settings-btn {
   background: var(--bg-alt);
-  text-decoration: none;
   transform: rotate(30deg);
 }
-.header-settings-icon {
+.quote-settings-icon {
   display: block;
 }
-
-/* ---------- Settings page ---------- */
-
-.settings-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  margin-top: 1rem;
+.quote-settings-panel {
+  position: absolute;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  z-index: 20;
+  min-width: 260px;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
 }
-.setting-row {
+.quote-settings-row {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 0.9rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--bg-alt, transparent);
+  gap: 0.75rem;
 }
-.setting-label {
+.quote-settings-label {
   flex: 1;
   min-width: 0;
-}
-.setting-title {
-  font-weight: 600;
-  font-size: 0.95rem;
-  margin-bottom: 0.2rem;
-}
-.setting-desc {
   font-size: 0.85rem;
+}
+.quote-settings-label strong {
+  display: block;
+  font-size: 0.9rem;
+  margin-bottom: 0.15rem;
+}
+.quote-settings-label span {
   color: var(--muted, #666);
-  line-height: 1.35;
+  font-size: 0.78rem;
+  line-height: 1.3;
 }
 
-/* Toggle switch (iOS-style) */
+/* Toggle switch (iOS-style) — reused for quote settings popover */
 .toggle-switch {
   position: relative;
   display: inline-block;
