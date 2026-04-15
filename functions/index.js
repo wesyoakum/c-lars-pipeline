@@ -408,7 +408,14 @@ export async function onRequestGet(context) {
     // alpine-initialized event fires after every x-data component
     // has finished its init hook, which is exactly what we need.
     document.addEventListener('alpine:initialized', function () {
-      ${raw(buildChartInitScript('car-', chartsJson))}
+      // Double requestAnimationFrame so layout settles after Alpine strips
+      // x-cloak before Chart.js measures the canvas parents. Without this
+      // the first slide may still be reporting 0 height when init runs.
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          ${raw(buildChartInitScript('car-', chartsJson))}
+        });
+      });
     });
     </script>
   `;

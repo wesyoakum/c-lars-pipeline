@@ -380,9 +380,17 @@ export function renderHeatmapGrid(heatmap, { includeLegend = true } = {}) {
  * — if that canvas doesn't exist on the page, the block is a no-op.
  */
 export function buildChartInitScript(prefix, chartsJson) {
+  const prefixJson = JSON.stringify(prefix);
   return `
     (function() {
-      if (typeof Chart === 'undefined') return;
+      var PREFIX = ${prefixJson};
+      var LOG = '[' + PREFIX.replace(/-$/, '') + '-charts]';
+      if (typeof Chart === 'undefined') {
+        console.error(LOG, 'Chart.js not loaded — aborting init');
+        return;
+      }
+      console.log(LOG, 'init starting, Chart.js version:', Chart.version);
+
       var palette = [
         'rgba(9,105,218,0.75)','rgba(26,127,55,0.75)','rgba(191,135,0,0.75)',
         'rgba(207,34,46,0.75)','rgba(130,80,223,0.75)','rgba(17,138,178,0.75)',
@@ -397,11 +405,35 @@ export function buildChartInitScript(prefix, chartsJson) {
         if (v >= 1e3) return '$' + Math.round(v / 1e3) + 'k';
         return '$' + Math.round(v);
       }
-      function el(id) { return document.getElementById(${JSON.stringify(prefix)} + id); }
+      function el(id) { return document.getElementById(PREFIX + id); }
+
+      // Per-chart creation wrapper: logs result, wraps errors, reports
+      // parent dimensions (Chart.js measures parentNode). If the parent
+      // has 0 width or 0 height, the chart renders as 0x0 (invisible),
+      // which is the most common "silent failure" mode.
+      var created = 0, skipped = 0, failed = 0;
+      function make(key, factory) {
+        var canvas = el(key);
+        if (!canvas) { skipped++; return; }
+        var parent = canvas.parentNode;
+        var pw = parent ? parent.clientWidth : 0;
+        var ph = parent ? parent.clientHeight : 0;
+        if (pw === 0 || ph === 0) {
+          console.warn(LOG, key, 'parent has 0 size:', pw + 'x' + ph, '— chart will not render');
+        }
+        try {
+          factory(canvas);
+          created++;
+          console.log(LOG, key, 'OK, parent', pw + 'x' + ph);
+        } catch (err) {
+          failed++;
+          console.error(LOG, key, 'FAILED:', err && err.message, err);
+        }
+      }
 
       var stage = ${chartsJson.stage};
-      if (stage.labels.length && el('stage')) {
-        new Chart(el('stage'), {
+      if (stage.labels.length) make('stage', function(canvas) {
+        new Chart(canvas, {
           type: 'bar',
           data: { labels: stage.labels, datasets: [{ label: 'Pipeline ($)', data: stage.values, backgroundColor: palette, borderRadius: 4 }] },
           options: {
@@ -413,11 +445,11 @@ export function buildChartInitScript(prefix, chartsJson) {
             scales: { x: { ticks: { callback: function(v) { return fmt$(v); } } } }
           }
         });
-      }
+      });
 
       var type = ${chartsJson.type};
-      if (type.labels.length && el('type')) {
-        new Chart(el('type'), {
+      if (type.labels.length) make('type', function(canvas) {
+        new Chart(canvas, {
           type: 'doughnut',
           data: { labels: type.labels, datasets: [{ data: type.values, backgroundColor: palette }] },
           options: {
@@ -428,11 +460,11 @@ export function buildChartInitScript(prefix, chartsJson) {
             }
           }
         });
-      }
+      });
 
       var owner = ${chartsJson.owner};
-      if (owner.labels.length && el('owner')) {
-        new Chart(el('owner'), {
+      if (owner.labels.length) make('owner', function(canvas) {
+        new Chart(canvas, {
           type: 'bar',
           data: { labels: owner.labels, datasets: [{ label: 'Pipeline ($)', data: owner.values, backgroundColor: palette, borderRadius: 4 }] },
           options: {
@@ -441,11 +473,11 @@ export function buildChartInitScript(prefix, chartsJson) {
             scales: { x: { ticks: { callback: function(v) { return fmt$(v); } } } }
           }
         });
-      }
+      });
 
       var topacct = ${chartsJson.topAccounts};
-      if (topacct.labels.length && el('topAccounts')) {
-        new Chart(el('topAccounts'), {
+      if (topacct.labels.length) make('topAccounts', function(canvas) {
+        new Chart(canvas, {
           type: 'bar',
           data: { labels: topacct.labels, datasets: [{ label: 'Pipeline ($)', data: topacct.values, backgroundColor: 'rgba(9,105,218,0.75)', borderRadius: 4 }] },
           options: {
@@ -457,18 +489,18 @@ export function buildChartInitScript(prefix, chartsJson) {
             scales: { x: { ticks: { callback: function(v) { return fmt$(v); } } } }
           }
         });
-      }
+      });
 
       var seg = ${chartsJson.segment};
-      if (seg.labels.length && el('segment')) {
-        new Chart(el('segment'), {
+      if (seg.labels.length) make('segment', function(canvas) {
+        new Chart(canvas, {
           type: 'bar',
           data: {
             labels: seg.labels,
             datasets: [
               { label: 'Won', data: seg.won, backgroundColor: 'rgba(26,127,55,0.75)', borderRadius: 3 },
               { label: 'Lost', data: seg.lost, backgroundColor: 'rgba(207,34,46,0.75)', borderRadius: 3 },
-              { label: 'Abandoned', data: seg.abandoned, backgroundColor: 'rgba(100,116,139,0.65)', borderRadius: 3 },
+              { label: 'Abandoned', data: seg.abandoned, backgroundColor: 'rgba(100,116,139,0.65)', borderRadius: 3 }
             ]
           },
           options: {
@@ -477,11 +509,11 @@ export function buildChartInitScript(prefix, chartsJson) {
             scales: { x: { stacked: true, beginAtZero: true, ticks: { precision: 0 } }, y: { stacked: true } }
           }
         });
-      }
+      });
 
       var aging = ${chartsJson.aging};
-      if (aging.labels.length && el('aging')) {
-        new Chart(el('aging'), {
+      if (aging.labels.length) make('aging', function(canvas) {
+        new Chart(canvas, {
           type: 'bar',
           data: {
             labels: aging.labels,
@@ -508,11 +540,11 @@ export function buildChartInitScript(prefix, chartsJson) {
             scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
           }
         });
-      }
+      });
 
       var book = ${chartsJson.bookings};
-      if (book.labels.length && el('bookings')) {
-        new Chart(el('bookings'), {
+      if (book.labels.length) make('bookings', function(canvas) {
+        new Chart(canvas, {
           type: 'line',
           data: {
             labels: book.labels,
@@ -538,11 +570,11 @@ export function buildChartInitScript(prefix, chartsJson) {
             scales: { y: { beginAtZero: true, ticks: { callback: function(v) { return fmt$(v); } } } }
           }
         });
-      }
+      });
 
       var fc = ${chartsJson.forecast};
-      if (fc.labels.length && el('forecast')) {
-        new Chart(el('forecast'), {
+      if (fc.labels.length) make('forecast', function(canvas) {
+        new Chart(canvas, {
           type: 'bar',
           data: {
             labels: fc.labels,
@@ -560,11 +592,11 @@ export function buildChartInitScript(prefix, chartsJson) {
             scales: { y: { beginAtZero: true, ticks: { callback: function(v) { return fmt$(v); } } } }
           }
         });
-      }
+      });
 
       var bn = ${chartsJson.bottleneck};
-      if (bn.labels.length && el('bottleneck')) {
-        new Chart(el('bottleneck'), {
+      if (bn.labels.length) make('bottleneck', function(canvas) {
+        new Chart(canvas, {
           type: 'bar',
           data: {
             labels: bn.labels,
@@ -592,7 +624,9 @@ export function buildChartInitScript(prefix, chartsJson) {
             scales: { y: { beginAtZero: true, title: { display: true, text: 'Average days' } } }
           }
         });
-      }
+      });
+
+      console.log(LOG, 'done. created:', created, 'skipped:', skipped, 'failed:', failed);
     })();
   `;
 }
