@@ -9,7 +9,7 @@ import { uuid, now, nextNumber, currentYear } from '../lib/ids.js';
 import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
 import { parseTransactionTypes } from '../lib/validators.js';
-import { listScript, listTableHead, listToolbar, columnsMenu, rowDataAttrs } from '../lib/list-table.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
@@ -76,14 +76,13 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Jobs</h1>
-        ${listToolbar({ id: 'jobs', count: rows.length })}
+        ${listToolbar({ id: 'jobs', count: rows.length, columns })}
       </div>
 
       ${rows.length === 0
         ? html`<p class="muted">No jobs yet. Jobs are created when an opportunity reaches Closed Won.</p>`
         : html`
           <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
-            ${columnsMenu(columns)}
             <table class="data opp-list-table">
               ${listTableHead(columns, rowData)}
               <tbody data-role="rows">

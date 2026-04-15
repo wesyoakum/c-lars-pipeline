@@ -76,7 +76,7 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Resources</h1>
-        ${listToolbar({ id: 'res', count: rows.length, showColumnsMenu: false })}
+        ${listToolbar({ id: 'res', count: rows.length, columns })}
       </div>
 
       <p class="muted" style="padding:0 1rem">

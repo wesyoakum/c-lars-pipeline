@@ -141,7 +141,7 @@ export async function onRequestGet(context) {
       <div class="card-header">
         <h2>Activities</h2>
         <div class="toolbar-right" style="display:flex;align-items:center;gap:0.5rem">
-          ${listToolbar({ id: 'act', count: activities.length, showColumnsMenu: false })}
+          ${listToolbar({ id: 'act', count: activities.length, columns })}
           <button class="btn btn-sm primary" onclick="document.getElementById('new-activity-form').style.display = document.getElementById('new-activity-form').style.display === 'none' ? 'block' : 'none'">+ New</button>
         </div>
       </div>

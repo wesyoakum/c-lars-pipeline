@@ -11,7 +11,7 @@ import {
   QUOTE_STATUS_LABELS,
   quoteTypeDisplayLabel,
 } from '../lib/validators.js';
-import { listScript, listTableHead, listToolbar, columnsMenu, rowDataAttrs } from '../lib/list-table.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 
 export async function onRequestGet(context) {
   const { env, data, request } = context;
@@ -86,14 +86,13 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Quotes</h1>
-        ${listToolbar({ id: 'quotes', count: rows.length })}
+        ${listToolbar({ id: 'quotes', count: rows.length, columns })}
       </div>
 
       ${rows.length === 0
         ? html`<p class="muted">No quotes yet. Create one from an opportunity.</p>`
         : html`
           <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
-            ${columnsMenu(columns)}
             <table class="data opp-list-table">
               ${listTableHead(columns, rowData)}
               <tbody data-role="rows">

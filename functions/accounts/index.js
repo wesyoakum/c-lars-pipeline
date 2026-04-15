@@ -16,7 +16,7 @@ import {
   popupCloseResponse,
 } from '../lib/http.js';
 import { parseAddressForm, buildAddressStatements } from '../lib/address_editor.js';
-import { listScript, listTableHead, listToolbar, columnsMenu, rowDataAttrs } from '../lib/list-table.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 
 /**
  * GET /accounts — list accounts with full client-side sort/filter/search.
@@ -70,7 +70,7 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Accounts</h1>
-        ${listToolbar({ id: 'acct', count: rows.length, newHref: '/accounts/new', newLabel: 'New account' })}
+        ${listToolbar({ id: 'acct', count: rows.length, columns, newHref: '/accounts/new', newLabel: 'New account' })}
       </div>
 
       ${rows.length === 0
@@ -80,7 +80,6 @@ export async function onRequestGet(context) {
           </p>`
         : html`
           <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
-            ${columnsMenu(columns)}
             <table class="data opp-list-table">
               ${listTableHead(columns, rowData)}
               <tbody data-role="rows">

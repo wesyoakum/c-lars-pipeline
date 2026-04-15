@@ -15,7 +15,7 @@ import { uuid, now, nextSequenceValue } from '../lib/ids.js';
 import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
 import { loadStageCatalog } from '../lib/stages.js';
-import { listScript, listTableHead, listToolbar, columnsMenu, rowDataAttrs } from '../lib/list-table.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
@@ -96,7 +96,7 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Opportunities</h1>
-        ${listToolbar({ id: 'opp', count: rows.length, newHref: '/opportunities/new', newLabel: 'New opportunity' })}
+        ${listToolbar({ id: 'opp', count: rows.length, columns, newHref: '/opportunities/new', newLabel: 'New opportunity' })}
       </div>
 
       ${rows.length === 0
@@ -106,7 +106,6 @@ export async function onRequestGet(context) {
           </p>`
         : html`
           <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
-            ${columnsMenu(columns)}
             <table class="data opp-list-table">
               ${listTableHead(columns, rowData)}
               <tbody data-role="rows">

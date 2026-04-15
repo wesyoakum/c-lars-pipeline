@@ -14,9 +14,18 @@
 //   Toolbar:   data-role="quicksearch", data-role="count", data-role="columns-menu"
 //
 // Usage:
-//   import { listScript, listTableHead, listToolbar, columnsMenu } from '../lib/list-table.js';
+//   import { listScript, listTableHead, listToolbar } from '../lib/list-table.js';
 //   // ... render HTML following conventions ...
+//   ${listToolbar({ id: 'quotes', count: rows.length, columns })}
 //   html`<script>${raw(listScript('pms.quotes.v1'))}</script>`
+//
+// Pass `columns` to listToolbar() to get a working hamburger-icon
+// dropdown with per-column show/hide checkboxes, up/down reorder
+// buttons, and a Reset button. The dropdown panel lives inside the
+// toolbar <details> element so the CSS `.opp-list-columns[open]
+// .opp-list-columns-menu` rule shows it on click. The client script
+// queries these elements via document.querySelector because they
+// live in the toolbar (a sibling of .opp-list), not inside it.
 
 import { html, escape } from './layout.js';
 
@@ -27,9 +36,15 @@ import { html, escape } from './layout.js';
 /**
  * Standard toolbar: quicksearch + count + optional columns-menu + optional new button.
  *
- *   listToolbar({ id: 'quotes', count: rows.length, newHref: '/quotes/new' })
+ *   listToolbar({ id: 'quotes', count: rows.length, columns, newHref: '/quotes/new' })
+ *
+ * When `columns` (array of column defs) is provided, a hamburger icon
+ * is rendered; clicking it opens a dropdown with show/hide checkboxes
+ * and up/down reorder buttons for each column. Pass `null`/omit to
+ * suppress the columns menu entirely.
  */
-export function listToolbar({ id, count, showColumnsMenu = true, newHref, newLabel = 'New' } = {}) {
+export function listToolbar({ id, count, columns = null, newHref, newLabel = 'New' } = {}) {
+  const showMenu = Array.isArray(columns) && columns.length > 0;
   return html`
     <div class="toolbar-right">
       <div class="search-expand">
@@ -39,11 +54,32 @@ export function listToolbar({ id, count, showColumnsMenu = true, newHref, newLab
         <input type="search" id="${id}-quicksearch" data-role="quicksearch" placeholder="Search...">
       </div>
       <span class="muted" data-role="count" style="font-size:0.8em;white-space:nowrap">${count}</span>
-      ${showColumnsMenu ? html`
+      ${showMenu ? html`
         <details class="opp-list-columns" data-role="columns-menu" style="display:inline-block">
           <summary class="icon-btn" title="Columns">
             <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="4" x2="17" y2="4"/><line x1="3" y1="10" x2="17" y2="10"/><line x1="3" y1="16" x2="17" y2="16"/></svg>
           </summary>
+          <div class="opp-list-columns-menu" data-role="columns-list">
+            ${columns.map((c, idx) => html`
+              <div class="opp-list-column-row" data-column-row="${c.key}">
+                <label class="checkbox">
+                  <input type="checkbox" data-column-toggle="${c.key}"
+                         ${c.default !== false ? 'checked' : ''}>
+                  <span>${c.label}</span>
+                </label>
+                <div class="opp-list-column-move">
+                  <button type="button" class="btn btn-xs"
+                          data-column-move="up" data-key="${c.key}"
+                          ${idx === 0 ? 'disabled' : ''}>&#8593;</button>
+                  <button type="button" class="btn btn-xs"
+                          data-column-move="down" data-key="${c.key}"
+                          ${idx === columns.length - 1 ? 'disabled' : ''}>&#8595;</button>
+                </div>
+              </div>`)}
+            <div class="opp-list-columns-actions">
+              <button type="button" class="btn btn-xs" data-role="reset">Reset</button>
+            </div>
+          </div>
         </details>
       ` : ''}
       ${newHref ? html`
@@ -97,41 +133,6 @@ export function listTableHead(columns, rowData) {
 }
 
 /**
- * Render the hidden columns-menu panel (checkbox toggles + reorder buttons).
- * Omit this from pages that don't need column reordering / toggling.
- *
- *   columnsMenu(columns)
- */
-export function columnsMenu(columns) {
-  return html`
-    <div class="opp-list-toolbar" style="display:none">
-      <details class="opp-list-columns" data-role="columns-menu-hidden">
-        <div class="opp-list-columns-menu" data-role="columns-list">
-          ${columns.map((c, idx) => html`
-            <div class="opp-list-column-row" data-column-row="${c.key}">
-              <label class="checkbox">
-                <input type="checkbox" data-column-toggle="${c.key}"
-                       ${c.default !== false ? 'checked' : ''}>
-                <span>${c.label}</span>
-              </label>
-              <div class="opp-list-column-move">
-                <button type="button" class="btn btn-xs"
-                        data-column-move="up" data-key="${c.key}"
-                        ${idx === 0 ? 'disabled' : ''}>&#8593;</button>
-                <button type="button" class="btn btn-xs"
-                        data-column-move="down" data-key="${c.key}"
-                        ${idx === columns.length - 1 ? 'disabled' : ''}>&#8595;</button>
-              </div>
-            </div>`)}
-          <div class="opp-list-columns-actions">
-            <button type="button" class="btn btn-xs" data-role="reset">Reset</button>
-          </div>
-        </div>
-      </details>
-    </div>`;
-}
-
-/**
  * Build a data-attribute string for a <tr> from column defs + row object.
  *
  *   html`<tr data-row-id="${r.id}" ${raw(rowDataAttrs(columns, r))}>`
@@ -178,6 +179,9 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     var totalRows = allRows.length;
     var countEl = document.querySelector('[data-role="count"]');
     var quickSearchInput = document.querySelector('[data-role="quicksearch"]');
+    // Columns-menu elements live in the toolbar (a sibling of .opp-list),
+    // not inside it, so queries go through document instead of host.
+    var menuScope = host.closest('.card') || document;
 
     // -- State -----------------------------------------------------------
 
@@ -244,7 +248,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         });
       });
 
-      var menu = host.querySelector('[data-role="columns-list"]');
+      var menu = menuScope.querySelector('[data-role="columns-list"]');
       if (menu) {
         state.order.forEach(function(key) {
           var row = menu.querySelector('[data-column-row="' + key + '"]');
@@ -399,7 +403,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
 
     if (quickSearchInput) quickSearchInput.addEventListener('input', applyFilters);
 
-    host.querySelectorAll('[data-column-toggle]').forEach(function(cb) {
+    menuScope.querySelectorAll('[data-column-toggle]').forEach(function(cb) {
       var key = cb.dataset.columnToggle;
       cb.checked = !!state.visible[key];
       cb.addEventListener('change', function() {
@@ -409,14 +413,14 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       });
     });
 
-    host.querySelectorAll('[data-column-move]').forEach(function(btn) {
+    menuScope.querySelectorAll('[data-column-move]').forEach(function(btn) {
       btn.addEventListener('click', function() {
         var dir = btn.dataset.columnMove === 'up' ? -1 : 1;
         moveColumn(btn.dataset.key, dir);
       });
     });
 
-    var resetBtn = host.querySelector('[data-role="reset"]');
+    var resetBtn = menuScope.querySelector('[data-role="reset"]');
     if (resetBtn) {
       resetBtn.addEventListener('click', function() {
         try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
@@ -427,7 +431,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     // -- Init ------------------------------------------------------------
 
     // Only reorder columns if the columns menu exists (some pages skip it).
-    if (host.querySelector('[data-role="columns-list"]')) {
+    if (menuScope.querySelector('[data-role="columns-list"]')) {
       applyColumnOrder();
     }
     applyColumnVisibility();

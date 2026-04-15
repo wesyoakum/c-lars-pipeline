@@ -117,7 +117,7 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Attachments</h1>
-        ${listToolbar({ id: 'dl', count: docs.length, showColumnsMenu: false })}
+        ${listToolbar({ id: 'dl', count: docs.length, columns })}
       </div>
 
       ${docs.length === 0

@@ -120,7 +120,7 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Templates</h1>
-        ${listToolbar({ id: 'tpl', count: totalCount, showColumnsMenu: false })}
+        ${listToolbar({ id: 'tpl', count: totalCount, columns })}
       </div>
 
       <p class="muted" style="padding:0 1rem">
