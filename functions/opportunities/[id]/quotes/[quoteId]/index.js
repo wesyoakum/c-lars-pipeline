@@ -1053,15 +1053,19 @@ export async function onRequestGet(context) {
       // every non-hybrid delivery-terms textarea. Mirrors flatTerms'
       // checkbox/default machinery but parameterized by field.
       //
-      //   - `val` tracks the textarea content via x-model
-      //   - `useDefault` is the checkbox state; flipping it on re-applies
+      // NOTE: no backticks allowed in comments inside this template
+      // literal — they close the outer html tag early and break the
+      // Pages build.
+      //
+      //   - val tracks the textarea content via x-model
+      //   - useDefault is the checkbox state; flipping it on re-applies
       //     the saved default for this (quote_type, field) pair
-      //   - `saveAsDefault()` POSTs the current text as the new default
+      //   - saveAsDefault posts the current text as the new default
       //     and flips useDefault to true on success
       //
-      // Initial value comes from closure scope so Alpine's x-model
-      // doesn't blank the textarea on mount (x-model assigns data →
-      // element on first render).
+      // Initial value comes from closure scope so Alpine x-model
+      // doesn't blank the textarea on mount (x-model assigns data
+      // into the element on first render).
       Alpine.data('plainTerms', function(field) {
         var initial = (field === 'payment_terms')  ? _initialPaymentTerms
                     : (field === 'delivery_terms') ? _initialDeliveryTerms
