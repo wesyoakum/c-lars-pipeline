@@ -12,6 +12,7 @@ import {
   resolveQuoteTemplateKey,
 } from '../../../../lib/doc-generate.js';
 import { storeGeneratedDoc } from '../../../../lib/doc-storage.js';
+import { templateTypeForQuote } from '../../../../lib/template-catalog.js';
 import {
   getFilenameTemplate,
   renderFilenameTemplate,
@@ -46,8 +47,12 @@ export async function onRequestPost(context) {
     const docxBuffer = await fillTemplate(env, templateKey, docData);
 
     // 3. Build the download filename from the admin-configurable
-    //    template. Fall back to the legacy "number-rev.pdf" shape
-    //    if the row is somehow missing so generation never breaks.
+    //    template. Each template catalog entry has its own filename
+    //    convention in the filename_templates table — we look up by
+    //    the "ideal" key (e.g. quote-hybrid) even when the R2 template
+    //    fall back kicks in, so the filename reflects user intent.
+    //    The stored template doesn't include `.pdf` — we append it
+    //    here so one convention covers both PDF and DOCX downloads.
     const fnCtx = buildQuoteFilenameContext({
       quote,
       accountName:       docData.clientName,
@@ -55,14 +60,15 @@ export async function onRequestPost(context) {
       opportunityNumber: docData.opportunityNumber,
       opportunityTitle:  docData.opportunityTitle,
     });
+    const filenameKey = templateTypeForQuote(quote.quote_type);
     const fnTpl = await getFilenameTemplate(
       env,
-      'quote_pdf',
-      '{quoteNumber}{revisionSuffix}.pdf'
+      filenameKey,
+      'C-LARS Quote {quoteNumber}{revisionSuffix}'
     );
     const pdfFilename =
-      renderFilenameTemplate(fnTpl, fnCtx) ||
-      `${quote.number}${fnCtx.revisionSuffix}.pdf`;
+      (renderFilenameTemplate(fnTpl, fnCtx) ||
+        `${quote.number}${fnCtx.revisionSuffix}`) + '.pdf';
 
     // 4. Convert to PDF and store (no .docx saved)
 

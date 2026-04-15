@@ -1,9 +1,14 @@
 // functions/lib/filename-templates.js
 //
 // Render customizable filenames for generated documents (quote PDFs,
-// Word docs, order confirmations, etc.). Users edit the templates at
-// /documents/filenames; this helper does the `{token}` substitution
-// at generation time.
+// Word docs, order confirmations, NTPs, etc.). Users edit the templates
+// inline on the Templates list page (/documents/templates); this helper
+// does the `{token}` substitution at generation time.
+//
+// Keys match template catalog entries (quote-service, quote-spares,
+// oc-eps, ntp, …) so each template row has one filename convention
+// that covers both its PDF and DOCX renderings — the generate handler
+// appends the correct extension at download time.
 //
 // Tokens that aren't in the context render as empty strings — so an
 // unset `{accountAlias}` just disappears from the filename rather
@@ -71,17 +76,7 @@ export async function listFilenameTemplates(env) {
  * pieces the generate handlers already have on hand (the raw quote
  * row + a few associated fields) and returns a flat token map.
  *
- * Exposed tokens:
- *   {quoteNumber}       — raw quote number, e.g. "25-00042"
- *   {revision}          — e.g. "v2", empty for v1
- *   {revisionSuffix}    — "-v2" for non-v1 revisions, empty for v1
- *                         (captures the legacy "number-rev" convention)
- *   {quoteTitle}        — quote title, may be empty
- *   {accountName}       — account name, e.g. "Helix Robotics"
- *   {accountAlias}      — account short-form alias, e.g. "Helix"
- *   {opportunityNumber} — e.g. "OPP-25-0042"
- *   {opportunityTitle}  — opportunity title
- *   {date}              — today, YYYY-MM-DD
+ * Exposed tokens: see FILENAME_TOKENS below for the full list.
  */
 export function buildQuoteFilenameContext({
   quote,
@@ -103,13 +98,47 @@ export function buildQuoteFilenameContext({
     accountAlias:      accountAlias || '',
     opportunityNumber: opportunityNumber || '',
     opportunityTitle:  opportunityTitle || '',
+    ocNumber:          '',
+    ntpNumber:         '',
+    jobNumber:         '',
     date:              today,
   };
 }
 
 /**
- * Reference list of tokens for the admin page. Keep in sync with
- * buildQuoteFilenameContext above so users have an accurate cheat
+ * Build the token context for a job-based filename (OC / NTP).
+ * Used by future OC and NTP generators. Missing fields render as
+ * empty strings so the template can be shared across job types.
+ */
+export function buildJobFilenameContext({
+  job,
+  accountName,
+  accountAlias,
+  opportunityNumber,
+  opportunityTitle,
+  quoteNumber,
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+
+  return {
+    quoteNumber:       quoteNumber || '',
+    revision:          '',
+    revisionSuffix:    '',
+    quoteTitle:        '',
+    accountName:       accountName || '',
+    accountAlias:      accountAlias || '',
+    opportunityNumber: opportunityNumber || '',
+    opportunityTitle:  opportunityTitle || '',
+    ocNumber:          job?.oc_number || '',
+    ntpNumber:         job?.ntp_number || '',
+    jobNumber:         job?.number || '',
+    date:              today,
+  };
+}
+
+/**
+ * Reference list of tokens for the admin UI. Keep in sync with
+ * the context builders above so users have an accurate cheat
  * sheet when editing templates.
  */
 export const FILENAME_TOKENS = [
@@ -121,5 +150,28 @@ export const FILENAME_TOKENS = [
   { token: 'accountAlias',      label: 'Customer short alias' },
   { token: 'opportunityNumber', label: 'Opportunity number' },
   { token: 'opportunityTitle',  label: 'Opportunity title' },
+  { token: 'ocNumber',          label: 'OC number (OC / NTP templates)' },
+  { token: 'ntpNumber',         label: 'NTP number (NTP template)' },
+  { token: 'jobNumber',         label: 'Job number (OC / NTP templates)' },
   { token: 'date',              label: 'Today, YYYY-MM-DD' },
 ];
+
+/**
+ * Sample context used to drive live filename previews in the
+ * Templates list UI. Mirrors what a real quote/job would provide
+ * so users can see what their convention will look like.
+ */
+export const FILENAME_PREVIEW_CONTEXT = {
+  quoteNumber:       'Q25-00042-1',
+  revision:          'v2',
+  revisionSuffix:    '-v2',
+  quoteTitle:        'Q2 Spares Refresh',
+  accountName:       'Helix Robotics',
+  accountAlias:      'Helix',
+  opportunityNumber: '25-00042',
+  opportunityTitle:  'Helix robot spares',
+  ocNumber:          'OC-25-0042',
+  ntpNumber:         'NTP-25-0042',
+  jobNumber:         'J25-00042',
+  date:              new Date().toISOString().slice(0, 10),
+};

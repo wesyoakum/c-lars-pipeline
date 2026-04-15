@@ -11,6 +11,12 @@ import { readFlash } from '../lib/http.js';
 import { TEMPLATE_CATALOG } from '../lib/template-catalog.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { docsSubNav } from '../lib/docs-subnav.js';
+import {
+  listFilenameTemplates,
+  renderFilenameTemplate,
+  FILENAME_TOKENS,
+  FILENAME_PREVIEW_CONTEXT,
+} from '../lib/filename-templates.js';
 
 function formatSize(bytes) {
   if (!bytes) return '\u2014';
@@ -66,30 +72,44 @@ export async function onRequestGet(context) {
     emailToName = Object.fromEntries(users.map(u => [u.email, u.display_name || u.email]));
   }
 
+  // Load filename conventions (one row per template catalog key, keyed by
+  // template_catalog key — see migration 0025). Map them onto each
+  // template row so the inline editor has a starting value.
+  const filenameRows = await listFilenameTemplates(env);
+  const filenameByKey = Object.fromEntries(
+    filenameRows.map((r) => [r.key, r.template || ''])
+  );
+
   const columns = [
-    { key: 'label',     label: 'Template',   sort: 'text',   filter: 'text',   default: true },
-    { key: 'category',  label: 'Category',   sort: 'text',   filter: 'select', default: true },
-    { key: 'status',    label: 'Status',     sort: 'text',   filter: 'select', default: true },
-    { key: 'size',      label: 'Size',       sort: 'number', filter: null,     default: true },
-    { key: 'uploaded',  label: 'Uploaded',   sort: 'date',   filter: 'text',   default: true },
-    { key: 'actions',   label: '',           sort: null,      filter: null,     default: true },
+    { key: 'label',       label: 'Template',   sort: 'text',   filter: 'text',   default: true },
+    { key: 'category',    label: 'Category',   sort: 'text',   filter: 'select', default: true },
+    { key: 'status',      label: 'Status',     sort: 'text',   filter: 'select', default: true },
+    { key: 'filenameTpl', label: 'Download filename', sort: 'text', filter: 'text', default: true },
+    { key: 'size',        label: 'Size',       sort: 'number', filter: null,     default: true },
+    { key: 'uploaded',    label: 'Uploaded',   sort: 'date',   filter: 'text',   default: true },
+    { key: 'actions',     label: '',           sort: null,      filter: null,     default: true },
   ];
 
-  const rowData = r2Results.map(t => ({
-    id: t.key,
-    key: t.key,
-    label: t.customLabel || t.label,
-    filename: t.filename,
-    category: templateCategory(t.key),
-    status: t.exists ? 'Uploaded' : 'Missing',
-    exists: t.exists,
-    size: t.size || 0,
-    size_display: t.exists ? formatSize(t.size) : '\u2014',
-    uploaded: t.uploaded,
-    uploadedBy: emailToName[t.uploadedBy] || t.uploadedBy,
-    originalFilename: t.originalFilename,
-    actions: '',
-  }));
+  const rowData = r2Results.map(t => {
+    const filenameTpl = filenameByKey[t.key] || '';
+    return {
+      id: t.key,
+      key: t.key,
+      label: t.customLabel || t.label,
+      filename: t.filename,
+      category: templateCategory(t.key),
+      status: t.exists ? 'Uploaded' : 'Missing',
+      exists: t.exists,
+      size: t.size || 0,
+      size_display: t.exists ? formatSize(t.size) : '\u2014',
+      uploaded: t.uploaded,
+      uploadedBy: emailToName[t.uploadedBy] || t.uploadedBy,
+      originalFilename: t.originalFilename,
+      filenameTpl,
+      filenamePreview: renderFilenameTemplate(filenameTpl, FILENAME_PREVIEW_CONTEXT),
+      actions: '',
+    };
+  });
 
   const uploadedCount = rowData.filter(r => r.exists).length;
   const totalCount = rowData.length;
@@ -106,7 +126,22 @@ export async function onRequestGet(context) {
       <p class="muted" style="padding:0 1rem">
         ${uploadedCount} of ${totalCount} templates uploaded.
         Templates are Word .docx files with <code>{placeholder}</code> variables.
+        Each template also has a <strong>download filename convention</strong>
+        (inline-editable below) that controls what the file is called when it's generated —
+        <code>.pdf</code> / <code>.docx</code> is appended automatically.
       </p>
+
+      <details class="token-cheat" style="margin:0 1rem 0.75rem;font-size:0.9em">
+        <summary style="cursor:pointer;color:var(--muted)">Available filename tokens</summary>
+        <ul style="margin:0.4rem 0 0 1.25rem;padding:0;line-height:1.55">
+          ${FILENAME_TOKENS.map((t) => html`
+            <li>
+              <code>{${escape(t.token)}}</code>
+              <span class="muted"> — ${escape(t.label)}</span>
+            </li>
+          `)}
+        </ul>
+      </details>
 
       <!-- Upload drop zone -->
       <div x-data="tplUpload()" style="margin:0.75rem 1rem">
@@ -162,12 +197,13 @@ function tplUpload() {
       <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
         <table class="data opp-list-table" style="table-layout:fixed;width:100%">
           <colgroup>
-            <col data-col="label"    style="width:auto">
-            <col data-col="category" style="width:150px">
-            <col data-col="status"   style="width:90px">
-            <col data-col="size"     style="width:80px">
-            <col data-col="uploaded" style="width:130px">
-            <col data-col="actions"  style="width:260px">
+            <col data-col="label"       style="width:auto">
+            <col data-col="category"    style="width:140px">
+            <col data-col="status"      style="width:90px">
+            <col data-col="filenameTpl" style="width:320px">
+            <col data-col="size"        style="width:70px">
+            <col data-col="uploaded"    style="width:120px">
+            <col data-col="actions"     style="width:220px">
           </colgroup>
           ${listTableHead(columns, rowData)}
           <tbody data-role="rows">
@@ -191,6 +227,22 @@ function tplUpload() {
                   ${r.exists
                     ? html`<span class="pill pill-success">Uploaded</span>`
                     : html`<span class="pill pill-locked">Missing</span>`}
+                </td>
+                <td class="col-filenameTpl" data-col="filenameTpl" style="vertical-align:top"
+                    x-data="filenameEdit('${escape(r.key)}', ${escape(JSON.stringify(r.filenameTpl))}, ${escape(JSON.stringify(FILENAME_PREVIEW_CONTEXT))})">
+                  <input type="text" x-model="val"
+                         @blur="save()"
+                         @keydown.enter.prevent="save(); $event.target.blur()"
+                         @keydown.escape="val = initial; $event.target.blur()"
+                         placeholder="e.g. C-LARS Quote {quoteNumber}"
+                         style="width:100%;font:inherit;padding:0.3rem 0.45rem;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:0.85em">
+                  <div style="margin-top:0.2rem;font-size:0.78em;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"
+                       x-text="previewLine()"
+                       :title="previewLine()"></div>
+                  <small class="muted" x-show="dirty" x-cloak style="font-size:0.75em">unsaved…</small>
+                  <small class="pill pill-success" x-show="saved" x-cloak
+                         x-transition.opacity.duration.600ms
+                         style="font-size:0.72em;margin-top:0.15rem;display:inline-block">saved</small>
                 </td>
                 <td class="col-size num muted" data-col="size" style="font-size:0.85em;text-align:right">
                   ${escape(r.size_display)}
@@ -229,7 +281,7 @@ function tplUpload() {
         </table>
       </div>
       <script>${raw(listScript('pms.templates.v1', 'label', 'asc'))}</script>
-      <script>
+      <script>${raw(`
       document.addEventListener('alpine:init', function() {
         Alpine.data('tplEdit', function(tplKey, field, initial) {
           return {
@@ -246,8 +298,61 @@ function tplUpload() {
             },
           };
         });
+
+        // Inline edit for the download-filename convention on each row.
+        // Saves to /documents/filenames/:key/patch. Preview mirrors
+        // renderFilenameTemplate() server-side so what you see matches
+        // what the generator produces exactly.
+        Alpine.data('filenameEdit', function(key, initial, previewCtx) {
+          return {
+            key: key,
+            initial: initial,
+            val: initial,
+            saved: false,
+            get dirty() { return this.val !== this.initial; },
+            previewLine: function() {
+              var rendered = renderFilenamePreview(this.val, previewCtx);
+              return rendered ? '\u2192 ' + rendered : '';
+            },
+            save: function() {
+              if (this.val === this.initial) return;
+              var self = this;
+              var payload = this.val;
+              fetch('/documents/filenames/' + encodeURIComponent(this.key) + '/patch', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ template: payload }),
+              }).then(function(res) {
+                if (!res.ok) {
+                  self.val = self.initial;
+                  return;
+                }
+                self.initial = payload;
+                self.saved = true;
+                setTimeout(function() { self.saved = false; }, 1200);
+              }).catch(function() {
+                self.val = self.initial;
+              });
+            },
+          };
+        });
       });
-      </script>
+
+      // Mirror of renderFilenameTemplate in functions/lib/filename-templates.js
+      // so the live preview exactly matches what the server will render.
+      function renderFilenamePreview(template, context) {
+        if (!template) return '';
+        var rendered = template.replace(/\\{(\\w+)\\}/g, function(_m, token) {
+          var v = context && context[token];
+          if (v == null) return '';
+          return String(v);
+        });
+        return rendered
+          .replace(/[\\\\/:*?"<>|]/g, '')
+          .replace(/\\s+/g, ' ')
+          .trim();
+      }
+      `)}</script>
     </section>
   `;
 

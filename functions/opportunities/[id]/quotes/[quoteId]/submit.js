@@ -11,6 +11,7 @@ import { redirectWithFlash } from '../../../../lib/http.js';
 import { snapshotGoverningDocs, createIssueTask } from '../../../../lib/quote-transitions.js';
 import { getQuoteDocData, fillTemplate, convertToPdf, resolveQuoteTemplateKey } from '../../../../lib/doc-generate.js';
 import { storeGeneratedDoc } from '../../../../lib/doc-storage.js';
+import { templateTypeForQuote } from '../../../../lib/template-catalog.js';
 import {
   getFilenameTemplate,
   renderFilenameTemplate,
@@ -87,7 +88,8 @@ export async function onRequestPost(context) {
 
         // Build the download filename from the admin-configurable
         // template so the auto-issued PDF matches manually-generated
-        // ones. Fall back to the legacy shape if the row is missing.
+        // ones. Keyed by template catalog key (quote-spares, quote-
+        // hybrid, …) with `.pdf` appended at the end.
         const fnCtx = buildQuoteFilenameContext({
           quote,
           accountName:       docData.clientName,
@@ -95,14 +97,15 @@ export async function onRequestPost(context) {
           opportunityNumber: docData.opportunityNumber,
           opportunityTitle:  docData.opportunityTitle,
         });
+        const filenameKey = templateTypeForQuote(quote.quote_type);
         const fnTpl = await getFilenameTemplate(
           env,
-          'quote_pdf',
-          '{quoteNumber}{revisionSuffix}.pdf'
+          filenameKey,
+          'C-LARS Quote {quoteNumber}{revisionSuffix}'
         );
         const pdfFilename =
-          renderFilenameTemplate(fnTpl, fnCtx) ||
-          `${quote.number}${fnCtx.revisionSuffix}.pdf`;
+          (renderFilenameTemplate(fnTpl, fnCtx) ||
+            `${quote.number}${fnCtx.revisionSuffix}`) + '.pdf';
 
         const pdfBuffer = await convertToPdf(env, docxBuffer);
         await storeGeneratedDoc(env, {
