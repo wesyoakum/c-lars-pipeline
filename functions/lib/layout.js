@@ -185,234 +185,102 @@ const NOTIFICATION_STORE_SCRIPT = (
 // lazily the first time the modal opens on a page, from
 // /activities/picker-data.
 //
-// Deliberately uses string concatenation (no template literals /
-// backticks) so it can be dropped into layout()'s plain-template-
-// literal shell without escaping issues.
-const TASK_MODAL_SCRIPT = (
-  "document.addEventListener('alpine:init', function () {\n" +
-  "  Alpine.store('taskModal', {\n" +
-  "    open: false,\n" +
-  "    loading: false,\n" +
-  "    submitting: false,\n" +
-  "    pickerLoaded: false,\n" +
-  "    users: [],\n" +
-  "    opportunities: [],\n" +
-  "    quotes: [],\n" +
-  "    accounts: [],\n" +
-  "    currentUserId: null,\n" +
-  "    prefillLabel: '',\n" +
-  "    prefillLocked: false,\n" +
-  "    reloadOnSuccess: true,\n" +
-  "    error: null,\n" +
-  "    form: {\n" +
-  "      body: '',\n" +
-  "      assigned_user_id: '',\n" +
-  "      due_at: '',\n" +
-  "      remind_at: '',\n" +
-  "      link_type: 'none',\n" +
-  "      opportunity_id: '',\n" +
-  "      quote_id: '',\n" +
-  "      account_id: ''\n" +
-  "    },\n" +
-  "    openModal: function (prefill) {\n" +
-  "      prefill = prefill || {};\n" +
-  "      this.error = null;\n" +
-  "      this.reloadOnSuccess = prefill.reload_on_success !== false;\n" +
-  "      this.form = {\n" +
-  "        body: '',\n" +
-  "        assigned_user_id: this.currentUserId || '',\n" +
-  "        due_at: '',\n" +
-  "        remind_at: '',\n" +
-  "        link_type: 'none',\n" +
-  "        opportunity_id: '',\n" +
-  "        quote_id: '',\n" +
-  "        account_id: ''\n" +
-  "      };\n" +
-  "      this.prefillLabel = prefill.link_label || '';\n" +
-  "      this.prefillLocked = false;\n" +
-  "      if (prefill.opportunity_id) {\n" +
-  "        this.form.link_type = 'opportunity';\n" +
-  "        this.form.opportunity_id = prefill.opportunity_id;\n" +
-  "        this.prefillLocked = !!prefill.link_label;\n" +
-  "      } else if (prefill.quote_id) {\n" +
-  "        this.form.link_type = 'quote';\n" +
-  "        this.form.quote_id = prefill.quote_id;\n" +
-  "        this.prefillLocked = !!prefill.link_label;\n" +
-  "      } else if (prefill.account_id) {\n" +
-  "        this.form.link_type = 'account';\n" +
-  "        this.form.account_id = prefill.account_id;\n" +
-  "        this.prefillLocked = !!prefill.link_label;\n" +
-  "      }\n" +
-  "      this.open = true;\n" +
-  "      if (!this.pickerLoaded) this.loadPickerData();\n" +
-  "      setTimeout(function () {\n" +
-  "        var ta = document.getElementById('task-modal-body-input');\n" +
-  "        if (ta) ta.focus();\n" +
-  "      }, 60);\n" +
-  "    },\n" +
-  "    closeModal: function () {\n" +
-  "      this.open = false;\n" +
-  "      this.error = null;\n" +
-  "    },\n" +
-  "    loadPickerData: function () {\n" +
-  "      var self = this;\n" +
-  "      self.loading = true;\n" +
-  "      fetch('/activities/picker-data', { credentials: 'same-origin', headers: { 'accept': 'application/json' } })\n" +
-  "        .then(function (res) { return res.ok ? res.json() : null; })\n" +
-  "        .then(function (data) {\n" +
-  "          self.loading = false;\n" +
-  "          if (!data) { self.error = 'Could not load picker data.'; return; }\n" +
-  "          self.users = data.users || [];\n" +
-  "          self.opportunities = data.opportunities || [];\n" +
-  "          self.quotes = data.quotes || [];\n" +
-  "          self.accounts = data.accounts || [];\n" +
-  "          self.currentUserId = data.current_user_id || null;\n" +
-  "          if (!self.form.assigned_user_id && self.currentUserId) {\n" +
-  "            self.form.assigned_user_id = self.currentUserId;\n" +
-  "          }\n" +
-  "          self.pickerLoaded = true;\n" +
-  "        })\n" +
-  "        .catch(function () {\n" +
-  "          self.loading = false;\n" +
-  "          self.error = 'Could not load picker data.';\n" +
-  "        });\n" +
-  "    },\n" +
-  "    submit: function () {\n" +
-  "      var self = this;\n" +
-  "      if (self.submitting) return;\n" +
-  "      var bodyText = (self.form.body || '').trim();\n" +
-  "      if (!bodyText) { self.error = 'Please enter task details.'; return; }\n" +
-  "      self.submitting = true;\n" +
-  "      self.error = null;\n" +
-  "      var fd = new FormData();\n" +
-  "      fd.append('body', bodyText);\n" +
-  "      if (self.form.assigned_user_id) fd.append('assigned_user_id', self.form.assigned_user_id);\n" +
-  "      if (self.form.due_at) fd.append('due_at', self.form.due_at);\n" +
-  "      if (self.form.remind_at) fd.append('remind_at', self.form.remind_at);\n" +
-  "      if (self.form.link_type === 'opportunity' && self.form.opportunity_id) {\n" +
-  "        fd.append('opportunity_id', self.form.opportunity_id);\n" +
-  "      } else if (self.form.link_type === 'quote' && self.form.quote_id) {\n" +
-  "        fd.append('quote_id', self.form.quote_id);\n" +
-  "      } else if (self.form.link_type === 'account' && self.form.account_id) {\n" +
-  "        fd.append('account_id', self.form.account_id);\n" +
-  "      }\n" +
-  "      fd.append('source', 'modal');\n" +
-  "      fetch('/activities', {\n" +
-  "        method: 'POST',\n" +
-  "        credentials: 'same-origin',\n" +
-  "        body: fd,\n" +
-  "        headers: { 'x-requested-with': 'XMLHttpRequest', 'accept': 'application/json' }\n" +
-  "      })\n" +
-  "        .then(function (res) {\n" +
-  "          return res.json().then(function (data) { return { ok: res.ok, data: data }; });\n" +
-  "        })\n" +
-  "        .then(function (result) {\n" +
-  "          self.submitting = false;\n" +
-  "          if (!result.ok || !result.data || !result.data.ok) {\n" +
-  "            self.error = (result.data && result.data.error) || 'Could not create task.';\n" +
-  "            return;\n" +
-  "          }\n" +
-  "          self.closeModal();\n" +
-  "          if (self.reloadOnSuccess) window.location.reload();\n" +
-  "        })\n" +
-  "        .catch(function () {\n" +
-  "          self.submitting = false;\n" +
-  "          self.error = 'Could not create task.';\n" +
-  "        });\n" +
-  "    }\n" +
-  "  });\n" +
-  "  window.addEventListener('pms:open-task-modal', function (e) {\n" +
-  "    Alpine.store('taskModal').openModal((e && e.detail) || {});\n" +
-  "  });\n" +
-  "  window.PMS = window.PMS || {};\n" +
-  "  window.PMS.openTaskModal = function (prefill) {\n" +
-  "    Alpine.store('taskModal').openModal(prefill || {});\n" +
-  "  };\n" +
-  "});\n"
-);
-
-// Task modal markup. Rendered once per authenticated page, right
-// before the notification toast stack. Uses x-show/x-cloak so it
-// stays invisible until the store flips open=true.
+// All wizard logic (date parsing, fuzzy match, step state, submit)
+// lives in /js/task-modal.js. This file just emits the static DOM.
+// Uses string concatenation (no template literals) so it drops into
+// layout()'s shell without escaping issues.
 const TASK_MODAL_MARKUP = (
   '<div class="task-modal-overlay" x-data x-show="$store.taskModal.open" x-cloak ' +
   '@keydown.escape.window="$store.taskModal.closeModal()" ' +
   '@click.self="$store.taskModal.closeModal()" style="display:none">' +
-  '<div class="task-modal" @click.stop>' +
+  '<div class="task-modal task-modal-wizard" @click.stop>' +
   '<div class="task-modal-header">' +
   '<h3>New task</h3>' +
   '<button type="button" class="task-modal-close" @click="$store.taskModal.closeModal()" aria-label="Close">&times;</button>' +
   '</div>' +
-  '<form @submit.prevent="$store.taskModal.submit()" class="task-modal-body">' +
-  '<div class="field">' +
-  '<label class="field-label" for="task-modal-body-input">Details *</label>' +
-  '<textarea id="task-modal-body-input" x-model="$store.taskModal.form.body" rows="3" ' +
-  'placeholder="What needs to be done?" required></textarea>' +
+  '<div class="task-modal-body">' +
+
+  // Pinned linked-to indicator (only when the caller locked a link).
+  '<div class="task-wizard-pinned" x-show="$store.taskModal.prefillLocked">' +
+  '<span class="task-wizard-pinned-label">Linked to</span>' +
+  '<strong x-text="$store.taskModal.prefillLockedLabel"></strong>' +
   '</div>' +
-  '<div class="field-grid">' +
-  '<div class="field">' +
-  '<label class="field-label">Assigned to</label>' +
-  '<select x-model="$store.taskModal.form.assigned_user_id">' +
-  '<template x-for="u in $store.taskModal.users" :key="u.id">' +
-  '<option :value="u.id" x-text="u.display_name || u.email"></option>' +
+
+  // Chips row: prior answers, click to jump back.
+  '<div class="task-wizard-chips" x-show="$store.taskModal.chipsList().length > 0">' +
+  '<template x-for="(chip, i) in $store.taskModal.chipsList()" :key="i">' +
+  '<button type="button" class="task-wizard-chip" @click="$store.taskModal.jumpTo(chip.stepIndex)">' +
+  '<span class="task-wizard-chip-label" x-text="chip.label"></span>' +
+  '<span class="task-wizard-chip-value" x-text="chip.value"></span>' +
+  '</button>' +
   '</template>' +
-  '</select>' +
   '</div>' +
-  '<div class="field">' +
-  '<label class="field-label">Due</label>' +
-  '<input type="datetime-local" x-model="$store.taskModal.form.due_at">' +
-  '</div>' +
-  '</div>' +
-  '<div class="field">' +
-  '<label class="field-label">Reminder</label>' +
-  '<input type="datetime-local" x-model="$store.taskModal.form.remind_at">' +
-  '</div>' +
-  '<div class="field" x-show="$store.taskModal.prefillLocked">' +
-  '<label class="field-label">Linked to</label>' +
-  '<div class="task-modal-link-pinned"><strong x-text="$store.taskModal.prefillLabel"></strong></div>' +
-  '</div>' +
-  '<div class="field" x-show="!$store.taskModal.prefillLocked">' +
-  '<label class="field-label">Link to</label>' +
-  '<div class="task-modal-link-options">' +
-  '<label><input type="radio" x-model="$store.taskModal.form.link_type" value="none"> None</label>' +
-  '<label><input type="radio" x-model="$store.taskModal.form.link_type" value="opportunity"> Opportunity</label>' +
-  '<label><input type="radio" x-model="$store.taskModal.form.link_type" value="quote"> Quote</label>' +
-  '<label><input type="radio" x-model="$store.taskModal.form.link_type" value="account"> Account</label>' +
-  '</div>' +
-  '<select x-show="$store.taskModal.form.link_type === \'opportunity\'" ' +
-  'x-model="$store.taskModal.form.opportunity_id" style="margin-top:0.5rem">' +
-  '<option value="">\u2014 select opportunity \u2014</option>' +
-  '<template x-for="o in $store.taskModal.opportunities" :key="o.id">' +
-  '<option :value="o.id" x-text="o.number + \' \u2014 \' + (o.title || \'\')"></option>' +
+
+  // Big prompt
+  '<div class="task-wizard-prompt" x-text="$store.taskModal.currentPrompt()"></div>' +
+
+  // Input area: textarea for multiline steps, input for the rest.
+  '<div class="task-wizard-input-wrap">' +
+  '<template x-if="$store.taskModal.isMultilineStep()">' +
+  '<textarea id="task-wizard-input" class="task-wizard-input task-wizard-input-textarea" ' +
+  'x-model="$store.taskModal.typedInput" ' +
+  '@input="$store.taskModal.onInputChange()" ' +
+  '@keydown.tab.prevent="$store.taskModal.advance()" ' +
+  '@keydown.shift.tab.prevent="$store.taskModal.goBack()" ' +
+  'rows="3" placeholder="Type your task..." autocomplete="off"></textarea>' +
   '</template>' +
-  '</select>' +
-  '<select x-show="$store.taskModal.form.link_type === \'quote\'" ' +
-  'x-model="$store.taskModal.form.quote_id" style="margin-top:0.5rem">' +
-  '<option value="">\u2014 select quote \u2014</option>' +
-  '<template x-for="q in $store.taskModal.quotes" :key="q.id">' +
-  '<option :value="q.id" x-text="q.number + \' \u2014 \' + (q.title || \'\')"></option>' +
+  '<template x-if="!$store.taskModal.isMultilineStep()">' +
+  '<input id="task-wizard-input" class="task-wizard-input" type="text" ' +
+  'x-model="$store.taskModal.typedInput" ' +
+  '@input="$store.taskModal.onInputChange()" ' +
+  '@keydown.tab.prevent="$store.taskModal.advance()" ' +
+  '@keydown.shift.tab.prevent="$store.taskModal.goBack()" ' +
+  '@keydown.enter.prevent="$store.taskModal.advance()" ' +
+  '@keydown.arrow-down.prevent="$store.taskModal.moveSuggestion(1)" ' +
+  '@keydown.arrow-up.prevent="$store.taskModal.moveSuggestion(-1)" ' +
+  'placeholder="Start typing..." autocomplete="off">' +
   '</template>' +
-  '</select>' +
-  '<select x-show="$store.taskModal.form.link_type === \'account\'" ' +
-  'x-model="$store.taskModal.form.account_id" style="margin-top:0.5rem">' +
-  '<option value="">\u2014 select account \u2014</option>' +
-  '<template x-for="a in $store.taskModal.accounts" :key="a.id">' +
-  '<option :value="a.id" x-text="a.alias ? (a.name + \' (\' + a.alias + \')\') : a.name"></option>' +
+
+  // Suggestions dropdown (assignee + link steps only).
+  '<div class="task-wizard-suggestions" x-show="$store.taskModal.visibleSuggestions().length > 0">' +
+  '<template x-for="(sug, idx) in $store.taskModal.visibleSuggestions()" :key="sug.id">' +
+  '<button type="button" class="task-wizard-suggestion" ' +
+  ':class="idx === $store.taskModal.suggestionIndex ? \'active\' : \'\'" ' +
+  '@mouseenter="$store.taskModal.suggestionIndex = idx" ' +
+  '@click="$store.taskModal.pickSuggestion(idx)">' +
+  '<span class="task-wizard-suggestion-type" x-text="sug.typeLabel" x-show="sug.typeLabel"></span>' +
+  '<span class="task-wizard-suggestion-main" x-text="sug.label"></span>' +
+  '<span class="task-wizard-suggestion-sub" x-text="sug.sub" x-show="sug.sub"></span>' +
+  '</button>' +
   '</template>' +
-  '</select>' +
   '</div>' +
+
+  '</div>' + // /.task-wizard-input-wrap
+
+  // Help text
+  '<div class="task-wizard-help" x-text="$store.taskModal.currentHint()"></div>' +
+
+  // Error message
   '<div class="task-modal-error" x-show="$store.taskModal.error" x-text="$store.taskModal.error"></div>' +
+
+  // Footer: Cancel / Back / Create
   '<div class="task-modal-footer">' +
   '<button type="button" class="btn" @click="$store.taskModal.closeModal()" ' +
   ':disabled="$store.taskModal.submitting">Cancel</button>' +
-  '<button type="submit" class="btn primary" :disabled="$store.taskModal.submitting">' +
+  '<button type="button" class="btn" @click="$store.taskModal.goBack()" ' +
+  ':disabled="$store.taskModal.stepIndex === 0 || $store.taskModal.submitting" ' +
+  'x-show="$store.taskModal.stepIndex > 0">Back</button>' +
+  '<button type="button" class="btn primary" ' +
+  '@click="$store.taskModal.submit()" ' +
+  ':disabled="!$store.taskModal.canSubmit() || $store.taskModal.submitting">' +
   '<span x-show="!$store.taskModal.submitting">Create task</span>' +
   '<span x-show="$store.taskModal.submitting">Saving\u2026</span>' +
   '</button>' +
   '</div>' +
-  '</form>' +
-  '</div>' +
-  '</div>'
+
+  '</div>' + // /.task-modal-body
+  '</div>' + // /.task-modal
+  '</div>'   // /.task-modal-overlay
 );
 
 /**
@@ -448,6 +316,7 @@ export function layout(title, body, opts = {}) {
   <script defer src="/js/alpine.min.js"></script>
   <script defer src="/js/live-calc.js"></script>
   <script defer src="/js/account-picker.js"></script>
+  <script defer src="/js/task-modal.js"></script>
   ${opts.charts ? '<script defer src="/js/chart.min.js"></script>' : ''}
 </head>
 <body>
@@ -498,7 +367,7 @@ ${body}
     <small>C-LARS Pipeline Management System</small>
   </footer>
   ${versionTag ? `<div class="version-badge">${versionTag}</div>` : ''}
-  ${user ? `<script>${NOTIFICATION_STORE_SCRIPT}${TASK_MODAL_SCRIPT}</script>` : ''}
+  ${user ? `<script>${NOTIFICATION_STORE_SCRIPT}</script>` : ''}
 </body>
 </html>`;
 }
