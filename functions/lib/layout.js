@@ -163,6 +163,258 @@ const NOTIFICATION_STORE_SCRIPT = (
   "});\n"
 );
 
+// Global task modal (T+) — Alpine store + helper.
+//
+// Lives in every authenticated page so any button anywhere can
+// trigger it. Callers open the modal by dispatching a window event
+// or calling window.PMS.openTaskModal():
+//
+//   <button onclick="window.PMS.openTaskModal({ opportunity_id: '...' })">+ Task</button>
+//
+// or via a custom event:
+//
+//   window.dispatchEvent(new CustomEvent('pms:open-task-modal', { detail: { opportunity_id: '...' } }))
+//
+// Prefill shape (all optional):
+//   { opportunity_id, quote_id, account_id, link_label, reload_on_success }
+//
+// If link_label is provided, the picker collapses into a pinned
+// "Linked to: <label>" row so the user doesn't have to re-select.
+//
+// Picker data (users, open opps, recent quotes, accounts) is fetched
+// lazily the first time the modal opens on a page, from
+// /activities/picker-data.
+//
+// Deliberately uses string concatenation (no template literals /
+// backticks) so it can be dropped into layout()'s plain-template-
+// literal shell without escaping issues.
+const TASK_MODAL_SCRIPT = (
+  "document.addEventListener('alpine:init', function () {\n" +
+  "  Alpine.store('taskModal', {\n" +
+  "    open: false,\n" +
+  "    loading: false,\n" +
+  "    submitting: false,\n" +
+  "    pickerLoaded: false,\n" +
+  "    users: [],\n" +
+  "    opportunities: [],\n" +
+  "    quotes: [],\n" +
+  "    accounts: [],\n" +
+  "    currentUserId: null,\n" +
+  "    prefillLabel: '',\n" +
+  "    prefillLocked: false,\n" +
+  "    reloadOnSuccess: true,\n" +
+  "    error: null,\n" +
+  "    form: {\n" +
+  "      body: '',\n" +
+  "      assigned_user_id: '',\n" +
+  "      due_at: '',\n" +
+  "      remind_at: '',\n" +
+  "      link_type: 'none',\n" +
+  "      opportunity_id: '',\n" +
+  "      quote_id: '',\n" +
+  "      account_id: ''\n" +
+  "    },\n" +
+  "    openModal: function (prefill) {\n" +
+  "      prefill = prefill || {};\n" +
+  "      this.error = null;\n" +
+  "      this.reloadOnSuccess = prefill.reload_on_success !== false;\n" +
+  "      this.form = {\n" +
+  "        body: '',\n" +
+  "        assigned_user_id: this.currentUserId || '',\n" +
+  "        due_at: '',\n" +
+  "        remind_at: '',\n" +
+  "        link_type: 'none',\n" +
+  "        opportunity_id: '',\n" +
+  "        quote_id: '',\n" +
+  "        account_id: ''\n" +
+  "      };\n" +
+  "      this.prefillLabel = prefill.link_label || '';\n" +
+  "      this.prefillLocked = false;\n" +
+  "      if (prefill.opportunity_id) {\n" +
+  "        this.form.link_type = 'opportunity';\n" +
+  "        this.form.opportunity_id = prefill.opportunity_id;\n" +
+  "        this.prefillLocked = !!prefill.link_label;\n" +
+  "      } else if (prefill.quote_id) {\n" +
+  "        this.form.link_type = 'quote';\n" +
+  "        this.form.quote_id = prefill.quote_id;\n" +
+  "        this.prefillLocked = !!prefill.link_label;\n" +
+  "      } else if (prefill.account_id) {\n" +
+  "        this.form.link_type = 'account';\n" +
+  "        this.form.account_id = prefill.account_id;\n" +
+  "        this.prefillLocked = !!prefill.link_label;\n" +
+  "      }\n" +
+  "      this.open = true;\n" +
+  "      if (!this.pickerLoaded) this.loadPickerData();\n" +
+  "      setTimeout(function () {\n" +
+  "        var ta = document.getElementById('task-modal-body-input');\n" +
+  "        if (ta) ta.focus();\n" +
+  "      }, 60);\n" +
+  "    },\n" +
+  "    closeModal: function () {\n" +
+  "      this.open = false;\n" +
+  "      this.error = null;\n" +
+  "    },\n" +
+  "    loadPickerData: function () {\n" +
+  "      var self = this;\n" +
+  "      self.loading = true;\n" +
+  "      fetch('/activities/picker-data', { credentials: 'same-origin', headers: { 'accept': 'application/json' } })\n" +
+  "        .then(function (res) { return res.ok ? res.json() : null; })\n" +
+  "        .then(function (data) {\n" +
+  "          self.loading = false;\n" +
+  "          if (!data) { self.error = 'Could not load picker data.'; return; }\n" +
+  "          self.users = data.users || [];\n" +
+  "          self.opportunities = data.opportunities || [];\n" +
+  "          self.quotes = data.quotes || [];\n" +
+  "          self.accounts = data.accounts || [];\n" +
+  "          self.currentUserId = data.current_user_id || null;\n" +
+  "          if (!self.form.assigned_user_id && self.currentUserId) {\n" +
+  "            self.form.assigned_user_id = self.currentUserId;\n" +
+  "          }\n" +
+  "          self.pickerLoaded = true;\n" +
+  "        })\n" +
+  "        .catch(function () {\n" +
+  "          self.loading = false;\n" +
+  "          self.error = 'Could not load picker data.';\n" +
+  "        });\n" +
+  "    },\n" +
+  "    submit: function () {\n" +
+  "      var self = this;\n" +
+  "      if (self.submitting) return;\n" +
+  "      var bodyText = (self.form.body || '').trim();\n" +
+  "      if (!bodyText) { self.error = 'Please enter task details.'; return; }\n" +
+  "      self.submitting = true;\n" +
+  "      self.error = null;\n" +
+  "      var fd = new FormData();\n" +
+  "      fd.append('body', bodyText);\n" +
+  "      if (self.form.assigned_user_id) fd.append('assigned_user_id', self.form.assigned_user_id);\n" +
+  "      if (self.form.due_at) fd.append('due_at', self.form.due_at);\n" +
+  "      if (self.form.remind_at) fd.append('remind_at', self.form.remind_at);\n" +
+  "      if (self.form.link_type === 'opportunity' && self.form.opportunity_id) {\n" +
+  "        fd.append('opportunity_id', self.form.opportunity_id);\n" +
+  "      } else if (self.form.link_type === 'quote' && self.form.quote_id) {\n" +
+  "        fd.append('quote_id', self.form.quote_id);\n" +
+  "      } else if (self.form.link_type === 'account' && self.form.account_id) {\n" +
+  "        fd.append('account_id', self.form.account_id);\n" +
+  "      }\n" +
+  "      fd.append('source', 'modal');\n" +
+  "      fetch('/activities', {\n" +
+  "        method: 'POST',\n" +
+  "        credentials: 'same-origin',\n" +
+  "        body: fd,\n" +
+  "        headers: { 'x-requested-with': 'XMLHttpRequest', 'accept': 'application/json' }\n" +
+  "      })\n" +
+  "        .then(function (res) {\n" +
+  "          return res.json().then(function (data) { return { ok: res.ok, data: data }; });\n" +
+  "        })\n" +
+  "        .then(function (result) {\n" +
+  "          self.submitting = false;\n" +
+  "          if (!result.ok || !result.data || !result.data.ok) {\n" +
+  "            self.error = (result.data && result.data.error) || 'Could not create task.';\n" +
+  "            return;\n" +
+  "          }\n" +
+  "          self.closeModal();\n" +
+  "          if (self.reloadOnSuccess) window.location.reload();\n" +
+  "        })\n" +
+  "        .catch(function () {\n" +
+  "          self.submitting = false;\n" +
+  "          self.error = 'Could not create task.';\n" +
+  "        });\n" +
+  "    }\n" +
+  "  });\n" +
+  "  window.addEventListener('pms:open-task-modal', function (e) {\n" +
+  "    Alpine.store('taskModal').openModal((e && e.detail) || {});\n" +
+  "  });\n" +
+  "  window.PMS = window.PMS || {};\n" +
+  "  window.PMS.openTaskModal = function (prefill) {\n" +
+  "    Alpine.store('taskModal').openModal(prefill || {});\n" +
+  "  };\n" +
+  "});\n"
+);
+
+// Task modal markup. Rendered once per authenticated page, right
+// before the notification toast stack. Uses x-show/x-cloak so it
+// stays invisible until the store flips open=true.
+const TASK_MODAL_MARKUP = (
+  '<div class="task-modal-overlay" x-data x-show="$store.taskModal.open" x-cloak ' +
+  '@keydown.escape.window="$store.taskModal.closeModal()" ' +
+  '@click.self="$store.taskModal.closeModal()" style="display:none">' +
+  '<div class="task-modal" @click.stop>' +
+  '<div class="task-modal-header">' +
+  '<h3>New task</h3>' +
+  '<button type="button" class="task-modal-close" @click="$store.taskModal.closeModal()" aria-label="Close">&times;</button>' +
+  '</div>' +
+  '<form @submit.prevent="$store.taskModal.submit()" class="task-modal-body">' +
+  '<div class="field">' +
+  '<label class="field-label" for="task-modal-body-input">Details *</label>' +
+  '<textarea id="task-modal-body-input" x-model="$store.taskModal.form.body" rows="3" ' +
+  'placeholder="What needs to be done?" required></textarea>' +
+  '</div>' +
+  '<div class="field-grid">' +
+  '<div class="field">' +
+  '<label class="field-label">Assigned to</label>' +
+  '<select x-model="$store.taskModal.form.assigned_user_id">' +
+  '<template x-for="u in $store.taskModal.users" :key="u.id">' +
+  '<option :value="u.id" x-text="u.display_name || u.email"></option>' +
+  '</template>' +
+  '</select>' +
+  '</div>' +
+  '<div class="field">' +
+  '<label class="field-label">Due</label>' +
+  '<input type="datetime-local" x-model="$store.taskModal.form.due_at">' +
+  '</div>' +
+  '</div>' +
+  '<div class="field">' +
+  '<label class="field-label">Reminder</label>' +
+  '<input type="datetime-local" x-model="$store.taskModal.form.remind_at">' +
+  '</div>' +
+  '<div class="field" x-show="$store.taskModal.prefillLocked">' +
+  '<label class="field-label">Linked to</label>' +
+  '<div class="task-modal-link-pinned"><strong x-text="$store.taskModal.prefillLabel"></strong></div>' +
+  '</div>' +
+  '<div class="field" x-show="!$store.taskModal.prefillLocked">' +
+  '<label class="field-label">Link to</label>' +
+  '<div class="task-modal-link-options">' +
+  '<label><input type="radio" x-model="$store.taskModal.form.link_type" value="none"> None</label>' +
+  '<label><input type="radio" x-model="$store.taskModal.form.link_type" value="opportunity"> Opportunity</label>' +
+  '<label><input type="radio" x-model="$store.taskModal.form.link_type" value="quote"> Quote</label>' +
+  '<label><input type="radio" x-model="$store.taskModal.form.link_type" value="account"> Account</label>' +
+  '</div>' +
+  '<select x-show="$store.taskModal.form.link_type === \'opportunity\'" ' +
+  'x-model="$store.taskModal.form.opportunity_id" style="margin-top:0.5rem">' +
+  '<option value="">\u2014 select opportunity \u2014</option>' +
+  '<template x-for="o in $store.taskModal.opportunities" :key="o.id">' +
+  '<option :value="o.id" x-text="o.number + \' \u2014 \' + (o.title || \'\')"></option>' +
+  '</template>' +
+  '</select>' +
+  '<select x-show="$store.taskModal.form.link_type === \'quote\'" ' +
+  'x-model="$store.taskModal.form.quote_id" style="margin-top:0.5rem">' +
+  '<option value="">\u2014 select quote \u2014</option>' +
+  '<template x-for="q in $store.taskModal.quotes" :key="q.id">' +
+  '<option :value="q.id" x-text="q.number + \' \u2014 \' + (q.title || \'\')"></option>' +
+  '</template>' +
+  '</select>' +
+  '<select x-show="$store.taskModal.form.link_type === \'account\'" ' +
+  'x-model="$store.taskModal.form.account_id" style="margin-top:0.5rem">' +
+  '<option value="">\u2014 select account \u2014</option>' +
+  '<template x-for="a in $store.taskModal.accounts" :key="a.id">' +
+  '<option :value="a.id" x-text="a.alias ? (a.name + \' (\' + a.alias + \')\') : a.name"></option>' +
+  '</template>' +
+  '</select>' +
+  '</div>' +
+  '<div class="task-modal-error" x-show="$store.taskModal.error" x-text="$store.taskModal.error"></div>' +
+  '<div class="task-modal-footer">' +
+  '<button type="button" class="btn" @click="$store.taskModal.closeModal()" ' +
+  ':disabled="$store.taskModal.submitting">Cancel</button>' +
+  '<button type="submit" class="btn primary" :disabled="$store.taskModal.submitting">' +
+  '<span x-show="!$store.taskModal.submitting">Create task</span>' +
+  '<span x-show="$store.taskModal.submitting">Saving\u2026</span>' +
+  '</button>' +
+  '</div>' +
+  '</form>' +
+  '</div>' +
+  '</div>'
+);
+
 /**
  * Full-page HTML shell: includes nav, user badge, and slot for body.
  * Vendored HTMX + Alpine from /js so Access + CSP don't fight CDN cross-origin.
@@ -235,7 +487,8 @@ export function layout(title, body, opts = {}) {
         <div class="notification-toast-body" x-show="toast.body" x-text="toast.body"></div>
       </div>
     </template>
-  </div>` : ''}
+  </div>
+  ${TASK_MODAL_MARKUP}` : ''}
   ${flash ? `<div class="flash flash-${escape(flash.kind ?? 'info')}">${escape(flash.message)}</div>` : ''}
   <main class="site-main">
 ${breadcrumbHtml}
@@ -245,7 +498,7 @@ ${body}
     <small>C-LARS Pipeline Management System</small>
   </footer>
   ${versionTag ? `<div class="version-badge">${versionTag}</div>` : ''}
-  ${user ? `<script>${NOTIFICATION_STORE_SCRIPT}</script>` : ''}
+  ${user ? `<script>${NOTIFICATION_STORE_SCRIPT}${TASK_MODAL_SCRIPT}</script>` : ''}
 </body>
 </html>`;
 }

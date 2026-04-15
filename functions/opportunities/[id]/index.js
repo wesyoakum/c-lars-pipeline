@@ -589,27 +589,19 @@ export async function onRequestGet(context) {
       );
       const visibleTasks = pendingTasks.slice(0, 10);
       const moreCount = pendingTasks.length - visibleTasks.length;
+      const taskModalPrefill = JSON.stringify({
+        opportunity_id: opp.id,
+        link_label: `${opp.number} — ${opp.title ?? ''}`.trim(),
+      });
       return html`
         <section class="card">
           <div class="card-header">
             <h2>Pending tasks${pendingTasks.length > 0 ? ` (${pendingTasks.length})` : ''}</h2>
-            <a class="btn btn-sm" href="/opportunities/${escape(opp.id)}?tab=tasks">View all</a>
-          </div>
-          <div style="margin-bottom:0.75rem; padding:0.75rem; background:var(--bg-muted,#f6f8fa); border-radius:var(--radius);">
-            <form method="post" action="/activities">
-              <input type="hidden" name="opportunity_id" value="${escape(opp.id)}">
-              <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}">
-              <div style="display:grid; grid-template-columns:auto 1fr auto auto; gap:0.5rem; align-items:end;">
-                <select name="type" style="font-size:0.85em">
-                  <option value="task">Task</option><option value="note">Note</option>
-                  <option value="email">Email</option><option value="call">Call</option>
-                  <option value="meeting">Meeting</option>
-                </select>
-                <input type="text" name="subject" placeholder="Subject..." required style="width:100%; font-size:0.85em">
-                <input type="date" name="due_at" style="font-size:0.85em">
-                <button class="btn btn-sm primary" type="submit">Add</button>
-              </div>
-            </form>
+            <div style="display:flex;gap:0.5rem;">
+              <button class="btn btn-sm primary" type="button"
+                      onclick="window.PMS && window.PMS.openTaskModal(${escape(taskModalPrefill)})">+ Add task</button>
+              <a class="btn btn-sm" href="/opportunities/${escape(opp.id)}?tab=tasks">View all</a>
+            </div>
           </div>
           ${visibleTasks.length === 0
             ? html`<p class="muted">No pending tasks.</p>`
@@ -921,24 +913,16 @@ export async function onRequestGet(context) {
 
   // ---- Tasks tab ---------------------------------------------------------
   const TASK_TYPE_LABELS = { task: 'Task', note: 'Note', email: 'Email', call: 'Call', meeting: 'Meeting' };
+  const tasksTabPrefill = JSON.stringify({
+    opportunity_id: opp.id,
+    link_label: `${opp.number} — ${opp.title ?? ''}`.trim(),
+  });
   const tasksTab = html`
     <section class="card">
-      <div class="card-header"><h2>Tasks & Activities</h2></div>
-      <div style="margin-bottom:1rem; padding:0.75rem; background:var(--bg-muted,#f6f8fa); border-radius:var(--radius);">
-        <form method="post" action="/activities">
-          <input type="hidden" name="opportunity_id" value="${escape(opp.id)}">
-          <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}?tab=tasks">
-          <div style="display:grid; grid-template-columns:auto 1fr auto auto; gap:0.5rem; align-items:end;">
-            <select name="type" style="font-size:0.85em">
-              <option value="task">Task</option><option value="note">Note</option>
-              <option value="email">Email</option><option value="call">Call</option>
-              <option value="meeting">Meeting</option>
-            </select>
-            <input type="text" name="subject" placeholder="Subject..." required style="width:100%; font-size:0.85em">
-            <input type="date" name="due_at" style="font-size:0.85em">
-            <button class="btn btn-sm primary" type="submit">Add</button>
-          </div>
-        </form>
+      <div class="card-header">
+        <h2>Tasks & Activities</h2>
+        <button class="btn btn-sm primary" type="button"
+                onclick="window.PMS && window.PMS.openTaskModal(${escape(tasksTabPrefill)})">+ Add task</button>
       </div>
       ${taskRows.length === 0
         ? html`<p class="muted">No tasks or activities yet.</p>`

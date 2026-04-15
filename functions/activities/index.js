@@ -74,15 +74,6 @@ export async function onRequestGet(context) {
      LIMIT 200`,
     params);
 
-  // Load opportunities and users for the create form
-  const opportunities = await all(env.DB,
-    `SELECT id, number, title FROM opportunities
-      WHERE stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
-      ORDER BY updated_at DESC LIMIT 100`);
-
-  const users = await all(env.DB,
-    `SELECT id, display_name, email FROM users WHERE active = 1 ORDER BY display_name, email`);
-
   const overdueTasks = activities.filter(a =>
     a.status === 'pending' && a.due_at && a.due_at < new Date().toISOString().slice(0, 10)
   ).length;
@@ -142,64 +133,9 @@ export async function onRequestGet(context) {
         <h2>Activities</h2>
         <div class="toolbar-right" style="display:flex;align-items:center;gap:0.5rem">
           ${listToolbar({ id: 'act', count: activities.length, columns })}
-          <button class="btn btn-sm primary" onclick="document.getElementById('new-activity-form').style.display = document.getElementById('new-activity-form').style.display === 'none' ? 'block' : 'none'">+ New</button>
+          <button class="btn btn-sm primary" type="button"
+                  onclick="window.PMS && window.PMS.openTaskModal({})">+ New task</button>
         </div>
-      </div>
-
-      <div id="new-activity-form" style="display:none; margin-bottom:1rem; padding:1rem; background:var(--bg-muted,#f6f8fa); border-radius:var(--radius);">
-        <form method="post" action="/activities">
-          <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem;">
-            <div>
-              <label class="field-label">Type</label>
-              <select name="type" required style="width:100%">
-                ${Object.entries(TYPE_LABELS).map(([k, v]) => html`
-                  <option value="${k}" ${k === 'task' ? 'selected' : ''}>${v}</option>
-                `)}
-              </select>
-            </div>
-            <div>
-              <label class="field-label">Opportunity</label>
-              <select name="opportunity_id" style="width:100%">
-                <option value="">— none —</option>
-                ${opportunities.map(o => html`
-                  <option value="${o.id}">${escape(o.number)} — ${escape(o.title)}</option>
-                `)}
-              </select>
-            </div>
-            <div style="grid-column:1/-1">
-              <label class="field-label">Subject</label>
-              <input type="text" name="subject" required style="width:100%">
-            </div>
-            <div style="grid-column:1/-1">
-              <label class="field-label">Details</label>
-              <textarea name="body" rows="2" style="width:100%; field-sizing:content; min-height:2.5rem;"></textarea>
-            </div>
-            <div>
-              <label class="field-label">Assigned to</label>
-              <select name="assigned_user_id" style="width:100%">
-                ${users.map(u => html`
-                  <option value="${u.id}" ${u.id === user?.id ? 'selected' : ''}>${escape(u.display_name ?? u.email)}</option>
-                `)}
-              </select>
-            </div>
-            <div>
-              <label class="field-label">Due date</label>
-              <input type="date" name="due_at" style="width:100%">
-            </div>
-            <div>
-              <label class="field-label">Direction</label>
-              <select name="direction" style="width:100%">
-                <option value="">—</option>
-                <option value="inbound">Inbound</option>
-                <option value="outbound">Outbound</option>
-              </select>
-            </div>
-          </div>
-          <div style="margin-top:0.75rem; display:flex; gap:0.5rem;">
-            <button class="btn primary" type="submit">Create</button>
-            <button class="btn" type="button" onclick="document.getElementById('new-activity-form').style.display='none'">Cancel</button>
-          </div>
-        </form>
       </div>
 
       ${activities.length === 0
@@ -249,34 +185,98 @@ export async function onRequestGet(context) {
   }));
 }
 
+// POST /activities — Create a new activity.
+//
+// Normalized for the new "New task" modal:
+//   - type is always forced to 'task' (modal only creates tasks).
+//     The DB column + schema still support note/email/call/meeting
+//     and we keep them here so legacy code paths (e.g. notes form)
+//     don't break, but the modal UX only emits tasks.
+//   - subject is auto-derived from the first 20 chars of body + "..."
+//     if the caller didn't supply one. Tasks don't need a standalone
+//     subject field — users type a single details box and move on.
+//   - remind_at is stored if supplied.
+//   - Accepts opportunity_id, quote_id, or account_id as the linked
+//     entity (at most one).
+//
+// Two response modes:
+//   - If the request came from the modal (source=modal or an Ajax
+//     x-requested-with header), return JSON { ok: true, id } so the
+//     client can close the modal and reload.
+//   - Otherwise fall back to the classic redirect-with-flash pattern
+//     used by legacy inline forms.
+function deriveSubject(explicit, body) {
+  const trimmedExplicit = (explicit || '').trim();
+  if (trimmedExplicit) return trimmedExplicit;
+  const trimmedBody = (body || '').trim();
+  if (!trimmedBody) return '';
+  // Take the first line, first 20 chars, append … if truncated.
+  const firstLine = trimmedBody.split(/\r?\n/)[0];
+  if (firstLine.length <= 20) return firstLine;
+  return firstLine.slice(0, 20) + '…';
+}
+
+function isAjaxRequest(request, input) {
+  if (input?.source === 'modal') return true;
+  const xrw = request.headers.get('x-requested-with');
+  if (xrw && xrw.toLowerCase() === 'xmlhttprequest') return true;
+  const accept = request.headers.get('accept') || '';
+  return accept.includes('application/json') && !accept.includes('text/html');
+}
+
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
+}
+
 export async function onRequestPost(context) {
   const { env, data, request } = context;
   const user = data?.user;
   const input = await formBody(request);
+  const ajax = isAjaxRequest(request, input);
 
   const id = uuid();
   const ts = now();
+
+  // Type is intentionally locked to 'task' for modal-created rows.
+  // Callers can still pass an explicit non-task type (notes, calls, etc.)
+  // for legacy flows; only the modal leaves type blank.
   const type = input.type || 'task';
-  const subject = (input.subject || '').trim();
   const body = (input.body || '').trim() || null;
+  const subject = deriveSubject(input.subject, input.body);
   const oppId = input.opportunity_id || null;
+  const quoteId = input.quote_id || null;
+  const accountId = input.account_id || null;
   const assignedUserId = input.assigned_user_id || user?.id || null;
   const dueAt = input.due_at || null;
+  const remindAt = input.remind_at || null;
   const direction = input.direction || null;
   const status = (type === 'task') ? 'pending' : 'completed';
 
   if (!subject) {
-    return redirectWithFlash('/activities', 'Subject is required.', 'error');
+    const msg = 'Please enter task details.';
+    if (ajax) return jsonResponse({ ok: false, error: msg }, 400);
+    return redirectWithFlash('/activities', msg, 'error');
   }
 
-  // If created from an opportunity page, redirect back there
   const returnTo = input.return_to || null;
 
   await batch(env.DB, [
     stmt(env.DB,
-      `INSERT INTO activities (id, opportunity_id, type, subject, body, direction, status, due_at, assigned_user_id, created_at, updated_at, created_by_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, oppId, type, subject, body, direction, status, dueAt, assignedUserId, ts, ts, user?.id]),
+      `INSERT INTO activities (
+         id, opportunity_id, account_id, quote_id, type, subject, body,
+         direction, status, due_at, remind_at, assigned_user_id,
+         created_at, updated_at, created_by_user_id
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, oppId, accountId, quoteId, type, subject, body,
+       direction, status, dueAt, remindAt, assignedUserId,
+       ts, ts, user?.id]),
     auditStmt(env.DB, {
       entityType: 'activity',
       entityId: id,
@@ -286,8 +286,11 @@ export async function onRequestPost(context) {
     }),
   ]);
 
-  if (returnTo) {
-    return redirectWithFlash(returnTo, `Created ${TYPE_LABELS[type] ?? type}: ${subject}`);
+  if (ajax) {
+    return jsonResponse({ ok: true, id, subject });
   }
-  return redirectWithFlash('/activities', `Created ${TYPE_LABELS[type] ?? type}: ${subject}`);
+
+  const flashMsg = `Created ${TYPE_LABELS[type] ?? type}: ${subject}`;
+  if (returnTo) return redirectWithFlash(returnTo, flashMsg);
+  return redirectWithFlash('/activities', flashMsg);
 }
