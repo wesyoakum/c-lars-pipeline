@@ -152,6 +152,7 @@ export async function onRequestPost(context) {
           incoterms, payment_terms, delivery_terms, delivery_estimate,
           cost_build_id,
           notes_internal, notes_customer,
+          show_discounts,
           created_at, updated_at, created_by_user_id)
        VALUES (?, ?, ?, ?, ?, ?, 'draft',
                ?, ?, ?, 'USD',
@@ -159,6 +160,7 @@ export async function onRequestPost(context) {
                ?, ?, ?, ?,
                ?,
                ?, ?,
+               0,
                ?, ?, ?)`,
       [
         id,

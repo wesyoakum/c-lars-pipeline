@@ -91,6 +91,7 @@ export async function onRequestPost(context) {
           cost_build_id, supersedes_quote_id,
           notes_internal, notes_customer,
           discount_amount, discount_pct, discount_description, discount_is_phantom,
+          show_discounts,
           created_at, updated_at, created_by_user_id)
        VALUES (?, ?, ?, ?, ?, ?, 'revision_draft',
                ?, ?, ?, ?,
@@ -99,6 +100,7 @@ export async function onRequestPost(context) {
                ?, ?,
                ?, ?,
                ?, ?, ?, ?,
+               ?,
                ?, ?, ?)`,
       [
         newId,
@@ -127,6 +129,9 @@ export async function onRequestPost(context) {
         source.discount_pct ?? null,
         source.discount_description ?? null,
         source.discount_is_phantom ?? 0,
+        // Carry over the per-quote show_discounts toggle so revisions
+        // inherit the parent's visibility setting (migration 0027).
+        source.show_discounts ?? 0,
         ts,
         ts,
         user?.id ?? null,
