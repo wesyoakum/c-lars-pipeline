@@ -1289,9 +1289,9 @@ function oppInline(oppId, accountId) {
             isAddNew: o.value === '__new__',
           }));
           window.pmsAccountPicker.buildSelectOptions(input, items);
-          // buildSelectOptions restores `input.value` from what's
-          // already on the <select>, but we haven't set anything yet.
-          // Force the current value explicitly.
+          // buildSelectOptions restores the select value from whatever
+          // was already on the element, but we have not set anything
+          // yet on this freshly-created <select>. Force it explicitly.
           input.value = currentValue || '';
         } else {
           options.forEach(o => {
