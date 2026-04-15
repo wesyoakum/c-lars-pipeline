@@ -8,7 +8,7 @@ import { redirect, redirectWithFlash } from '../../../../lib/http.js';
 import {
   getQuoteDocData,
   fillTemplate,
-  templateKeyForQuote,
+  resolveQuoteTemplateKey,
 } from '../../../../lib/doc-generate.js';
 import { storeGeneratedDoc } from '../../../../lib/doc-storage.js';
 import {
@@ -35,7 +35,11 @@ export async function onRequestPost(context) {
       return redirectWithFlash(returnTo, 'Could not load quote data.', 'error');
     }
 
-    const templateKey = templateKeyForQuote(quote.quote_type);
+    // Hybrid quotes try the quote-hybrid.docx template first; fall
+    // back to the primary type's single-type template if the hybrid
+    // one hasn't been uploaded yet.
+    const { key: templateKey, usedFallback } =
+      await resolveQuoteTemplateKey(env, quote.quote_type);
     const docxBuffer = await fillTemplate(env, templateKey, docData);
 
     // Build the download filename from the admin-configurable
@@ -67,6 +71,13 @@ export async function onRequestPost(context) {
       user,
     });
 
+    if (usedFallback) {
+      return redirect(
+        `${returnTo}?highlight=${docId}&flash=${encodeURIComponent(
+          'Hybrid template not yet uploaded — rendered with the primary type\u2019s template.'
+        )}&flash_kind=warn`
+      );
+    }
     return redirect(`${returnTo}?highlight=${docId}`);
   } catch (err) {
     console.error('DOCX generation failed:', err);

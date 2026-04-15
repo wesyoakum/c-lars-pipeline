@@ -9,7 +9,7 @@ import { auditStmt } from '../../../../lib/audit.js';
 import { now } from '../../../../lib/ids.js';
 import { redirectWithFlash } from '../../../../lib/http.js';
 import { snapshotGoverningDocs, createIssueTask } from '../../../../lib/quote-transitions.js';
-import { getQuoteDocData, fillTemplate, convertToPdf, templateKeyForQuote } from '../../../../lib/doc-generate.js';
+import { getQuoteDocData, fillTemplate, convertToPdf, resolveQuoteTemplateKey } from '../../../../lib/doc-generate.js';
 import { storeGeneratedDoc } from '../../../../lib/doc-storage.js';
 import {
   getFilenameTemplate,
@@ -78,7 +78,11 @@ export async function onRequestPost(context) {
       try {
         const docData = await getQuoteDocData(env, quoteId);
         if (!docData) return;
-        const templateKey = templateKeyForQuote(quote.quote_type);
+        // Hybrid quotes try the shared quote-hybrid.docx first and
+        // fall back to the primary type's template so auto-issue
+        // keeps working before the hybrid template is uploaded.
+        const { key: templateKey } =
+          await resolveQuoteTemplateKey(env, quote.quote_type);
         const docxBuffer = await fillTemplate(env, templateKey, docData);
 
         // Build the download filename from the admin-configurable

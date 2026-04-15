@@ -9,7 +9,7 @@ import {
   getQuoteDocData,
   fillTemplate,
   convertToPdf,
-  templateKeyForQuote,
+  resolveQuoteTemplateKey,
 } from '../../../../lib/doc-generate.js';
 import { storeGeneratedDoc } from '../../../../lib/doc-storage.js';
 import {
@@ -38,8 +38,11 @@ export async function onRequestPost(context) {
       return redirectWithFlash(returnTo, 'Could not load quote data.', 'error');
     }
 
-    // 2. Fill the Word template
-    const templateKey = templateKeyForQuote(quote.quote_type);
+    // 2. Fill the Word template. Hybrid quotes try the dedicated
+    //    quote-hybrid.docx first, falling back to the primary type's
+    //    template if the hybrid one hasn't been uploaded yet.
+    const { key: templateKey, usedFallback } =
+      await resolveQuoteTemplateKey(env, quote.quote_type);
     const docxBuffer = await fillTemplate(env, templateKey, docData);
 
     // 3. Build the download filename from the admin-configurable
@@ -75,6 +78,16 @@ export async function onRequestPost(context) {
       user,
     });
 
+    // If we fell back from quote-hybrid to a single-type template,
+    // surface that in the flash so the user knows why their hybrid
+    // quote rendered as a Spares (or Service, etc) document.
+    if (usedFallback) {
+      return redirect(
+        `${returnTo}?highlight=${docId}&flash=${encodeURIComponent(
+          'Hybrid template not yet uploaded — rendered with the primary type\u2019s template.'
+        )}&flash_kind=warn`
+      );
+    }
     return redirect(`${returnTo}?highlight=${docId}`);
   } catch (err) {
     console.error('PDF generation failed:', err);

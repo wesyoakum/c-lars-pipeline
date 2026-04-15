@@ -75,8 +75,9 @@ export async function onRequestPost(context) {
          (id, quote_id, sort_order, item_type, title, part_number, description,
           quantity, unit, unit_price, extended_price, notes, line_notes, is_option,
           discount_amount, discount_pct, discount_description, discount_is_phantom,
+          line_type,
           created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         quoteId,
@@ -96,6 +97,7 @@ export async function onRequestPost(context) {
         value.discount_pct ?? null,
         value.discount_description ?? null,
         value.discount_is_phantom ?? 0,
+        value.line_type ?? null,
         ts,
         ts,
       ]

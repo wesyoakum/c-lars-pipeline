@@ -25,6 +25,7 @@ import {
   QUOTE_STATUS_LABELS,
   allowedQuoteTypes,
   parseTransactionTypes,
+  quoteTypeDisplayLabel,
 } from '../../lib/validators.js';
 
 const UPDATE_FIELDS = [
@@ -688,7 +689,7 @@ export async function onRequestGet(context) {
                 return html`<tr>
                   <td style="white-space:nowrap"><code>${escape(q.number)}</code></td>
                   <td style="white-space:nowrap">${escape(q.revision)}</td>
-                  <td style="white-space:nowrap">${escape(QUOTE_TYPE_LABELS[q.quote_type] ?? q.quote_type)}</td>
+                  <td style="white-space:nowrap">${escape(quoteTypeDisplayLabel(q.quote_type))}</td>
                   <td><a href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">${escape(q.title || '(no title)')}</a></td>
                   <td style="white-space:nowrap"><span class="pill ${statusClass}">${escape(QUOTE_STATUS_LABELS[q.status] ?? q.status)}</span></td>
                   <td class="num" style="white-space:nowrap">${fmtDollar(q.total_price)}</td>
@@ -841,14 +842,41 @@ export async function onRequestGet(context) {
 
   // ---- Quotes tab --------------------------------------------------------
   const quoteTypeOptions = allowedQuoteTypes(opp.transaction_type);  // handles comma-separated
+  // T3.4 Sub-feature A — when the opp has more than one allowed quote
+  // type, render a checkbox picker so the user can create a hybrid
+  // (multi-type) quote from the start. Multiple checkboxes named
+  // `quote_type` become an array on the server (formBody()), which
+  // validateQuote + parseQuoteTypes canonicalize to "part1,part2".
+  const quoteCreateForm = quoteTypeOptions.length <= 1
+    ? html`
+        <form method="post" action="/opportunities/${escape(opp.id)}/quotes" class="inline-form quotes-new-form">
+          <input type="hidden" name="quote_type" value="${escape(quoteTypeOptions[0] || 'spares')}">
+          <button class="btn primary" type="submit">+ New quote</button>
+        </form>`
+    : html`
+        <details class="new-quote-picker">
+          <summary class="btn primary">+ New quote</summary>
+          <form method="post" action="/opportunities/${escape(opp.id)}/quotes" class="new-quote-picker-form">
+            <p class="muted" style="margin:0 0 0.35rem;font-size:0.85em">
+              Pick one or more types (combine for a hybrid quote):
+            </p>
+            ${quoteTypeOptions.map((qt, i) => html`
+              <label class="new-quote-picker-option">
+                <input type="checkbox" name="quote_type" value="${escape(qt)}"
+                       ${i === 0 ? 'checked' : ''}>
+                ${escape(QUOTE_TYPE_LABELS[qt] ?? qt)}
+              </label>
+            `)}
+            <div style="margin-top:0.5rem;display:flex;gap:0.4rem;justify-content:flex-end">
+              <button class="btn primary small" type="submit">Create quote</button>
+            </div>
+          </form>
+        </details>`;
   const quotesTab = html`
     <section class="card">
       <div class="card-header">
         <h2>Quotes</h2>
-        <form method="post" action="/opportunities/${escape(opp.id)}/quotes" class="inline-form quotes-new-form">
-          <input type="hidden" name="quote_type" value="${escape(quoteTypeOptions[0] || 'spares')}">
-          <button class="btn primary" type="submit">+ New quote</button>
-        </form>
+        ${quoteCreateForm}
       </div>
       ${quoteRows.length === 0
         ? html`<p class="muted">No quotes yet.</p>`
@@ -861,7 +889,7 @@ export async function onRequestGet(context) {
                 return html`<tr>
                   <td style="white-space:nowrap"><code>${escape(q.number)}</code></td>
                   <td style="white-space:nowrap">${escape(q.revision)}</td>
-                  <td style="white-space:nowrap">${escape(QUOTE_TYPE_LABELS[q.quote_type] ?? q.quote_type)}</td>
+                  <td style="white-space:nowrap">${escape(quoteTypeDisplayLabel(q.quote_type))}</td>
                   <td><a href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">${escape(q.title || '(no title)')}</a></td>
                   <td style="white-space:nowrap"><span class="pill ${statusClass}">${escape(QUOTE_STATUS_LABELS[q.status] ?? q.status)}</span></td>
                   <td class="num" style="white-space:nowrap">${fmtDollar(q.total_price)}</td>

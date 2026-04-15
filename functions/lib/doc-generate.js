@@ -12,13 +12,52 @@ import {
 } from './pricing.js';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
-import { TEMPLATE_CATALOG, templateTypeForQuote } from './template-catalog.js';
+import {
+  TEMPLATE_CATALOG,
+  templateTypeForQuote,
+  fallbackTemplateTypeForQuote,
+} from './template-catalog.js';
+import {
+  parseQuoteTypes,
+  isHybridQuote,
+  QUOTE_TYPE_LABELS,
+} from './validators.js';
 
 // ── Template key mapping ────────────────────────────────────────────
 
 export function templateKeyForQuote(quoteType) {
   const catKey = templateTypeForQuote(quoteType);
   return TEMPLATE_CATALOG[catKey]?.r2Key || 'templates/quote-spares.docx';
+}
+
+/**
+ * T3.4 Sub-feature A — resolve a quote_type to an R2 template key with
+ * graceful fallback. For hybrid quotes we first try the dedicated
+ * `quote-hybrid.docx` template, and if that doesn't exist yet (because
+ * Wes hasn't uploaded the real template), fall back to the primary
+ * type's single-type template so the quote still generates. This
+ * keeps the feature usable before the template lands.
+ *
+ * Returns an object: { key, usedFallback: boolean, primaryKey }.
+ */
+export async function resolveQuoteTemplateKey(env, quoteType) {
+  const primaryKey = templateKeyForQuote(quoteType);
+  if (!isHybridQuote(quoteType)) {
+    return { key: primaryKey, usedFallback: false, primaryKey };
+  }
+  // Hybrid — probe R2 to see if the hybrid template exists.
+  try {
+    const head = await env.DOCS.head(primaryKey);
+    if (head) {
+      return { key: primaryKey, usedFallback: false, primaryKey };
+    }
+  } catch {
+    // fall through to fallback
+  }
+  const fallbackCatKey = fallbackTemplateTypeForQuote(quoteType);
+  const fallbackKey = TEMPLATE_CATALOG[fallbackCatKey]?.r2Key
+    || 'templates/quote-spares.docx';
+  return { key: fallbackKey, usedFallback: true, primaryKey };
 }
 
 // ── Load quote data ─────────────────────────────────────────────────
@@ -277,6 +316,94 @@ export async function getQuoteDocData(env, quoteId) {
     addWfmAliases(f, optionLines[i])
   );
 
+  // ── T3.4 Sub-feature A — hybrid quote line sections ───────────────
+  //
+  // For single-type quotes, `sections` is a single-element array with
+  // every line in it; the existing `lines`/`Task`/`Cost` arrays still
+  // work for single-type templates. For hybrid quotes, lines are
+  // grouped by `line_type` with per-section subtotals. Lines whose
+  // `line_type` is NULL get bucketed into an "Unassigned" section so
+  // they still appear in the PDF (flagged for the user to fix).
+  //
+  // Each section exposes:
+  //   - key         ("spares" | "service" | ...)
+  //   - label       ("Spares" | "Service" | "Unassigned")
+  //   - lines       formatted lines (same shape as `lines`)
+  //   - hasLines    boolean for template {#hasLines}...{/} loops
+  //   - subtotal    formatted dollar string
+  //   - subtotalRaw number, for math downstream
+  const quoteTypeParts = parseQuoteTypes(quote.quote_type);
+  const isHybrid = quoteTypeParts.length > 1;
+
+  const sectionByKey = new Map();
+  // Pre-seed sections in quoteTypeParts order so the PDF always
+  // renders them in the canonical order (e.g. Spares before Service
+  // when quote_type = "spares,service").
+  for (const key of quoteTypeParts) {
+    sectionByKey.set(key, {
+      key,
+      label: QUOTE_TYPE_LABELS[key] ?? key,
+      lines: [],
+      subtotalRaw: 0,
+    });
+  }
+  // Fall back to a single "All lines" section for single-type quotes.
+  if (quoteTypeParts.length === 1) {
+    const only = sectionByKey.get(quoteTypeParts[0]);
+    only.label = QUOTE_TYPE_LABELS[quoteTypeParts[0]] ?? only.label;
+  } else if (quoteTypeParts.length === 0) {
+    sectionByKey.set('_all', {
+      key: '_all',
+      label: 'All lines',
+      lines: [],
+      subtotalRaw: 0,
+    });
+  }
+
+  formattedLines.forEach((fl, i) => {
+    const raw = regularLines[i];
+    let targetKey;
+    if (isHybrid) {
+      targetKey = raw.line_type && quoteTypeParts.includes(raw.line_type)
+        ? raw.line_type
+        : '_unassigned';
+      if (!sectionByKey.has(targetKey)) {
+        sectionByKey.set(targetKey, {
+          key: targetKey,
+          label: targetKey === '_unassigned'
+            ? 'Unassigned'
+            : (QUOTE_TYPE_LABELS[targetKey] ?? targetKey),
+          lines: [],
+          subtotalRaw: 0,
+        });
+      }
+    } else {
+      targetKey = quoteTypeParts[0] ?? '_all';
+    }
+    const section = sectionByKey.get(targetKey);
+    section.lines.push(fl);
+    section.subtotalRaw += Number(raw.extended_price) || 0;
+  });
+
+  const sections = Array.from(sectionByKey.values())
+    .filter(s => s.lines.length > 0)
+    .map(s => ({
+      key: s.key,
+      label: s.label,
+      lines: s.lines,
+      hasLines: s.lines.length > 0,
+      subtotal: fmtDollar(s.subtotalRaw),
+      subtotalRaw: s.subtotalRaw,
+      // WFM-compatible PascalCase aliases for the template author's
+      // convenience — templates can loop {#Sections}{Label}{Subtotal}
+      // {#Lines}...{/Lines}{/Sections}.
+      Key: s.key,
+      Label: s.label,
+      Lines: s.lines,
+      HasLines: s.lines.length > 0,
+      Subtotal: fmtDollar(s.subtotalRaw),
+    }));
+
   // Quote number: omit "Rev" for v1
   const quoteNumDisplay = quote.revision && quote.revision !== 'v1'
     ? `${quote.number} Rev ${quote.revision}`
@@ -307,6 +434,18 @@ export async function getQuoteDocData(env, quoteId) {
     hasOptions: optionLines.length > 0,
     optionHeading: 'Preferred Options',
     quoteOptionExplanation: '',
+
+    // T3.4 Sub-feature A — hybrid quote sections. For single-type
+    // quotes `sections` is a one-element array; for hybrid quotes it
+    // contains one entry per line_type with per-section subtotals.
+    // `isHybrid` is the quick branch for template authors:
+    //   {#isHybrid}{#sections}...{/sections}{/isHybrid}
+    //   {^isHybrid}{#lines}...{/lines}{/isHybrid}
+    sections,
+    isHybrid,
+    quoteTypeLabel: quoteTypeParts.length > 0
+      ? quoteTypeParts.map(p => QUOTE_TYPE_LABELS[p] ?? p).join(' + ')
+      : '',
 
     // Pricing breakdown — camelCase (PMS)
     // `quoteSubtotal` is the DISPLAYED subtotal (with phantom markups in).
@@ -404,6 +543,12 @@ export async function getQuoteDocData(env, quoteId) {
     Task: formattedLines,
     Cost: formattedLines,
     Option: formattedOptions,
+    // Hybrid sections (WFM PascalCase): loop via {#Sections}...{/Sections}.
+    Sections: sections,
+    IsHybrid: isHybrid,
+    QuoteTypeLabel: quoteTypeParts.length > 0
+      ? quoteTypeParts.map(p => QUOTE_TYPE_LABELS[p] ?? p).join(' + ')
+      : '',
 
     // Metadata for filename/storage
     _quoteId: quote.id,

@@ -34,6 +34,16 @@ export const TEMPLATE_CATALOG = {
     filename: 'quote-refurb-supplemental.docx',
     label: 'Quote — Refurb Supplemental',
   },
+  'quote-hybrid': {
+    r2Key: 'templates/quote-hybrid.docx',
+    filename: 'quote-hybrid.docx',
+    label: 'Quote — Hybrid (multi-type)',
+    // T3.4 Sub-feature A — the real hybrid template isn't designed yet.
+    // Until Wes uploads a quote-hybrid.docx via /templates/quote-hybrid,
+    // doc-generate.js falls back to the primary type's template so
+    // hybrid quotes still render (with a single flat line-item section).
+    inProgress: true,
+  },
   'oc-eps': {
     r2Key: 'templates/oc-eps.docx',
     filename: 'oc-eps.docx',
@@ -79,8 +89,32 @@ const JOB_TYPE_TO_OC_TEMPLATE = {
   refurb: 'oc-refurb',
 };
 
+/**
+ * Resolve a quote_type value (which may be a single type like "spares"
+ * or a comma-separated hybrid like "spares,service") to a template
+ * catalog key.
+ *
+ * T3.4 Sub-feature A — hybrid quotes route to the shared `quote-hybrid`
+ * template key. Until the hybrid .docx template is uploaded, the
+ * document generator falls back to the primary type's template.
+ */
 export function templateTypeForQuote(quoteType) {
+  if (quoteType && String(quoteType).includes(',')) {
+    return 'quote-hybrid';
+  }
   return QUOTE_TYPE_TO_TEMPLATE[quoteType] || 'quote-spares';
+}
+
+/**
+ * Primary-type fallback template key for a quote_type. Used by
+ * doc-generate.js when a hybrid quote is being rendered but no
+ * `quote-hybrid.docx` has been uploaded yet — we fall back to the
+ * first part's single-type template so quotes still generate.
+ */
+export function fallbackTemplateTypeForQuote(quoteType) {
+  if (!quoteType) return 'quote-spares';
+  const firstPart = String(quoteType).split(',')[0].trim();
+  return QUOTE_TYPE_TO_TEMPLATE[firstPart] || 'quote-spares';
 }
 
 export function templateTypeForOC(jobType) {

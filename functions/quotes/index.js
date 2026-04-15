@@ -7,7 +7,10 @@ import { all } from '../lib/db.js';
 import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { readFlash } from '../lib/http.js';
 import { fmtDollar } from '../lib/pricing.js';
-import { QUOTE_TYPE_LABELS, QUOTE_STATUS_LABELS } from '../lib/validators.js';
+import {
+  QUOTE_STATUS_LABELS,
+  quoteTypeDisplayLabel,
+} from '../lib/validators.js';
 import { listScript, listTableHead, listToolbar, columnsMenu, rowDataAttrs } from '../lib/list-table.js';
 
 export async function onRequestGet(context) {
@@ -49,7 +52,7 @@ export async function onRequestGet(context) {
     opp_id: r.opportunity_id,
     number: r.number ?? '',
     revision: r.revision ?? '',
-    type_label: QUOTE_TYPE_LABELS[r.quote_type] ?? r.quote_type ?? '',
+    type_label: quoteTypeDisplayLabel(r.quote_type),
     status_label: QUOTE_STATUS_LABELS[r.status] ?? r.status ?? '',
     status: r.status,
     title: r.title ?? '',

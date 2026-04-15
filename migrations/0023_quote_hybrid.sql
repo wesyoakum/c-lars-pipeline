@@ -1,0 +1,29 @@
+-- 0023_quote_hybrid.sql
+--
+-- T3.4 Sub-feature A — Hybrid quotes.
+--
+-- A hybrid quote bundles two or more quote types (e.g. Spares + Service)
+-- into one document. Data-model changes:
+--
+--   1. `quotes.quote_type` stays a single TEXT column but now tolerates
+--      comma-separated values, mirroring the existing convention on
+--      `opportunities.transaction_type`. No schema change needed — the
+--      column type is already TEXT. The validator in functions/lib/validators.js
+--      handles parsing, deduping and canonicalization.
+--
+--   2. `quote_lines.line_type` — new nullable TEXT column that tags an
+--      individual line with which sub-type (spares / service / eps /
+--      refurb_*) of the hybrid quote it belongs to. For single-type
+--      quotes the column stays NULL and is ignored by the detail UI
+--      and the PDF generator. For hybrid quotes, the detail UI shows a
+--      small selector per line, and the PDF generator groups lines by
+--      line_type with per-section subtotals so the quote-hybrid.docx
+--      template can render them cleanly.
+--
+-- See also: template-catalog.js adds a `quote-hybrid` entry that routes
+-- all hybrid quotes to a single shared template. The template is marked
+-- `inProgress: true` until Wes uploads the real .docx via the admin
+-- page — hybrid quotes still generate today but will fall back to a
+-- plain rendering until the template lands.
+
+ALTER TABLE quote_lines ADD COLUMN line_type TEXT;

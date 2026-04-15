@@ -36,6 +36,10 @@ const LINE_FIELDS = [
   'discount_pct',
   'discount_description',
   'discount_is_phantom',
+  // T3.4 Sub-feature A — line_type tags the line with a hybrid-quote
+  // section (spares / service / eps / refurb_*). NULL on single-type
+  // quotes.
+  'line_type',
 ];
 
 export async function onRequestPost(context) {
@@ -114,6 +118,7 @@ export async function onRequestPost(context) {
               discount_pct = ?,
               discount_description = ?,
               discount_is_phantom = ?,
+              line_type = ?,
               updated_at = ?
         WHERE id = ? AND quote_id = ?`,
       [
@@ -132,6 +137,7 @@ export async function onRequestPost(context) {
         value.discount_pct ?? null,
         value.discount_description ?? null,
         value.discount_is_phantom ?? 0,
+        value.line_type ?? null,
         ts,
         lineId,
         quoteId,

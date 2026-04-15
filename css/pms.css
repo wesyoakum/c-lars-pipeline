@@ -2109,3 +2109,90 @@ tr.line-option td:first-child {
 .more-details-section {
   margin-top: 0.5rem;
 }
+
+/* T3.4 — Hybrid quote picker (opp detail quotes tab).
+   When an opportunity has more than one allowed quote type, the "New quote"
+   button expands a <details> menu with checkboxes so the user can pick any
+   combination. A single-type opp still renders a plain button form. */
+.new-quote-picker {
+  position: relative;
+  display: inline-block;
+}
+.new-quote-picker > summary {
+  list-style: none;
+  cursor: pointer;
+}
+.new-quote-picker > summary::-webkit-details-marker { display: none; }
+.new-quote-picker[open] > summary::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+}
+.new-quote-picker-form {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  right: 0;
+  z-index: 20;
+  min-width: 16rem;
+  background: var(--bg, #fff);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  padding: 0.6rem 0.7rem;
+}
+.new-quote-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.2rem;
+  cursor: pointer;
+  user-select: none;
+  border-radius: var(--radius);
+}
+.new-quote-picker-option:hover {
+  background: var(--bg-alt, #f4f4f4);
+}
+.new-quote-picker-option input[type="checkbox"] {
+  margin: 0;
+}
+
+/* T3.4 — Per-line section selector + section subtotals inside the quote
+   detail lines table. On a hybrid quote, each line is tagged with a
+   line_type (spares / service / ...) and the table shows a subtotal row
+   per section above the grand subtotal. */
+.line-section-select {
+  font-size: 0.8rem;
+  padding: 0.15rem 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg, #fff);
+  max-width: 9rem;
+}
+.line-section-unassigned {
+  background: #fff8db;
+  border-color: #d6b900;
+}
+.line-section-label {
+  display: block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted, #666);
+  margin-bottom: 0.15rem;
+}
+table.data tr.section-subtotal-row td {
+  border-top: 1px dashed var(--border);
+  background: #fafafa;
+  font-variant-numeric: tabular-nums;
+  padding-top: 0.4rem;
+  padding-bottom: 0.4rem;
+}
+table.data tr.section-subtotal-row.section-unassigned td {
+  background: #fff8db;
+}
+table.data tr.section-subtotal-row.section-unassigned .pill {
+  background: #ffe599;
+  color: #6b4f00;
+  border: 1px solid #d6b900;
+}

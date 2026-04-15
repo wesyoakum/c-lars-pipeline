@@ -13,7 +13,11 @@ import { one, all, stmt, batch } from '../../../lib/db.js';
 import { auditStmt } from '../../../lib/audit.js';
 import { uuid, now } from '../../../lib/ids.js';
 import { redirectWithFlash } from '../../../lib/http.js';
-import { validateQuote, allowedQuoteTypes } from '../../../lib/validators.js';
+import {
+  validateQuote,
+  allowedQuoteTypes,
+  parseQuoteTypes,
+} from '../../../lib/validators.js';
 import { formBody } from '../../../lib/http.js';
 
 export async function onRequestGet(context) {
@@ -54,25 +58,41 @@ export async function onRequestPost(context) {
   // Seed type-specific defaults when the user didn't supply them. These
   // strings match the quote detail page's "Default XXX Terms" checkbox so
   // that the seeded value round-trips as "still the default" on load.
-  const qt = value.quote_type;
-  const isRefurb = typeof qt === 'string' && qt.startsWith('refurb_');
+  //
+  // T3.4 Sub-feature A — hybrid quotes combine parts (e.g. spares +
+  // service). The plan says "apply the most-conservative default —
+  // shorter expiration, strictest payment terms". Concretely:
+  //   - If any part is spares/service, use the 14d expiration (shorter).
+  //   - Prefer spares terms when spares is in the mix (they are the
+  //     strictest — 50% PO / 50% delivery Net 15). Fall back to service
+  //     terms when it's the only non-EPS/refurb part. EPS terms are
+  //     computed client-side from delivery weeks so we don't seed
+  //     payment_terms for EPS-only quotes.
+  //   - Delivery terms default to "EXW, C-LARS facility" whenever any
+  //     part is EPS or refurb.
+  const parts = parseQuoteTypes(value.quote_type);
+  const hasSpares  = parts.includes('spares');
+  const hasService = parts.includes('service');
+  const hasEps     = parts.includes('eps');
+  const hasRefurb  = parts.some(p => p.startsWith('refurb_'));
+
   if (!value.valid_until) {
-    const days = (qt === 'spares' || qt === 'service') ? 14 : 30;
+    const days = (hasSpares || hasService) ? 14 : 30;
     const exp = new Date();
     exp.setUTCDate(exp.getUTCDate() + days);
     value.valid_until = exp.toISOString().slice(0, 10);
   }
   if (!value.payment_terms) {
-    if (qt === 'spares') {
+    if (hasSpares) {
       value.payment_terms =
         '50% Due upon receipt of purchase order\n50% Due upon delivery, payable Net 15';
-    } else if (qt === 'service') {
+    } else if (hasService) {
       value.payment_terms =
         '50% of estimated price Due upon receipt of purchase order\nRemainder Due upon completion of work, payable Net 15';
     }
     // EPS terms are computed client-side from delivery_estimate — don't seed here.
   }
-  if (!value.delivery_terms && (qt === 'eps' || isRefurb)) {
+  if (!value.delivery_terms && (hasEps || hasRefurb)) {
     value.delivery_terms = 'EXW, C-LARS facility';
   }
 

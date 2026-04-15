@@ -22,6 +22,9 @@ import {
   validateQuote,
   allowedQuoteTypes,
   parseTransactionTypes,
+  parseQuoteTypes,
+  isHybridQuote,
+  quoteTypeDisplayLabel,
   QUOTE_TYPE_LABELS,
   QUOTE_STATUS_LABELS,
 } from '../../../../lib/validators.js';
@@ -146,7 +149,7 @@ export async function onRequestGet(context) {
             <span class="header-value" id="q-header-total">${fmtDollar(total)}</span>
           </h1>
           <p class="muted" style="margin:0.15rem 0 0;font-size:0.85em">
-            ${escape(QUOTE_TYPE_LABELS[quote.quote_type] ?? quote.quote_type)}
+            ${escape(quoteTypeDisplayLabel(quote.quote_type))}
             · ${escape(quote.revision)}
             ${quote.title ? html` · ${escape(quote.title)}` : ''}
             ${quote.supersedes_quote_id
@@ -249,14 +252,21 @@ export async function onRequestGet(context) {
   `;
 
   // ── 2. Banner card ─────────────────────────────────────────────────
+  // T3.4 Sub-feature A — if this is a hybrid quote (comma-separated
+  // quote_type), render the composite label read-only. Editing the
+  // mix post-creation is explicitly out of scope for Sub-feature A —
+  // delete the quote and create a new one with a different mix.
+  // Single-type quotes retain the existing editable select.
   const quoteTypeOptions = allowedQuoteTypes(quote.opp_transaction_type);
+  const isHybrid = isHybridQuote(quote.quote_type);
+  const quoteTypeParts = parseQuoteTypes(quote.quote_type);
   const bannerCard = html`
     <section class="card quote-doc-card quote-doc-first quote-banner">
       <div class="quote-banner-inner">
         <div>
           <h2 class="quote-banner-title">QUOTATION</h2>
-          ${readOnly
-            ? html`<p class="quote-banner-type">${escape(QUOTE_TYPE_LABELS[quote.quote_type] ?? quote.quote_type)}</p>`
+          ${readOnly || isHybrid
+            ? html`<p class="quote-banner-type">${escape(quoteTypeDisplayLabel(quote.quote_type))}${isHybrid ? html` <span class="pill" style="font-size:0.6em;vertical-align:middle">HYBRID</span>` : ''}</p>`
             : html`<select class="quote-banner-type-select"
                            @change="window._qPatch('quote_type', $event.target.value)">
                 ${quoteTypeOptions.map(qt => html`
@@ -388,6 +398,32 @@ export async function onRequestGet(context) {
   const optionSubtotal = lines.filter(l => l.is_option).reduce((a, l) => a + Number(l.extended_price ?? 0), 0);
   const includedSubtotal = subtotal - optionSubtotal;
 
+  // T3.4 Sub-feature A — per-section subtotals for hybrid quotes.
+  // Sum extended_price of non-option lines grouped by line_type.
+  // Unassigned lines (line_type NULL) get their own "Unassigned"
+  // bucket so the user can see they still need to be tagged.
+  const sectionSubtotals = [];
+  if (isHybrid) {
+    const bucket = new Map();
+    for (const key of quoteTypeParts) {
+      bucket.set(key, { key, label: QUOTE_TYPE_LABELS[key] ?? key, total: 0, count: 0 });
+    }
+    bucket.set('_unassigned', { key: '_unassigned', label: 'Unassigned', total: 0, count: 0 });
+    for (const l of lines) {
+      if (l.is_option) continue;
+      const key = l.line_type && quoteTypeParts.includes(l.line_type) ? l.line_type : '_unassigned';
+      const b = bucket.get(key);
+      if (b) {
+        b.total += Number(l.extended_price ?? 0);
+        b.count += 1;
+      }
+    }
+    for (const b of bucket.values()) {
+      if (b.count > 0) sectionSubtotals.push(b);
+    }
+  }
+  const hasUnassigned = sectionSubtotals.some(s => s.key === '_unassigned');
+
   const linesSection = html`
     <section class="card quote-doc-card">
       <div class="card-header">
@@ -421,6 +457,21 @@ export async function onRequestGet(context) {
               <td class="col-num">${i + 1}${l.is_option ? html`<br><span class="pill" style="font-size:0.7em">OPT</span>` : ''}</td>
               <td class="col-item">
                 <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}" class="inline-form" id="line-form-${escape(l.id)}">
+                  ${isHybrid ? html`
+                    <div class="line-section-row">
+                      <label class="line-section-label">Section:</label>
+                      <select name="line_type" ${readOnly ? 'disabled' : ''}
+                              class="line-section-select ${!l.line_type ? 'line-section-unassigned' : ''}"
+                              data-autosave>
+                        <option value="" ${!l.line_type ? 'selected' : ''}>— Unassigned —</option>
+                        ${quoteTypeParts.map(p => html`
+                          <option value="${escape(p)}" ${l.line_type === p ? 'selected' : ''}>
+                            ${escape(QUOTE_TYPE_LABELS[p] ?? p)}
+                          </option>
+                        `)}
+                      </select>
+                    </div>
+                  ` : ''}
                   <div class="line-item-fields">
                     <input type="text" name="title" value="${escape(l.title ?? '')}" ${readOnly ? 'disabled' : ''}
                            placeholder="Title / Part #" class="line-title" data-autosave>
@@ -466,6 +517,17 @@ export async function onRequestGet(context) {
                 <td class="col-num muted">${lines.length + 1}</td>
                 <td class="col-item">
                   <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines" class="inline-form" id="new-line-form">
+                    ${isHybrid ? html`
+                      <div class="line-section-row">
+                        <label class="line-section-label">Section:</label>
+                        <select name="line_type" class="line-section-select line-section-unassigned">
+                          <option value="">— Unassigned —</option>
+                          ${quoteTypeParts.map(p => html`
+                            <option value="${escape(p)}">${escape(QUOTE_TYPE_LABELS[p] ?? p)}</option>
+                          `)}
+                        </select>
+                      </div>
+                    ` : ''}
                     <div class="line-item-fields">
                       <input type="text" name="title" placeholder="Title / Part #" class="line-title">
                       <input type="text" name="description" placeholder="Description" class="line-desc">
@@ -487,6 +549,18 @@ export async function onRequestGet(context) {
               </tr>
             `
             : ''}
+          ${isHybrid && sectionSubtotals.length > 0 ? sectionSubtotals.map(s => html`
+            <tr class="totals-row section-subtotal-row ${s.key === '_unassigned' ? 'section-unassigned' : ''}">
+              <td colspan="5" class="num">
+                <span class="muted" style="font-size:0.9em">${escape(s.label)} subtotal</span>
+                ${s.key === '_unassigned'
+                  ? html` <span class="pill" style="font-size:0.65em;background:#fef3c7;color:#92400e;border-color:#fde68a">assign a section</span>`
+                  : ''}
+              </td>
+              <td class="num"><span class="muted">${fmtDollar(s.total)}</span></td>
+              <td></td>
+            </tr>
+          `) : ''}
           <tr class="totals-row">
             <td colspan="5" class="num"><strong>Subtotal</strong></td>
             <td class="num" id="q-subtotal"><strong>${fmtDollar(includedSubtotal)}</strong></td>

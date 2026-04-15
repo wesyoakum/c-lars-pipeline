@@ -513,6 +513,46 @@ export const QUOTE_TYPE_LABELS = {
 };
 
 /**
+ * T3.4 Sub-feature A — Hybrid quotes.
+ *
+ * A hybrid quote's `quote_type` column holds a comma-separated list of
+ * parts (e.g. "spares,service"). These helpers mirror the pattern
+ * already in use for opportunity `transaction_type` via
+ * parseTransactionTypes().
+ *
+ * Single-type quotes return a one-element array — callers that want to
+ * branch on "is this hybrid" should use isHybridQuote(). Callers that
+ * just need a single value for a legacy single-type routing path
+ * (e.g. stage lookup by primary type) can use primaryQuoteType().
+ */
+export function parseQuoteTypes(raw) {
+  if (!raw) return [];
+  if (Array.isArray(raw)) {
+    return raw.map(t => String(t || '').trim()).filter(Boolean);
+  }
+  return String(raw).split(',').map(t => t.trim()).filter(Boolean);
+}
+
+export function isHybridQuote(raw) {
+  return parseQuoteTypes(raw).length > 1;
+}
+
+export function primaryQuoteType(raw) {
+  return parseQuoteTypes(raw)[0] ?? null;
+}
+
+/**
+ * Display label for a (possibly hybrid) quote_type value. Single-type
+ * falls back to QUOTE_TYPE_LABELS directly; hybrid joins the labels
+ * with " + " (e.g. "Spares + Service").
+ */
+export function quoteTypeDisplayLabel(raw) {
+  const parts = parseQuoteTypes(raw);
+  if (parts.length === 0) return '';
+  return parts.map(p => QUOTE_TYPE_LABELS[p] ?? p).join(' + ');
+}
+
+/**
  * Human-readable labels for quote status keys.
  */
 export const QUOTE_STATUS_LABELS = {
@@ -544,19 +584,40 @@ export function validateQuote(input, { transactionType = null, requireType = tru
   // quote_type is required at create time (we need to know which flavor
   // of quote we're minting) but immutable on update — the route handler
   // drops it from the update payload, so on update we pass requireType=false.
+  //
+  // T3.4 Sub-feature A — accepts either a single string ("spares"),
+  // a comma-separated string ("spares,service"), or an array of parts
+  // (from multiple same-named checkboxes in the create form). The
+  // canonical stored form is comma-separated with duplicates stripped
+  // in first-seen order.
   if (requireType) {
-    const qt = trim(input.quote_type);
-    if (!nonEmpty(qt)) {
+    const parts = parseQuoteTypes(input.quote_type);
+    if (parts.length === 0) {
       errors.quote_type = 'Quote type is required';
       value.quote_type = null;
-    } else if (!ALL_QUOTE_TYPES.has(qt)) {
-      errors.quote_type = 'Unknown quote type';
-      value.quote_type = null;
-    } else if (transactionType && !allowedQuoteTypes(transactionType).includes(qt)) {
-      errors.quote_type = `Not valid for this opportunity's type(s)`;
-      value.quote_type = null;
     } else {
-      value.quote_type = qt;
+      const unknown = parts.find(p => !ALL_QUOTE_TYPES.has(p));
+      if (unknown) {
+        errors.quote_type = `Unknown quote type: ${unknown}`;
+        value.quote_type = null;
+      } else if (transactionType) {
+        const allowed = allowedQuoteTypes(transactionType);
+        const bad = parts.find(p => !allowed.includes(p));
+        if (bad) {
+          errors.quote_type =
+            `"${QUOTE_TYPE_LABELS[bad] ?? bad}" is not valid for this opportunity's type(s)`;
+          value.quote_type = null;
+        }
+      }
+      if (!errors.quote_type) {
+        // Canonicalize: dedupe, preserve first-seen order.
+        const seen = new Set();
+        const canonical = [];
+        for (const p of parts) {
+          if (!seen.has(p)) { seen.add(p); canonical.push(p); }
+        }
+        value.quote_type = canonical.join(',');
+      }
     }
   }
 
@@ -632,6 +693,22 @@ export function validateQuoteLine(input) {
 
   // Option flag: line item priced but not included in quote total
   value.is_option = input.is_option === '1' || input.is_option === 'on' ? 1 : 0;
+
+  // T3.4 Sub-feature A — line_type tags a line with which sub-type of
+  // a hybrid quote it belongs to. Optional; null on single-type quotes
+  // and on unassigned lines in a hybrid. The route handler is
+  // responsible for checking that the chosen part actually belongs to
+  // the parent quote's `quote_type` parts — we can't validate that
+  // here without a DB lookup.
+  const lt = trim(input.line_type);
+  if (!lt) {
+    value.line_type = null;
+  } else if (!ALL_QUOTE_TYPES.has(lt)) {
+    errors.line_type = 'Unknown section';
+    value.line_type = null;
+  } else {
+    value.line_type = lt;
+  }
 
   // T3.2 Phase 2 — per-line discount. Same semantics as header discount
   // (see pricing.js): amount wins over pct, phantom means "display only,
