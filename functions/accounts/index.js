@@ -28,7 +28,7 @@ export async function onRequestGet(context) {
 
   const rows = await all(
     env.DB,
-    `SELECT a.id, a.name, a.alias, a.segment, a.phone, a.website, a.updated_at,
+    `SELECT a.id, a.name, a.alias, a.parent_group, a.segment, a.phone, a.website, a.updated_at,
             (SELECT COUNT(*) FROM contacts c WHERE c.account_id = a.id) AS contact_count,
             (SELECT COUNT(*) FROM opportunities o WHERE o.account_id = a.id) AS opp_count
        FROM accounts a
@@ -38,6 +38,7 @@ export async function onRequestGet(context) {
 
   const columns = [
     { key: 'name',          label: 'Name',      sort: 'text',   filter: 'text',   default: true },
+    { key: 'parent_group',  label: 'Group',     sort: 'text',   filter: 'select', default: false },
     { key: 'segment',       label: 'Segment',   sort: 'text',   filter: 'select', default: true },
     { key: 'phone',         label: 'Phone',     sort: 'text',   filter: 'text',   default: true },
     { key: 'contact_count', label: 'Contacts',  sort: 'number', filter: null,     default: true },
@@ -48,12 +49,15 @@ export async function onRequestGet(context) {
 
   const rowData = rows.map(r => ({
     id: r.id,
-    // Combine name + alias into the filter data so the quicksearch
-    // matches either — typing "helix" finds "Helix Robotics Inc."
-    // even when the row shows the full legal name.
-    name: r.alias ? `${r.name ?? ''} ${r.alias}` : (r.name ?? ''),
+    // Combine name + alias + parent group into the filter data so the
+    // quicksearch matches any of them — typing "helix", "HR" (alias),
+    // or "Super Big Corp" (group) all find Helix Robotics Inc.
+    name: [r.name ?? '', r.alias ?? '', r.parent_group ?? '']
+      .filter(Boolean)
+      .join(' '),
     name_display: r.name ?? '',
     alias: r.alias ?? '',
+    parent_group: r.parent_group ?? '',
     segment: r.segment ?? '',
     phone: r.phone ?? '',
     contact_count: r.contact_count ?? 0,
@@ -86,6 +90,7 @@ export async function onRequestGet(context) {
                     <td class="col-name" data-col="name">
                       <a href="/accounts/${escape(r.id)}">${escape(r.name_display)}</a>${r.alias ? html` <span class="muted">(${escape(r.alias)})</span>` : ''}
                     </td>
+                    <td class="col-parent_group" data-col="parent_group">${escape(r.parent_group)}</td>
                     <td class="col-segment" data-col="segment">${escape(r.segment)}</td>
                     <td class="col-phone" data-col="phone">${escape(r.phone)}</td>
                     <td class="col-contact_count num" data-col="contact_count">${r.contact_count}</td>

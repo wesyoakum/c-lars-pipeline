@@ -11,6 +11,7 @@ import { now } from '../../lib/ids.js';
 
 const PATCHABLE = new Set([
   'name', 'alias', 'segment', 'phone', 'website', 'notes', 'owner_user_id',
+  'parent_group',
 ]);
 
 function coerce(field, raw) {

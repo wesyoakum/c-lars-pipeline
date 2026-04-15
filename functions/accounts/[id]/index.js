@@ -19,6 +19,7 @@ import {
   parseAddressForm,
   buildAddressStatements,
 } from '../../lib/address_editor.js';
+import { slugifyGroup, loadSiblingAccounts } from '../../lib/account-groups.js';
 
 const UPDATE_FIELDS = [
   'name',
@@ -96,6 +97,12 @@ export async function onRequestGet(context) {
 
   const addresses = await loadAddresses(env.DB, accountId);
 
+  // Siblings in the same parent_group, if any. Used both for the
+  // sidebar strip on this page and (indirectly) to tell the group
+  // rollup link whether there is actually anything to show.
+  const siblings = await loadSiblingAccounts(env.DB, accountId, account.parent_group);
+  const groupSlug = slugifyGroup(account.parent_group);
+
   const users = await all(
     env.DB,
     `SELECT id, display_name, email FROM users WHERE active = 1 ORDER BY display_name`
@@ -125,6 +132,12 @@ export async function onRequestGet(context) {
       <div class="card-header">
         <div>
           <h1>${inlineText('name', account.name)}</h1>
+          ${account.parent_group
+            ? html`<div class="muted" style="margin-top:0.15rem;font-size:0.9em">
+                Part of
+                <a href="/accounts/group/${escape(groupSlug)}"><strong>${escape(account.parent_group)}</strong></a>
+              </div>`
+            : ''}
         </div>
         <div class="header-actions">
           <form method="post" action="/accounts/${escape(account.id)}/delete"
@@ -139,6 +152,10 @@ export async function onRequestGet(context) {
         <div class="detail-pair">
           <span class="detail-label">Alias</span>
           <span class="detail-value">${inlineText('alias', account.alias, { placeholder: 'Click to set a short nickname\u2026' })}</span>
+        </div>
+        <div class="detail-pair">
+          <span class="detail-label">Parent group</span>
+          <span class="detail-value">${inlineText('parent_group', account.parent_group, { placeholder: 'Click to add a group label\u2026' })}</span>
         </div>
         <div class="detail-pair">
           <span class="detail-label">Segment</span>
@@ -168,6 +185,22 @@ export async function onRequestGet(context) {
       <h3 style="margin-top:1rem">Notes</h3>
       ${inlineTextarea('notes', account.notes, { placeholder: 'Click to add notes…' })}
     </section>
+
+    ${siblings.length > 0
+      ? html`<section class="card">
+          <div class="card-header">
+            <h2>Also in <a href="/accounts/group/${escape(groupSlug)}">${escape(account.parent_group)}</a></h2>
+            <a class="btn" href="/accounts/group/${escape(groupSlug)}">Open group rollup</a>
+          </div>
+          <ul class="chips" style="display:flex;flex-wrap:wrap;gap:0.4rem;padding:0 1rem 1rem;list-style:none;margin:0">
+            ${siblings.map((s) => html`
+              <li><a class="pill" href="/accounts/${escape(s.id)}">
+                ${escape(s.name)}${s.alias ? html` <span class="muted">(${escape(s.alias)})</span>` : ''}
+              </a></li>
+            `)}
+          </ul>
+        </section>`
+      : ''}
 
     <section class="card">
       <div class="card-header">
