@@ -751,6 +751,13 @@ code {
   text-align: left;
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--border);
+  /* Now that column widths are user-adjustable, let cells wrap to fit
+     their column rather than clipping. overflow-wrap:anywhere breaks
+     long unbreakable strings (URLs, IDs) at the column boundary so
+     they don't overflow a narrowed column. */
+  vertical-align: top;
+  word-break: normal;
+  overflow-wrap: anywhere;
 }
 .data thead th {
   background: var(--bg-alt);
@@ -2436,10 +2443,12 @@ textarea.ie-input { width: 100%; min-width: 12rem; resize: vertical; }
 .opp-list-table td .ie .ie-display {
   display: inline-block;
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: middle;
+  /* Wrap instead of ellipsis — columns are user-adjustable, so long
+     text should flow to multiple lines within the chosen width
+     rather than being silently clipped. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: top;
 }
 /* Open-detail link column: a dedicated narrow column on each list table
    (accounts/opportunities/quotes/jobs/activities) that holds just the
