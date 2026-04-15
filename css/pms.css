@@ -394,6 +394,146 @@ code {
   color: var(--fg-muted);
 }
 
+/* ---------- Task modal (global) ---------- */
+
+.task-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 20, 30, 0.55);
+  z-index: 10000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 4rem 1rem 1rem;
+  overflow-y: auto;
+  animation: task-modal-fade 0.15s ease-out;
+}
+@keyframes task-modal-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.task-modal {
+  background: var(--bg);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: task-modal-slide 0.18s ease-out;
+}
+@keyframes task-modal-slide {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.task-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.9rem 1.1rem;
+  border-bottom: 1px solid var(--border);
+}
+.task-modal-header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.task-modal-close {
+  background: transparent;
+  border: none;
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--fg-muted);
+  cursor: pointer;
+  padding: 0 0.4rem;
+  border-radius: 4px;
+}
+.task-modal-close:hover {
+  background: var(--border);
+  color: var(--fg);
+}
+.task-modal-body {
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.task-modal-body .field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.task-modal-body .field-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.task-modal-body .field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+@media (max-width: 520px) {
+  .task-modal-body .field-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.task-modal-body input[type="text"],
+.task-modal-body input[type="date"],
+.task-modal-body input[type="datetime-local"],
+.task-modal-body select,
+.task-modal-body textarea {
+  width: 100%;
+  box-sizing: border-box;
+}
+.task-modal-body textarea {
+  min-height: 3rem;
+  resize: vertical;
+  font-family: inherit;
+}
+.task-modal-link-options {
+  display: flex;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+  font-size: 0.88rem;
+}
+.task-modal-link-options label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+}
+.task-modal-link-pinned {
+  padding: 0.45rem 0.65rem;
+  background: var(--bg-alt, #f6f8fa);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+}
+.task-modal-link-pinned strong {
+  color: var(--fg);
+}
+.task-modal-error {
+  color: #b42318;
+  font-size: 0.85rem;
+  background: #fef3f2;
+  border: 1px solid #fecdca;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius);
+}
+.task-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.35rem;
+  padding: 0.85rem 0 0;
+}
+
 /* ---------- Main content ---------- */
 
 .site-main {
@@ -2234,6 +2374,27 @@ tr.line-option td:first-child {
   .dashboard-charts { grid-template-columns: 1fr; }
 }
 
+/* Fixed-height wrapper for Chart.js canvases on the reports page.
+   Chart.js responsive:true + maintainAspectRatio:false needs a
+   parent with an EXPLICIT height, otherwise the canvas's ResizeObserver
+   fires in a feedback loop and the chart grows forever. Use position:
+   relative so the canvas inside fills the wrapper without contributing
+   to its own parent's height calculation. */
+.chart-wrap {
+  position: relative;
+  width: 100%;
+  height: 260px;
+}
+.chart-wrap.chart-wrap-wide { height: 220px; }
+.chart-wrap.chart-wrap-tall { height: 320px; }
+.chart-wrap.chart-wrap-fill { height: 100%; }
+.chart-wrap > canvas {
+  position: absolute;
+  inset: 0;
+  max-width: 100%;
+  max-height: 100%;
+}
+
 /* ---------- Chart carousel (dashboard) ---------- */
 
 .chart-carousel {
@@ -2296,19 +2457,11 @@ tr.line-option td:first-child {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.35s ease;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  justify-content: center;
   padding: 0.25rem 0;
 }
 .carousel-slide.active {
   opacity: 1;
   pointer-events: auto;
-}
-.carousel-slide canvas {
-  max-height: 100%;
-  width: 100% !important;
 }
 .carousel-dots {
   display: flex;

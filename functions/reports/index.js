@@ -111,57 +111,57 @@ export async function onRequestGet(context) {
       <section class="card">
         <h2>1 · ${escape(slideByKey('stage').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('stage').caption)}</p>
-        <canvas id="rpt-stage" height="260"></canvas>
+        <div class="chart-wrap"><canvas id="rpt-stage"></canvas></div>
       </section>
       <section class="card">
         <h2>2 · ${escape(slideByKey('type').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('type').caption)}</p>
-        <canvas id="rpt-type" height="260"></canvas>
+        <div class="chart-wrap"><canvas id="rpt-type"></canvas></div>
       </section>
 
       <!-- Row 2 -->
       <section class="card">
         <h2>3 · ${escape(slideByKey('owner').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('owner').caption)}</p>
-        <canvas id="rpt-owner" height="260"></canvas>
+        <div class="chart-wrap"><canvas id="rpt-owner"></canvas></div>
       </section>
       <section class="card">
         <h2>4 · ${escape(slideByKey('topAccounts').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('topAccounts').caption)}</p>
-        <canvas id="rpt-topAccounts" height="260"></canvas>
+        <div class="chart-wrap"><canvas id="rpt-topAccounts"></canvas></div>
       </section>
 
       <!-- Row 3 -->
       <section class="card">
         <h2>5 · ${escape(slideByKey('segment').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('segment').caption)}</p>
-        <canvas id="rpt-segment" height="260"></canvas>
+        <div class="chart-wrap"><canvas id="rpt-segment"></canvas></div>
       </section>
       <section class="card">
         <h2>6 · ${escape(slideByKey('aging').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('aging').caption)}</p>
-        <canvas id="rpt-aging" height="260"></canvas>
+        <div class="chart-wrap"><canvas id="rpt-aging"></canvas></div>
       </section>
 
       <!-- Row 4 - full width -->
       <section class="card" style="grid-column: 1 / -1">
         <h2>7 · ${escape(slideByKey('bookings').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('bookings').caption)}</p>
-        <canvas id="rpt-bookings" height="180"></canvas>
+        <div class="chart-wrap chart-wrap-wide"><canvas id="rpt-bookings"></canvas></div>
       </section>
 
       <!-- Row 5 - full width -->
       <section class="card" style="grid-column: 1 / -1">
         <h2>8 · ${escape(slideByKey('forecast').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('forecast').caption)}</p>
-        <canvas id="rpt-forecast" height="180"></canvas>
+        <div class="chart-wrap chart-wrap-wide"><canvas id="rpt-forecast"></canvas></div>
       </section>
 
       <!-- Row 6 - full width -->
       <section class="card" style="grid-column: 1 / -1">
         <h2>9 · ${escape(slideByKey('bottleneck').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('bottleneck').caption)}</p>
-        <canvas id="rpt-bottleneck" height="200"></canvas>
+        <div class="chart-wrap chart-wrap-wide"><canvas id="rpt-bottleneck"></canvas></div>
       </section>
 
       <!-- Row 7 - full width - heatmap -->
