@@ -340,16 +340,24 @@ export async function onRequestGet(context) {
               <td class="meta-label">Expiration:</td>
               <td>
                 <div x-data="expirationPicker('${escape(quote.valid_until ?? '')}')">
-                  <input type="date" x-model="dateVal" @change="save()" class="meta-input" ${readOnly ? 'disabled' : ''} style="margin-bottom:0.2rem">
-                  ${!readOnly ? html`
-                    <div class="quick-dates">
-                      <button type="button" class="btn-link" @click="setDays(0)">Today</button>
-                      <button type="button" class="btn-link" @click="setDays(14)">14d</button>
-                      <button type="button" class="btn-link" @click="setDays(30)">30d</button>
-                      <button type="button" class="btn-link" @click="setDays(60)">60d</button>
-                      <button type="button" class="btn-link" @click="setDays(90)">90d</button>
-                    </div>
-                  ` : ''}
+                  <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap">
+                    <select x-model="daysVal" @change="if(daysVal !== '') setDays(+daysVal)"
+                            class="meta-input" ${readOnly ? 'disabled' : ''}
+                            style="font-size:0.85em;padding:0.2rem 0.3rem;width:auto">
+                      <option value="">Days\u2026</option>
+                      <option value="7">7 days</option>
+                      <option value="14">14 days</option>
+                      <option value="21">21 days</option>
+                      <option value="30">30 days</option>
+                      <option value="45">45 days</option>
+                      <option value="60">60 days</option>
+                      <option value="90">90 days</option>
+                      <option value="120">120 days</option>
+                    </select>
+                    <input type="date" :value="dateVal" @change="setDate($event.target.value)"
+                           class="meta-input" ${readOnly ? 'disabled' : ''}
+                           style="font-size:0.85em;padding:0.2rem 0.3rem;width:auto">
+                  </div>
                 </div>
               </td>
             </tr>
@@ -360,7 +368,7 @@ export async function onRequestGet(context) {
                   <div style="display:flex;gap:0.4rem;align-items:center">
                     <input type="text" x-model="textVal" @change="save()" class="meta-input" ${readOnly ? 'disabled' : ''} placeholder="e.g. 12 weeks ARO" style="flex:1">
                     ${!readOnly ? html`
-                      <select @change="if($event.target.value) setWeeks(+$event.target.value); $event.target.value=''" style="font-size:0.85em;padding:0.2rem 0.3rem;width:auto">
+                      <select x-model="weeksVal" @change="if(weeksVal) setWeeks(+weeksVal)" style="font-size:0.85em;padding:0.2rem 0.3rem;width:auto">
                         <option value="">Weeks\u2026</option>
                         ${Array.from({ length: 52 }, (_, i) => i + 1).map(n =>
                           html`<option value="${n}">${n} wk</option>`
@@ -673,15 +681,44 @@ export async function onRequestGet(context) {
       });
     };
 
-    // Expiration date picker with quick-select buttons
+    // Expiration picker — dropdown for days + date input for specific dates.
+    // daysVal shows the selected preset (e.g. "14 days") whenever the
+    // underlying valid_until matches a preset (days from today). For custom
+    // dates the dropdown falls back to "Days..." and the date input holds the
+    // raw value.
     document.addEventListener('alpine:init', function() {
+      var _expPresets = [7, 14, 21, 30, 45, 60, 90, 120];
+      var _expComputeDays = function(validUntil) {
+        if (!validUntil) return '';
+        var v = new Date(validUntil + 'T00:00:00Z');
+        if (isNaN(v.getTime())) return '';
+        var t = new Date();
+        t.setUTCHours(0, 0, 0, 0);
+        var diff = Math.round((v.getTime() - t.getTime()) / 86400000);
+        return diff >= 0 ? diff : '';
+      };
+      var _expInitialDaysVal = function(initial) {
+        var n = _expComputeDays(initial);
+        if (n === '' || _expPresets.indexOf(Number(n)) === -1) return '';
+        return String(n);
+      };
       Alpine.data('expirationPicker', function(initial) {
         return {
           dateVal: initial || '',
+          daysVal: _expInitialDaysVal(initial),
           setDays: function(n) {
             var d = new Date();
-            d.setDate(d.getDate() + n);
+            d.setUTCHours(0, 0, 0, 0);
+            d.setUTCDate(d.getUTCDate() + n);
             this.dateVal = d.toISOString().slice(0, 10);
+            this.daysVal = String(n);
+            this.save();
+          },
+          setDate: function(dateStr) {
+            if (!dateStr) return;
+            this.dateVal = dateStr;
+            var n = _expComputeDays(dateStr);
+            this.daysVal = (n !== '' && _expPresets.indexOf(Number(n)) !== -1) ? String(n) : '';
             this.save();
           },
           save: function() {
@@ -723,27 +760,40 @@ export async function onRequestGet(context) {
         return '';
       }
 
-      // Delivery picker with text, calendar, and weeks buttons
+      // Delivery picker with text, calendar, and weeks dropdown.
+      // weeksVal keeps the <select> showing the currently-selected week
+      // count (or empty when the text is a free-form value that doesn't
+      // parse to "N weeks ...").
+      var _parseDeliveryWeeks = function(text) {
+        var m = (text || '').match(/^(\\d+)\\s*week/);
+        return m ? parseInt(m[1], 10) : '';
+      };
       Alpine.data('deliveryPicker', function(initial) {
+        var _initWeeks = _parseDeliveryWeeks(initial);
         return {
           textVal: initial || '',
+          weeksVal: _initWeeks === '' ? '' : String(_initWeeks),
           setWeeks: function(n) {
             var d = new Date();
             d.setDate(d.getDate() + (n * 7));
             var dateStr = d.toISOString().slice(0, 10);
             this.textVal = n + ' weeks (' + dateStr + ')';
+            this.weeksVal = String(n);
             this.save();
           },
           setDate: function(dateStr) {
             if (!dateStr) return;
             this.textVal = dateStr;
+            this.weeksVal = '';
             this.save();
           },
           save: function() {
             window._qPatch('delivery_estimate', this.textVal);
-            // Parse weeks and notify terms component
-            var m = this.textVal.match(/^(\\d+)\\s*week/);
-            _deliveryWeeks = m ? parseInt(m[1], 10) : null;
+            // Parse weeks and notify terms component. Also re-sync the
+            // dropdown so it stays in step when the user types manually.
+            var parsed = _parseDeliveryWeeks(this.textVal);
+            _deliveryWeeks = parsed === '' ? null : parsed;
+            this.weeksVal = parsed === '' ? '' : String(parsed);
             document.dispatchEvent(new CustomEvent('delivery-changed', { detail: { weeks: _deliveryWeeks } }));
           },
         };

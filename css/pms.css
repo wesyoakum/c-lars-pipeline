@@ -1419,24 +1419,7 @@ table.data.compact td {
   box-sizing: border-box;
 }
 
-/* Quick-select date/weeks buttons under date inputs. */
-.quick-dates {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.2rem 0.4rem;
-  margin-top: 0.1rem;
-}
-.btn-link {
-  background: none;
-  border: none;
-  color: var(--accent);
-  font: inherit;
-  font-size: 0.8em;
-  padding: 0;
-  cursor: pointer;
-  text-decoration: underline;
-}
-.btn-link:hover { color: var(--accent-hover); }
+/* Small calendar-icon date input next to the delivery weeks dropdown. */
 .btn-link-date {
   width: 1.1rem;
   height: 1.1rem;
