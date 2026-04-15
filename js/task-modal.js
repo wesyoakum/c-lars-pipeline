@@ -312,6 +312,35 @@
   }
 
   // ---------------------------------------------------------------
+  // External API (set immediately, before Alpine boots)
+  // ---------------------------------------------------------------
+  //
+  // Inline onclick handlers on buttons fire `window.PMS.openTaskModal({})`.
+  // If a user happens to click before Alpine's `alpine:init` has run (rare
+  // but possible with slow script loads / browser devtools throttling),
+  // we stash the prefill and open the modal the moment the store exists.
+
+  var __pendingPrefill = null;
+
+  window.PMS = window.PMS || {};
+  window.PMS.openTaskModal = function (prefill) {
+    try {
+      var store = (typeof Alpine !== 'undefined' && Alpine && typeof Alpine.store === 'function')
+        ? Alpine.store('taskModal')
+        : null;
+      if (store && typeof store.openModal === 'function') {
+        store.openModal(prefill || {});
+        return;
+      }
+    } catch (e) { /* fall through to queue */ }
+    __pendingPrefill = prefill || {};
+  };
+
+  window.addEventListener('pms:open-task-modal', function (e) {
+    window.PMS.openTaskModal((e && e.detail) || {});
+  });
+
+  // ---------------------------------------------------------------
   // Alpine store
   // ---------------------------------------------------------------
 
@@ -697,13 +726,11 @@
       }
     });
 
-    // External API
-    window.addEventListener('pms:open-task-modal', function (e) {
-      Alpine.store('taskModal').openModal((e && e.detail) || {});
-    });
-    window.PMS = window.PMS || {};
-    window.PMS.openTaskModal = function (prefill) {
-      Alpine.store('taskModal').openModal(prefill || {});
-    };
+    // Drain any click that happened before we were ready
+    if (__pendingPrefill !== null) {
+      var queued = __pendingPrefill;
+      __pendingPrefill = null;
+      Alpine.store('taskModal').openModal(queued);
+    }
   });
 })();
