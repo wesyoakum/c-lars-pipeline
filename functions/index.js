@@ -399,10 +399,10 @@ export async function onRequestGet(context) {
     });
 
     // Chart.js init has to wait until Alpine has mounted the carousel
-    // and removed x-cloak — otherwise the stage container has 0 size
-    // (display:none via x-cloak) and Chart.js measures 0×0. The
-    // `alpine:initialized` event fires after every x-data component
-    // has finished its init() hook, which is exactly what we need.
+    // and removed x-cloak -- otherwise the stage container has 0 size
+    // (display-none via x-cloak) and Chart.js measures 0 by 0. The
+    // alpine-initialized event fires after every x-data component
+    // has finished its init hook, which is exactly what we need.
     document.addEventListener('alpine:initialized', function () {
       ${raw(buildChartInitScript('car-', chartsJson))}
     });
