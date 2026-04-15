@@ -2457,11 +2457,51 @@ tr.line-option td:first-child {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.35s ease;
-  padding: 0.25rem 0;
 }
 .carousel-slide.active {
   opacity: 1;
   pointer-events: auto;
+}
+/* Canvas fills the slide rect directly. Using position:absolute +
+   inset:0 means Chart.js reads the slide's clientHeight (the rendered
+   pixel size, which IS 360px) rather than trying to resolve a
+   percentage height against the slide's specified height: auto. */
+.carousel-slide > canvas {
+  position: absolute;
+  inset: 0;
+  max-width: 100%;
+  max-height: 100%;
+}
+.carousel-heatmap-wrap {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem 0.5rem;
+  overflow: auto;
+}
+.carousel-heatmap-wrap > div {
+  max-width: 760px;
+  width: 100%;
+}
+
+/* Hover-only controls: keep the header minimal when idle so the
+   user focuses on the chart. Buttons + dots + progress fade in on
+   hover. The title and caption stay visible at all times. */
+.chart-carousel .carousel-controls,
+.chart-carousel .carousel-dots,
+.chart-carousel .carousel-progress {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.chart-carousel:hover .carousel-controls,
+.chart-carousel:hover .carousel-dots,
+.chart-carousel:hover .carousel-progress,
+.chart-carousel:focus-within .carousel-controls,
+.chart-carousel:focus-within .carousel-dots,
+.chart-carousel:focus-within .carousel-progress {
+  opacity: 1;
 }
 .carousel-dots {
   display: flex;

@@ -182,17 +182,17 @@ export async function onRequestGet(context) {
       <p class="carousel-caption" x-text="slides[current].caption"></p>
 
       <div class="carousel-stage">
-        <div class="carousel-slide" :class="{active: current === 0}"><div class="chart-wrap chart-wrap-fill"><canvas id="car-stage"></canvas></div></div>
-        <div class="carousel-slide" :class="{active: current === 1}"><div class="chart-wrap chart-wrap-fill"><canvas id="car-type"></canvas></div></div>
-        <div class="carousel-slide" :class="{active: current === 2}"><div class="chart-wrap chart-wrap-fill"><canvas id="car-owner"></canvas></div></div>
-        <div class="carousel-slide" :class="{active: current === 3}"><div class="chart-wrap chart-wrap-fill"><canvas id="car-topAccounts"></canvas></div></div>
-        <div class="carousel-slide" :class="{active: current === 4}"><div class="chart-wrap chart-wrap-fill"><canvas id="car-segment"></canvas></div></div>
-        <div class="carousel-slide" :class="{active: current === 5}"><div class="chart-wrap chart-wrap-fill"><canvas id="car-aging"></canvas></div></div>
-        <div class="carousel-slide" :class="{active: current === 6}"><div class="chart-wrap chart-wrap-fill"><canvas id="car-bookings"></canvas></div></div>
-        <div class="carousel-slide" :class="{active: current === 7}"><div class="chart-wrap chart-wrap-fill"><canvas id="car-forecast"></canvas></div></div>
-        <div class="carousel-slide" :class="{active: current === 8}"><div class="chart-wrap chart-wrap-fill"><canvas id="car-bottleneck"></canvas></div></div>
+        <div class="carousel-slide" :class="{active: current === 0}"><canvas id="car-stage"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 1}"><canvas id="car-type"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 2}"><canvas id="car-owner"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 3}"><canvas id="car-topAccounts"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 4}"><canvas id="car-segment"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 5}"><canvas id="car-aging"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 6}"><canvas id="car-bookings"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 7}"><canvas id="car-forecast"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 8}"><canvas id="car-bottleneck"></canvas></div>
         <div class="carousel-slide" :class="{active: current === 9}">
-          <div style="max-width:760px;margin:0 auto">
+          <div class="carousel-heatmap-wrap">
             ${renderHeatmapGrid(charts.heatmap)}
           </div>
         </div>
