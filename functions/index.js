@@ -1,12 +1,27 @@
 // functions/index.js
 //
 // GET /
-// Dashboard with pipeline overview, charts, and key metrics.
+// Dashboard with pipeline overview, hero chart carousel, KPI strip,
+// my tasks, my pipeline, and recent quotes.
+//
+// The chart carousel is a 10-slide auto-rotating showcase that uses
+// the same data-gathering helper as the /reports page (see
+// functions/lib/chart-data.js). Slides advance every 7 seconds and
+// pause on hover; users can click prev/next arrows, dot indicators,
+// or the pause toggle. All 10 canvases/grids are always in the DOM
+// (toggled via opacity+pointer-events, not display:none) so Chart.js
+// can measure them correctly on first init.
 
 import { all, one } from './lib/db.js';
 import { layout, htmlResponse, html, escape, raw } from './lib/layout.js';
 import { loadStageCatalog } from './lib/stages.js';
 import { parseTransactionTypes } from './lib/validators.js';
+import {
+  gatherDashboardCharts,
+  renderHeatmapGrid,
+  buildChartInitScript,
+  CHART_SLIDES,
+} from './lib/chart-data.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
@@ -21,6 +36,10 @@ function multiTypeLabel(csv) {
 export async function onRequestGet(context) {
   const { env, data } = context;
   const user = data?.user;
+
+  // Shared 10-chart data bundle (same as /reports).
+  const dashboard = await gatherDashboardCharts(env.DB);
+  const { charts, chartsJson, totals } = dashboard;
 
   // My pipeline: open opportunities owned by the current user
   const myPipeline = user?.id
@@ -39,27 +58,7 @@ export async function onRequestGet(context) {
       )
     : [];
 
-  // Pipeline summary by stage
-  const stageSummary = await all(
-    env.DB,
-    `SELECT stage, COUNT(*) AS n, COALESCE(SUM(estimated_value_usd), 0) AS total_value
-       FROM opportunities
-      WHERE stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
-      GROUP BY stage
-      ORDER BY n DESC`
-  );
-
-  // Pipeline by type
-  const typeSummary = await all(
-    env.DB,
-    `SELECT transaction_type, COUNT(*) AS n, COALESCE(SUM(estimated_value_usd), 0) AS total_value
-       FROM opportunities
-      WHERE stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
-      GROUP BY transaction_type
-      ORDER BY total_value DESC`
-  );
-
-  // Win/loss stats (last 90 days)
+  // Win/loss stats (last 90 days) for the "win rate" KPI
   const winLoss = await all(
     env.DB,
     `SELECT stage, COUNT(*) AS n, COALESCE(SUM(estimated_value_usd), 0) AS total_value
@@ -99,6 +98,7 @@ export async function onRequestGet(context) {
       LIMIT 5`
   );
 
+  // Stage label map — used by the my-pipeline table below.
   const catalog = await loadStageCatalog(env.DB);
   const stageLabels = new Map();
   for (const list of catalog.values()) {
@@ -111,7 +111,6 @@ export async function onRequestGet(context) {
     one(env.DB, 'SELECT COUNT(*) AS n FROM quotes'),
   ]);
 
-  const totalPipelineValue = stageSummary.reduce((a, s) => a + Number(s.total_value), 0);
   const wonRow = winLoss.find(w => w.stage === 'closed_won');
   const lostRow = winLoss.find(w => w.stage === 'closed_lost');
   const wonCount = wonRow?.n ?? 0;
@@ -120,19 +119,18 @@ export async function onRequestGet(context) {
     ? Math.round(wonCount / (wonCount + lostCount) * 100)
     : 0;
 
-  // Chart data as JSON for client-side rendering
-  const stageChartData = JSON.stringify({
-    labels: stageSummary.map(s => stageLabels.get(s.stage) ?? s.stage),
-    values: stageSummary.map(s => Number(s.total_value)),
-    counts: stageSummary.map(s => s.n),
-  });
+  // Slide metadata for the Alpine component — titles + captions the
+  // carousel header will bind to. Embedded as raw JSON so Alpine can
+  // reactively swap the header as current changes.
+  const slidesJSON = JSON.stringify(CHART_SLIDES.map(s => ({
+    key: s.key,
+    title: s.title,
+    caption: s.caption,
+    kind: s.kind,
+  })));
 
-  const typeChartData = JSON.stringify({
-    labels: typeSummary.map(s => multiTypeLabel(s.transaction_type)),
-    values: typeSummary.map(s => Number(s.total_value)),
-    counts: typeSummary.map(s => s.n),
-  });
-
+  // Which slide to show for each index (used to render the stage
+  // container below). Order matches CHART_SLIDES.
   const body = html`
     <section class="card">
       <h1 class="page-title">Dashboard</h1>
@@ -144,7 +142,7 @@ export async function onRequestGet(context) {
         <span class="metric-label">Opportunities</span>
       </div>
       <div class="metric-card">
-        <span class="metric-value">$${formatMoney(totalPipelineValue)}</span>
+        <span class="metric-value">$${formatMoney(totals.pipeline)}</span>
         <span class="metric-label">Pipeline value</span>
       </div>
       <div class="metric-card">
@@ -161,16 +159,56 @@ export async function onRequestGet(context) {
       </div>
     </div>
 
-    <div class="dashboard-charts">
-      <section class="card">
-        <h2>Pipeline by stage</h2>
-        <canvas id="chart-stage" height="220"></canvas>
-      </section>
-      <section class="card">
-        <h2>Pipeline by type</h2>
-        <canvas id="chart-type" height="220"></canvas>
-      </section>
-    </div>
+    <!-- Hero chart carousel — auto-rotates through 10 portfolio charts -->
+    <section class="card chart-carousel"
+             x-data="chartCarousel"
+             x-cloak
+             @mouseenter="pause()"
+             @mouseleave="resume()">
+      <div class="carousel-header">
+        <div>
+          <h2 class="carousel-title" x-text="slides[current].title">Pipeline</h2>
+        </div>
+        <div class="carousel-controls">
+          <button type="button" class="carousel-btn" @click="prev()" title="Previous" aria-label="Previous">&lsaquo;</button>
+          <span class="carousel-indicator"><span x-text="current + 1"></span> / <span x-text="slides.length"></span></span>
+          <button type="button" class="carousel-btn" @click="next()" title="Next" aria-label="Next">&rsaquo;</button>
+          <button type="button" class="carousel-btn" @click="togglePause()"
+                  :title="userPaused ? 'Resume auto-advance' : 'Pause auto-advance'"
+                  x-text="userPaused ? '▶' : '⏸'"></button>
+          <a class="carousel-btn" href="/reports" title="Open full reports" aria-label="Open full reports">⛶</a>
+        </div>
+      </div>
+      <p class="carousel-caption" x-text="slides[current].caption"></p>
+
+      <div class="carousel-stage">
+        <div class="carousel-slide" :class="{active: current === 0}"><canvas id="car-stage"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 1}"><canvas id="car-type"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 2}"><canvas id="car-owner"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 3}"><canvas id="car-topAccounts"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 4}"><canvas id="car-segment"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 5}"><canvas id="car-aging"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 6}"><canvas id="car-bookings"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 7}"><canvas id="car-forecast"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 8}"><canvas id="car-bottleneck"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 9}">
+          <div style="max-width:760px;margin:0 auto">
+            ${renderHeatmapGrid(charts.heatmap)}
+          </div>
+        </div>
+      </div>
+
+      <div class="carousel-dots">
+        <template x-for="(slide, i) in slides" :key="slide.key">
+          <button type="button"
+                  class="carousel-dot"
+                  :class="{active: current === i}"
+                  @click="goto(i)"
+                  :aria-label="'Go to slide ' + (i + 1) + ': ' + slide.title"></button>
+        </template>
+      </div>
+      <div class="carousel-progress" :style="'width: ' + progressPct + '%'"></div>
+    </section>
 
     ${myTasks.length > 0 ? html`
       <section class="card">
@@ -290,84 +328,83 @@ export async function onRequestGet(context) {
     ` : ''}
 
     <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      if (typeof Chart === 'undefined') return;
-
-      var colors = [
-        'rgba(9,105,218,0.7)', 'rgba(26,127,55,0.7)', 'rgba(191,135,0,0.7)',
-        'rgba(207,34,46,0.7)', 'rgba(130,80,223,0.7)', 'rgba(17,138,178,0.7)',
-        'rgba(219,112,60,0.7)', 'rgba(100,116,139,0.7)'
-      ];
-      var borderColors = colors.map(function(c) { return c.replace('0.7', '1'); });
-
-      Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif";
-      Chart.defaults.font.size = 12;
-      Chart.defaults.plugins.legend.position = 'bottom';
-
-      var stageData = ${raw(stageChartData)};
-      if (stageData.labels.length > 0) {
-        new Chart(document.getElementById('chart-stage'), {
-          type: 'bar',
-          data: {
-            labels: stageData.labels,
-            datasets: [{
-              label: 'Value ($)',
-              data: stageData.values,
-              backgroundColor: colors.slice(0, stageData.labels.length),
-              borderColor: borderColors.slice(0, stageData.labels.length),
-              borderWidth: 1,
-              borderRadius: 4,
-            }]
+    // Register the carousel Alpine component early so x-data can find
+    // it the moment Alpine boots. Using alpine:init so we don't race.
+    document.addEventListener('alpine:init', function () {
+      Alpine.data('chartCarousel', function () {
+        return {
+          slides: ${raw(slidesJSON)},
+          current: 0,
+          intervalMs: 7000,
+          tickMs: 100,
+          elapsed: 0,
+          progressPct: 0,
+          userPaused: false,
+          hoverPaused: false,
+          tickHandle: null,
+          init: function () {
+            var self = this;
+            this.start();
+            // Kick Chart.js re-layout whenever the active slide changes.
+            // Hidden charts (opacity:0) don't need resize; the active one
+            // might need it if the stage box size changed.
+            this.$watch('current', function () {
+              self.elapsed = 0;
+              self.progressPct = 0;
+            });
           },
-          options: {
-            responsive: true,
-            plugins: {
-              legend: { display: false },
-              tooltip: {
-                callbacks: {
-                  label: function(ctx) {
-                    return '$' + ctx.parsed.y.toLocaleString() + ' (' + stageData.counts[ctx.dataIndex] + ' opps)';
-                  }
-                }
+          start: function () {
+            this.stop();
+            if (this.userPaused || this.hoverPaused) return;
+            var self = this;
+            this.tickHandle = setInterval(function () {
+              self.elapsed += self.tickMs;
+              self.progressPct = Math.min(100, (self.elapsed / self.intervalMs) * 100);
+              if (self.elapsed >= self.intervalMs) {
+                self.next();
+                self.elapsed = 0;
+                self.progressPct = 0;
               }
-            },
-            scales: {
-              y: {
-                ticks: {
-                  callback: function(v) { return '$' + (v >= 1000 ? (v/1000) + 'k' : v); }
-                }
-              }
-            }
-          }
-        });
-      }
-
-      var typeData = ${raw(typeChartData)};
-      if (typeData.labels.length > 0) {
-        new Chart(document.getElementById('chart-type'), {
-          type: 'doughnut',
-          data: {
-            labels: typeData.labels,
-            datasets: [{
-              data: typeData.values,
-              backgroundColor: colors.slice(0, typeData.labels.length),
-              borderWidth: 2,
-            }]
+            }, this.tickMs);
           },
-          options: {
-            responsive: true,
-            plugins: {
-              tooltip: {
-                callbacks: {
-                  label: function(ctx) {
-                    return ctx.label + ': $' + ctx.parsed.toLocaleString() + ' (' + typeData.counts[ctx.dataIndex] + ' opps)';
-                  }
-                }
-              }
-            }
-          }
-        });
-      }
+          stop: function () {
+            if (this.tickHandle) { clearInterval(this.tickHandle); this.tickHandle = null; }
+          },
+          next: function () {
+            this.current = (this.current + 1) % this.slides.length;
+          },
+          prev: function () {
+            this.current = (this.current - 1 + this.slides.length) % this.slides.length;
+          },
+          goto: function (i) {
+            this.current = i;
+            this.elapsed = 0;
+            this.progressPct = 0;
+          },
+          pause: function () {
+            this.hoverPaused = true;
+            this.stop();
+          },
+          resume: function () {
+            this.hoverPaused = false;
+            if (!this.userPaused) this.start();
+          },
+          togglePause: function () {
+            this.userPaused = !this.userPaused;
+            if (this.userPaused) this.stop();
+            else this.start();
+          },
+        };
+      });
+    });
+
+    // Chart.js init has to wait until Alpine has mounted the carousel
+    // and removed x-cloak — otherwise the stage container has 0 size
+    // (display:none via x-cloak) and Chart.js measures 0×0. The
+    // `alpine:initialized` event fires after every x-data component
+    // has finished its init() hook, which is exactly what we need.
+    document.addEventListener('alpine:initialized', function () {
+      ${raw(buildChartInitScript('car-', chartsJson))}
     });
     </script>
   `;
@@ -376,5 +413,8 @@ export async function onRequestGet(context) {
 }
 
 function formatMoney(n) {
-  return Math.round(Number(n ?? 0)).toLocaleString('en-US');
+  const num = Number(n ?? 0);
+  if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M';
+  if (num >= 1_000) return Math.round(num / 1_000) + 'k';
+  return Math.round(num).toLocaleString('en-US');
 }
