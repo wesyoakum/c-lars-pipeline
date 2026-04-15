@@ -313,10 +313,14 @@ export function layout(title, body, opts = {}) {
   <link rel="icon" type="image/png" sizes="120x120" href="/img/logo-120.png">
   <link rel="stylesheet" href="/css/pms.css">
   <script defer src="/js/htmx.min.js"></script>
+  <!-- task-modal.js MUST load before alpine.min.js. Alpine 3's bundle
+       auto-calls Alpine.start() as soon as it parses, which fires
+       'alpine:init' synchronously. Any listener added after that is
+       too late and the store never registers. -->
+  <script defer src="/js/task-modal.js"></script>
   <script defer src="/js/alpine.min.js"></script>
   <script defer src="/js/live-calc.js"></script>
   <script defer src="/js/account-picker.js"></script>
-  <script defer src="/js/task-modal.js"></script>
   ${opts.charts ? '<script defer src="/js/chart.min.js"></script>' : ''}
 </head>
 <body>
