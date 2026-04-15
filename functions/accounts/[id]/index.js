@@ -19,7 +19,7 @@ import {
   parseAddressForm,
   buildAddressStatements,
 } from '../../lib/address_editor.js';
-import { slugifyGroup, loadSiblingAccounts } from '../../lib/account-groups.js';
+import { slugifyGroup, loadSiblingAccounts, listGroupLabels } from '../../lib/account-groups.js';
 
 const UPDATE_FIELDS = [
   'name',
@@ -60,12 +60,18 @@ function inlineTextarea(field, value, opts = {}) {
   </span>`;
 }
 
-function inlineSelect(field, value, options) {
+function inlineSelect(field, value, options, opts = {}) {
   const selectedOpt = options.find(o => o.value === (value ?? ''));
-  const display = selectedOpt?.label || value || '—';
+  // When the value is empty and a placeholder is provided, render the
+  // placeholder in muted text (matches inlineText's behavior) instead
+  // of whatever label the empty option had.
+  const display = value
+    ? (selectedOpt?.label || value)
+    : (opts.placeholder || selectedOpt?.label || '—');
   const displayClass = value ? '' : 'muted';
   const optJson = JSON.stringify(options);
-  return html`<span class="ie" data-field="${field}" data-type="select" data-options='${escape(optJson)}'>
+  const allowNewAttr = opts.allowNew ? ' data-allow-new="true"' : '';
+  return html`<span class="ie" data-field="${field}" data-type="select" data-options='${escape(optJson)}'${raw(allowNewAttr)}>
     <span class="ie-display ${displayClass}">${escape(display)}</span>
   </span>`;
 }
@@ -102,6 +108,17 @@ export async function onRequestGet(context) {
   // rollup link whether there is actually anything to show.
   const siblings = await loadSiblingAccounts(env.DB, accountId, account.parent_group);
   const groupSlug = slugifyGroup(account.parent_group);
+
+  // Build the parent-group dropdown from the distinct set of labels
+  // already in use, plus a sentinel "+ Add new group…" option. The
+  // client-side activate() intercepts the __new__ value and swaps the
+  // <select> for a text input so the user can type a fresh label.
+  const existingGroupLabels = await listGroupLabels(env);
+  const groupOptions = [
+    { value: '', label: '— None —' },
+    ...existingGroupLabels.map((g) => ({ value: g, label: g })),
+    { value: '__new__', label: '+ Add new group\u2026' },
+  ];
 
   const users = await all(
     env.DB,
@@ -155,7 +172,7 @@ export async function onRequestGet(context) {
         </div>
         <div class="detail-pair">
           <span class="detail-label">Parent group</span>
-          <span class="detail-value">${inlineText('parent_group', account.parent_group, { placeholder: 'Click to add a group label\u2026' })}</span>
+          <span class="detail-value">${inlineSelect('parent_group', account.parent_group, groupOptions, { allowNew: true, placeholder: 'Click to assign a group\u2026' })}</span>
         </div>
         <div class="detail-pair">
           <span class="detail-label">Segment</span>
@@ -305,7 +322,28 @@ export async function onRequestGet(context) {
               if (o.value === (currentValue || '')) opt.selected = true;
               input.appendChild(opt);
             });
-            input.addEventListener('change', () => this.save(el, input));
+            const self = this;
+            input.addEventListener('change', () => {
+              // Allow-new selects use the __new__ sentinel to mean
+              // "the user wants to type a fresh label". Swap the
+              // <select> out for a text <input> and let them type.
+              if (el.dataset.allowNew === 'true' && input.value === '__new__') {
+                el.removeChild(input);
+                const txt = document.createElement('input');
+                txt.type = 'text';
+                txt.className = 'ie-input';
+                txt.placeholder = 'Type a new label\u2026';
+                txt.addEventListener('blur', () => self.save(el, txt));
+                txt.addEventListener('keydown', (e) => {
+                  if (e.key === 'Enter') { e.preventDefault(); self.save(el, txt); }
+                  if (e.key === 'Escape') { self.deactivate(el, txt); }
+                });
+                el.appendChild(txt);
+                txt.focus();
+              } else {
+                self.save(el, input);
+              }
+            });
             input.addEventListener('blur', () => {
               setTimeout(() => this.deactivate(el, input), 150);
             });
@@ -359,6 +397,17 @@ export async function onRequestGet(context) {
               const options = JSON.parse(el.dataset.options || '[]');
               const opt = options.find(o => o.value === (data.value || ''));
               display.textContent = opt ? opt.label : (data.value || '\u2014');
+              // If this is an allow-new select and the user just typed
+              // a label that wasn't in the dropdown, persist it into
+              // the options dataset so the next click shows it in the
+              // list. Keeps the __new__ sentinel at the bottom.
+              if (el.dataset.allowNew === 'true' && data.value && !opt) {
+                const newOpt = { value: data.value, label: data.value };
+                const newIdx = options.findIndex(o => o.value === '__new__');
+                if (newIdx >= 0) options.splice(newIdx, 0, newOpt);
+                else options.push(newOpt);
+                el.dataset.options = JSON.stringify(options);
+              }
             } else {
               display.textContent = data.value || '\u2014';
             }
