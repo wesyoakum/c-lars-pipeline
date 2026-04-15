@@ -1,0 +1,5 @@
+# Keep importer artifacts (generated SQL, preview / summary CSVs) out
+# of the repo. The importer is reproducible from the source xlsx, so
+# only the xlsx belongs under version control if anywhere.
+*
+!.gitignore
