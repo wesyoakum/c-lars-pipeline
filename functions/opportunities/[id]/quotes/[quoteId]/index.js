@@ -410,7 +410,13 @@ export async function onRequestGet(context) {
           </tr>
         </thead>
         <tbody>
-          ${lines.map((l, i) => html`
+          ${lines.map((l, i) => {
+            const lineHasDiscount =
+              l.discount_amount != null ||
+              l.discount_pct != null ||
+              (l.discount_description && String(l.discount_description).trim() !== '') ||
+              l.discount_is_phantom === 1;
+            return html`
             <tr data-line-row data-line-id="${escape(l.id)}" class="${l.is_option ? 'line-option' : ''}">
               <td class="col-num">${i + 1}${l.is_option ? html`<br><span class="pill" style="font-size:0.7em">OPT</span>` : ''}</td>
               <td class="col-item">
@@ -423,6 +429,7 @@ export async function onRequestGet(context) {
                   </div>
                   <textarea name="line_notes" ${readOnly ? 'disabled' : ''}
                             placeholder="Item notes..." class="line-notes" data-autosave>${escape(l.line_notes ?? '')}</textarea>
+                  ${renderLineDiscountEditor({ line: l, readOnly, hasDiscount: lineHasDiscount })}
                   <input type="hidden" name="is_option" value="${l.is_option ? '1' : '0'}">
                 </form>
               </td>
@@ -452,7 +459,7 @@ export async function onRequestGet(context) {
                 ` : ''}
               </td>
             </tr>
-          `)}
+          `;})}
           ${!readOnly
             ? html`
               <tr class="new-line-row" data-line-row>
@@ -775,6 +782,16 @@ export async function onRequestGet(context) {
         };
       });
 
+      // Per-line discount editor — `open` controls the collapsed/expanded
+      // state; once a discount is set on a line, it's expanded on load.
+      // Inputs inside the editor use data-autosave + form="line-form-..."
+      // so the existing line autosave machinery picks up changes.
+      Alpine.data('lineDiscount', function(initialOpen) {
+        return {
+          open: !!initialOpen,
+        };
+      });
+
       // Details card: address selector + description auto-save
       Alpine.data('quoteDetails', function() {
         return {
@@ -849,9 +866,16 @@ export async function onRequestGet(context) {
         if (totalEl) totalEl.innerHTML = '<strong>' + fmtDollar(data.total_price) + '</strong>';
         var headerTotal = document.getElementById('q-header-total');
         if (headerTotal) headerTotal.textContent = fmtDollar(data.total_price);
-        // Discount applied cell is implied by (subtotal - total + tax) but
-        // we don't know tax from the line-save payload, so leave it alone
-        // here. The discount-field patch path updates it directly below.
+        // If the line-save payload includes discount_applied, update the
+        // discount cell too (a line change that affects subtotal affects
+        // the %-based header discount proportionally).
+        if (typeof data.discount_applied === 'number') {
+          var discEl = document.getElementById('q-discount-applied');
+          if (discEl) {
+            var amt = Number(data.discount_applied || 0);
+            discEl.innerHTML = '<em>' + (amt > 0 ? '-' + fmtDollar(amt) : '') + '</em>';
+          }
+        }
       }
 
       // Listen for _qPatch responses that include recomputed totals (e.g.
@@ -1121,6 +1145,83 @@ function renderDiscountRow({ quote, readOnly, headerDiscountApplied }) {
       </td>
       <td></td>
     </tr>
+  `;
+}
+
+/**
+ * Render the per-line discount editor inside the item cell, below the
+ * line_notes textarea. Uses the same form as the rest of the line so the
+ * existing data-autosave mechanism catches changes automatically.
+ *
+ * Collapsed to a "+ Add discount" affordance when no discount is set and
+ * the quote is editable. Expanded (showing all fields) when a discount is
+ * set or the user clicks the affordance. Hidden entirely when read-only
+ * and no discount is set.
+ */
+function renderLineDiscountEditor({ line, readOnly, hasDiscount }) {
+  if (readOnly && !hasDiscount) return '';
+
+  const id = line.id;
+  const descVal = line.discount_description ?? '';
+  const amtVal = line.discount_amount != null ? line.discount_amount : '';
+  const pctVal = line.discount_pct != null ? line.discount_pct : '';
+  const phantomChecked = line.discount_is_phantom === 1 ? 'checked' : '';
+
+  if (readOnly) {
+    // Read-only display — show the discount as a small muted line under
+    // line_notes. The math itself lives in extended_price already.
+    const bits = [];
+    if (descVal) bits.push(escape(descVal));
+    if (line.discount_amount) bits.push(`-${fmtDollar(line.discount_amount)}`);
+    if (line.discount_pct) bits.push(`-${line.discount_pct}%`);
+    if (line.discount_is_phantom === 1) bits.push('(phantom)');
+    return html`
+      <div class="line-discount-ro muted" style="font-size:0.8em;margin-top:0.2rem">
+        Discount: ${raw(bits.join(' · '))}
+      </div>
+    `;
+  }
+
+  return html`
+    <div x-data="lineDiscount(${hasDiscount ? 'true' : 'false'})"
+         class="line-discount-editor"
+         style="margin-top:0.3rem;font-size:0.85em">
+      <a x-show="!open" @click="open = true" class="muted"
+         style="cursor:pointer;text-decoration:underline">+ Add discount</a>
+      <div x-show="open" x-cloak
+           style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap">
+        <span class="muted">Discount:</span>
+        <input type="text" name="discount_description"
+               form="line-form-${escape(id)}"
+               value="${escape(descVal)}"
+               placeholder="description"
+               data-autosave
+               style="flex:1;min-width:6rem;font-size:0.85em">
+        <span class="muted">$</span>
+        <input type="text" name="discount_amount"
+               form="line-form-${escape(id)}"
+               value="${escape(String(amtVal))}"
+               placeholder="0"
+               data-autosave
+               class="num-input" style="width:4rem;font-size:0.85em">
+        <span class="muted">or</span>
+        <input type="text" name="discount_pct"
+               form="line-form-${escape(id)}"
+               value="${escape(String(pctVal))}"
+               placeholder="0"
+               data-autosave
+               class="num-input" style="width:3rem;font-size:0.85em">
+        <span class="muted">%</span>
+        <label class="muted" style="display:inline-flex;align-items:center;gap:0.2rem;cursor:pointer"
+               title="When checked, unit price on the PDF is marked up to show a 'list price' with a matching discount line — the revenue figure doesn't change.">
+          <input type="checkbox" name="discount_is_phantom" value="1"
+                 form="line-form-${escape(id)}"
+                 ${phantomChecked}
+                 data-autosave>
+          Phantom
+        </label>
+      </div>
+    </div>
   `;
 }
 

@@ -609,6 +609,29 @@ export function validateQuoteLine(input) {
   // Option flag: line item priced but not included in quote total
   value.is_option = input.is_option === '1' || input.is_option === 'on' ? 1 : 0;
 
+  // T3.2 Phase 2 — per-line discount. Same semantics as header discount
+  // (see pricing.js): amount wins over pct, phantom means "display only,
+  // don't reduce stored totals".
+  const { value: discAmt, error: discAmtErr } = parseOptionalMoney(input.discount_amount);
+  if (discAmtErr) errors.discount_amount = discAmtErr;
+  value.discount_amount = discAmt === null ? null : discAmt;
+
+  const { value: discPct, error: discPctErr } = parseOptionalNumber(input.discount_pct);
+  if (discPctErr) errors.discount_pct = discPctErr;
+  if (discPct != null && (discPct < 0 || discPct > 100)) {
+    errors.discount_pct = 'Discount percent must be between 0 and 100';
+  }
+  value.discount_pct = discPct === null ? null : discPct;
+
+  value.discount_description = trim(input.discount_description) || null;
+  value.discount_is_phantom =
+    input.discount_is_phantom === '1' ||
+    input.discount_is_phantom === 'on' ||
+    input.discount_is_phantom === 1 ||
+    input.discount_is_phantom === true
+      ? 1
+      : 0;
+
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, value };
 }

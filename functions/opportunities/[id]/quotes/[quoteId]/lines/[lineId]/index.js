@@ -8,7 +8,10 @@ import { auditStmt, diff } from '../../../../../../lib/audit.js';
 import { now } from '../../../../../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../../../../../lib/http.js';
 import { validateQuoteLine } from '../../../../../../lib/validators.js';
-import { quoteTotalsRecomputeStmt } from '../../../../../../lib/pricing.js';
+import {
+  quoteTotalsRecomputeStmt,
+  computeLineExtendedPrice,
+} from '../../../../../../lib/pricing.js';
 
 const READ_ONLY_STATUSES = new Set([
   'accepted',
@@ -29,6 +32,10 @@ const LINE_FIELDS = [
   'notes',
   'line_notes',
   'is_option',
+  'discount_amount',
+  'discount_pct',
+  'discount_description',
+  'discount_is_phantom',
 ];
 
 export async function onRequestPost(context) {
@@ -75,7 +82,11 @@ export async function onRequestPost(context) {
   }
 
   const ts = now();
-  const extended = Number(value.quantity) * Number(value.unit_price);
+  // T3.2 Phase 2 — extended_price bakes in the line's own real discount
+  // (phantom discounts don't reduce the stored value; they mark up at
+  // render time). The header discount is still applied separately via
+  // quoteTotalsRecomputeStmt.
+  const extended = computeLineExtendedPrice(value);
 
   const after = {
     ...before,
@@ -99,6 +110,10 @@ export async function onRequestPost(context) {
               notes = ?,
               line_notes = ?,
               is_option = ?,
+              discount_amount = ?,
+              discount_pct = ?,
+              discount_description = ?,
+              discount_is_phantom = ?,
               updated_at = ?
         WHERE id = ? AND quote_id = ?`,
       [
@@ -113,6 +128,10 @@ export async function onRequestPost(context) {
         value.notes,
         value.line_notes,
         value.is_option ?? 0,
+        value.discount_amount ?? null,
+        value.discount_pct ?? null,
+        value.discount_description ?? null,
+        value.discount_is_phantom ?? 0,
         ts,
         lineId,
         quoteId,
@@ -132,15 +151,22 @@ export async function onRequestPost(context) {
   // If the client accepts JSON (fetch auto-save), return JSON instead of redirect
   const accept = request.headers.get('accept') || '';
   if (accept.includes('application/json')) {
-    // Fetch the updated totals to send back
+    // Fetch the updated totals to send back. Include tax_amount so the
+    // client can derive discount_applied = subtotal - total + tax.
     const updated = await one(env.DB,
-      'SELECT subtotal_price, total_price FROM quotes WHERE id = ?', [quoteId]);
+      'SELECT subtotal_price, total_price, tax_amount FROM quotes WHERE id = ?',
+      [quoteId]);
+    const sub = Number(updated?.subtotal_price ?? 0);
+    const tot = Number(updated?.total_price ?? 0);
+    const tax = Number(updated?.tax_amount ?? 0);
+    const discountApplied = Math.max(0, sub - (tot - tax));
     return new Response(JSON.stringify({
       ok: true,
       lineId,
       extended_price: extended,
-      subtotal_price: updated?.subtotal_price ?? 0,
-      total_price: updated?.total_price ?? 0,
+      subtotal_price: sub,
+      total_price: tot,
+      discount_applied: discountApplied,
     }), { headers: { 'content-type': 'application/json' } });
   }
 

@@ -4,7 +4,12 @@
 // template from R2, and optionally converts .docx → PDF via ConvertAPI.
 
 import { one, all } from './db.js';
-import { fmtDollar, computeDiscountApplied, readDiscountFromRow } from './pricing.js';
+import {
+  fmtDollar,
+  computeDiscountApplied,
+  readDiscountFromRow,
+  computePhantomMarkup,
+} from './pricing.js';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import { TEMPLATE_CATALOG, templateTypeForQuote } from './template-catalog.js';
@@ -83,53 +88,194 @@ export async function getQuoteDocData(env, quoteId) {
     } catch { return iso; }
   };
 
-  // Format dollar amounts for line items
-  const fmtLine = (line) => ({
-    title: line.title || line.description || '',
-    note: line.notes || line.line_notes || '',
-    partNumber: line.part_number || '',
-    quantity: line.quantity != null ? String(line.quantity) : '',
-    unit: line.unit || '',
-    unitPrice: fmtDollar(line.unit_price),
-    amount: fmtDollar(line.extended_price),
-    lineItemType: line.item_type || '',
-  });
+  // Format dollar amounts for line items.
+  //
+  // T3.2 Phase 2 — Line-level discounts:
+  //   - REAL line discounts are baked into stored `extended_price`, so the
+  //     displayed amount column shows the post-discount figure. Templates
+  //     that want to surface the original pre-discount price can use
+  //     `lineGrossAmount` alongside `lineDiscountAmount` /
+  //     `lineDiscountDescription`. The subtotal displayed on the PDF
+  //     already ties out because the amount column is the stored value.
+  //   - PHANTOM line discounts are a no-op at storage time. At render
+  //     time we mark up unit_price + amount so the PDF shows a "list
+  //     price" that, after a corresponding discount line (aggregated in
+  //     `quoteDiscountAmount`), returns to the real net.
+  //
+  // We also track `_phantomMarkupDelta` (raw number, not formatted) so
+  // the outer function can aggregate all line phantom markups into the
+  // header discount figure.
+  const fmtLine = (line) => {
+    const qty = Number(line.quantity) || 0;
+    const lineDiscount = readDiscountFromRow(line);
+    const realNet = Number(line.extended_price) || 0;
 
-  // Compute subtotal from lines (sum of extended_price)
+    // Default: display = stored (works for no-discount and real-discount lines)
+    let displayUnitPrice = Number(line.unit_price) || 0;
+    let displayAmount = realNet;
+    let lineDiscountApplied = 0;
+    let phantomMarkupDelta = 0;
+    // lineGrossAmount = pre-discount "list price" figure for templates
+    // that want to show "was X" alongside "net Y".
+    let lineGrossAmount = realNet;
+
+    if (lineDiscount && lineDiscount.isPhantom) {
+      // Phantom markup — mark up unit_price + displayed amount so the
+      // aggregate discount row returns to the real net. realNet here is
+      // qty × unit_price (phantom is a no-op at storage, so the stored
+      // extended equals qty × stored unit price).
+      const { grossDisplay, discountApplied } = computePhantomMarkup(
+        lineDiscount,
+        realNet
+      );
+      displayAmount = grossDisplay;
+      displayUnitPrice = qty > 0 ? grossDisplay / qty : displayUnitPrice;
+      lineDiscountApplied = discountApplied;
+      phantomMarkupDelta = discountApplied;
+      lineGrossAmount = grossDisplay;
+    } else if (lineDiscount) {
+      // Real discount — the stored extended_price is already
+      // post-discount, so displayAmount (=realNet) is what the PDF
+      // shows in the amount column. We expose the pre-discount figure
+      // in `lineGrossAmount` so templates can render a secondary
+      // "was X" note.
+      const preDiscount = qty * displayUnitPrice;
+      const applied = computeDiscountApplied(lineDiscount, preDiscount);
+      if (applied > 0) {
+        lineDiscountApplied = applied;
+        lineGrossAmount = preDiscount;
+      }
+    }
+
+    return {
+      title: line.title || line.description || '',
+      note: line.notes || line.line_notes || '',
+      partNumber: line.part_number || '',
+      quantity: line.quantity != null ? String(line.quantity) : '',
+      unit: line.unit || '',
+      unitPrice: fmtDollar(displayUnitPrice),
+      amount: fmtDollar(displayAmount),
+      lineItemType: line.item_type || '',
+
+      // Line discount metadata (empty / 0 when no line-level discount)
+      hasLineDiscount: lineDiscountApplied > 0 ||
+        !!(lineDiscount && lineDiscount.description),
+      lineDiscountDescription: lineDiscount?.description || '',
+      lineDiscountAmount: fmtDollar(lineDiscountApplied),
+      lineGrossAmount: fmtDollar(lineGrossAmount),
+      lineNetAmount: fmtDollar(realNet),
+
+      // Private — used by the outer function to aggregate.
+      _displayAmountRaw: displayAmount,
+      _phantomMarkupDelta: phantomMarkupDelta,
+    };
+  };
+
+  // Stored subtotal — sum of extended_price for all lines. Real line
+  // discounts are baked in; phantom line discounts are no-op at storage.
   const subtotalRaw = lines.reduce((sum, l) => sum + (Number(l.extended_price) || 0), 0);
 
-  // Header-level discount. For Phase 1 we only support real (non-phantom)
-  // discounts at the header level. Phantom rendering (Phase 2) will
-  // additionally mark up each line's unit price before formatting.
+  // Pre-format every line ONCE so we can reuse the per-line display
+  // numbers for the footer aggregation below.
+  const rawFormattedRegular = regularLines.map(fmtLine);
+  const rawFormattedOptions = optionLines.map(fmtLine);
+  const allFormattedLines = [...rawFormattedRegular, ...rawFormattedOptions];
+
+  // Sum of displayed line amounts (marked up for phantom lines, stored
+  // for real / none). This is what the "Subtotal" row on the PDF shows.
+  const lineDisplaySubtotal = allFormattedLines.reduce(
+    (sum, l) => sum + (l._displayAmountRaw || 0),
+    0
+  );
+  // Aggregate phantom line markup — the amount that needs to appear in
+  // the discount row so the net lands back at subtotalRaw.
+  const linePhantomMarkupTotal = allFormattedLines.reduce(
+    (sum, l) => sum + (l._phantomMarkupDelta || 0),
+    0
+  );
+
+  // Header-level discount.
+  //   - REAL: subtract from subtotalRaw before tax.
+  //   - PHANTOM: mark up the displayed subtotal even further so the
+  //     discount row returns to the real net.
   const headerDiscount = readDiscountFromRow(quote);
   const headerDiscountApplied = computeDiscountApplied(headerDiscount, subtotalRaw);
-  const hasHeaderDiscount = headerDiscountApplied > 0 || !!headerDiscount?.description;
+  const headerPhantom = headerDiscount && headerDiscount.isPhantom
+    ? computePhantomMarkup(headerDiscount, lineDisplaySubtotal)
+    : { grossDisplay: lineDisplaySubtotal, discountApplied: 0 };
+
+  // The "Subtotal" row on the PDF = displayed line sum + header phantom markup.
+  const subtotalDisplayed = headerPhantom.grossDisplay;
+
+  // Aggregate discount displayed on the PDF — one number that covers
+  // all the different kinds of discount the quote can have:
+  //   - Line phantom markups (each phantom line contributes its markup)
+  //   - Header real discount (dollar or pct of subtotal_raw)
+  //   - Header phantom markup on top of the displayed line subtotal
+  //
+  // (Real line discounts do NOT appear here because the line's amount
+  // column already shows the post-discount figure; subtotal ties out.)
+  const aggregateDiscountDisplayed =
+    linePhantomMarkupTotal +
+    headerDiscountApplied +
+    headerPhantom.discountApplied;
+
+  const hasHeaderDiscount =
+    aggregateDiscountDisplayed > 0 || !!headerDiscount?.description;
   const taxRaw = Number(quote.tax_amount) || 0;
   const totalAfterDiscount = subtotalRaw - headerDiscountApplied + taxRaw;
+
+  // Sanity-check (dev only, cheap): (subtotalDisplayed - aggregateDiscount + tax)
+  // must equal totalAfterDiscount. A mismatch means the math above drifted.
+  // No exception on mismatch — we just log it server-side.
+  if (Math.abs(
+    (subtotalDisplayed - aggregateDiscountDisplayed + taxRaw) - totalAfterDiscount
+  ) > 0.01) {
+    console.warn('[doc-generate] discount math mismatch', {
+      subtotalDisplayed,
+      aggregateDiscountDisplayed,
+      taxRaw,
+      totalAfterDiscount,
+      subtotalRaw,
+      linePhantomMarkupTotal,
+      headerDiscountApplied,
+      headerPhantomDiscount: headerPhantom.discountApplied,
+    });
+  }
 
   // Build combined contact name
   const contactFirst = quote.contact_first || '';
   const contactLast  = quote.contact_last  || '';
   const contactFullName = [contactFirst, contactLast].filter(Boolean).join(' ');
 
-  // Format line items with both PMS camelCase and WFM PascalCase keys
-  const fmtLineWfm = (line) => {
-    const base = fmtLine(line);
-    return {
-      ...base,
-      // WFM-compatible aliases
-      Name: base.title,
-      Description: line.description || '',
-      Note: base.note,
-      Quantity: base.quantity,
-      Rate: base.unitPrice,
-      Amount: base.amount,
-      Code: base.partNumber,
-    };
-  };
+  // Add WFM PascalCase aliases to each already-formatted line. Uses the
+  // base object from fmtLine (which we pre-computed above) and attaches
+  // the description from the raw line.
+  const addWfmAliases = (base, line) => ({
+    ...base,
+    // WFM-compatible aliases
+    Name: base.title,
+    Description: line.description || '',
+    Note: base.note,
+    Quantity: base.quantity,
+    Rate: base.unitPrice,
+    Amount: base.amount,
+    Code: base.partNumber,
+    // Line discount (Phase 2) — templates that want to render a
+    // "was X" or "discount -Y" alongside each line can use these.
+    HasLineDiscount: base.hasLineDiscount,
+    LineDiscountDescription: base.lineDiscountDescription,
+    LineDiscountAmount: base.lineDiscountAmount,
+    LineGrossAmount: base.lineGrossAmount,
+    LineNetAmount: base.lineNetAmount,
+  });
 
-  const formattedLines = regularLines.map(fmtLineWfm);
-  const formattedOptions = optionLines.map(fmtLineWfm);
+  const formattedLines = rawFormattedRegular.map((f, i) =>
+    addWfmAliases(f, regularLines[i])
+  );
+  const formattedOptions = rawFormattedOptions.map((f, i) =>
+    addWfmAliases(f, optionLines[i])
+  );
 
   // Quote number: omit "Rev" for v1
   const quoteNumDisplay = quote.revision && quote.revision !== 'v1'
@@ -163,22 +309,25 @@ export async function getQuoteDocData(env, quoteId) {
     quoteOptionExplanation: '',
 
     // Pricing breakdown — camelCase (PMS)
-    quoteSubtotal: fmtDollar(subtotalRaw),
+    // `quoteSubtotal` is the DISPLAYED subtotal (with phantom markups in).
+    // `quoteSubtotalStored` is the real banked subtotal. For quotes
+    // without any phantom discounts the two are equal.
+    quoteSubtotal: fmtDollar(subtotalDisplayed),
+    quoteSubtotalStored: fmtDollar(subtotalRaw),
     quoteTax: fmtDollar(quote.tax_amount),
     quoteTotal: fmtDollar(quote.total_price),
 
-    // Header-level discount (T3.2 Phase 1)
+    // Header-level discount (T3.2 Phase 1 + Phase 2 phantom rendering)
     // Templates can conditionally render a discount row with:
     //   {#hasDiscount} Discount: -{quoteDiscountAmount} {/hasDiscount}
     hasDiscount: hasHeaderDiscount,
     quoteDiscountDescription: headerDiscount?.description || 'Discount',
-    quoteDiscountAmount: fmtDollar(headerDiscountApplied),
+    quoteDiscountAmount: fmtDollar(aggregateDiscountDisplayed),
     quoteDiscountPct:
       headerDiscount?.pct != null ? `${Number(headerDiscount.pct).toFixed(1)}%` : '',
-    // Pre-discount subtotal — same as quoteSubtotal for real discounts.
-    // (Phantom rendering in Phase 2 will substitute a marked-up figure
-    // so the "list price" row reads higher than the stored subtotal.)
-    quoteSubtotalPreDiscount: fmtDollar(subtotalRaw),
+    // Pre-discount subtotal — the marked-up figure for phantom headers;
+    // same as quoteSubtotal when there is no phantom markup.
+    quoteSubtotalPreDiscount: fmtDollar(subtotalDisplayed),
     // Post-discount, pre-tax figure. Useful for templates that want to
     // show a "Net total" line above tax.
     quoteNetAfterDiscount: fmtDollar(subtotalRaw - headerDiscountApplied),
@@ -230,16 +379,16 @@ export async function getQuoteDocData(env, quoteId) {
     TITLE: quote.title || '',
     OrderNumber: quote.customer_po_number || '',
 
-    // Financial totals
-    QuoteSubTotal: fmtDollar(subtotalRaw),
+    // Financial totals (displayed — phantom markups included)
+    QuoteSubTotal: fmtDollar(subtotalDisplayed),
     QuoteTaxTotal: fmtDollar(quote.tax_amount),
     QuoteTotal: fmtDollar(quote.total_price),
 
     // WFM-compatible discount aliases
     HasDiscount: hasHeaderDiscount,
     QuoteDiscountDescription: headerDiscount?.description || 'Discount',
-    QuoteDiscountAmount: fmtDollar(headerDiscountApplied),
-    QuoteSubTotalPreDiscount: fmtDollar(subtotalRaw),
+    QuoteDiscountAmount: fmtDollar(aggregateDiscountDisplayed),
+    QuoteSubTotalPreDiscount: fmtDollar(subtotalDisplayed),
     QuoteNetAfterDiscount: fmtDollar(subtotalRaw - headerDiscountApplied),
 
     // Job context

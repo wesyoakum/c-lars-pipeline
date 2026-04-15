@@ -534,6 +534,66 @@ export function applyHeaderDiscount(quoteRow, subtotal) {
   };
 }
 
+/**
+ * Compute the stored `extended_price` for a quote line, given the
+ * line's validated form values (or a raw D1 row with the same column
+ * names). Bakes in the REAL portion of any line-level discount;
+ * phantom discounts are a no-op at storage time and only affect the
+ * render-time markup in the template.
+ *
+ *   line = { quantity, unit_price, discount_amount?, discount_pct?,
+ *            discount_is_phantom? }
+ */
+export function computeLineExtendedPrice(line) {
+  if (!line) return 0;
+  const qty = Number(line.quantity) || 0;
+  const price = Number(line.unit_price) || 0;
+  const gross = qty * price;
+  if (gross <= 0) return 0;
+
+  const d = readDiscountFromRow(line);
+  const applied = computeDiscountApplied(d, gross);
+  return gross - applied;
+}
+
+/**
+ * Compute the "gross" display figure for a phantom discount — the
+ * marked-up list price that, after subtracting the phantom discount,
+ * lands back at the real net value.
+ *
+ * Returns `{ grossDisplay, discountApplied }`:
+ *   - `grossDisplay` is the figure to show as the pre-discount price
+ *     on the PDF (unit × qty OR subtotal, depending on the scope).
+ *   - `discountApplied` is the matching discount line the PDF should
+ *     show underneath (so grossDisplay - discountApplied === realNet).
+ *
+ * For NON-phantom discounts the function is a no-op and returns
+ * `{ grossDisplay: realNet, discountApplied: 0 }` — callers should
+ * use `computeDiscountApplied` for the real-discount path.
+ *
+ * Math:
+ *   - amount phantom: grossDisplay = realNet + amount
+ *   - pct phantom:    grossDisplay = realNet / (1 - pct/100)
+ *                     discount    = grossDisplay * (pct/100)
+ */
+export function computePhantomMarkup(discount, realNet) {
+  const real = Number(realNet) || 0;
+  if (!discount || !discount.isPhantom || real <= 0) {
+    return { grossDisplay: real, discountApplied: 0 };
+  }
+  const amt = normNum(discount.amount);
+  if (amt !== null && amt > 0) {
+    return { grossDisplay: real + amt, discountApplied: amt };
+  }
+  const pct = normNum(discount.pct);
+  if (pct !== null && pct > 0 && pct < 100) {
+    const ratio = pct / 100;
+    const gross = real / (1 - ratio);
+    return { grossDisplay: gross, discountApplied: gross - real };
+  }
+  return { grossDisplay: real, discountApplied: 0 };
+}
+
 // =====================================================================
 // 7. Quote totals recompute (subtotal, total, with discount)
 // =====================================================================

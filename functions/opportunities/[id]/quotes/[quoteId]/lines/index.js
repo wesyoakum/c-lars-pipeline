@@ -8,7 +8,10 @@ import { auditStmt } from '../../../../../lib/audit.js';
 import { uuid, now } from '../../../../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../../../../lib/http.js';
 import { validateQuoteLine } from '../../../../../lib/validators.js';
-import { quoteTotalsRecomputeStmt } from '../../../../../lib/pricing.js';
+import {
+  quoteTotalsRecomputeStmt,
+  computeLineExtendedPrice,
+} from '../../../../../lib/pricing.js';
 
 const READ_ONLY_STATUSES = new Set([
   'accepted',
@@ -52,7 +55,11 @@ export async function onRequestPost(context) {
 
   const id = uuid();
   const ts = now();
-  const extended = Number(value.quantity) * Number(value.unit_price);
+  // T3.2 Phase 2 — extended_price bakes in the line's own real discount
+  // (phantom discounts don't reduce the stored value; they mark up at
+  // render time). The header discount is still applied separately via
+  // quoteTotalsRecomputeStmt.
+  const extended = computeLineExtendedPrice(value);
 
   const maxRow = await one(
     env.DB,
@@ -67,8 +74,9 @@ export async function onRequestPost(context) {
       `INSERT INTO quote_lines
          (id, quote_id, sort_order, item_type, title, part_number, description,
           quantity, unit, unit_price, extended_price, notes, line_notes, is_option,
+          discount_amount, discount_pct, discount_description, discount_is_phantom,
           created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         quoteId,
@@ -84,6 +92,10 @@ export async function onRequestPost(context) {
         value.notes,
         value.line_notes,
         value.is_option ?? 0,
+        value.discount_amount ?? null,
+        value.discount_pct ?? null,
+        value.discount_description ?? null,
+        value.discount_is_phantom ?? 0,
         ts,
         ts,
       ]
@@ -109,14 +121,20 @@ export async function onRequestPost(context) {
   const accept = request.headers.get('accept') || '';
   if (accept.includes('application/json')) {
     const updated = await one(env.DB,
-      'SELECT subtotal_price, total_price FROM quotes WHERE id = ?', [quoteId]);
+      'SELECT subtotal_price, total_price, tax_amount FROM quotes WHERE id = ?',
+      [quoteId]);
+    const sub = Number(updated?.subtotal_price ?? 0);
+    const tot = Number(updated?.total_price ?? 0);
+    const tax = Number(updated?.tax_amount ?? 0);
+    const discountApplied = Math.max(0, sub - (tot - tax));
     return new Response(JSON.stringify({
       ok: true,
       lineId: id,
       isNew: true,
       extended_price: extended,
-      subtotal_price: updated?.subtotal_price ?? 0,
-      total_price: updated?.total_price ?? 0,
+      subtotal_price: sub,
+      total_price: tot,
+      discount_applied: discountApplied,
     }), { headers: { 'content-type': 'application/json' } });
   }
 
