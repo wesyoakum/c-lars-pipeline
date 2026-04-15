@@ -149,6 +149,9 @@ async function renderCreatePrompt(context, ctx) {
 async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
   const { env, data, request, params } = context;
   const user = data?.user;
+  // Per-user preference (migration 0026) — hides the build discount
+  // editor when false, same toggle as the quote page discount UI.
+  const showDiscounts = user?.show_discounts === 1 || user?.show_discounts === true;
   const url = new URL(request.url);
   const sub = url.searchParams.get('sub') || 'pricing';
   const { line, oppId, quoteId, lineId } = ctx;
@@ -195,7 +198,7 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
   const errText = (k) => (errors[k] ? html`<small class="error">${errors[k]}</small>` : '');
   const base = baseUrl(oppId, quoteId, lineId);
 
-  const pricingTabBody = renderPricingSubtab({ build, pricing, totals, settings, errText, locked });
+  const pricingTabBody = renderPricingSubtab({ build, pricing, totals, settings, errText, locked, showDiscounts });
   const laborTabBody = renderLaborSubtab({
     workcenters, settings, currentLaborByWc,
     currentLaborTotal: totals.currentLaborTotal,
@@ -700,7 +703,7 @@ function renderBuildDiscountEditor({ build, locked, errText }) {
   `;
 }
 
-function renderPricingSubtab({ build, pricing, totals, settings, errText, locked }) {
+function renderPricingSubtab({ build, pricing, totals, settings, errText, locked, showDiscounts }) {
   const eff = pricing.effective;
   const auto = pricing.auto;
   const notes = pricing.notes;
@@ -811,7 +814,7 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
         </tfoot>
       </table>
 
-      ${renderBuildDiscountEditor({ build, locked, errText })}
+      ${showDiscounts ? renderBuildDiscountEditor({ build, locked, errText }) : ''}
 
       <div class="reference-estimates">
         <div class="ref-heading">Reference Estimates</div>

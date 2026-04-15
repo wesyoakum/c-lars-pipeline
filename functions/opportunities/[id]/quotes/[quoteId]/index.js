@@ -50,6 +50,9 @@ const UPDATE_FIELDS = [
 export async function onRequestGet(context) {
   const { env, data, request, params } = context;
   const user = data?.user;
+  // Per-user preference (migration 0026) — hides the discount UI when
+  // false but stored data is preserved and still applied to totals.
+  const showDiscounts = user?.show_discounts === 1 || user?.show_discounts === true;
   const url = new URL(request.url);
   const oppId = params.id;
   const quoteId = params.quoteId;
@@ -494,7 +497,7 @@ export async function onRequestGet(context) {
                   </div>
                   <textarea name="line_notes" ${readOnly ? 'disabled' : ''}
                             placeholder="Item notes..." class="line-notes" data-autosave>${escape(l.line_notes ?? '')}</textarea>
-                  ${renderLineDiscountEditor({ line: l, readOnly, hasDiscount: lineHasDiscount })}
+                  ${showDiscounts ? renderLineDiscountEditor({ line: l, readOnly, hasDiscount: lineHasDiscount }) : ''}
                   <input type="hidden" name="is_option" value="${l.is_option ? '1' : '0'}">
                 </form>
               </td>
@@ -587,7 +590,7 @@ export async function onRequestGet(context) {
               <td></td>
             </tr>
           ` : ''}
-          ${renderDiscountRow({ quote, readOnly, headerDiscountApplied })}
+          ${showDiscounts ? renderDiscountRow({ quote, readOnly, headerDiscountApplied }) : ''}
           <tr class="totals-row">
             <td colspan="5" class="num"><strong>Total</strong></td>
             <td class="num" id="q-total"><strong>${fmtDollar(total)}</strong></td>

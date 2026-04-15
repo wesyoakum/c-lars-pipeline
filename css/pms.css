@@ -147,6 +147,100 @@ code {
   box-shadow: 0 0 0 2px var(--bg);
 }
 
+/* ---------- Header settings (gear) ---------- */
+
+.header-settings {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: var(--fg);
+  transition: background 0.15s ease, transform 0.2s ease;
+}
+.header-settings:hover {
+  background: var(--bg-alt);
+  text-decoration: none;
+  transform: rotate(30deg);
+}
+.header-settings-icon {
+  display: block;
+}
+
+/* ---------- Settings page ---------- */
+
+.settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+.setting-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-alt, transparent);
+}
+.setting-label {
+  flex: 1;
+  min-width: 0;
+}
+.setting-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  margin-bottom: 0.2rem;
+}
+.setting-desc {
+  font-size: 0.85rem;
+  color: var(--muted, #666);
+  line-height: 1.35;
+}
+
+/* Toggle switch (iOS-style) */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  width: 44px;
+  height: 24px;
+  cursor: pointer;
+}
+.toggle-switch input[type="checkbox"] {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: #bbb;
+  border-radius: 999px;
+  transition: background 0.2s ease;
+}
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 20px;
+  height: 20px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s ease;
+}
+.toggle-switch--on .toggle-slider {
+  background: #2f80ed;
+}
+.toggle-switch--on .toggle-slider::before {
+  transform: translateX(20px);
+}
+
 /* ---------- Notification toasts (T4.2) ---------- */
 
 .notification-toast-stack {
