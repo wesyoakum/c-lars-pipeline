@@ -11,6 +11,11 @@ import { redirectWithFlash } from '../../../../lib/http.js';
 import { snapshotGoverningDocs, createIssueTask } from '../../../../lib/quote-transitions.js';
 import { getQuoteDocData, fillTemplate, convertToPdf, templateKeyForQuote } from '../../../../lib/doc-generate.js';
 import { storeGeneratedDoc } from '../../../../lib/doc-storage.js';
+import {
+  getFilenameTemplate,
+  renderFilenameTemplate,
+  buildQuoteFilenameContext,
+} from '../../../../lib/filename-templates.js';
 
 export async function onRequestPost(context) {
   const { env, data, params } = context;
@@ -75,15 +80,31 @@ export async function onRequestPost(context) {
         if (!docData) return;
         const templateKey = templateKeyForQuote(quote.quote_type);
         const docxBuffer = await fillTemplate(env, templateKey, docData);
-        const baseFilename = quote.revision && quote.revision !== 'v1'
-          ? `${quote.number}-${quote.revision}`
-          : quote.number;
+
+        // Build the download filename from the admin-configurable
+        // template so the auto-issued PDF matches manually-generated
+        // ones. Fall back to the legacy shape if the row is missing.
+        const fnCtx = buildQuoteFilenameContext({
+          quote,
+          accountName:       docData.clientName,
+          accountAlias:      docData.clientAlias,
+          opportunityNumber: docData.opportunityNumber,
+          opportunityTitle:  docData.opportunityTitle,
+        });
+        const fnTpl = await getFilenameTemplate(
+          env,
+          'quote_pdf',
+          '{quoteNumber}{revisionSuffix}.pdf'
+        );
+        const pdfFilename =
+          renderFilenameTemplate(fnTpl, fnCtx) ||
+          `${quote.number}${fnCtx.revisionSuffix}.pdf`;
 
         const pdfBuffer = await convertToPdf(env, docxBuffer);
         await storeGeneratedDoc(env, {
           opportunityId: oppId, quoteId,
           buffer: pdfBuffer,
-          filename: `${baseFilename}.pdf`,
+          filename: pdfFilename,
           mimeType: 'application/pdf',
           kind: 'quote_pdf', user,
         });

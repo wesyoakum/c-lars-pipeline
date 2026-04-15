@@ -12,6 +12,11 @@ import {
   templateKeyForQuote,
 } from '../../../../lib/doc-generate.js';
 import { storeGeneratedDoc } from '../../../../lib/doc-storage.js';
+import {
+  getFilenameTemplate,
+  renderFilenameTemplate,
+  buildQuoteFilenameContext,
+} from '../../../../lib/filename-templates.js';
 
 export async function onRequestPost(context) {
   const { env, data, params } = context;
@@ -21,7 +26,7 @@ export async function onRequestPost(context) {
   const returnTo = `/opportunities/${oppId}/quotes/${quoteId}`;
 
   // Verify quote exists and belongs to this opportunity
-  const quote = await one(env.DB, 'SELECT id, opportunity_id, quote_type, number, revision FROM quotes WHERE id = ?', [quoteId]);
+  const quote = await one(env.DB, 'SELECT id, opportunity_id, quote_type, number, revision, title FROM quotes WHERE id = ?', [quoteId]);
   if (!quote || quote.opportunity_id !== oppId) {
     return new Response('Quote not found', { status: 404 });
   }
@@ -37,11 +42,26 @@ export async function onRequestPost(context) {
     const templateKey = templateKeyForQuote(quote.quote_type);
     const docxBuffer = await fillTemplate(env, templateKey, docData);
 
-    const baseFilename = quote.revision && quote.revision !== 'v1'
-      ? `${quote.number}-${quote.revision}`
-      : quote.number;
+    // 3. Build the download filename from the admin-configurable
+    //    template. Fall back to the legacy "number-rev.pdf" shape
+    //    if the row is somehow missing so generation never breaks.
+    const fnCtx = buildQuoteFilenameContext({
+      quote,
+      accountName:       docData.clientName,
+      accountAlias:      docData.clientAlias,
+      opportunityNumber: docData.opportunityNumber,
+      opportunityTitle:  docData.opportunityTitle,
+    });
+    const fnTpl = await getFilenameTemplate(
+      env,
+      'quote_pdf',
+      '{quoteNumber}{revisionSuffix}.pdf'
+    );
+    const pdfFilename =
+      renderFilenameTemplate(fnTpl, fnCtx) ||
+      `${quote.number}${fnCtx.revisionSuffix}.pdf`;
 
-    // 3. Convert to PDF and store (no .docx saved)
+    // 4. Convert to PDF and store (no .docx saved)
 
     const pdfBuffer = await convertToPdf(env, docxBuffer);
 
@@ -49,7 +69,7 @@ export async function onRequestPost(context) {
       opportunityId: oppId,
       quoteId,
       buffer: pdfBuffer,
-      filename: `${baseFilename}.pdf`,
+      filename: pdfFilename,
       mimeType: 'application/pdf',
       kind: 'quote_pdf',
       user,

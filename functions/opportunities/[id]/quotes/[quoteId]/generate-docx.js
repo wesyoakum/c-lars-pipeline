@@ -11,6 +11,11 @@ import {
   templateKeyForQuote,
 } from '../../../../lib/doc-generate.js';
 import { storeGeneratedDoc } from '../../../../lib/doc-storage.js';
+import {
+  getFilenameTemplate,
+  renderFilenameTemplate,
+  buildQuoteFilenameContext,
+} from '../../../../lib/filename-templates.js';
 
 export async function onRequestPost(context) {
   const { env, data, params } = context;
@@ -19,7 +24,7 @@ export async function onRequestPost(context) {
   const quoteId = params.quoteId;
   const returnTo = `/opportunities/${oppId}/quotes/${quoteId}`;
 
-  const quote = await one(env.DB, 'SELECT id, opportunity_id, quote_type, number, revision FROM quotes WHERE id = ?', [quoteId]);
+  const quote = await one(env.DB, 'SELECT id, opportunity_id, quote_type, number, revision, title FROM quotes WHERE id = ?', [quoteId]);
   if (!quote || quote.opportunity_id !== oppId) {
     return new Response('Quote not found', { status: 404 });
   }
@@ -32,15 +37,31 @@ export async function onRequestPost(context) {
 
     const templateKey = templateKeyForQuote(quote.quote_type);
     const docxBuffer = await fillTemplate(env, templateKey, docData);
-    const baseFilename = quote.revision && quote.revision !== 'v1'
-      ? `${quote.number}-${quote.revision}`
-      : quote.number;
+
+    // Build the download filename from the admin-configurable
+    // template. Fall back to the legacy "number-rev.docx" shape
+    // if the row is somehow missing so generation never breaks.
+    const fnCtx = buildQuoteFilenameContext({
+      quote,
+      accountName:       docData.clientName,
+      accountAlias:      docData.clientAlias,
+      opportunityNumber: docData.opportunityNumber,
+      opportunityTitle:  docData.opportunityTitle,
+    });
+    const fnTpl = await getFilenameTemplate(
+      env,
+      'quote_docx',
+      '{quoteNumber}{revisionSuffix}.docx'
+    );
+    const docxFilename =
+      renderFilenameTemplate(fnTpl, fnCtx) ||
+      `${quote.number}${fnCtx.revisionSuffix}.docx`;
 
     const docId = await storeGeneratedDoc(env, {
       opportunityId: oppId,
       quoteId,
       buffer: docxBuffer,
-      filename: `${baseFilename}.docx`,
+      filename: docxFilename,
       mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       kind: 'quote_docx',
       user,

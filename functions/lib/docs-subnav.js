@@ -6,8 +6,9 @@
 import { html } from './layout.js';
 
 /**
- * Render the Documents sub-nav with "Attachments", "Templates", and "Resources" tabs.
- * @param {'library'|'templates'|'resources'} active — which tab is active
+ * Render the Documents sub-nav with "Attachments", "Templates",
+ * "Filenames", and "Resources" tabs.
+ * @param {'library'|'templates'|'filenames'|'resources'} active — which tab is active
  */
 export function docsSubNav(active) {
   return html`
@@ -16,6 +17,8 @@ export function docsSubNav(active) {
          href="/documents/library">Attachments</a>
       <a class="nav-link ${active === 'templates' ? 'active' : ''}"
          href="/documents/templates">Templates</a>
+      <a class="nav-link ${active === 'filenames' ? 'active' : ''}"
+         href="/documents/filenames">Filenames</a>
       <a class="nav-link ${active === 'resources' ? 'active' : ''}"
          href="/documents/resources">Resources</a>
     </nav>`;

@@ -30,6 +30,7 @@ export async function getQuoteDocData(env, quoteId) {
             o.title AS opp_title,
             o.customer_po_number,
             a.name AS account_name,
+            a.alias AS account_alias,
             c.first_name AS contact_first, c.last_name AS contact_last,
             c.email AS contact_email, c.phone AS contact_phone,
             c.title AS contact_title
@@ -129,6 +130,7 @@ export async function getQuoteDocData(env, quoteId) {
   return {
     // Header — camelCase (PMS)
     clientName: quote.account_name || '',
+    clientAlias: quote.account_alias || '',
     clientAddress: billingAddr?.address || '',
     quoteNumber: quoteNumDisplay,
     quoteDate: fmtDate(quote.submitted_at) || fmtDate(new Date().toISOString()),

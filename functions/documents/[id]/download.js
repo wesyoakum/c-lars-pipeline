@@ -34,9 +34,14 @@ export async function onRequestGet(context) {
     summary: `Downloaded: ${doc.title}`,
   }).run());
 
-  // Set content-disposition so the browser downloads with the original name
+  // Set content-disposition so the browser downloads with the original
+  // name. Only strip characters that would break the Content-Disposition
+  // quoted-string syntax (double quote, backslash, line breaks) so
+  // configured filenames like "C-LARS Quote 25-00042.pdf" survive with
+  // their spaces intact.
   const headers = new Headers(response.headers);
-  const safeName = (doc.original_filename || doc.title || 'file').replace(/[^\w.\-]/g, '_');
+  const rawName = doc.original_filename || doc.title || 'file';
+  const safeName = rawName.replace(/["\\\r\n]/g, '').trim() || 'file';
   headers.set('content-disposition', `attachment; filename="${safeName}"`);
   if (doc.mime_type) {
     headers.set('content-type', doc.mime_type);
