@@ -1257,7 +1257,15 @@ fieldset.qualification-box select {
 
 /* ---------- Opportunities list (Alpine advanced table) ---------- */
 
-.opp-list { margin-top: 1rem; }
+/* Horizontal scroll when the table is wider than its container.
+   max-width:100% keeps the scroll container itself bounded by .card,
+   and overflow-x:auto puts a scrollbar on the wrapper instead of
+   letting the table push the page wider than the viewport. */
+.opp-list {
+  margin-top: 1rem;
+  max-width: 100%;
+  overflow-x: auto;
+}
 .opp-list-toolbar {
   display: flex;
   justify-content: space-between;
