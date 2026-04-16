@@ -1742,6 +1742,11 @@ table.data.compact td {
   border-color: #b4bac6;
   color: #4a5162;
 }
+.pill-expired {
+  background: #2d333b;
+  border-color: #2d333b;
+  color: #ffffff;
+}
 .pill-green  { background: #dafbe1; color: #116329; }
 .pill-red    { background: #ffebe9; color: #82071e; }
 .pill-yellow { background: #fff8c5; color: #7a6400; }

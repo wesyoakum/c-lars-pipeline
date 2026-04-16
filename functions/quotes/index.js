@@ -79,7 +79,8 @@ export async function onRequestGet(context) {
       case 'draft': case 'revision_draft': return '';
       case 'issued': case 'revision_issued': return 'pill-success';
       case 'accepted': return 'pill-success';
-      case 'rejected': case 'expired': case 'dead': return 'pill-locked';
+      case 'expired': return 'pill-expired';
+      case 'rejected': case 'dead': return 'pill-locked';
       default: return '';
     }
   }
@@ -129,7 +130,13 @@ export async function onRequestGet(context) {
               </tbody>
             </table>
           </div>
-          <script>${raw(listScript('pms.quotes.v1'))}</script>
+          <script>${raw(listScript('pms.quotes.v1', 'updated', 'desc', {
+            // Default view: just the "live" statuses — Draft, Issued,
+            // Expired. Hides Accepted/Rejected/Dead so the main list is
+            // the set of quotes that still need attention. Users can
+            // clear the Status column filter to widen.
+            status_label: { values: ['Draft', 'Issued', 'Expired'] },
+          }))}</script>
           <script>${raw(listInlineEditScript('/opportunities/:opp_id/quotes/:id/patch'))}</script>
         `}
     </section>

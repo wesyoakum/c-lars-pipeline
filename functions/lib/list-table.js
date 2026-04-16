@@ -154,8 +154,17 @@ export function rowDataAttrs(columns, row) {
  * @param {string} storageKey   e.g. 'pms.quotes.v1'
  * @param {string} defaultSortKey  column key to sort by initially (default 'updated')
  * @param {string} defaultSortDir  'asc' or 'desc' (default 'desc')
+ * @param {object} defaultFilters  optional initial filterState, keyed by
+ *                                 column key. Shape per type:
+ *                                   text   -> { text: 'foo' }
+ *                                   select -> { values: ['Draft','Issued'] }
+ *                                   range  -> { min: '10', max: '99' }
+ *                                 Filter state is NOT persisted to localStorage,
+ *                                 so these defaults re-apply on every page load
+ *                                 (user can clear per-column to widen the view
+ *                                 within a session).
  */
-export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDir = 'desc') {
+export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDir = 'desc', defaultFilters = {}) {
   return `
 (function() {
   try {
@@ -486,7 +495,12 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     //   text  -> { text: 'foo' }
     //   select-> { values: ['a','b'] }   (empty array = no filter)
     //   range -> { min: '5', max: '100' } (strings from <input type=number>)
-    var filterState = {};
+    //
+    // Seeded from defaultFilters passed at listScript() construction time;
+    // not persisted to localStorage, so these defaults re-apply on every
+    // page load. Users can still clear/change them within a session via
+    // the per-column popover.
+    var filterState = ${JSON.stringify(defaultFilters)};
 
     function isFilterActive(key) {
       var fs = filterState[key];
