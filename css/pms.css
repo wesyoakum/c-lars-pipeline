@@ -3078,11 +3078,8 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 .board-sidebar::-webkit-scrollbar { width: 6px; }
 .board-sidebar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 3px; }
 
-/* Peek-over-the-wall hide button — sits at the top-right corner of
-   the Tasks card. Click hides both sidebars for 5 min. Two SVGs are
-   layered in the button: the "peek" (head up) shows by default, the
-   "hide" (head ducked, fingertips still gripping) shows on hover —
-   so the icon previews what the click will do. */
+/* Hide button — small chevron in the top-right of the Tasks card.
+   Click hides both sidebars for 5 min. */
 .board-hide-peek {
   position: absolute;
   top: 6px;
@@ -3102,9 +3099,6 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   color: rgba(0,0,0,0.8);
 }
 .board-hide-peek svg { display: block; }
-.board-hide-peek .peek-icon-down { display: none; }
-.board-hide-peek:hover .peek-icon-up { display: none; }
-.board-hide-peek:hover .peek-icon-down { display: block; }
 
 /* Restore button — lives in .header-right to the left of the bell.
    Only shown while the board is collapsed (Alpine controls visibility).
@@ -3175,11 +3169,11 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }
 /* "show complete" toggle — only revealed on hover. Sits to the left
-   of the peek-hide icon. */
+   of the chevron hide-button. */
 .board-tasks-toggle {
   position: absolute;
-  top: 11px;
-  right: 44px;
+  top: 9px;
+  right: 30px;
   background: transparent;
   border: none;
   color: rgba(0,0,0,0.4);

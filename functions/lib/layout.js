@@ -311,37 +311,13 @@ const BOARD_RIGHT_MARKUP = (
     // ---------- Zone 1: Tasks ----------
     '<section class="board-zone board-zone-tasks" ' +
       ':class="$store.board.showCompleted ? \'board-tasks-show-done\' : \'\'">' +
-      // "Peek over the wall" icon \u2014 hide both sidebars for 5 min.
-      // Two SVGs in one button: peek (head visible) is the default,
-      // hide (head ducked behind wall, fingertips still gripping)
-      // appears on hover to preview what the click will do.
+      // Hide button \u2014 small chevron pointing right (toward the edge
+      // the board collapses into). Click hides both sidebars for 5 min.
       '<button type="button" class="board-hide-peek" ' +
         '@click="$store.board.hideFor(5)" ' +
         'title="Hide board for 5 min" aria-label="Hide board">' +
-        // peek (default)
-        '<svg class="peek-icon-up" viewBox="0 0 100 60" width="32" height="19" aria-hidden="true">' +
-          '<g fill="currentColor">' +
-            '<rect x="2" y="46" width="96" height="10" rx="5"/>' +
-            '<path d="M 32 46 Q 32 11 50 11 Q 68 11 68 46 Z"/>' +
-            '<circle cx="10" cy="46" r="3"/>' +
-            '<circle cx="17" cy="46" r="3"/>' +
-            '<circle cx="24" cy="46" r="3"/>' +
-            '<circle cx="76" cy="46" r="3"/>' +
-            '<circle cx="83" cy="46" r="3"/>' +
-            '<circle cx="90" cy="46" r="3"/>' +
-          '</g>' +
-        '</svg>' +
-        // hide (hover) \u2014 head is gone, just wall + fingertips
-        '<svg class="peek-icon-down" viewBox="0 0 100 60" width="32" height="19" aria-hidden="true">' +
-          '<g fill="currentColor">' +
-            '<rect x="2" y="46" width="96" height="10" rx="5"/>' +
-            '<circle cx="10" cy="46" r="3"/>' +
-            '<circle cx="17" cy="46" r="3"/>' +
-            '<circle cx="24" cy="46" r="3"/>' +
-            '<circle cx="76" cy="46" r="3"/>' +
-            '<circle cx="83" cy="46" r="3"/>' +
-            '<circle cx="90" cy="46" r="3"/>' +
-          '</g>' +
+        '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true">' +
+          '<polygon points="5,3 12,8 5,13"/>' +
         '</svg>' +
       '</button>' +
       '<h3 class="board-zone-heading">Tasks</h3>' +
