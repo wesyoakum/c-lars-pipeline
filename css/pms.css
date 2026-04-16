@@ -3021,6 +3021,7 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   --board-width: 260px;
   --board-content-max: 1100px;     /* matches --maxw */
   --board-gap: 14px;
+  --board-top-offset: 70px;        /* below the ~53px site header + breathing room */
   --board-hand: 'Caveat', 'Kalam', 'Segoe Script', 'Bradley Hand', cursive;
   --board-note-yellow: #fff4b8;
   --board-note-pink:   #ffd6e4;
@@ -3035,7 +3036,7 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 
 .board-root {
   position: fixed;
-  top: 0;
+  top: var(--board-top-offset);
   bottom: 0;
   width: var(--board-width);
   z-index: 50;
