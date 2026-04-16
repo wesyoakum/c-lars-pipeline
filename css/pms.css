@@ -3021,7 +3021,7 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   --board-width: 260px;
   --board-content-max: 1100px;     /* matches --maxw */
   --board-gap: 14px;
-  --board-top-offset: 100px;       /* below the ~53px site header + breathing room */
+  --board-top-offset: 140px;       /* below the ~53px site header + breathing room */
   --board-hand: 'Caveat', 'Kalam', 'Segoe Script', 'Bradley Hand', cursive;
   --board-note-yellow: #fff4b8;
   --board-note-pink:   #ffd6e4;
@@ -3417,16 +3417,38 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   color: rgba(0,0,0,0.55);
   flex-wrap: wrap;
 }
-.board-composer-hint {
-  margin-left: auto;
-  font-style: italic;
-  font-size: 0.7rem;
-  color: rgba(0,0,0,0.4);
-}
 .board-composer-error {
   color: #c0392b;
   font-size: 0.72rem;
   font-family: var(--font);
+}
+
+/* Publish toggle — small text-link button in the bottom-right of the
+   composer/edit toolbar. Default ("Publish") is muted; active state
+   ("Published") is the ink-blue handwritten accent so it reads as
+   "this note is now visible to everyone." */
+.board-publish-btn {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  padding: 2px 6px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 0.72rem;
+  color: rgba(0,0,0,0.45);
+  border-radius: 4px;
+  transition: color 0.12s ease, background-color 0.12s ease;
+}
+.board-publish-btn:hover {
+  color: rgba(0,0,0,0.75);
+  background: rgba(0,0,0,0.06);
+}
+.board-publish-btn.is-published {
+  color: var(--board-ink-blue);
+  font-weight: 600;
+}
+.board-publish-btn.is-published:hover {
+  background: rgba(42, 74, 127, 0.1);
 }
 
 /* Color picker — collapsed swatch, expand on hover */
@@ -3475,20 +3497,6 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 .board-color-current.color-orange { background: var(--board-note-orange); }
 .board-color-swatch-white,
 .board-color-current.color-white  { background: var(--board-note-white); }
-
-.board-composer-scope-mini {
-  display: flex;
-  gap: 0.5rem;
-  font-family: var(--font);
-  font-size: 0.7rem;
-  color: rgba(0,0,0,0.55);
-}
-.board-composer-scope-mini label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  cursor: pointer;
-}
 
 /* ---------- Messages zone (left sidebar) ---------- */
 .board-zone-messages,

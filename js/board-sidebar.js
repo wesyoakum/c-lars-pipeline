@@ -137,6 +137,7 @@
         body: '',
         color: 'yellow',
         flag: null,
+        scope: 'private',
         submitting: false,
         error: null,
       },
@@ -334,6 +335,14 @@
         this.showCompleted = !this.showCompleted;
       },
 
+      // ---- Publish toggle (composer or editing) ----
+      // Notes default to private; clicking "Publish" flips scope to
+      // 'public' (shared); clicking again ("Published") flips back.
+      togglePublish: function (target) {
+        if (target !== 'composer' && target !== 'editing') return;
+        this[target].scope = this[target].scope === 'public' ? 'private' : 'public';
+      },
+
       toggleTask: function (task) {
         if (!task || !task.id) return;
         var self = this;
@@ -422,6 +431,10 @@
         this.editing.body = card.body || '';
         this.editing.color = card.color || 'yellow';
         this.editing.flag = card.flag || null;
+        // Existing notes are either private or public ("shared"). Default
+        // to private if scope is missing or anything unexpected (direct
+        // notes aren't in the notes list).
+        this.editing.scope = card.scope === 'public' ? 'public' : 'private';
         this.editing.submitting = false;
         this.editing.error = null;
         this.closeMention();
@@ -453,7 +466,12 @@
           method: 'PATCH',
           credentials: 'same-origin',
           headers: { 'content-type': 'application/json', 'accept': 'application/json' },
-          body: JSON.stringify({ body: self.editing.body, color: self.editing.color, flag: self.editing.flag }),
+          body: JSON.stringify({
+            body: self.editing.body,
+            color: self.editing.color,
+            flag: self.editing.flag,
+            scope: self.editing.scope,
+          }),
         })
           .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
           .then(function (r) {

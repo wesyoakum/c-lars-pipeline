@@ -389,12 +389,6 @@ const BOARD_RIGHT_MARKUP = (
           '</template>' +
         '</div>' +
         '<div class="board-composer-toolbar">' +
-          '<div class="board-composer-scope-mini">' +
-            '<label><input type="radio" name="b_scope" value="private" ' +
-              'x-model="$store.board.composer.scope"> private</label>' +
-            '<label><input type="radio" name="b_scope" value="public" ' +
-              'x-model="$store.board.composer.scope"> shared</label>' +
-          '</div>' +
           '<div class="board-color-picker">' +
             '<button type="button" ' +
               ':class="\'board-color-current color-\' + $store.board.composer.color" ' +
@@ -409,7 +403,11 @@ const BOARD_RIGHT_MARKUP = (
             '</div>' +
           '</div>' +
           '<span class="board-composer-error" x-show="$store.board.composer.error" x-text="$store.board.composer.error"></span>' +
-          '<span class="board-composer-hint" x-show="!$store.board.composer.error">Enter \u2192 save</span>' +
+          '<button type="button" class="board-publish-btn" ' +
+            ':class="$store.board.composer.scope === \'public\' ? \'is-published\' : \'\'" ' +
+            ':title="$store.board.composer.scope === \'public\' ? \'Visible to everyone — click to make private\' : \'Only you can see this — click to publish\'" ' +
+            '@click="$store.board.togglePublish(\'composer\')" ' +
+            'x-text="$store.board.composer.scope === \'public\' ? \'Published\' : \'Publish\'"></button>' +
         '</div>' +
       '</div>' +
 
@@ -458,7 +456,11 @@ const BOARD_RIGHT_MARKUP = (
                     '</div>' +
                   '</div>' +
                   '<span class="board-composer-error" x-show="$store.board.editing.error" x-text="$store.board.editing.error"></span>' +
-                  '<span class="board-composer-hint" x-show="!$store.board.editing.error">Enter \u2192 save \u00B7 Esc \u2192 cancel</span>' +
+                  '<button type="button" class="board-publish-btn" ' +
+                    ':class="$store.board.editing.scope === \'public\' ? \'is-published\' : \'\'" ' +
+                    ':title="$store.board.editing.scope === \'public\' ? \'Visible to everyone — click to make private\' : \'Only you can see this — click to publish\'" ' +
+                    '@click="$store.board.togglePublish(\'editing\')" ' +
+                    'x-text="$store.board.editing.scope === \'public\' ? \'Published\' : \'Publish\'"></button>' +
                 '</div>' +
               '</div>' +
             '</template>' +
