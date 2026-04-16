@@ -189,6 +189,7 @@
         id: o.id,
         number: o.number || '',
         title: o.title || '',
+        account_id: o.account_id || '',
         searchText: (o.number || '') + ' ' + (o.title || '')
       });
     });
@@ -420,7 +421,12 @@
         }
         if (step.type === 'entity-select') {
           var kinds = step.entityKinds || ['opportunity', 'quote', 'account'];
-          var filtered = this.linkables.filter(function (l) { return kinds.indexOf(l.kind) >= 0; });
+          var ans = this.answers;
+          var filtered = this.linkables.filter(function (l) {
+            if (kinds.indexOf(l.kind) < 0) return false;
+            if (typeof step.filterFn === 'function' && !step.filterFn(l, ans)) return false;
+            return true;
+          });
           return linkSuggestions(filtered, this.typedInput).map(function (item) {
             var mainLabel, sub = '';
             if (item.kind === 'opportunity') { mainLabel = item.number; sub = item.title || ''; }
@@ -651,7 +657,12 @@
             return true;
           }
           var kinds = step.entityKinds || ['opportunity', 'quote', 'account'];
-          var filtered = this.linkables.filter(function (l) { return kinds.indexOf(l.kind) >= 0; });
+          var ans2 = this.answers;
+          var filtered = this.linkables.filter(function (l) {
+            if (kinds.indexOf(l.kind) < 0) return false;
+            if (typeof step.filterFn === 'function' && !step.filterFn(l, ans2)) return false;
+            return true;
+          });
           var ls = linkSuggestions(filtered, val);
           if (ls.length === 0) {
             this.error = 'No matching record.' + (step.required ? '' : ' Tab to skip.');

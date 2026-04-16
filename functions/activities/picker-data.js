@@ -53,7 +53,7 @@ export async function onRequestGet(context) {
         WHERE active = 1
         ORDER BY display_name, email`),
     all(env.DB,
-      `SELECT id, number, title
+      `SELECT id, number, title, account_id
          FROM opportunities
         WHERE stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
         ORDER BY updated_at DESC

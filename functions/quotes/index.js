@@ -98,7 +98,16 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Quotes</h1>
-        ${listToolbar({ id: 'quotes', count: rows.length, columns })}
+        ${listToolbar({
+          id: 'quotes',
+          count: rows.length,
+          columns,
+          // Launches js/wizards/quote.js \u2014 picks account \u2192 opportunity
+          // \u2192 quote type, then POSTs to the existing quote-create
+          // endpoint scoped to the chosen opportunity.
+          newOnClick: `window.PMS.openWizard('quote', {})`,
+          newLabel: 'New quote',
+        })}
       </div>
 
       ${rows.length === 0
