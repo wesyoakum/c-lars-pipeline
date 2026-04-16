@@ -3276,28 +3276,30 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 }
 .board-notes-stack {
   position: relative;
-  height: 130px;
-  margin: 0.5rem 0 1rem;
+  height: 95px;
+  margin: 0.5rem 0 0.85rem;
 }
 .board-stack-note {
   position: absolute;
-  width: 90px;
-  height: 100px;
+  width: 62px;
+  height: 70px;
   border: 1px solid rgba(0,0,0,0.1);
   border-radius: 2px;
   cursor: pointer;
-  box-shadow: 2px 3px 6px rgba(0,0,0,0.15);
+  box-shadow: 2px 3px 5px rgba(0,0,0,0.15);
   transition: transform 0.15s ease, box-shadow 0.15s ease;
   padding: 0;
 }
 .board-stack-note:hover {
-  box-shadow: 4px 6px 12px rgba(0,0,0,0.2);
+  box-shadow: 4px 6px 10px rgba(0,0,0,0.2);
   transform: translateY(-2px) rotate(0deg) !important;
   z-index: 10;
 }
-.board-stack-note-yellow { background: var(--board-note-yellow); left: 20px;  top: 5px;  transform: rotate(-5deg); z-index: 1; }
-.board-stack-note-pink   { background: var(--board-note-pink);   left: 75px;  top: 15px; transform: rotate(3deg);  z-index: 2; }
-.board-stack-note-blue   { background: var(--board-note-blue);   left: 130px; top: 8px;  transform: rotate(-2deg); z-index: 3; }
+.board-stack-note-yellow { background: var(--board-note-yellow); left:   8px; top:  5px; transform: rotate(-5deg); z-index: 1; }
+.board-stack-note-pink   { background: var(--board-note-pink);   left:  46px; top: 14px; transform: rotate(3deg);  z-index: 2; }
+.board-stack-note-blue   { background: var(--board-note-blue);   left:  84px; top:  6px; transform: rotate(-2deg); z-index: 3; }
+.board-stack-note-green  { background: var(--board-note-green);  left: 122px; top: 16px; transform: rotate(4deg);  z-index: 4; }
+.board-stack-note-orange { background: var(--board-note-orange); left: 160px; top:  3px; transform: rotate(-3deg); z-index: 5; }
 
 /* Saved notes list */
 .board-notes-list {

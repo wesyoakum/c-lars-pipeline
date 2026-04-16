@@ -352,7 +352,7 @@ const BOARD_RIGHT_MARKUP = (
     // ---------- Zone 2: Notes (sticky note pad) ----------
     '<section class="board-zone board-zone-notes">' +
 
-      // Compose stack — three blank colored cards, or the active composer
+      // Compose stack — five blank colored cards, or the active composer
       '<div class="board-notes-stack" x-show="!$store.board.composer.open">' +
         '<button type="button" class="board-stack-note board-stack-note-yellow" ' +
           'title="New yellow note" aria-label="New yellow note" ' +
@@ -363,6 +363,12 @@ const BOARD_RIGHT_MARKUP = (
         '<button type="button" class="board-stack-note board-stack-note-blue" ' +
           'title="New blue note" aria-label="New blue note" ' +
           '@click="$store.board.openComposer({ color: \'blue\' })"></button>' +
+        '<button type="button" class="board-stack-note board-stack-note-green" ' +
+          'title="New green note" aria-label="New green note" ' +
+          '@click="$store.board.openComposer({ color: \'green\' })"></button>' +
+        '<button type="button" class="board-stack-note board-stack-note-orange" ' +
+          'title="New orange note" aria-label="New orange note" ' +
+          '@click="$store.board.openComposer({ color: \'orange\' })"></button>' +
       '</div>' +
 
       // Active composer (slides over stack when open). Enter saves,
