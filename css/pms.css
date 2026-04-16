@@ -1472,6 +1472,28 @@ body.col-resizing * { cursor: col-resize !important; user-select: none; }
   background: var(--bg);
   color: var(--fg);
 }
+.col-filter-popover .col-filter-quick {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 0.4rem;
+  flex-wrap: wrap;
+}
+.col-filter-popover .col-filter-quick button {
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.2rem 0.55rem;
+  font: inherit;
+  font-size: 0.78em;
+  cursor: pointer;
+  color: var(--fg);
+  font-weight: 500;
+}
+.col-filter-popover .col-filter-quick button:hover {
+  background: var(--accent, #2d8a3e);
+  border-color: var(--accent, #2d8a3e);
+  color: #fff;
+}
 .col-filter-popover .col-filter-actions {
   display: flex;
   gap: 0.4rem;

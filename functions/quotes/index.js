@@ -42,7 +42,16 @@ export async function onRequestGet(context) {
     { key: 'title',        label: 'Title',        sort: 'text',   filter: 'text',   default: true },
     { key: 'opp_number',   label: 'Opportunity',  sort: 'text',   filter: 'text',   default: true },
     { key: 'account_name', label: 'Account',      sort: 'text',   filter: 'text',   default: true },
-    { key: 'status_label', label: 'Status',       sort: 'text',   filter: 'select', default: true },
+    {
+      key: 'status_label', label: 'Status', sort: 'text', filter: 'select', default: true,
+      // Preset subsets shown above the checkbox list in the filter
+      // popover. "Active" = the statuses the user is likely still
+      // acting on; "Inactive" = fully-settled / dead ones.
+      quickFilters: [
+        { label: 'Active',   values: ['Draft', 'Revision Draft', 'Issued', 'Revision Issued', 'Expired'] },
+        { label: 'Inactive', values: ['Accepted', 'Rejected', 'Dead'] },
+      ],
+    },
     { key: 'total',        label: 'Total',        sort: 'number', filter: 'range',  default: true },
     { key: 'valid_until',  label: 'Valid until',   sort: 'date',   filter: 'text',   default: true },
     { key: 'updated',      label: 'Updated',      sort: 'date',   filter: 'text',   default: true },

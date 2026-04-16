@@ -714,6 +714,17 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         var selected = fs.values || [];
         var selSet = {};
         selected.forEach(function(v) { selSet[v] = true; });
+        // Optional per-column quick-filter presets — row of small
+        // buttons that apply a named subset (e.g. "Active" = draft,
+        // issued, expired on the quotes status column).
+        if (col.quickFilters && col.quickFilters.length) {
+          out += '<div class="col-filter-quick">';
+          col.quickFilters.forEach(function(qf, i) {
+            out += '<button type="button" data-quick-idx="' + i + '">' +
+                   escHtml(qf.label) + '</button>';
+          });
+          out += '</div>';
+        }
         out += '<div class="col-filter-actions">' +
                '<button type="button" data-action="all">Select all</button>' +
                '<button type="button" data-action="none">Clear</button>' +
@@ -772,6 +783,23 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
           e.preventDefault();
           checkboxes.forEach(function(cb) { cb.checked = false; });
           readSelected();
+        });
+        // Wire quick-filter preset buttons: each applies a named
+        // subset of values as the active filter.
+        var quickBtns = Array.prototype.slice.call(
+          popContent.querySelectorAll('.col-filter-quick [data-quick-idx]')
+        );
+        quickBtns.forEach(function(btn) {
+          btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            var idx = parseInt(btn.getAttribute('data-quick-idx'), 10);
+            var preset = col.quickFilters && col.quickFilters[idx];
+            if (!preset) return;
+            var wantSet = {};
+            (preset.values || []).forEach(function(v) { wantSet[v] = true; });
+            checkboxes.forEach(function(cb) { cb.checked = !!wantSet[cb.value]; });
+            readSelected();
+          });
         });
       } else if (col.filter === 'range') {
         var minInput = popContent.querySelector('.col-filter-min');
