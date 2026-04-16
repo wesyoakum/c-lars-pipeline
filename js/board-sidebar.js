@@ -9,10 +9,12 @@
 //         inserts a newline. Hover shows X delete in the corner. Color
 //         picker collapses to one swatch and expands on hover.
 //   * LEFT:  Messages
-//       - Always-open composer at the bottom. Type, Enter sends,
-//         Shift+Enter newline, Escape clears. @user mention sets the
-//         direct target (one mention) or just notifies (multiple).
-//         No mention = broadcast (visible to everyone).
+//       - Always-open composer at the TOP \u2014 sits where the next new
+//         message will appear. List below is newest \u2192 oldest.
+//         Type, Enter sends, Shift+Enter newline, Escape clears.
+//         @user mention sets the direct target (one mention) or just
+//         notifies (multiple). No mention = broadcast (visible to
+//         everyone).
 //
 // Polls /board/state every 30s. @[type:id|label] markers in card bodies
 // render as inline coloured text via renderCardBody().
@@ -209,8 +211,8 @@
       },
 
       // Direct messages — broadcasts (target_user_id IS NULL) plus
-      // anything to/from me. Oldest first so the thread reads
-      // top-to-bottom like a chat.
+      // anything to/from me. Newest first so the latest message sits
+      // right under the composer (which lives at the top now).
       get messages() {
         var me = this.userId;
         var list = (this.modules.mentions || [])
@@ -220,7 +222,7 @@
           c.from_me = me && c.author_user_id === me;
         });
         list.sort(function (a, b) {
-          return (a.created_at || '').localeCompare(b.created_at || '');
+          return (b.created_at || '').localeCompare(a.created_at || '');
         });
         return list;
       },

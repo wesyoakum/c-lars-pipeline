@@ -3503,7 +3503,7 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 /* ---------- Messages zone (left sidebar) ---------- */
 .board-zone-messages,
 .board-sidebar-left {
-  /* messages list grows; composer pinned to bottom */
+  /* composer pinned at top; message list grows below it (newest first) */
 }
 .board-message-list {
   display: flex;
@@ -3548,7 +3548,7 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  margin-top: 0.4rem;
+  margin-bottom: 0.4rem;
   position: relative;
   flex-shrink: 0;
 }

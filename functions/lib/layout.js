@@ -495,22 +495,10 @@ const BOARD_LEFT_MARKUP = (
 
       '<h3 class="board-zone-heading">Messages</h3>' +
 
-      // Scrollable message list (chat thread, oldest \u2192 newest)
-      '<div class="board-message-list" x-ref="msgList">' +
-        '<template x-if="$store.board.messages.length === 0">' +
-          '<p class="board-zone-empty">No messages yet \u2014 say hi.</p>' +
-        '</template>' +
-        '<template x-for="msg in $store.board.messages" :key="msg.id">' +
-          '<div :class="\'board-message board-message-\' + (msg.from_me ? \'out\' : \'in\')">' +
-            '<span class="board-message-prefix" x-text="$store.board.messagePrefix(msg) + \'-\'"></span>' +
-            '<span class="board-message-body" x-html="$store.board.renderBody(msg.body)"></span>' +
-          '</div>' +
-        '</template>' +
-      '</div>' +
-
-      // Always-open composer pinned to the bottom. Type, hit Enter to
-      // send, Shift+Enter for newline, Escape to clear. @user mentions
-      // direct the message; no mentions \u2192 broadcast to everyone.
+      // Always-open composer at the top \u2014 sits exactly where the
+      // next new message will land. Type, hit Enter to send,
+      // Shift+Enter for newline, Escape to clear. @user mention directs
+      // the message; no mentions \u2192 broadcast to everyone.
       '<div class="board-message-composer">' +
         '<textarea id="board-message-textarea" class="board-message-textarea" ' +
           'rows="1" placeholder="Type a message\u2026 (@ to address someone)" ' +
@@ -530,6 +518,20 @@ const BOARD_LEFT_MARKUP = (
         '</div>' +
         '<div class="board-message-error" x-show="$store.board.messageComposer.error" ' +
           'x-text="$store.board.messageComposer.error"></div>' +
+      '</div>' +
+
+      // Scrollable message list (chat thread, newest \u2192 oldest).
+      // Sits below the composer so each new send lands right against it.
+      '<div class="board-message-list" x-ref="msgList">' +
+        '<template x-if="$store.board.messages.length === 0">' +
+          '<p class="board-zone-empty">No messages yet \u2014 say hi.</p>' +
+        '</template>' +
+        '<template x-for="msg in $store.board.messages" :key="msg.id">' +
+          '<div :class="\'board-message board-message-\' + (msg.from_me ? \'out\' : \'in\')">' +
+            '<span class="board-message-prefix" x-text="$store.board.messagePrefix(msg) + \'-\'"></span>' +
+            '<span class="board-message-body" x-html="$store.board.renderBody(msg.body)"></span>' +
+          '</div>' +
+        '</template>' +
       '</div>' +
 
     '</aside>' +
