@@ -288,6 +288,303 @@ const WIZARD_MODAL_MARKUP = (
   '</div>'   // /.task-modal-overlay
 );
 
+// Right-edge "whiteboard / fridge door" sidebar. Store + logic live in
+// /js/board-sidebar.js; this is just the static DOM + Alpine bindings.
+// Uses string concatenation so it drops into layout()'s shell without
+// escaping conflicts (same pattern as WIZARD_MODAL_MARKUP above).
+const BOARD_SIDEBAR_MARKUP = (
+  '<div class="board-root" x-data x-cloak>' +
+
+  // ---------- Collapsed strip (fridge-door closed) ----------
+  '<button type="button" class="board-strip" ' +
+    'x-show="$store.board && $store.board.isCollapsed" ' +
+    '@click="$store.board.expandNow()" ' +
+    'aria-label="Open board">' +
+    '<span class="board-strip-label">BOARD</span>' +
+    '<span class="board-strip-badge" ' +
+      'x-show="$store.board && $store.board.collapsedBadge > 0" ' +
+      'x-text="$store.board && $store.board.collapsedBadge"></span>' +
+    '<span class="board-strip-timer" ' +
+      'x-text="$store.board && $store.board.collapsedRemainingLabel"></span>' +
+  '</button>' +
+
+  // ---------- Expanded sidebar ----------
+  '<aside class="board-sidebar" ' +
+    'x-show="$store.board && !$store.board.isCollapsed" ' +
+    'aria-label="Whiteboard sidebar">' +
+
+    // Header
+    '<div class="board-header">' +
+      '<strong class="board-title">Board</strong>' +
+      '<div class="board-header-actions">' +
+        '<button type="button" class="board-icon-btn" ' +
+          'title="New card" aria-label="New card" ' +
+          '@click="$store.board.openComposer()">+ New</button>' +
+        '<div class="board-hide-menu" x-data="{ open: false }" @click.outside="open = false">' +
+          '<button type="button" class="board-icon-btn" ' +
+            'title="Hide" aria-label="Hide sidebar" ' +
+            '@click="open = !open">Hide\u25BE</button>' +
+          '<div class="board-hide-dropdown" x-show="open" x-cloak @click="open = false">' +
+            '<button type="button" @click="$store.board.hideFor(5)">5 min</button>' +
+            '<button type="button" @click="$store.board.hideFor(30)">30 min</button>' +
+            '<button type="button" @click="$store.board.hideFor(120)">2 hours</button>' +
+            '<button type="button" @click="$store.board.hideFor(\'tomorrow\')">Until tomorrow</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+
+    // Composer (inline new-card form)
+    '<div class="board-composer" x-show="$store.board.composer.open" x-cloak>' +
+      // Scope picker
+      '<div class="board-composer-scope">' +
+        '<label><input type="radio" name="b_scope" value="private" ' +
+          'x-model="$store.board.composer.scope"> Private</label>' +
+        '<label><input type="radio" name="b_scope" value="public" ' +
+          'x-model="$store.board.composer.scope"> Shared</label>' +
+        '<label><input type="radio" name="b_scope" value="direct" ' +
+          'x-model="$store.board.composer.scope"> Direct</label>' +
+      '</div>' +
+
+      // Target picker (only for scope=direct)
+      '<div class="board-composer-target" x-show="$store.board.composer.scope === \'direct\'">' +
+        '<template x-if="$store.board.composer.target">' +
+          '<div class="board-composer-target-pill">' +
+            'To: <strong x-text="$store.board.composer.target.label"></strong>' +
+            '<button type="button" class="board-mini-btn" @click="$store.board.clearTarget()">\u00D7</button>' +
+          '</div>' +
+        '</template>' +
+        '<template x-if="!$store.board.composer.target">' +
+          '<div>' +
+            '<input type="text" class="board-composer-target-input" ' +
+              'placeholder="Recipient name\u2026" ' +
+              'x-on:input="$store.board.searchTargets($event.target.value)">' +
+            '<div class="board-target-results" x-show="$store.board.targetResults.length">' +
+              '<template x-for="(r, i) in $store.board.targetResults" :key="r.ref_id">' +
+                '<button type="button" class="board-target-result" ' +
+                  ':class="{ active: i === $store.board.targetSelectedIndex }" ' +
+                  '@click="$store.board.pickTarget(r)">' +
+                  '<span x-text="r.label"></span>' +
+                  '<small x-text="r.sub"></small>' +
+                '</button>' +
+              '</template>' +
+            '</div>' +
+          '</div>' +
+        '</template>' +
+      '</div>' +
+
+      // Body textarea + @-autocomplete
+      '<div class="board-composer-body">' +
+        '<textarea id="board-composer-textarea" class="board-composer-textarea" ' +
+          'rows="3" placeholder="What\'s on your mind? Use @ to link." ' +
+          ':value="$store.board.composer.body" ' +
+          '@input="$store.board.onBodyInput(\'composer\', $event.target)" ' +
+          '@keydown="$store.board.onBodyKeydown(\'composer\', $event.target, $event)"></textarea>' +
+        '<div class="board-mention-popup" ' +
+          'x-show="$store.board.mention.active && $store.board.mention.for === \'composer\' && $store.board.mention.results.length" x-cloak>' +
+          '<template x-for="(r, i) in $store.board.mention.results" :key="r.ref_type + r.ref_id">' +
+            '<button type="button" class="board-mention-opt" ' +
+              ':class="{ active: i === $store.board.mention.selectedIndex }" ' +
+              '@click="$store.board.pickMention(r, document.getElementById(\'board-composer-textarea\'))">' +
+              '<span class="board-mention-type" x-text="r.ref_type"></span>' +
+              '<span class="board-mention-label" x-text="r.label"></span>' +
+              '<small x-text="r.sub"></small>' +
+            '</button>' +
+          '</template>' +
+        '</div>' +
+      '</div>' +
+
+      // Color + flag pickers
+      '<div class="board-composer-styles">' +
+        '<div class="board-color-picker">' +
+          '<template x-for="c in $store.board.colors" :key="c">' +
+            '<button type="button" class="board-color-swatch" ' +
+              ':class="\'board-color-swatch-\' + c + ($store.board.composer.color === c ? \' selected\' : \'\')" ' +
+              ':title="c" ' +
+              '@click="$store.board.composer.color = c"></button>' +
+          '</template>' +
+        '</div>' +
+        '<div class="board-flag-picker">' +
+          '<template x-for="f in $store.board.flags" :key="f || \'none\'">' +
+            '<button type="button" class="board-flag-dot" ' +
+              ':class="(f ? \'board-flag-dot-\' + f : \'board-flag-dot-none\') + ($store.board.composer.flag === f ? \' selected\' : \'\')" ' +
+              ':title="f || \'No flag\'" ' +
+              '@click="$store.board.composer.flag = f"></button>' +
+          '</template>' +
+        '</div>' +
+      '</div>' +
+
+      // Actions
+      '<div class="board-composer-actions">' +
+        '<span class="board-composer-error" x-show="$store.board.composer.error" x-text="$store.board.composer.error"></span>' +
+        '<button type="button" class="btn btn-sm" @click="$store.board.cancelComposer()">Cancel</button>' +
+        '<button type="button" class="btn btn-sm primary" ' +
+          ':disabled="$store.board.composer.submitting" ' +
+          '@click="$store.board.submitComposer()">' +
+          '<span x-show="!$store.board.composer.submitting">Post</span>' +
+          '<span x-show="$store.board.composer.submitting">Saving\u2026</span>' +
+        '</button>' +
+      '</div>' +
+    '</div>' + // /.board-composer
+
+    // Modules list (ordered per user prefs)
+    '<div class="board-modules">' +
+      '<template x-for="mKey in $store.board.orderedModules" :key="mKey">' +
+        '<section class="board-module">' +
+
+          // Module header
+          '<header class="board-module-header" @click="$store.board.toggleModuleCollapse(mKey)">' +
+            '<span class="board-module-caret" x-text="$store.board.isModuleCollapsed(mKey) ? \'\u25B8\' : \'\u25BE\'"></span>' +
+            '<span class="board-module-title" x-text="$store.board.moduleLabel(mKey)"></span>' +
+            '<span class="board-module-count" x-text="$store.board.moduleCount(mKey)"></span>' +
+            '<span class="board-module-spacer"></span>' +
+            '<button type="button" class="board-mini-btn" title="Move up" ' +
+              '@click.stop="$store.board.moveModule(mKey, -1)">\u25B4</button>' +
+            '<button type="button" class="board-mini-btn" title="Move down" ' +
+              '@click.stop="$store.board.moveModule(mKey, 1)">\u25BE</button>' +
+          '</header>' +
+
+          // Module body
+          '<div class="board-module-body" x-show="!$store.board.isModuleCollapsed(mKey)">' +
+
+            // Empty state
+            '<template x-if="$store.board.moduleItems(mKey).length === 0">' +
+              '<p class="board-module-empty" x-text="' +
+                'mKey === \'my_tasks\' ? \'No open tasks.\' : ' +
+                'mKey === \'mentions\' ? \'No mentions.\' : \'No cards yet.\'"></p>' +
+            '</template>' +
+
+            // My Tasks: read-only task cards that deep-link to activities page
+            '<template x-if="mKey === \'my_tasks\'">' +
+              '<ul class="board-task-list">' +
+                '<template x-for="t in $store.board.moduleItems(\'my_tasks\')" :key="t.id">' +
+                  '<li class="board-task-item">' +
+                    '<a :href="\'/activities\'" class="board-task-link">' +
+                      '<span class="board-task-body" x-text="(t.subject || t.body || \'\').slice(0, 120)"></span>' +
+                      '<span class="board-task-due" ' +
+                        'x-show="t.due_at" ' +
+                        'x-text="$store.board.dueLabel(t.due_at)"></span>' +
+                    '</a>' +
+                  '</li>' +
+                '</template>' +
+              '</ul>' +
+            '</template>' +
+
+            // Other modules: note cards
+            '<template x-if="mKey !== \'my_tasks\'">' +
+              '<div class="board-card-list">' +
+                '<template x-for="card in $store.board.moduleItems(mKey)" :key="card.id">' +
+                  '<article :class="$store.board.cardClass(card)">' +
+
+                    // Edit mode
+                    '<template x-if="$store.board.editing.cardId === card.id">' +
+                      '<div class="board-card-editing">' +
+                        '<textarea :id="\'board-edit-textarea-\' + card.id" ' +
+                          'class="board-card-edit-textarea" rows="3" ' +
+                          ':value="$store.board.editing.body" ' +
+                          '@input="$store.board.onBodyInput(\'editing\', $event.target)" ' +
+                          '@keydown="$store.board.onBodyKeydown(\'editing\', $event.target, $event)"></textarea>' +
+                        '<div class="board-mention-popup" ' +
+                          'x-show="$store.board.mention.active && $store.board.mention.for === \'editing\' && $store.board.mention.results.length" x-cloak>' +
+                          '<template x-for="(r, i) in $store.board.mention.results" :key="r.ref_type + r.ref_id">' +
+                            '<button type="button" class="board-mention-opt" ' +
+                              ':class="{ active: i === $store.board.mention.selectedIndex }" ' +
+                              '@click="$store.board.pickMention(r, document.getElementById(\'board-edit-textarea-\' + card.id))">' +
+                              '<span class="board-mention-type" x-text="r.ref_type"></span>' +
+                              '<span class="board-mention-label" x-text="r.label"></span>' +
+                              '<small x-text="r.sub"></small>' +
+                            '</button>' +
+                          '</template>' +
+                        '</div>' +
+                        '<div class="board-card-edit-styles">' +
+                          '<div class="board-color-picker">' +
+                            '<template x-for="c in $store.board.colors" :key="c">' +
+                              '<button type="button" class="board-color-swatch" ' +
+                                ':class="\'board-color-swatch-\' + c + ($store.board.editing.color === c ? \' selected\' : \'\')" ' +
+                                '@click="$store.board.editing.color = c"></button>' +
+                            '</template>' +
+                          '</div>' +
+                          '<div class="board-flag-picker">' +
+                            '<template x-for="f in $store.board.flags" :key="f || \'none\'">' +
+                              '<button type="button" class="board-flag-dot" ' +
+                                ':class="(f ? \'board-flag-dot-\' + f : \'board-flag-dot-none\') + ($store.board.editing.flag === f ? \' selected\' : \'\')" ' +
+                                '@click="$store.board.editing.flag = f"></button>' +
+                            '</template>' +
+                          '</div>' +
+                        '</div>' +
+                        '<div class="board-card-edit-actions">' +
+                          '<span class="board-composer-error" x-show="$store.board.editing.error" x-text="$store.board.editing.error"></span>' +
+                          '<button type="button" class="btn btn-sm" @click="$store.board.cancelEdit()">Cancel</button>' +
+                          '<button type="button" class="btn btn-sm primary" ' +
+                            ':disabled="$store.board.editing.submitting" ' +
+                            '@click="$store.board.saveEdit()">Save</button>' +
+                        '</div>' +
+                      '</div>' +
+                    '</template>' +
+
+                    // Display mode
+                    '<template x-if="$store.board.editing.cardId !== card.id">' +
+                      '<div class="board-card-display">' +
+                        '<div class="board-card-body" ' +
+                          'x-html="$store.board.renderBody(card.body)" ' +
+                          '@click="$store.board.startEdit(card)"></div>' +
+                        '<div class="board-card-footer">' +
+                          '<span class="board-card-author" ' +
+                            ':title="$store.board.authorLabel(card)" ' +
+                            'x-text="$store.board.authorInitials(card)"></span>' +
+                          '<span class="board-card-time" x-text="$store.board.relativeTime(card.created_at)"></span>' +
+                          '<span class="board-card-spacer"></span>' +
+                          '<button type="button" class="board-mini-btn" title="Pin" ' +
+                            '@click.stop="$store.board.togglePin(card)" ' +
+                            'x-text="card.pinned ? \'\u2605\' : \'\u2606\'"></button>' +
+                          '<div class="board-snooze-menu" x-data="{ open: false }" @click.outside="open = false">' +
+                            '<button type="button" class="board-mini-btn" title="Snooze" ' +
+                              '@click.stop="open = !open">\u23F1</button>' +
+                            '<div class="board-hide-dropdown" x-show="open" x-cloak @click="open = false">' +
+                              '<button type="button" @click.stop="$store.board.snoozeCard(card, 5); open = false">5 min</button>' +
+                              '<button type="button" @click.stop="$store.board.snoozeCard(card, 30); open = false">30 min</button>' +
+                              '<button type="button" @click.stop="$store.board.snoozeCard(card, 120); open = false">2 hours</button>' +
+                              '<button type="button" @click.stop="$store.board.snoozeCard(card, \'tomorrow\'); open = false">Tomorrow</button>' +
+                            '</div>' +
+                          '</div>' +
+                          '<button type="button" class="board-mini-btn" title="Archive" ' +
+                            '@click.stop="$store.board.archiveCard(card)">\u00D7</button>' +
+                        '</div>' +
+                      '</div>' +
+                    '</template>' +
+
+                  '</article>' +
+                '</template>' +
+              '</div>' +
+            '</template>' +
+
+          '</div>' + // /.board-module-body
+        '</section>' +
+      '</template>' +
+    '</div>' + // /.board-modules
+
+  '</aside>' +
+  '</div>' // /.board-root
+);
+
+// Reflect sidebar collapsed/expanded state onto <body> so CSS can
+// adjust main-content padding-right. Lives in layout so it's inlined
+// once and doesn't need its own JS file.
+const BOARD_BODY_CLASS_SCRIPT = (
+  "document.addEventListener('alpine:init', function () {\n" +
+  "  queueMicrotask(function () {\n" +
+  "    if (!window.Alpine || !Alpine.effect) return;\n" +
+  "    Alpine.effect(function () {\n" +
+  "      var s = Alpine.store('board');\n" +
+  "      if (!s) return;\n" +
+  "      var collapsed = !!s.isCollapsed;\n" +
+  "      document.body.classList.toggle('board-collapsed', collapsed);\n" +
+  "      document.body.classList.toggle('board-expanded', !collapsed);\n" +
+  "    });\n" +
+  "  });\n" +
+  "});\n"
+);
+
 /**
  * Full-page HTML shell: includes nav, user badge, and slot for body.
  * Vendored HTMX + Alpine from /js so Access + CSP don't fight CDN cross-origin.
@@ -330,6 +627,7 @@ export function layout(title, body, opts = {}) {
   <script defer src="/js/live-calc.js"></script>
   <script defer src="/js/account-picker.js"></script>
   <script defer src="/js/table-resize.js"></script>
+  ${user ? '<script defer src="/js/board-sidebar.js"></script>' : ''}
   ${opts.charts ? '<script defer src="/js/chart.min.js"></script>' : ''}
 </head>
 <body>
@@ -370,7 +668,8 @@ export function layout(title, body, opts = {}) {
       </div>
     </template>
   </div>
-  ${WIZARD_MODAL_MARKUP}` : ''}
+  ${WIZARD_MODAL_MARKUP}
+  ${BOARD_SIDEBAR_MARKUP}` : ''}
   ${flash ? `<div class="flash flash-${escape(flash.kind ?? 'info')}">${escape(flash.message)}</div>` : ''}
   <main class="site-main">
 ${breadcrumbHtml}
@@ -381,6 +680,7 @@ ${body}
   </footer>
   ${versionTag ? `<div class="version-badge">${versionTag}</div>` : ''}
   ${user ? `<script>${NOTIFICATION_STORE_SCRIPT}</script>` : ''}
+  ${user ? `<script>${BOARD_BODY_CLASS_SCRIPT}</script>` : ''}
 </body>
 </html>`;
 }
