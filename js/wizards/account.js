@@ -4,15 +4,18 @@
 // in /js/wizard-modal.js.
 //
 // Steps:
-//   1. name     — "What is the account name?"  (text, required)
-//   2. segment  — "What segment?"              (select, optional)
-//   3. phone    — "Main phone number?"         (text, optional)
-//   4. website  — "Website URL?"               (text, optional)
-//   5. owner    — "Who owns this account?"     (user-select, defaults to current user)
-//   6. notes    — "Any notes?"                 (textarea, optional)
+//   1. alias    — "Short name for lists?"      (text, optional — defaults to derived alias on submit)
+//   2. name     — "Full legal name?"           (text, required)
+//   3. segment  — "What segment?"              (select, optional)
+//   4. phone    — "Main phone number?"         (text, optional)
+//   5. website  — "Website URL?"               (text, optional)
+//   6. owner    — "Who owns this account?"     (user-select, defaults to current user)
+//   7. notes    — "Any notes?"                 (textarea, optional)
 //
 // After the required "name" step, everything else is optional — Tab
-// skips them. Name-only is a valid account; the user can enrich later
+// skips them. If the user leaves alias blank, the server derives one
+// by stripping the corporate suffix from name (", LLC" / ", Inc." /
+// etc.). Name-only is a valid account; the user can enrich later
 // via the account detail page (inline edit everywhere).
 //
 // Prefill (from openWizard('account', ...)):
@@ -35,11 +38,18 @@
 
     steps: [
       {
+        key: 'alias',
+        type: 'text',
+        prompt: 'Short name for lists?',
+        hint: 'Optional. Tab to skip — we\'ll derive one from the legal name.',
+        placeholder: 'e.g. Helix Robotics'
+      },
+      {
         key: 'name',
         type: 'text',
-        prompt: 'What is the account name?',
+        prompt: 'Full legal name?',
         hint: 'Press Tab to continue. Shift+Tab goes back.',
-        placeholder: 'e.g. Helix Robotics Inc.',
+        placeholder: 'e.g. Helix Robotics, Inc.',
         required: true,
         requiredError: 'Account name is required.'
       },
@@ -89,6 +99,7 @@
 
     blankAnswers: function () {
       return {
+        alias: '',
         name: '',
         segment: null,    // { value, label } or null
         phone: '',
@@ -109,6 +120,7 @@
     submit: function (answers /*, ctx */) {
       var fd = new FormData();
       fd.append('name', (answers.name || '').trim());
+      if (answers.alias) fd.append('alias', String(answers.alias).trim());
       if (answers.segment && answers.segment.value) fd.append('segment', answers.segment.value);
       if (answers.phone) fd.append('phone', String(answers.phone).trim());
       if (answers.website) fd.append('website', String(answers.website).trim());

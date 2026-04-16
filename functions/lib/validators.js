@@ -57,6 +57,36 @@ function trim(v) {
 }
 
 /**
+ * Derive a conversational alias from a legal account name by stripping
+ * trailing corporate suffixes (", LLC", ", Inc.", ", Ltd.", etc.).
+ *
+ *   deriveAlias('Helix Robotics, Inc.')   // 'Helix Robotics'
+ *   deriveAlias('Acme Co.')               // 'Acme'
+ *   deriveAlias('  Big Industries LLC ')  // 'Big Industries'
+ *   deriveAlias('')                       // ''
+ *
+ * Used by validateAccount() when the caller doesn't supply an explicit
+ * alias, and by migration 0033 to backfill existing accounts.
+ */
+export function deriveAlias(name) {
+  if (!nonEmpty(name)) return '';
+  let s = String(name).trim();
+  // Strip well-known corporate suffixes from the end. Allow optional
+  // leading comma + whitespace, optional trailing period. Run repeatedly
+  // so "Foo, Inc., LLC" collapses cleanly. Case-insensitive.
+  const suffixRe = /[,\s]+(L\.?L\.?C\.?|L\.?L\.?P\.?|L\.?P\.?|Inc\.?|Incorporated|Co\.?|Corp\.?|Corporation|Ltd\.?|Limited|GmbH|S\.?A\.?|N\.?V\.?|P\.?L\.?L\.?C\.?|P\.?C\.?)\.?$/i;
+  for (let i = 0; i < 4; i++) {
+    const next = s.replace(suffixRe, '').trim();
+    if (next === s) break;
+    s = next;
+  }
+  // Drop a trailing comma left behind by a stripped suffix (e.g.
+  // "Acme Co.," → "Acme Co" → "Acme,") — clean it up.
+  s = s.replace(/[,\s]+$/, '');
+  return s;
+}
+
+/**
  * Validate an opportunity create/update payload. Covers every field the
  * forms expose: identity (number, title, account, type), pipeline dates
  * (rfq_received, rfq_due, rfi_due, expected_close, quoted), routing
@@ -225,6 +255,13 @@ export function validateAccount(input) {
 
   value.name = trim(input.name);
   if (!nonEmpty(value.name)) errors.name = 'Name is required';
+
+  // Alias defaults to the name with the corporate suffix stripped
+  // (", LLC" / ", Inc." / etc.) so list views show the conversational
+  // name instead of the legal name. Only applied when the caller didn't
+  // supply an explicit alias.
+  const rawAlias = trim(input.alias);
+  value.alias = nonEmpty(rawAlias) ? rawAlias : (deriveAlias(value.name) || null);
 
   value.segment = trim(input.segment) || null;
   value.address_billing = trim(input.address_billing) || null;

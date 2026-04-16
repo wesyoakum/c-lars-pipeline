@@ -273,13 +273,14 @@ export async function onRequestPost(context) {
     stmt(
       env.DB,
       `INSERT INTO accounts
-         (id, name, segment, address_billing, address_physical,
+         (id, name, alias, segment, address_billing, address_physical,
           phone, website, notes, owner_user_id, is_active,
           created_at, updated_at, created_by_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         value.name,
+        value.alias,
         value.segment,
         firstBilling?.address ?? null,
         firstPhysical?.address ?? null,

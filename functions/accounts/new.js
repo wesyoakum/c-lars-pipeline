@@ -48,8 +48,16 @@ export async function renderNewForm(context, opts = {}) {
       <form method="post" action="/accounts${popup ? '?popup=1' : ''}" class="stacked">
         ${popup ? html`<input type="hidden" name="popup" value="1">` : ''}
         <label>
+          <span>Alias</span>
+          <input type="text" name="alias" value="${escape(values.alias ?? '')}"
+                 placeholder="Conversational name (defaults to legal name minus LLC/Inc.)">
+          ${errors.alias ? html`<small class="field-error">${errors.alias}</small>` : ''}
+        </label>
+
+        <label>
           <span>Name <em>*</em></span>
-          <input type="text" name="name" required value="${escape(values.name ?? '')}">
+          <input type="text" name="name" required value="${escape(values.name ?? '')}"
+                 placeholder="Full legal name, e.g. Helix Robotics, Inc.">
           ${errors.name ? html`<small class="field-error">${errors.name}</small>` : ''}
         </label>
 
