@@ -317,7 +317,38 @@ export async function onRequestGet(context) {
   const detailsSection = html`
     <section class="card quote-doc-card" x-data="quoteDetails()" x-init="init()">
       ${readOnly
-        ? html`<p class="muted" style="margin:0 0 0.5rem"><em>This quote is ${escape(quote.status)}. Create a new revision to make changes.</em></p>`
+        ? (function () {
+            // Prominent read-only banner. The message + color signal the
+            // status at a glance; the action ("New revision") already
+            // lives in the top action bar above, so the banner just has
+            // to be impossible to miss.
+            const kind =
+              quote.status === 'expired' ? 'expired' :
+              quote.status === 'accepted' ? 'accepted' :
+              quote.status === 'rejected' || quote.status === 'dead' ? 'rejected' :
+              'issued';
+            const icon =
+              kind === 'expired' ? '\u23F0' :
+              kind === 'accepted' ? '\u2714' :
+              kind === 'rejected' ? '\u2716' :
+              '\uD83D\uDD12';
+            const label = QUOTE_STATUS_LABELS[quote.status] ?? quote.status;
+            const canRevise = quote.status === 'accepted' || quote.status === 'rejected' || quote.status === 'expired';
+            return html`
+              <div class="quote-readonly-banner quote-readonly-banner-${escape(kind)}">
+                <span class="quote-readonly-banner-icon" aria-hidden="true">${raw(icon)}</span>
+                <div class="quote-readonly-banner-body">
+                  <strong class="quote-readonly-banner-title">This quote is ${escape((label || '').toLowerCase())}.</strong>
+                  <span class="quote-readonly-banner-sub">Create a new revision to make changes.</span>
+                </div>
+                ${canRevise ? html`
+                  <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
+                    <button class="btn primary quote-readonly-banner-btn" type="submit">New revision</button>
+                  </form>
+                ` : ''}
+              </div>
+            `;
+          })()
         : ''}
       <div class="quote-meta-grid quote-meta-equal">
         <div class="quote-meta-left">

@@ -367,7 +367,11 @@
       isDraggable: function (card) {
         if (!card) return false;
         if (this.editing.cardId === card.id) return false;
-        return card.scope === 'private' && card.author_user_id === this.userId;
+        // state.js only returns private cards the user authored, so
+        // scope='private' is sufficient as an identity check here.
+        // Fallback: also allow if authored-by-me is explicitly known.
+        if (card.scope === 'private') return true;
+        return this.userId && card.author_user_id === this.userId;
       },
       onDragStart: function (card, ev) {
         if (!this.isDraggable(card)) {
@@ -386,7 +390,12 @@
       onDragOver: function (card, ev) {
         if (!this.drag.id) return;
         if (this.drag.id === card.id) return;
-        if (!this.isDraggable(card)) return;
+        // Allow drop on any card. The dragged card is already
+        // guaranteed private (isDraggable gate in onDragStart), so
+        // updating its sort_order places it relative to whatever it
+        // landed near. Dropping on a shared card still just moves
+        // the private card to that visual slot; it doesn't modify
+        // the shared card's own position.
         ev.preventDefault();
         // Above/below split by the midpoint of the drop target's bbox.
         var el = ev.currentTarget;

@@ -460,7 +460,12 @@ const BOARD_RIGHT_MARKUP = (
             '($store.board.drag.id === card.id ? \'is-dragging \' : \'\') + ' +
             '($store.board.drag.targetId === card.id ? (\'drag-over-\' + ($store.board.drag.mode || \'above\') + \' \') : \'\') + ' +
             '(card.__expanded ? \'is-expanded\' : \'is-collapsed\')" ' +
-            ':draggable="$store.board.isDraggable(card)" ' +
+            // draggable is hardcoded to "true" (string literal) rather
+            // than bound via :draggable \u2014 Alpine\u2019s reactive binding for
+            // this attribute is unreliable across browsers. onDragStart
+            // calls preventDefault() for cards the user shouldn\u2019t be
+            // allowed to move (non-private, editing, etc.).
+            'draggable="true" ' +
             '@dragstart="$store.board.onDragStart(card, $event)" ' +
             '@dragover="$store.board.onDragOver(card, $event)" ' +
             '@dragleave="$store.board.onDragLeave(card)" ' +
@@ -578,7 +583,7 @@ const BOARD_LEFT_MARKUP = (
       'x-show="$store.board && !$store.board.isCollapsed" ' +
       'aria-label="Messages sidebar">' +
 
-      '<h3 class="board-zone-heading">Messages</h3>' +
+      '<h3 class="board-zone-heading">Message Everyone</h3>' +
 
       // Always-open composer at the top \u2014 sits exactly where the
       // next new message will land. Type, hit Enter to send,

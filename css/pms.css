@@ -744,6 +744,55 @@ code {
 .flash-warning, .flash-warn { background: #fff8c5; border-color: #d4a72c; color: #7a5200; }
 .flash-error   { background: #ffebe9; border-color: #ff8182; color: #cf222e; }
 
+/* Quote read-only banner \u2014 dropped at the top of the details card
+   whenever the quote is in a locked status (issued, expired, etc.).
+   Built to be impossible to miss: thick left border, big icon, bold
+   status line, optional "New revision" button on the right. */
+.quote-readonly-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.9rem 1rem;
+  margin: 0 0 1rem 0;
+  border-left: 6px solid;
+  border-radius: var(--radius);
+  font-size: 1rem;
+}
+.quote-readonly-banner-icon { font-size: 1.75rem; line-height: 1; flex: 0 0 auto; }
+.quote-readonly-banner-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.quote-readonly-banner-title { font-size: 1.15rem; font-weight: 700; }
+.quote-readonly-banner-sub { font-size: 0.95rem; opacity: 0.85; }
+.quote-readonly-banner-btn { flex: 0 0 auto; }
+
+/* Status-specific color palettes. Expired is the loudest because
+   users are most likely to hit it while still trying to edit. */
+.quote-readonly-banner-expired {
+  background: #fff4d6;
+  border-left-color: #d48806;
+  color: #7a4a00;
+}
+.quote-readonly-banner-issued {
+  background: #e7f1ff;
+  border-left-color: #3b82f6;
+  color: #1d4ed8;
+}
+.quote-readonly-banner-accepted {
+  background: #e6f9ec;
+  border-left-color: #2d8a3e;
+  color: #155724;
+}
+.quote-readonly-banner-rejected {
+  background: #f3f4f6;
+  border-left-color: #6b7280;
+  color: #374151;
+}
+
 /* ---------- Tables ---------- */
 
 .data {
@@ -3360,7 +3409,7 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 .board-notes-stack {
   position: relative;
   height: 95px;
-  margin: 0.5rem 0 1.6rem;
+  margin: 0.5rem 0 2.75rem;
 }
 .board-stack-note {
   position: absolute;
