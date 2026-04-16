@@ -92,7 +92,7 @@ function printUsage() {
   console.log(`
 scripts/wfm-import.mjs — WFM → PMS importer
 
-  --entity <name>   One of: accounts, contacts, opportunities   (quotes TBD)
+  --entity <name>   One of: accounts, contacts, opportunities, quotes
   --file <path>     Path to the WFM .xlsx export
   --dry-run         Parse + build SQL + preview CSV, do not touch the DB
   --commit          Actually execute the generated SQL via wrangler
@@ -1019,6 +1019,540 @@ function buildOpportunitiesStatements(rows, accountLookup, contactLookup) {
 }
 
 // ---------------------------------------------------------------------
+// Entity: quotes
+// ---------------------------------------------------------------------
+
+/**
+ * Load the WFM-origin opportunities lookup. Produced manually via:
+ *   SELECT o.id AS opp_id, o.number AS opp_number, o.title, o.transaction_type,
+ *          a.name AS account_name, a.external_id AS account_external_id
+ *   FROM opportunities o
+ *   JOIN accounts a ON a.id = o.account_id
+ *   WHERE o.external_source='wfm'
+ *   ORDER BY o.number;
+ *
+ * Expected rows: 196 (the WFM01-0001 … WFM01-0196 set created in phase C).
+ *
+ * Returned Map: key = `${account_slug}::${title_slug}`, value = array of opp
+ * records (array because some titles duplicate across opps — e.g. Q25232 &
+ * Q25196 both match WFM01-0101 and WFM01-0189 on "Repair Levelwind PCB
+ * Board"). Callers pick the lowest-numbered opp when the array has > 1
+ * entry (tiebreaker rule: oldest opp wins).
+ */
+function loadOppsLookup() {
+  const file = path.join(OUT_DIR, 'wfm-opps-lookup.json');
+  if (!fs.existsSync(file)) {
+    throw new Error(
+      `Missing opps lookup: ${file}\n` +
+      `Import opportunities first and export the lookup from D1 with:\n` +
+      `  SELECT o.id, o.number, o.title, o.transaction_type,\n` +
+      `         a.name AS account_name, a.external_id AS account_external_id\n` +
+      `  FROM opportunities o JOIN accounts a ON a.id=o.account_id\n` +
+      `  WHERE o.external_source='wfm' ORDER BY o.number;`
+    );
+  }
+  const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+  // Key: `${slugify(account_name)}::${slugify(title)}`
+  const byAcctAndTitle = new Map();
+  for (const row of data) {
+    const acctSlug = slugify(row.account_name || '');
+    const titleSlug = slugify(row.title || '');
+    if (!acctSlug || !titleSlug) continue;
+    const key = `${acctSlug}::${titleSlug}`;
+    if (!byAcctAndTitle.has(key)) byAcctAndTitle.set(key, []);
+    byAcctAndTitle.get(key).push(row);
+  }
+  return byAcctAndTitle;
+}
+
+/**
+ * WFM quotes Sales Person → PMS user ID.
+ *
+ * Fatymee Byrne (1 row) is deliberately remapped to Wes per user direction
+ * (her attribution was dropped). Blank Sales Person (87 rows) also defaults
+ * to Wes as the importing admin.
+ */
+const QUOTE_SALES_TO_USER_ID = {
+  'Wes Yoakum':     'user-wes-yoakum',
+  'Kat Deno':       'user-kat-deno',
+  'Sara Patterson': 'user-sara-patterson',
+  'Adam Janac':     'user-adam-janac',
+  // 'Fatymee Byrne' intentionally NOT mapped — falls through to Wes default
+};
+
+/**
+ * WFM quote status → PMS quote status. See migration 0011 for PMS statuses:
+ *   draft | issued | revision_draft | revision_issued |
+ *   accepted | rejected | expired | dead
+ *
+ * Per user direction:
+ *   - Accepted → accepted
+ *   - Declined → rejected
+ *   - Expired  → expired
+ *   - Draft    → draft
+ *   - Issued   → issued
+ *   - Revised  → dead (WFM's "this one was replaced by a newer revision")
+ */
+const QUOTE_STATUS_MAP = {
+  'Accepted': 'accepted',
+  'Declined': 'rejected',
+  'Expired':  'expired',
+  'Draft':    'draft',
+  'Issued':   'issued',
+  'Revised':  'dead',
+};
+
+/**
+ * Derive orphan-opp transaction_type from the quote's Name. Regex-matches
+ * LARS/winch/HPU/refurb/cylinder/A-frame/service/crane keywords → 'eps'
+ * (Engineered Products & Services). Everything else → 'spares'.
+ *
+ * Note: for quotes that match an existing WFM01 opp we inherit that opp's
+ * transaction_type instead; this regex only runs for new orphan opps.
+ */
+function deriveQuoteTxnType(title) {
+  const t = String(title || '');
+  return /LARS|winch|hpu|refurb|cylinder|a[-\s]?frame|service|crane/i.test(t)
+    ? 'eps'
+    : 'spares';
+}
+
+/**
+ * Derive orphan-opp stage from the "latest" quote in a revision chain.
+ * Called with the latest row's status string.
+ *
+ *   Accepted → closed_won
+ *   Declined → closed_lost
+ *   Expired  → closed_died
+ *   Draft/Issued/Revised → quote_submitted
+ */
+function deriveOrphanOppStage(latestStatus) {
+  switch ((latestStatus || '').trim()) {
+    case 'Accepted': return 'closed_won';
+    case 'Declined': return 'closed_lost';
+    case 'Expired':  return 'closed_died';
+    case 'Draft':
+    case 'Issued':
+    case 'Revised':
+    default:
+      return 'quote_submitted';
+  }
+}
+
+/**
+ * Parse a WFM-formatted date string ("13 Jul 2026" / "05 Jul 2026") to
+ * ISO 'YYYY-MM-DD'. Returns null for blanks or unparseable values.
+ */
+function parseWfmQuoteDate(raw) {
+  if (raw == null || raw === '') return null;
+  const parsed = new Date(String(raw).trim());
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+}
+
+/**
+ * Strip commas and parse to Number. Returns null for blanks/zeros/unparseables.
+ * Used for both Amount (quote total_price) and for deciding whether an orphan
+ * opp gets an estimated_value_usd (zero → NULL "not estimated").
+ */
+function parseWfmMoney(raw) {
+  if (raw == null || raw === '') return null;
+  const n = Number(String(raw).replace(/,/g, ''));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return n;
+}
+
+/**
+ * Build the SQL + preview rows for the quotes import.
+ *
+ * Strategy:
+ *   1. Normalize No. ("Q25002/1" → "Q25002-1" — one such row exists).
+ *   2. Parse No. into (base, seq). seq=0 = plain base, seq=1+ from -N suffix.
+ *   3. Group rows by base → 276 base groups (225 singletons, 39 pairs,
+ *      9 triples, 3 quadruples per verification on WFM_Quotes.xlsx).
+ *   4. For each base, attempt an EXACT slug match on (account, title) to an
+ *      existing WFM01 opp from wfm-opps-lookup.json. If multiple opps match,
+ *      pick the lowest-numbered (oldest) opp.
+ *   5. If no match → create an orphan opp 'WFM02-<digits>' (quote base minus
+ *      the leading Q). Title = quote Name; account from client lookup;
+ *      transaction_type from keyword regex on title; stage from latest
+ *      revision's status; estimated_value_usd from latest revision's Amount.
+ *   6. Emit one quotes row per WFM row (343 total). Revision = A/B/C/D by seq.
+ *      supersedes_quote_id chains within the base group (seq N points at seq
+ *      N-1's id). status = QUOTE_STATUS_MAP[WFM Status]. quote_type inherited
+ *      from the linked opp's transaction_type.
+ *
+ * Every INSERT is prefaced with an external_source='wfm' / external_id marker
+ * discriminated by prefix so the rollback SQL can target exactly the rows we
+ * created:
+ *   - orphan opps:   external_id = 'quotes-orphan::Q25XXX'
+ *   - quotes:        external_id = 'quote::Q25XXX' or 'quote::Q25XXX-N'
+ */
+function buildQuotesStatements(rows, accountLookup, oppsLookup) {
+  const ts = now();
+  const sqlStatements = [];
+  const rollbackStatements = [];
+  const previewRows = [];
+  const summaryRows = [];
+
+  // ---- 1 + 2: normalize, parse into (base, seq) ----
+  const parsed = [];
+  for (const row of rows) {
+    const rawNo = String(row['No.'] ?? '').trim();
+    if (!rawNo) continue;
+    const normalized = rawNo.replace('/', '-');
+    const m = normalized.match(/^(Q\d+)(?:-(\d+))?$/);
+    if (!m) {
+      console.warn(`  ! unparseable quote number "${rawNo}" — skipped`);
+      continue;
+    }
+    const base = m[1];
+    const seq = m[2] ? parseInt(m[2], 10) : 0;
+    parsed.push({ base, seq, number: normalized, raw: row });
+  }
+
+  // ---- 3: group by base ----
+  const groups = new Map(); // base → [{ base, seq, number, raw }, ...]
+  for (const p of parsed) {
+    if (!groups.has(p.base)) groups.set(p.base, []);
+    groups.get(p.base).push(p);
+  }
+  for (const group of groups.values()) {
+    group.sort((a, b) => a.seq - b.seq);
+  }
+
+  // ---- 4 + 5: resolve opp per base group ----
+  // Output structure: each group now has `opp` = existing WFM01 record
+  // or `orphanOpp` = a freshly-synthesized record to INSERT.
+  let exactMatches = 0;
+  let orphanOpps = 0;
+  let skippedNoAccount = 0;
+
+  const resolvedGroups = [];
+  for (const [base, group] of groups.entries()) {
+    const firstRow = group[0].raw;
+    const latestRow = group[group.length - 1].raw;
+
+    const clientName = String(firstRow.Client ?? '').trim();
+    const acctSlug = slugify(clientName);
+    const account = accountLookup.get(acctSlug);
+    if (!account) {
+      console.warn(`  ! no account for quote ${base} / "${clientName}" (slug="${acctSlug}") — skipped`);
+      skippedNoAccount++;
+      continue;
+    }
+
+    const title = String(firstRow.Name ?? '').trim();
+    const titleSlug = slugify(title);
+    const key = `${acctSlug}::${titleSlug}`;
+    const candidates = oppsLookup.get(key);
+
+    let opp = null;         // { id, number, title, transaction_type } from lookup
+    let orphanOpp = null;   // { id, number, title, account_id, ... } to be inserted
+
+    if (candidates && candidates.length > 0) {
+      // Tiebreaker: lowest WFM01 number (oldest opp).
+      const sorted = [...candidates].sort((a, b) =>
+        String(a.number).localeCompare(String(b.number))
+      );
+      opp = sorted[0];
+      exactMatches++;
+    } else {
+      // Orphan: create a new WFM02 opp. Number = 'WFM02-' + quote base digits.
+      const digits = base.replace(/^Q/, '');
+      const number = `WFM02-${digits}`;
+      const latestStatus = String(latestRow.Status ?? '').trim();
+      const latestSales = String(latestRow['Sales Person'] ?? '').trim();
+      const ownerUserId = QUOTE_SALES_TO_USER_ID[latestSales] ?? IMPORT_USER_ID;
+      const stage = deriveOrphanOppStage(latestStatus);
+      const transactionType = deriveQuoteTxnType(title);
+      const probability = STAGE_DEFAULT_PROBABILITY[stage] ?? null;
+      const estValue = parseWfmMoney(latestRow.Amount);
+
+      // created_at proxy: use the earliest valid_until in the group as a
+      // stand-in (WFM doesn't export quote-creation dates on this report).
+      // Fall back to now() if none parseable.
+      let createdAt = ts;
+      for (const g of group) {
+        const iso = parseWfmQuoteDate(g.raw['Valid Until']);
+        if (iso) { createdAt = `${iso}T00:00:00.000Z`; break; }
+      }
+
+      const isClosed = stage === 'closed_won' || stage === 'closed_lost' || stage === 'closed_died';
+      const actualCloseIso = isClosed ? parseWfmQuoteDate(latestRow['Valid Until']) : null;
+      const expectedCloseIso = !isClosed ? parseWfmQuoteDate(latestRow['Valid Until']) : null;
+
+      orphanOpp = {
+        id: uuid(),
+        number,
+        account,
+        title,
+        transactionType,
+        stage,
+        probability,
+        estValue,
+        ownerUserId,
+        ownerRaw: latestSales,
+        createdAt,
+        expectedCloseIso,
+        actualCloseIso,
+        externalId: `quotes-orphan::${base}`,
+      };
+      orphanOpps++;
+    }
+
+    resolvedGroups.push({ base, group, account, opp, orphanOpp });
+  }
+
+  // ---- 5a: emit orphan opp INSERTs (before any quote INSERT that FKs them) ----
+  for (const rg of resolvedGroups) {
+    if (!rg.orphanOpp) continue;
+    const o = rg.orphanOpp;
+    sqlStatements.push(
+      [
+        `INSERT INTO opportunities`,
+        `  (id, number, account_id, primary_contact_id, title, description,`,
+        `   transaction_type, stage, stage_entered_at, probability,`,
+        `   estimated_value_usd, currency,`,
+        `   expected_close_date, actual_close_date,`,
+        `   source, rfq_format,`,
+        `   bant_budget, bant_authority, bant_need, bant_timeline,`,
+        `   close_reason, loss_reason_tag,`,
+        `   owner_user_id, salesperson_user_id,`,
+        `   external_source, external_id,`,
+        `   created_at, updated_at, created_by_user_id,`,
+        `   bant_authority_contact_id,`,
+        `   rfq_received_date, rfq_due_date, rfi_due_date, quoted_date,`,
+        `   customer_po_number)`,
+        `VALUES (`,
+        `  ${sqlLit(o.id)}, ${sqlLit(o.number)}, ${sqlLit(o.account.id)}, NULL, ${sqlLit(o.title)}, NULL,`,
+        `  ${sqlLit(o.transactionType)}, ${sqlLit(o.stage)}, ${sqlLit(o.createdAt)}, ${sqlLit(o.probability)},`,
+        `  ${sqlLit(o.estValue)}, 'USD',`,
+        `  ${sqlLit(o.expectedCloseIso)}, ${sqlLit(o.actualCloseIso)},`,
+        `  NULL, NULL,`,
+        `  NULL, NULL, NULL, NULL,`,
+        `  NULL, NULL,`,
+        `  ${sqlLit(o.ownerUserId)}, ${sqlLit(o.ownerUserId)},`,
+        `  ${sqlLit(EXTERNAL_SOURCE)}, ${sqlLit(o.externalId)},`,
+        `  ${sqlLit(o.createdAt)}, ${sqlLit(ts)}, ${sqlLit(IMPORT_USER_ID)},`,
+        `  NULL,`,
+        `  NULL, NULL, NULL, NULL,`,
+        `  NULL`,
+        `);`,
+      ].join('\n')
+    );
+
+    // audit event for orphan opp
+    const auditId = uuid();
+    const changesJson = JSON.stringify({
+      number: o.number,
+      account_id: o.account.id,
+      account_name: o.account.name,
+      title: o.title,
+      transaction_type: o.transactionType,
+      stage: o.stage,
+      estimated_value_usd: o.estValue,
+      wfm_owner: o.ownerRaw || null,
+      owner_user_id: o.ownerUserId,
+      created_at: o.createdAt,
+      external_source: EXTERNAL_SOURCE,
+      external_id: o.externalId,
+      import_source_file: 'WFM_Quotes.xlsx',
+      origin: 'orphan-opp-for-quote-without-matching-lead',
+    });
+    sqlStatements.push(
+      [
+        `INSERT INTO audit_events`,
+        `  (id, entity_type, entity_id, event_type, user_id, at,`,
+        `   summary, changes_json, override_reason)`,
+        `VALUES (`,
+        `  ${sqlLit(auditId)}, 'opportunity', ${sqlLit(o.id)}, 'created',`,
+        `  ${sqlLit(IMPORT_USER_ID)}, ${sqlLit(ts)},`,
+        `  ${sqlLit(`Imported from WFM quotes: orphan opp "${o.title}" @ ${o.account.name} (${o.number})`)}, ${sqlLit(changesJson)}, NULL`,
+        `);`,
+      ].join('\n')
+    );
+  }
+
+  // ---- 6: emit one quote INSERT per WFM row ----
+  const REVISION_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+
+  for (const rg of resolvedGroups) {
+    const oppId = rg.opp ? rg.opp.id : rg.orphanOpp.id;
+    const oppNumber = rg.opp ? rg.opp.number : rg.orphanOpp.number;
+    const oppTxnType = rg.opp ? rg.opp.transaction_type : rg.orphanOpp.transactionType;
+
+    // Track ids within the group so we can set supersedes_quote_id.
+    const idsBySeq = new Map();
+
+    for (const g of rg.group) {
+      const r = g.raw;
+      const id = uuid();
+      idsBySeq.set(g.seq, id);
+
+      const number = g.number; // already normalized
+      const revisionIdx = g.seq; // 0→A, 1→B, ...
+      const revision = REVISION_LETTERS[revisionIdx] ?? `R${revisionIdx}`;
+
+      const wfmStatus = String(r.Status ?? '').trim();
+      const pmsStatus = QUOTE_STATUS_MAP[wfmStatus] ?? 'draft';
+
+      const title = String(r.Name ?? '').trim();
+      const total = parseWfmMoney(r.Amount);
+      const totalVal = total ?? 0;
+
+      const validUntilIso = parseWfmQuoteDate(r['Valid Until']);
+      const quoteDueDateIso = parseWfmQuoteDate(r.QuoteDueDate);
+
+      // created_at proxy: the quote's Valid Until, which is the only dated
+      // field in the WFM export. Fall back to the group's createdAt proxy.
+      const createdAt = validUntilIso
+        ? `${validUntilIso}T00:00:00.000Z`
+        : (rg.orphanOpp ? rg.orphanOpp.createdAt : ts);
+
+      const sales = String(r['Sales Person'] ?? '').trim();
+      const createdByUserId = QUOTE_SALES_TO_USER_ID[sales] ?? IMPORT_USER_ID;
+
+      // supersedes chain: seq 0 = null, seq N → id of seq N-1
+      const supersedes = g.seq > 0 ? idsBySeq.get(g.seq - 1) : null;
+
+      const extId = `quote::${number}`;
+
+      sqlStatements.push(
+        [
+          `INSERT INTO quotes`,
+          `  (id, number, opportunity_id, revision, quote_type, status,`,
+          `   title, description, valid_until, currency,`,
+          `   subtotal_price, tax_amount, total_price,`,
+          `   incoterms, payment_terms, delivery_terms, delivery_estimate,`,
+          `   tc_revision, warranty_revision, rate_schedule_revision, sop_revision,`,
+          `   supersedes_quote_id, cost_build_id,`,
+          `   submitted_at, submitted_by_user_id,`,
+          `   notes_internal, notes_customer,`,
+          `   external_source, external_id,`,
+          `   created_at, updated_at, created_by_user_id,`,
+          `   quote_seq, show_discounts, quote_due_date)`,
+          `VALUES (`,
+          `  ${sqlLit(id)}, ${sqlLit(number)}, ${sqlLit(oppId)}, ${sqlLit(revision)}, ${sqlLit(oppTxnType)}, ${sqlLit(pmsStatus)},`,
+          `  ${sqlLit(title)}, NULL, ${sqlLit(validUntilIso)}, 'USD',`,
+          `  ${sqlLit(totalVal)}, 0, ${sqlLit(totalVal)},`,
+          `  NULL, NULL, NULL, NULL,`,
+          `  NULL, NULL, NULL, NULL,`,
+          `  ${sqlLit(supersedes)}, NULL,`,
+          `  NULL, NULL,`,
+          `  NULL, NULL,`,
+          `  ${sqlLit(EXTERNAL_SOURCE)}, ${sqlLit(extId)},`,
+          `  ${sqlLit(createdAt)}, ${sqlLit(ts)}, ${sqlLit(createdByUserId)},`,
+          `  ${sqlLit(g.seq)}, 1, ${sqlLit(quoteDueDateIso)}`,
+          `);`,
+        ].join('\n')
+      );
+
+      // audit event for quote creation
+      const auditId = uuid();
+      const changesJson = JSON.stringify({
+        number,
+        opportunity_id: oppId,
+        opportunity_number: oppNumber,
+        revision,
+        quote_type: oppTxnType,
+        status: pmsStatus,
+        wfm_status: wfmStatus,
+        title,
+        total_price: totalVal,
+        valid_until: validUntilIso,
+        quote_due_date: quoteDueDateIso,
+        wfm_sales_person: sales || null,
+        created_by_user_id: createdByUserId,
+        supersedes_quote_id: supersedes,
+        external_source: EXTERNAL_SOURCE,
+        external_id: extId,
+        import_source_file: 'WFM_Quotes.xlsx',
+        opp_origin: rg.opp ? 'matched-wfm01-lead' : 'orphan-wfm02',
+      });
+      sqlStatements.push(
+        [
+          `INSERT INTO audit_events`,
+          `  (id, entity_type, entity_id, event_type, user_id, at,`,
+          `   summary, changes_json, override_reason)`,
+          `VALUES (`,
+          `  ${sqlLit(auditId)}, 'quote', ${sqlLit(id)}, 'created',`,
+          `  ${sqlLit(IMPORT_USER_ID)}, ${sqlLit(ts)},`,
+          `  ${sqlLit(`Imported from WFM: ${number} rev ${revision} — "${title}" (${oppNumber})`)}, ${sqlLit(changesJson)}, NULL`,
+          `);`,
+        ].join('\n')
+      );
+
+      previewRows.push({
+        quote_number: number,
+        revision,
+        wfm_status: wfmStatus,
+        pms_status: pmsStatus,
+        title,
+        account_name: rg.account.name,
+        opp_number: oppNumber,
+        opp_origin: rg.opp ? 'matched' : 'orphan',
+        quote_type: oppTxnType,
+        total_price: totalVal,
+        valid_until: validUntilIso || '',
+        quote_due_date: quoteDueDateIso || '',
+        wfm_sales_person: sales || '',
+        created_by_user_id: createdByUserId,
+        supersedes_quote_id: supersedes || '',
+        external_id: extId,
+      });
+
+      summaryRows.push({
+        quote_number: number,
+        new_quote_id: id,
+        opp_number: oppNumber,
+        new_opp_id: oppId,
+        opp_origin: rg.opp ? 'matched' : 'orphan',
+        external_id: extId,
+        status: 'pending',
+      });
+    }
+  }
+
+  // ---- Rollback SQL ----
+  // Order matters: delete audit events first (FK-safe), then child quotes,
+  // then orphan opps. We target by external_id prefix so only rows created
+  // by THIS import get removed. The quotes-orphan:: opps only exist because
+  // of this import; the quote:: rows likewise.
+  rollbackStatements.push(
+    `-- Rollback for wfm-quotes-import.sql`,
+    `-- Deletes only rows created by the quotes import. Does NOT touch the`,
+    `-- 196 WFM01-0001 … WFM01-0196 opps (those belong to the opportunities`,
+    `-- phase and have external_id's without the 'quotes-orphan::' prefix).`,
+    ``,
+    `-- 1. Audit events for imported quotes`,
+    `DELETE FROM audit_events`,
+    `WHERE entity_type='quote'`,
+    `  AND entity_id IN (SELECT id FROM quotes WHERE external_source='wfm' AND external_id LIKE 'quote::%');`,
+    ``,
+    `-- 2. Audit events for orphan opps created by the quotes import`,
+    `DELETE FROM audit_events`,
+    `WHERE entity_type='opportunity'`,
+    `  AND entity_id IN (SELECT id FROM opportunities WHERE external_source='wfm' AND external_id LIKE 'quotes-orphan::%');`,
+    ``,
+    `-- 3. Quotes (rows with external_id starting 'quote::')`,
+    `DELETE FROM quotes WHERE external_source='wfm' AND external_id LIKE 'quote::%';`,
+    ``,
+    `-- 4. Orphan opps (rows with external_id starting 'quotes-orphan::')`,
+    `DELETE FROM opportunities WHERE external_source='wfm' AND external_id LIKE 'quotes-orphan::%';`,
+    ``
+  );
+
+  console.log(`  Resolution:`);
+  console.log(`    exact matches to existing WFM01 opp: ${exactMatches} base groups`);
+  console.log(`    orphan opps (new WFM02):              ${orphanOpps} base groups`);
+  console.log(`    skipped (no account):                 ${skippedNoAccount} base groups`);
+  console.log(`    total quote rows emitted:             ${previewRows.length}`);
+
+  return { sqlStatements, rollbackStatements, previewRows, summaryRows };
+}
+
+// ---------------------------------------------------------------------
 // wrangler runner
 // ---------------------------------------------------------------------
 
@@ -1056,6 +1590,10 @@ function runWrangler(sqlFile, { local, remote }) {
 // ---------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------
+
+// Populated only by the 'quotes' entity case; consumed by the writer
+// below to emit a companion rollback .sql file next to the forward SQL.
+let __quotesRollbackStatements = null;
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
@@ -1105,8 +1643,25 @@ function main() {
       ));
       break;
     }
+    case 'quotes': {
+      const accountLookup = loadAccountLookup();
+      const oppsLookup = loadOppsLookup();
+      console.log(
+        `Loaded ${accountLookup.size} WFM-origin accounts and ${oppsLookup.size} unique (account,title) keys from the opps lookup.`
+      );
+      let rollbackStatements;
+      ({ sqlStatements, rollbackStatements, previewRows, summaryRows } = buildQuotesStatements(
+        rows,
+        accountLookup,
+        oppsLookup
+      ));
+      // Stash on a module-local so the writer below can emit the rollback
+      // SQL alongside the forward SQL.
+      __quotesRollbackStatements = rollbackStatements;
+      break;
+    }
     default:
-      fail(`Unknown --entity: ${args.entity}. Supported: accounts, contacts, opportunities`);
+      fail(`Unknown --entity: ${args.entity}. Supported: accounts, contacts, opportunities, quotes`);
   }
 
   console.log(`Generated ${sqlStatements.length} SQL statements for ${previewRows.length} ${args.entity}.`);
@@ -1123,6 +1678,21 @@ function main() {
   ].join('\n');
   fs.writeFileSync(sqlFile, header + sqlStatements.join('\n\n') + '\n', 'utf8');
   console.log(`  SQL written:     ${sqlFile}`);
+
+  // Rollback SQL (quotes entity only, for now — the accounts/contacts/opps
+  // phases didn't need one because they were one-shot clean inserts).
+  if (__quotesRollbackStatements && __quotesRollbackStatements.length > 0) {
+    const rollbackFile = path.join(OUT_DIR, `wfm-${args.entity}-rollback.sql`);
+    const rollbackHeader = [
+      `-- Generated by scripts/wfm-import.mjs on ${now()}`,
+      `-- Rollback script for: wfm-${args.entity}-import.sql`,
+      `-- Run via: npx wrangler d1 execute c-lars-pms-db --remote --file scripts/out/wfm-${args.entity}-rollback.sql`,
+      `-- Surgical: only touches rows with external_source='wfm' AND a quote-specific external_id prefix.`,
+      ``,
+    ].join('\n');
+    fs.writeFileSync(rollbackFile, rollbackHeader + __quotesRollbackStatements.join('\n') + '\n', 'utf8');
+    console.log(`  Rollback SQL:    ${rollbackFile}`);
+  }
 
   // Write the human-readable preview CSV.
   const previewFile = path.join(OUT_DIR, `wfm-${args.entity}-import-preview.csv`);
