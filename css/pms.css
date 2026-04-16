@@ -3430,8 +3430,15 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 }
 .board-notes-stack {
   position: relative;
-  height: 95px;
-  margin: 0.5rem 0 2.75rem;
+  /* Internal height has to cover: tallest note bottom (top:16 + h:70 = 86)
+     + box-shadow bleed (~8px) + rotation overhang (~4px) = ~98px. Pad
+     generously so hover-lift and drop-shadows stay inside. */
+  height: 115px;
+  /* flex-shrink:0 guards against the parent flex column squishing the
+     stack when other modules grow — without it, the stack can collapse
+     and the notes list below can bleed up into the post-it paint area. */
+  flex: 0 0 auto;
+  margin: 0.5rem 0 1rem;
 }
 .board-stack-note {
   position: absolute;
@@ -3460,7 +3467,11 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
-  padding: 0.6rem 0.3rem 0.25rem;
+  padding: 1rem 0.3rem 0.25rem;
+  /* Explicit stacking context so post-it shadows above can't bleed
+     visually onto the first saved card. */
+  position: relative;
+  z-index: 0;
 }
 
 /* Each note is wrapped in a .board-card-stack so a long body can
@@ -3725,32 +3736,17 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   font-family: var(--font);
 }
 
-/* Publish toggle — small text-link button in the bottom-right of the
-   composer/edit toolbar. Default ("Publish") is muted; active state
-   ("Published") is the ink-blue handwritten accent so it reads as
-   "this note is now visible to everyone." */
-.board-publish-btn {
+/* Share hint — small label in the bottom-right of the composer/edit
+   toolbar. Reads "Private" when body has no @-mention, "Shared" when
+   it does. Sharing is automatic: there's no toggle to click, it just
+   reflects what's in the body. */
+.board-composer-share-hint {
   margin-left: auto;
-  background: transparent;
-  border: none;
   padding: 2px 6px;
-  cursor: pointer;
   font-family: var(--font);
   font-size: 0.72rem;
   color: rgba(0,0,0,0.45);
-  border-radius: 4px;
-  transition: color 0.12s ease, background-color 0.12s ease;
-}
-.board-publish-btn:hover {
-  color: rgba(0,0,0,0.75);
-  background: rgba(0,0,0,0.06);
-}
-.board-publish-btn.is-published {
-  color: var(--board-ink-blue);
-  font-weight: 600;
-}
-.board-publish-btn.is-published:hover {
-  background: rgba(42, 74, 127, 0.1);
+  cursor: help;
 }
 
 /* Color picker — collapsed swatch, expand on hover */

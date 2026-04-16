@@ -551,13 +551,10 @@
         this.showCompleted = !this.showCompleted;
       },
 
-      // ---- Publish toggle (composer or editing) ----
-      // Notes default to private; clicking "Publish" flips scope to
-      // 'public' (shared); clicking again ("Published") flips back.
-      togglePublish: function (target) {
-        if (target !== 'composer' && target !== 'editing') return;
-        this[target].scope = this[target].scope === 'public' ? 'private' : 'public';
-      },
+      // Notes are always created as scope='private'. Sharing happens
+      // purely via @-mention: @Someone in the body writes a row to
+      // board_card_refs, and that user sees the note in their Mentions
+      // module. No separate Publish toggle — less UI, one mental model.
 
       toggleTask: function (task) {
         if (!task || !task.id) return;
@@ -660,8 +657,19 @@
           });
       },
 
+      // Only the author can edit a card. Mentioned recipients see the
+      // card in their Mentions module but can't modify it.
+      canEditCard: function (card) {
+        if (!card) return false;
+        if (this.userId && card.author_user_id) return card.author_user_id === this.userId;
+        // If userId hasn't loaded yet, fall back to scope-based:
+        // my_notes are always scope='private' authored by me.
+        return card.scope === 'private';
+      },
+
       // ---- Inline edit ----
       startEdit: function (card) {
+        if (!this.canEditCard(card)) return;
         this.editing.cardId = card.id;
         this.editing.body = card.body || '';
         this.editing.color = card.color || 'yellow';

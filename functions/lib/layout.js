@@ -437,11 +437,12 @@ const BOARD_RIGHT_MARKUP = (
             '</div>' +
           '</div>' +
           '<span class="board-composer-error" x-show="$store.board.composer.error" x-text="$store.board.composer.error"></span>' +
-          '<button type="button" class="board-publish-btn" ' +
-            ':class="$store.board.composer.scope === \'public\' ? \'is-published\' : \'\'" ' +
-            ':title="$store.board.composer.scope === \'public\' ? \'Visible to everyone — click to make private\' : \'Only you can see this — click to publish\'" ' +
-            '@click="$store.board.togglePublish(\'composer\')" ' +
-            'x-text="$store.board.composer.scope === \'public\' ? \'Published\' : \'Publish\'"></button>' +
+          // Sharing is purely @-mention driven: a plain note stays private,
+          // but @Someone adds that user to board_card_refs and the note
+          // shows up in their Mentions module. Hint at this in the corner.
+          '<span class="board-composer-share-hint" ' +
+            ':title="$store.board.composer.body.indexOf(\'@\') >= 0 ? \'This note will be shared with mentioned users.\' : \'Only you will see this. Type @ to share with someone.\'" ' +
+            'x-text="$store.board.composer.body.indexOf(\'@\') >= 0 ? \'Shared\' : \'Private\'"></span>' +
         '</div>' +
       '</div>' +
 
@@ -528,11 +529,9 @@ const BOARD_RIGHT_MARKUP = (
                     '</div>' +
                   '</div>' +
                   '<span class="board-composer-error" x-show="$store.board.editing.error" x-text="$store.board.editing.error"></span>' +
-                  '<button type="button" class="board-publish-btn" ' +
-                    ':class="$store.board.editing.scope === \'public\' ? \'is-published\' : \'\'" ' +
-                    ':title="$store.board.editing.scope === \'public\' ? \'Visible to everyone — click to make private\' : \'Only you can see this — click to publish\'" ' +
-                    '@click="$store.board.togglePublish(\'editing\')" ' +
-                    'x-text="$store.board.editing.scope === \'public\' ? \'Published\' : \'Publish\'"></button>' +
+                  '<span class="board-composer-share-hint" ' +
+                    ':title="$store.board.editing.body.indexOf(\'@\') >= 0 ? \'This note is shared with mentioned users.\' : \'Only you will see this. Type @ to share with someone.\'" ' +
+                    'x-text="$store.board.editing.body.indexOf(\'@\') >= 0 ? \'Shared\' : \'Private\'"></span>' +
                 '</div>' +
               '</div>' +
             '</template>' +

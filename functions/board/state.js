@@ -116,8 +116,22 @@ export async function onRequestGet(context) {
               OR c.target_user_id = ?
               OR c.author_user_id = ?
             ))
+            -- Public notes (legacy; new notes aren't published anymore)
+            -- that @-mention me.
             OR (
               c.scope = 'public'
+              AND EXISTS (
+                SELECT 1 FROM board_card_refs r
+                 WHERE r.card_id = c.id AND r.ref_type = 'user' AND r.ref_id = ?
+              )
+            )
+            -- Private notes authored by someone else that @-mention me.
+            -- This is the new "share via mention" path: authors keep
+            -- their notes private but adding @Someone surfaces the note
+            -- in that user's Mentions module.
+            OR (
+              c.scope = 'private'
+              AND c.author_user_id != ?
               AND EXISTS (
                 SELECT 1 FROM board_card_refs r
                  WHERE r.card_id = c.id AND r.ref_type = 'user' AND r.ref_id = ?
@@ -126,7 +140,7 @@ export async function onRequestGet(context) {
           )
         ORDER BY c.pinned DESC, c.sort_order DESC, c.created_at DESC
         LIMIT 100`,
-      [nowIso, user.id, user.id, user.id]),
+      [nowIso, user.id, user.id, user.id, user.id, user.id]),
   ]);
 
   // Bundle refs for all note-type cards in one query, fan out client-side.
