@@ -313,22 +313,25 @@ const BOARD_RIGHT_MARKUP = (
       ':class="$store.board.showCompleted ? \'board-tasks-show-done\' : \'\'">' +
       // "Peek over the wall" icon \u2014 hide both sidebars for 5 min.
       // Replaces the old plain-X handle that lived in the sidebar corner.
+      // Dome head + fingertip bumps gripping the wall.
       '<button type="button" class="board-hide-peek" ' +
         '@click="$store.board.hideFor(5)" ' +
         'title="Hide board for 5 min" aria-label="Hide board">' +
-        '<svg viewBox="0 0 32 20" width="24" height="15" aria-hidden="true">' +
+        '<svg viewBox="0 0 100 60" width="32" height="19" aria-hidden="true">' +
           '<g fill="currentColor">' +
-            // fence / wall the figure peeks over
-            '<rect x="1" y="14" width="30" height="3" rx="1.5"/>' +
-            // head
-            '<ellipse cx="16" cy="9" rx="6" ry="6"/>' +
-            // two hand-bumps gripping the wall
-            '<ellipse cx="6" cy="13" rx="1.5" ry="2"/>' +
-            '<ellipse cx="26" cy="13" rx="1.5" ry="2"/>' +
+            // wall
+            '<rect x="2" y="46" width="96" height="10" rx="5"/>' +
+            // head: dome rising out of the wall
+            '<path d="M 32 46 Q 32 11 50 11 Q 68 11 68 46 Z"/>' +
+            // left fingertips (3 bumps)
+            '<circle cx="10" cy="46" r="3"/>' +
+            '<circle cx="17" cy="46" r="3"/>' +
+            '<circle cx="24" cy="46" r="3"/>' +
+            // right fingertips (3 bumps)
+            '<circle cx="76" cy="46" r="3"/>' +
+            '<circle cx="83" cy="46" r="3"/>' +
+            '<circle cx="90" cy="46" r="3"/>' +
           '</g>' +
-          // eyes \u2014 hollow circles in the head (bg-coloured)
-          '<circle cx="14" cy="9.5" r="1" fill="#fff"/>' +
-          '<circle cx="18" cy="9.5" r="1" fill="#fff"/>' +
         '</svg>' +
       '</button>' +
       '<h3 class="board-zone-heading">Tasks</h3>' +

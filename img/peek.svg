@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60" width="160" height="96" aria-label="Peeking">
+  <g fill="#000">
+    <!-- wall -->
+    <rect x="2" y="46" width="96" height="10" rx="5"/>
+    <!-- head: dome rising out of the wall -->
+    <path d="M 32 46 Q 32 11 50 11 Q 68 11 68 46 Z"/>
+    <!-- left fingertips -->
+    <circle cx="10" cy="46" r="3"/>
+    <circle cx="17" cy="46" r="3"/>
+    <circle cx="24" cy="46" r="3"/>
+    <!-- right fingertips -->
+    <circle cx="76" cy="46" r="3"/>
+    <circle cx="83" cy="46" r="3"/>
+    <circle cx="90" cy="46" r="3"/>
+  </g>
+</svg>
