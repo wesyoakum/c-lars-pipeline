@@ -301,16 +301,8 @@ const WIZARD_MODAL_MARKUP = (
 const BOARD_RIGHT_MARKUP = (
   '<div class="board-root board-root-right" x-data x-cloak>' +
 
-  // Collapsed strip (after a Hide). Sits in same fixed slot.
-  '<button type="button" class="board-strip" ' +
-    'x-show="$store.board && $store.board.isCollapsed" ' +
-    '@click="$store.board.expandNow()" ' +
-    'aria-label="Open board">' +
-    '<span class="board-strip-label">BOARD</span>' +
-    '<span class="board-strip-badge" ' +
-      'x-show="$store.board && $store.board.collapsedBadge > 0" ' +
-      'x-text="$store.board && $store.board.collapsedBadge"></span>' +
-  '</button>' +
+  // (Restore button when collapsed lives in the header next to the
+  // notification bell \u2014 see BOARD_RESTORE_HEADER_BTN.)
 
   '<aside class="board-sidebar board-sidebar-right" ' +
     'x-show="$store.board && !$store.board.isCollapsed" ' +
@@ -538,6 +530,28 @@ const BOARD_LEFT_MARKUP = (
   '</div>'
 );
 
+// Header restore button \u2014 sits in .header-right, just left of the
+// notification bell. Only visible when the board has been hidden via
+// the X (or any other reason `isCollapsed` is true). Clicking it
+// expands both sidebars in one shot.
+const BOARD_RESTORE_HEADER_BTN = (
+  '<button type="button" class="board-restore-btn" x-data x-cloak ' +
+    'x-show="$store.board && $store.board.isCollapsed" ' +
+    '@click="$store.board.expandNow()" ' +
+    'aria-label="Open board" title="Open board">' +
+    '<svg class="board-restore-icon" viewBox="0 0 24 24" width="20" height="20" ' +
+      'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+      'stroke-linejoin="round" aria-hidden="true">' +
+      // Sticky-note silhouette with a corner fold.
+      '<path d="M4 4h12l4 4v12H4z"/>' +
+      '<path d="M16 4v4h4"/>' +
+    '</svg>' +
+    '<span class="board-restore-badge" ' +
+      'x-show="$store.board && $store.board.collapsedBadge > 0" ' +
+      'x-text="$store.board && $store.board.collapsedBadge"></span>' +
+  '</button>'
+);
+
 // (Previously the sidebar overlaid the page and required body-class
 // gymnastics to push main-content padding. Sidebars now sit in the
 // natural left/right margin of the centered .site-main, so no body
@@ -607,6 +621,7 @@ export function layout(title, body, opts = {}) {
       ${navLink('/jobs', 'Jobs', activeNav)}
     </nav>
     <div class="header-right">
+      ${user ? BOARD_RESTORE_HEADER_BTN : ''}
       ${user ? `<a href="/notifications" class="notification-bell" aria-label="Notifications" x-data>
         <svg class="notification-bell-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
           <path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6V11a6 6 0 0 0-4.5-5.81V5a1.5 1.5 0 0 0-3 0v.19A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z"/>

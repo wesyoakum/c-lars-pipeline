@@ -3097,41 +3097,41 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   color: rgba(0,0,0,0.65);
 }
 
-/* Strip stays as a tiny floating chip in the right margin once hidden */
-.board-strip {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  right: 4px;
-  background: rgba(255,255,255,0.85);
-  border: 1px solid rgba(0,0,0,0.15);
-  color: var(--fg-muted);
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
+/* Restore button — lives in .header-right to the left of the bell.
+   Only shown while the board is collapsed (Alpine controls visibility).
+   Styled to match the notification bell: same 36×36 circle, same hover. */
+.board-restore-btn {
+  position: relative;
+  display: inline-flex;
   align-items: center;
-  padding: 0.6rem 0.3rem;
-  gap: 0.4rem;
-  border-radius: 6px;
-  z-index: 5;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s ease;
 }
-.board-strip:hover { background: #fff; color: var(--fg); }
-.board-strip-label {
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  font-family: var(--board-hand);
-  font-size: 1rem;
-  letter-spacing: 0.1em;
-  font-weight: 600;
-}
-.board-strip-badge {
-  min-width: 1.2em;
-  padding: 0 0.35em;
-  background: #c0392b;
-  color: white;
-  border-radius: 1em;
-  font-size: 0.7rem;
+.board-restore-btn:hover { background: var(--bg-alt); }
+.board-restore-icon { display: block; }
+.board-restore-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #d1242f;
+  color: #fff;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 16px;
   text-align: center;
+  box-shadow: 0 0 0 2px var(--bg);
 }
 
 /* ---------- Zone heading (handwritten blue, underlined) ---------- */
