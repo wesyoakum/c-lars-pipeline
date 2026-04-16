@@ -1,10 +1,12 @@
 // functions/accounts/[id]/index.js
 //
-// GET  /accounts/:id  — account detail (overview, contacts, activity feed)
-// POST /accounts/:id  — update account (from the edit form)
+// GET  /accounts/:id           — account detail, overview tab
+// GET  /accounts/:id?tab=…     — switch tabs (contacts/opportunities/quotes/tasks/docs/history)
+// POST /accounts/:id           — update account (from the legacy edit form)
 //
-// The detail page has three tabs rendered as stacked cards on one page
-// (we'll break them into true tabs when the detail pages get busier).
+// The detail page mirrors the opportunity detail page — a tab nav card
+// followed by a single tab body. Tabs are server-rendered (each link is
+// a real GET with `?tab=` so URLs can be shared/bookmarked).
 
 import { one, all, stmt, batch } from '../../lib/db.js';
 import { auditStmt, diff } from '../../lib/audit.js';
@@ -151,6 +153,7 @@ export async function onRequestGet(context) {
   const user = data?.user;
   const url = new URL(request.url);
   const accountId = params.id;
+  const tab = url.searchParams.get('tab') || 'overview';
 
   const account = await one(
     env.DB,
@@ -200,14 +203,16 @@ export async function onRequestGet(context) {
     ...users.map(u => ({ value: u.id, label: u.display_name ?? u.email })),
   ];
 
-  // Related-records sections: opportunities, quotes, and documents for
-  // this account. Quotes reach the account via the opportunities join;
-  // documents can be attached directly to the account, to an opp, or
-  // to a quote on one of its opps. Note-attachment documents (those
-  // with `activity_id` set) are excluded — they render inline with
-  // their note. All four queries run in parallel so the page does not
-  // serialize on database latency.
-  const [accountOpps, accountQuotes, accountDocs, stageCatalog] = await Promise.all([
+  // Related-records sections: opportunities, quotes, documents, and
+  // tasks/activities for this account. Quotes reach the account via
+  // the opportunities join; documents can be attached directly to the
+  // account, to an opp, or to a quote on one of its opps. Tasks reach
+  // it the same three ways (account_id, opportunity_id → account, or
+  // quote_id → opportunity → account). Note-attachment documents
+  // (those with `activity_id` set) are excluded — they render inline
+  // with their note. All five queries run in parallel so the page
+  // does not serialize on database latency.
+  const [accountOpps, accountQuotes, accountDocs, accountTasks, stageCatalog] = await Promise.all([
     all(
       env.DB,
       `SELECT id, number, title, transaction_type, stage,
@@ -251,8 +256,34 @@ export async function onRequestGet(context) {
         LIMIT 100`,
       [accountId, accountId, accountId]
     ),
+    all(
+      env.DB,
+      `SELECT a.id, a.type, a.subject, a.body, a.status, a.due_at,
+              a.completed_at, a.direction, a.created_at,
+              a.account_id, a.opportunity_id, a.quote_id,
+              o.number AS opp_number, o.title AS opp_title,
+              u.display_name AS assigned_name, u.email AS assigned_email
+         FROM activities a
+         LEFT JOIN opportunities o ON o.id = a.opportunity_id
+         LEFT JOIN users u ON u.id = a.assigned_user_id
+        WHERE a.account_id = ?
+           OR a.opportunity_id IN (SELECT id FROM opportunities WHERE account_id = ?)
+           OR a.quote_id IN (SELECT q3.id FROM quotes q3
+                              JOIN opportunities o3 ON o3.id = q3.opportunity_id
+                             WHERE o3.account_id = ?)
+        ORDER BY
+          CASE WHEN a.status = 'pending' THEN 0 ELSE 1 END,
+          CASE WHEN a.due_at IS NOT NULL THEN 0 ELSE 1 END,
+          a.due_at ASC, a.created_at DESC
+        LIMIT 100`,
+      [accountId, accountId, accountId]
+    ),
     loadStageCatalog(env.DB),
   ]);
+
+  const TASK_TYPE_LABELS = { task: 'Task', note: 'Note', email: 'Email', call: 'Call', meeting: 'Meeting' };
+  const taskRows = accountTasks;
+  const taskBadgeCount = accountTasks.filter((t) => t.status === 'pending').length;
 
   // Pre-format rows so the template stays simple.
   const userDisplayById = new Map(users.map((u) => [u.id, u.display_name ?? u.email]));
@@ -329,7 +360,14 @@ export async function onRequestGet(context) {
     [accountId, accountId]
   );
 
-  const body = html`
+  const tasksTabPrefill = JSON.stringify({
+    account_id: account.id,
+    link_label: account.alias || account.name,
+  });
+
+  // ---- Per-tab body fragments -------------------------------------------
+
+  const overviewTab = html`
     <section class="card" x-data="acctInline('${escape(account.id)}')">
       <div class="card-header">
         <div>
@@ -406,125 +444,12 @@ export async function onRequestGet(context) {
             `)}
           </ul>
         </section>`
-      : ''}
+      : ''}`;
 
+  const contactsTab = html`
     <section class="card">
       <div class="card-header">
-        <h2>Opportunities (${oppRows.length})</h2>
-        <a class="btn primary" href="/opportunities/new?account=${escape(account.id)}">New opportunity</a>
-      </div>
-      ${oppRows.length === 0
-        ? html`<p class="muted">No opportunities yet.</p>`
-        : html`
-          <table class="data compact">
-            <thead>
-              <tr>
-                <th>Number</th>
-                <th>Title</th>
-                <th>Type</th>
-                <th>Stage</th>
-                <th class="num">Value</th>
-                <th>Owner</th>
-                <th>Updated</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${oppRows.map((o) => html`
-                <tr>
-                  <td><a href="/opportunities/${escape(o.id)}"><code>${escape(o.number)}</code></a></td>
-                  <td><a href="/opportunities/${escape(o.id)}">${escape(o.title || '(untitled)')}</a></td>
-                  <td>${escape(o.typeLabel)}</td>
-                  <td><span class="pill">${escape(o.stageLabel)}</span></td>
-                  <td class="num">${escape(o.value != null ? fmtDollar(o.value) : '\u2014')}</td>
-                  <td>${escape(o.owner)}</td>
-                  <td><small class="muted">${escape(o.updated)}</small></td>
-                </tr>
-              `)}
-            </tbody>
-          </table>
-        `}
-    </section>
-
-    <section class="card">
-      <div class="card-header">
-        <h2>Quotes (${quoteRows.length})</h2>
-      </div>
-      ${quoteRows.length === 0
-        ? html`<p class="muted">No quotes yet.</p>`
-        : html`
-          <table class="data compact">
-            <thead>
-              <tr>
-                <th>Number</th>
-                <th>Rev</th>
-                <th>Type</th>
-                <th>Title</th>
-                <th>Opportunity</th>
-                <th>Status</th>
-                <th class="num">Total</th>
-                <th>Valid until</th>
-                <th>Updated</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${quoteRows.map((q) => html`
-                <tr>
-                  <td><a href="/opportunities/${escape(q.opportunity_id)}/quotes/${escape(q.id)}"><code>${escape(q.number)}</code></a></td>
-                  <td>${escape(q.revision)}</td>
-                  <td>${escape(q.typeLabel)}</td>
-                  <td>${escape(q.title || '(no title)')}</td>
-                  <td><a href="/opportunities/${escape(q.opportunity_id)}"><code>${escape(q.oppNumber)}</code> ${escape(q.oppTitle)}</a></td>
-                  <td><span class="pill ${quoteStatusPillClass(q.status)}">${escape(q.statusLabel)}</span></td>
-                  <td class="num">${escape(q.total != null ? fmtDollar(q.total) : '\u2014')}</td>
-                  <td><small class="muted">${escape(q.validUntil)}</small></td>
-                  <td><small class="muted">${escape(q.updated)}</small></td>
-                </tr>
-              `)}
-            </tbody>
-          </table>
-        `}
-    </section>
-
-    <section class="card">
-      <div class="card-header">
-        <h2>Documents (${docRows.length})</h2>
-        <a class="btn" href="/documents/library">Open library</a>
-      </div>
-      ${docRows.length === 0
-        ? html`<p class="muted">No documents yet.</p>`
-        : html`
-          <table class="data compact">
-            <thead>
-              <tr>
-                <th>Kind</th>
-                <th>Title</th>
-                <th>Linked to</th>
-                <th class="num">Size</th>
-                <th>Uploaded</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              ${docRows.map((d) => html`
-                <tr>
-                  <td><span class="pill">${escape(d.kindLabel)}</span></td>
-                  <td><a href="/documents/${escape(d.id)}/download">${escape(d.title)}</a></td>
-                  <td>${d.linkedHref
-                    ? html`<a href="${escape(d.linkedHref)}">${escape(d.linkedTo)}</a>`
-                    : html`<small class="muted">${escape(d.linkedTo)}</small>`}</td>
-                  <td class="num"><small class="muted">${escape(d.size)}</small></td>
-                  <td><small class="muted">${escape(d.uploaded)}</small></td>
-                  <td class="row-actions"><a class="btn btn-sm" href="/documents/${escape(d.id)}/download">Download</a></td>
-                </tr>
-              `)}
-            </tbody>
-          </table>
-        `}
-    </section>
-
-    <section class="card">
-      <div class="card-header">
-        <h2>Contacts (${contacts.length})</h2>
+        <h2>Contacts</h2>
         <a class="btn primary" href="/accounts/${escape(account.id)}/contacts/new">New contact</a>
       </div>
 
@@ -564,10 +489,162 @@ export async function onRequestGet(context) {
             </tbody>
           </table>
         `}
-    </section>
+    </section>`;
 
+  const opportunitiesTab = html`
     <section class="card">
-      <h2>Activity</h2>
+      <div class="card-header">
+        <h2>Opportunities</h2>
+        <a class="btn primary" href="/opportunities/new?account=${escape(account.id)}">New opportunity</a>
+      </div>
+      ${oppRows.length === 0
+        ? html`<p class="muted">No opportunities yet.</p>`
+        : html`
+          <table class="data compact">
+            <thead>
+              <tr>
+                <th>Number</th>
+                <th>Title</th>
+                <th>Type</th>
+                <th>Stage</th>
+                <th class="num">Value</th>
+                <th>Owner</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${oppRows.map((o) => html`
+                <tr>
+                  <td><a href="/opportunities/${escape(o.id)}"><code>${escape(o.number)}</code></a></td>
+                  <td><a href="/opportunities/${escape(o.id)}">${escape(o.title || '(untitled)')}</a></td>
+                  <td>${escape(o.typeLabel)}</td>
+                  <td><span class="pill">${escape(o.stageLabel)}</span></td>
+                  <td class="num">${escape(o.value != null ? fmtDollar(o.value) : '\u2014')}</td>
+                  <td>${escape(o.owner)}</td>
+                  <td><small class="muted">${escape(o.updated)}</small></td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        `}
+    </section>`;
+
+  const quotesTab = html`
+    <section class="card">
+      <div class="card-header">
+        <h2>Quotes</h2>
+      </div>
+      ${quoteRows.length === 0
+        ? html`<p class="muted">No quotes yet.</p>`
+        : html`
+          <table class="data compact">
+            <thead>
+              <tr>
+                <th>Number</th>
+                <th>Rev</th>
+                <th>Type</th>
+                <th>Title</th>
+                <th>Opportunity</th>
+                <th>Status</th>
+                <th class="num">Total</th>
+                <th>Valid until</th>
+                <th>Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${quoteRows.map((q) => html`
+                <tr>
+                  <td><a href="/opportunities/${escape(q.opportunity_id)}/quotes/${escape(q.id)}"><code>${escape(q.number)}</code></a></td>
+                  <td>${escape(q.revision)}</td>
+                  <td>${escape(q.typeLabel)}</td>
+                  <td>${escape(q.title || '(no title)')}</td>
+                  <td><a href="/opportunities/${escape(q.opportunity_id)}"><code>${escape(q.oppNumber)}</code> ${escape(q.oppTitle)}</a></td>
+                  <td><span class="pill ${quoteStatusPillClass(q.status)}">${escape(q.statusLabel)}</span></td>
+                  <td class="num">${escape(q.total != null ? fmtDollar(q.total) : '\u2014')}</td>
+                  <td><small class="muted">${escape(q.validUntil)}</small></td>
+                  <td><small class="muted">${escape(q.updated)}</small></td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        `}
+    </section>`;
+
+  const tasksTab = html`
+    <section class="card">
+      <div class="card-header">
+        <h2>Tasks &amp; Activities</h2>
+        <button class="btn btn-sm primary" type="button"
+                onclick="window.PMS && window.PMS.openTaskModal(${escape(tasksTabPrefill)})">+ Add task</button>
+      </div>
+      ${taskRows.length === 0
+        ? html`<p class="muted">No tasks or activities yet.</p>`
+        : html`
+          <table class="data compact">
+            <thead><tr><th style="width:2rem"></th><th>Subject</th><th>Type</th><th>Linked to</th><th>Assigned</th><th>Due</th><th>Status</th></tr></thead>
+            <tbody>
+              ${taskRows.map(a => {
+                const isOverdue = a.status === 'pending' && a.due_at && a.due_at < new Date().toISOString().slice(0, 10);
+                return html`<tr class="${a.status === 'completed' ? 'row-muted' : ''} ${isOverdue ? 'row-overdue' : ''}">
+                  <td>${a.status === 'pending'
+                    ? html`<form method="post" action="/activities/${escape(a.id)}/complete" style="display:inline"><button type="submit" class="check-btn" title="Mark complete"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/></svg></button></form>`
+                    : html`<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--green,#1a7f37)" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="M5 8l2 2 4-4"/></svg>`}</td>
+                  <td><a href="/activities/${escape(a.id)}"><strong class="${a.status === 'completed' ? 'completed-text' : ''}">${escape(a.subject || '(no subject)')}</strong></a>
+                    ${a.body ? html`<br><small class="muted">${escape(a.body.length > 60 ? a.body.slice(0, 60) + '...' : a.body)}</small>` : ''}</td>
+                  <td><span class="pill pill-${a.type}">${escape(TASK_TYPE_LABELS[a.type] ?? a.type)}</span></td>
+                  <td>${a.opportunity_id
+                    ? html`<a href="/opportunities/${escape(a.opportunity_id)}"><code>${escape(a.opp_number ?? '')}</code></a>`
+                    : html`<span class="muted">Account</span>`}</td>
+                  <td>${escape(a.assigned_name ?? a.assigned_email ?? '\u2014')}</td>
+                  <td class="${isOverdue ? 'overdue-text' : ''}">${a.due_at ? escape(a.due_at.slice(0, 10)) : html`<span class="muted">\u2014</span>`}</td>
+                  <td><span class="pill ${a.status === 'completed' ? 'pill-success' : ''}">${escape(a.status ?? '\u2014')}</span></td>
+                </tr>`;
+              })}
+            </tbody>
+          </table>`}
+    </section>`;
+
+  const docsTab = html`
+    <section class="card">
+      <div class="card-header">
+        <h2>Documents</h2>
+        <a class="btn" href="/documents/library">Open library</a>
+      </div>
+      ${docRows.length === 0
+        ? html`<p class="muted">No documents yet.</p>`
+        : html`
+          <table class="data compact">
+            <thead>
+              <tr>
+                <th>Kind</th>
+                <th>Title</th>
+                <th>Linked to</th>
+                <th class="num">Size</th>
+                <th>Uploaded</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${docRows.map((d) => html`
+                <tr>
+                  <td><span class="pill">${escape(d.kindLabel)}</span></td>
+                  <td><a href="/documents/${escape(d.id)}/download">${escape(d.title)}</a></td>
+                  <td>${d.linkedHref
+                    ? html`<a href="${escape(d.linkedHref)}">${escape(d.linkedTo)}</a>`
+                    : html`<small class="muted">${escape(d.linkedTo)}</small>`}</td>
+                  <td class="num"><small class="muted">${escape(d.size)}</small></td>
+                  <td><small class="muted">${escape(d.uploaded)}</small></td>
+                  <td class="row-actions"><a class="btn btn-sm" href="/documents/${escape(d.id)}/download">Download</a></td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        `}
+    </section>`;
+
+  const historyTab = html`
+    <section class="card">
+      <h2>History</h2>
       ${events.length === 0
         ? html`<p class="muted">No activity yet.</p>`
         : html`
@@ -594,7 +671,33 @@ export async function onRequestGet(context) {
             )}
           </ul>
         `}
-    </section>
+    </section>`;
+
+  // ---- Tab nav -----------------------------------------------------------
+
+  const tabs = html`
+    <nav class="card" style="padding: 0.5rem 1rem;">
+      <a class="nav-link ${tab === 'overview' ? 'active' : ''}" href="/accounts/${escape(account.id)}">Overview</a>
+      <a class="nav-link ${tab === 'contacts' ? 'active' : ''}" href="/accounts/${escape(account.id)}?tab=contacts">Contacts (${contacts.length})</a>
+      <a class="nav-link ${tab === 'opportunities' ? 'active' : ''}" href="/accounts/${escape(account.id)}?tab=opportunities">Opportunities (${oppRows.length})</a>
+      <a class="nav-link ${tab === 'quotes' ? 'active' : ''}" href="/accounts/${escape(account.id)}?tab=quotes">Quotes (${quoteRows.length})</a>
+      <a class="nav-link ${tab === 'tasks' ? 'active' : ''}" href="/accounts/${escape(account.id)}?tab=tasks">Tasks${taskBadgeCount > 0 ? ` (${taskBadgeCount})` : ''}</a>
+      <a class="nav-link ${tab === 'docs' ? 'active' : ''}" href="/accounts/${escape(account.id)}?tab=docs">Docs (${docRows.length})</a>
+      <a class="nav-link ${tab === 'history' ? 'active' : ''}" href="/accounts/${escape(account.id)}?tab=history">History (${events.length})</a>
+    </nav>`;
+
+  const activeTab =
+    tab === 'contacts' ? contactsTab :
+    tab === 'opportunities' ? opportunitiesTab :
+    tab === 'quotes' ? quotesTab :
+    tab === 'tasks' ? tasksTab :
+    tab === 'docs' ? docsTab :
+    tab === 'history' ? historyTab :
+    overviewTab;
+
+  const body = html`
+    ${tabs}
+    ${activeTab}
 
     <script>
     function acctInline(acctId) {

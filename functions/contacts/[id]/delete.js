@@ -40,7 +40,7 @@ export async function onRequestPost(context) {
   ]);
 
   return redirectWithFlash(
-    `/accounts/${contact.account_id}`,
+    `/accounts/${contact.account_id}?tab=contacts`,
     `Contact "${displayName}" deleted.`
   );
 }

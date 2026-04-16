@@ -106,7 +106,7 @@ export async function onRequestPost(context) {
   }
 
   return redirectWithFlash(
-    `/accounts/${accountId}`,
+    `/accounts/${accountId}?tab=contacts`,
     `Contact "${displayName}" added.`
   );
 }
