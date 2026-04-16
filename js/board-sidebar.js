@@ -305,6 +305,49 @@
         return cls;
       },
 
+      // ---- Long-note pagination ----
+      // If a note's body exceeds PAGE_LEN it splits into "pages" — extra
+      // squares stacked behind the first one. Cached on the card object
+      // keyed by the body string so we don't re-split on every Alpine
+      // reactivity tick. Cache invalidates automatically when body
+      // changes (poll replaces card object, or edit rewrites body).
+      PAGE_LEN: 240,
+      splitPages: function (body) {
+        body = body || '';
+        var max = this.PAGE_LEN;
+        if (body.length <= max) return [body];
+        var pages = [];
+        var rest = body;
+        while (rest.length > max) {
+          var cut = max;
+          // Prefer to break on a newline or whitespace within the
+          // back half of the page so we don't slice mid-word.
+          var slice = rest.slice(0, max + 1);
+          var ws = Math.max(slice.lastIndexOf('\n'), slice.lastIndexOf(' '));
+          if (ws > max * 0.5) cut = ws;
+          pages.push(rest.slice(0, cut).replace(/\s+$/, ''));
+          rest = rest.slice(cut).replace(/^\s+/, '');
+        }
+        if (rest.length > 0) pages.push(rest);
+        return pages;
+      },
+      cardPages: function (card) {
+        if (!card) return [''];
+        var body = card.body || '';
+        if (card.__pages_for !== body) {
+          card.__pages = this.splitPages(body);
+          card.__pages_for = body;
+        }
+        return card.__pages;
+      },
+      hasMorePages: function (card) { return this.cardPages(card).length > 1; },
+      firstPage: function (card)    { return this.cardPages(card)[0] || ''; },
+      extraPages: function (card)   { return this.cardPages(card).slice(1); },
+      toggleExpand: function (card) {
+        if (!card) return;
+        card.__expanded = !card.__expanded;
+      },
+
       // ---- Lifecycle ----
       start: function () {
         if (this.pollHandle) return;

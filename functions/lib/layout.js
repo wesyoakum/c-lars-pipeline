@@ -448,6 +448,13 @@ const BOARD_RIGHT_MARKUP = (
       // Saved notes (private + shared + public-mentions) — below the stack
       '<div class="board-notes-list">' +
         '<template x-for="card in $store.board.allNotes" :key="card.id">' +
+          // Wrapper holds the primary card + any "extra pages" when
+          // a long body has been split. Classes drive the collapsed
+          // stacked-paper look (single peeking edge) vs. expanded
+          // stack of full cards.
+          '<div :class="\'board-card-stack \' + ' +
+            '($store.board.hasMorePages(card) ? \'board-card-stack-multi \' : \'\') + ' +
+            '(card.__expanded ? \'is-expanded\' : \'is-collapsed\')">' +
           '<article :class="$store.board.cardClass(card)">' +
 
             // Pin + Copy + X delete on hover (opacity controlled by CSS).
@@ -516,11 +523,35 @@ const BOARD_RIGHT_MARKUP = (
 
             '<template x-if="$store.board.editing.cardId !== card.id">' +
               '<div class="board-card-body" ' +
-                'x-html="$store.board.renderBody(card.body)" ' +
+                'x-html="$store.board.renderBody($store.board.firstPage(card))" ' +
                 '@click="$store.board.startEdit(card)"></div>' +
             '</template>' +
 
+            // "+N more" / "Hide pages" toggle \u2014 only appears when the
+            // body has been split into 2+ pages and we\u2019re not in edit
+            // mode. Sits in the bottom-right corner of the first card.
+            '<button type="button" class="board-card-pages-toggle" ' +
+              'x-show="$store.board.hasMorePages(card) && $store.board.editing.cardId !== card.id" ' +
+              '@click.stop="$store.board.toggleExpand(card)" ' +
+              'x-text="card.__expanded ? \'Hide pages\' : (\'+\' + ($store.board.cardPages(card).length - 1) + \' more\')"></button>' +
+
           '</article>' +
+
+          // Extra pages \u2014 only rendered when expanded. Each is a full
+          // card sharing the same color/tilt-from-id seed so the
+          // stack reads as one note. Click any extra page to enter
+          // edit mode on the parent card.
+          '<template x-if="$store.board.hasMorePages(card) && card.__expanded && $store.board.editing.cardId !== card.id">' +
+            '<template x-for="(p, i) in $store.board.extraPages(card)" :key="i">' +
+              '<article :class="$store.board.cardClass(card) + \' board-card-page-extra\'">' +
+                '<div class="board-card-body" ' +
+                  'x-html="$store.board.renderBody(p)" ' +
+                  '@click="$store.board.startEdit(card)"></div>' +
+              '</article>' +
+            '</template>' +
+          '</template>' +
+
+          '</div>' + // /.board-card-stack
         '</template>' +
       '</div>' +
 
