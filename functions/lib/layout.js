@@ -623,11 +623,11 @@ export function layout(title, body, opts = {}) {
   <script defer src="/js/wizard-modal.js"></script>
   <script defer src="/js/wizards/task.js"></script>
   <script defer src="/js/wizards/account.js"></script>
+  ${user ? '<script defer src="/js/board-sidebar.js"></script>' : ''}
   <script defer src="/js/alpine.min.js"></script>
   <script defer src="/js/live-calc.js"></script>
   <script defer src="/js/account-picker.js"></script>
   <script defer src="/js/table-resize.js"></script>
-  ${user ? '<script defer src="/js/board-sidebar.js"></script>' : ''}
   ${opts.charts ? '<script defer src="/js/chart.min.js"></script>' : ''}
 </head>
 <body>
