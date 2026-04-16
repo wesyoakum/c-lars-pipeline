@@ -3663,6 +3663,7 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   min-height: 0;
 }
 .board-message {
+  position: relative;
   font-family: var(--board-hand);
   font-size: 1.05rem;
   line-height: 1.25;
@@ -3718,6 +3719,61 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   color: #c0392b;
   font-size: 0.72rem;
   font-family: var(--font);
+}
+
+/* ---------- Per-message hover affordances (author only) ---------- */
+/* Two small chiclet buttons that float above the bubble's top-right
+   corner. Hidden until hover. The emphasize star stays visible while
+   active so the recipient can see at a glance which messages were
+   marked important. */
+.board-message-emphasize,
+.board-message-delete {
+  position: absolute;
+  top: -8px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid rgba(0,0,0,0.15);
+  border-radius: 50%;
+  background: #fff;
+  color: rgba(0,0,0,0.55);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+  z-index: 5;
+}
+.board-message-emphasize { right: 26px; }
+.board-message-delete    { right: 6px; font-size: 14px; line-height: 0.9; }
+.board-message:hover .board-message-emphasize,
+.board-message:hover .board-message-delete,
+.board-message-emphasize:focus,
+.board-message-delete:focus { opacity: 1; }
+.board-message-emphasize.is-on {
+  opacity: 1;
+  color: #b07d00;
+  border-color: #e0b400;
+  background: #fff8d8;
+}
+.board-message-emphasize:hover { color: #b07d00; border-color: #e0b400; }
+.board-message-delete:hover    { color: #c0392b; border-color: #c0392b; }
+
+/* Emphasized message styling \u2014 bolder body, subtle yellow accent.
+   Side accent bar matches the bubble alignment (right edge for
+   outgoing, left for incoming). */
+.board-message.is-emphasized .board-message-body { font-weight: 700; }
+.board-message-in.is-emphasized {
+  background: #fff8d8;
+  border-left: 3px solid #e0b400;
+}
+.board-message-out.is-emphasized {
+  background: #fff4c2;
+  border-right: 3px solid #e0b400;
 }
 
 /* ---------- Inline mentions (no pill, just coloured bold text) ---------- */

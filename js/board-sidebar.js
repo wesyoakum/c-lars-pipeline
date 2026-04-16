@@ -623,6 +623,37 @@
         fallbackCopy(plain); done();
       },
 
+      // ---- Message-specific actions (chat bubbles in left sidebar) ----
+      // Both restricted by markup to from_me === true (only the author
+      // can emphasize or delete). Backend enforces author-or-admin too.
+
+      // Flip the message's flag between null and 'red'. We piggy-back on
+      // the existing card flag column so no schema change is needed.
+      // 'red' is rendered via the .is-emphasized CSS class on the bubble.
+      toggleEmphasize: function (msg) {
+        if (!msg || !msg.id) return;
+        var self = this;
+        var nextFlag = msg.flag === 'red' ? null : 'red';
+        msg.flag = nextFlag; // optimistic
+        fetch('/board/cards/' + encodeURIComponent(msg.id), {
+          method: 'PATCH',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json', 'accept': 'application/json' },
+          body: JSON.stringify({ flag: nextFlag }),
+        }).then(function (res) {
+          if (!res.ok) self.poll();
+        }).catch(function () { self.poll(); });
+      },
+
+      // Confirm-then-archive. Reuses archiveCard which soft-deletes via
+      // DELETE /board/cards/:id. Confirm prompt added because deleting
+      // chat history is more destructive than archiving a sticky note.
+      deleteMessage: function (msg) {
+        if (!msg || !msg.id) return;
+        if (!window.confirm('Delete this message? This cannot be undone.')) return;
+        this.archiveCard(msg);
+      },
+
       // ---- Message composer ----
       submitMessageComposer: function () {
         var self = this;

@@ -570,7 +570,21 @@ const BOARD_LEFT_MARKUP = (
           '<p class="board-zone-empty">No messages yet \u2014 say hi.</p>' +
         '</template>' +
         '<template x-for="msg in $store.board.messages" :key="msg.id">' +
-          '<div :class="\'board-message board-message-\' + (msg.from_me ? \'out\' : \'in\')">' +
+          '<div :class="\'board-message board-message-\' + (msg.from_me ? \'out\' : \'in\') + (msg.flag === \'red\' ? \' is-emphasized\' : \'\')">' +
+            // Emphasize \u2605 + delete \u00D7 \u2014 author-only, on hover.
+            // Emphasize stays visible at rest when active so the
+            // recipient can see at a glance which messages were
+            // marked important by their author.
+            '<button type="button" class="board-message-emphasize" ' +
+              ':class="msg.flag === \'red\' ? \'is-on\' : \'\'" ' +
+              'x-show="msg.from_me" ' +
+              '@click.stop="$store.board.toggleEmphasize(msg)" ' +
+              ':title="msg.flag === \'red\' ? \'Remove emphasis\' : \'Emphasize\'" ' +
+              ':aria-label="msg.flag === \'red\' ? \'Remove emphasis\' : \'Emphasize\'">\u2605</button>' +
+            '<button type="button" class="board-message-delete" ' +
+              'x-show="msg.from_me" ' +
+              '@click.stop="$store.board.deleteMessage(msg)" ' +
+              'title="Delete message" aria-label="Delete message">\u00D7</button>' +
             '<span class="board-message-prefix" x-text="$store.board.messagePrefix(msg) + \'-\'"></span>' +
             '<span class="board-message-body" x-html="$store.board.renderBody(msg.body)"></span>' +
           '</div>' +
