@@ -74,7 +74,7 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
   const body = html`
     <section class="card">
       <div class="card-header">
-        <h1>Labor library</h1>
+        <h1>Direct Labor library</h1>
         <div style="display:flex;align-items:center;gap:0.5rem">
           ${listToolbar({ id: 'labor', count: rows.length, columns })}
           <a class="btn" href="/library">\u2190 Library</a>
@@ -131,14 +131,14 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
   `;
 
   return htmlResponse(
-    layout('Labor library', body, {
+    layout('Direct Labor library', body, {
       user,
       env: data?.env,
       activeNav: '/library',
       flash: readFlash(url),
       breadcrumbs: [
         { label: 'Library', href: '/library' },
-        { label: 'Labor Items' },
+        { label: 'Direct Labor' },
       ],
     })
   );

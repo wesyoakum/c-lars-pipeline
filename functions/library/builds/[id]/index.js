@@ -225,7 +225,7 @@ async function renderEditor(context, { values = null, errors = {} } = {}) {
   `;
 
   return htmlResponse(
-    layout(`${build.name || 'Build template'} — Builds Library`, body, {
+    layout(`${build.name || 'Build template'} — Price Builds Library`, body, {
       user,
       env: data?.env,
       activeNav: '/library',
@@ -428,7 +428,7 @@ function renderLaborSubtab({
         </tfoot>
       </table>
 
-      <h3 style="margin-top:1rem">Labor library selections</h3>
+      <h3 style="margin-top:1rem">Direct Labor library selections</h3>
       <label class="checkbox">
         <input type="checkbox" name="use_labor_library" ${useLaborLibrary ? 'checked' : ''}>
         Link labor cost to library selections + current project hours

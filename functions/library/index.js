@@ -39,7 +39,7 @@ export async function onRequestGet(context) {
           <p class="library-count"><strong>${dmCount?.n ?? 0}</strong> items</p>
         </a>
         <a class="library-card" href="/library/labor-items">
-          <h2>Labor</h2>
+          <h2>Direct Labor</h2>
           <p class="muted">Reusable labor packages broken out by workcenter (hours × rate).</p>
           <p class="library-count"><strong>${laborCount?.n ?? 0}</strong> items</p>
         </a>
@@ -49,7 +49,7 @@ export async function onRequestGet(context) {
           <p class="library-count"><strong>${itemsCount?.n ?? 0}</strong> items</p>
         </a>
         <a class="library-card" href="/library/builds">
-          <h2>Builds</h2>
+          <h2>Price Builds</h2>
           <p class="muted">Reusable price build templates with DM/DL/IMOH/Other cost structures.</p>
           <p class="library-count"><strong>${buildsCount?.n ?? 0}</strong> templates</p>
         </a>

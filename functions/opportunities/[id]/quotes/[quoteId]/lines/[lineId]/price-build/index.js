@@ -894,7 +894,7 @@ function renderLaborSubtab({
         <tfoot><tr><th colspan="3">Current project total</th><th class="num" id="cb-labor-total">${fmtDollar(currentLaborTotal)}</th></tr></tfoot>
       </table>
 
-      <h3 style="margin-top:1rem">Labor library selections</h3>
+      <h3 style="margin-top:1rem">Direct Labor library selections</h3>
       <label class="checkbox">
         <input type="checkbox" name="use_labor_library" ${useLaborLibrary ? 'checked' : ''} ${locked ? 'disabled' : ''}>
         Link labor cost to library selections + current project hours
