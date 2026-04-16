@@ -18,6 +18,7 @@ import {
 import { parseAddressForm, buildAddressStatements } from '../lib/address_editor.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieText, ieSelect, listInlineEditScript } from '../lib/list-inline-edit.js';
+import { listBulkEditScript } from '../lib/list-bulk-edit.js';
 
 // Keep in sync with functions/accounts/[id]/index.js::SEGMENT_OPTIONS.
 // Used by the inline-edit select in the segment column.
@@ -126,7 +127,7 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Accounts</h1>
-        ${listToolbar({ id: 'acct', count: rows.length, columns, newOnClick: "window.PMS.openWizard('account', {})", newLabel: 'New account' })}
+        ${listToolbar({ id: 'acct', count: rows.length, columns, newOnClick: "window.PMS.openWizard('account', {})", newLabel: 'New account', bulk: true })}
       </div>
 
       ${rows.length === 0
@@ -182,6 +183,10 @@ export async function onRequestGet(context) {
             // handler accepts 'active'/'inactive' string values and
             // coerces them to 0/1 for storage.
             fieldAttrMap: { is_active: 'status' },
+          }))}</script>
+          <script>${raw(listBulkEditScript({
+            patchUrl: '/accounts/:id/patch',
+            deleteUrl: '/accounts/:id/delete',
           }))}</script>
         `}
     </section>

@@ -7,10 +7,23 @@ import { auditStmt } from '../../lib/audit.js';
 import { redirectWithFlash } from '../../lib/http.js';
 import { layout, htmlResponse } from '../../lib/layout.js';
 
+function wantsJson(request) {
+  const a = request.headers.get('accept') || '';
+  return a.includes('application/json') && !a.includes('text/html');
+}
+
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 export async function onRequestPost(context) {
-  const { env, data, params } = context;
+  const { env, data, request, params } = context;
   const user = data?.user;
   const contactId = params.id;
+  const json = wantsJson(request);
 
   const contact = await one(
     env.DB,
@@ -18,6 +31,7 @@ export async function onRequestPost(context) {
     [contactId]
   );
   if (!contact) {
+    if (json) return jsonResponse({ ok: false, error: 'Contact not found' }, 404);
     return htmlResponse(
       layout('Not found', '<section class="card"><h1>Contact not found</h1></section>', {
         user, env: data?.env, activeNav: '/accounts',
@@ -39,6 +53,7 @@ export async function onRequestPost(context) {
     stmt(env.DB, `DELETE FROM contacts WHERE id = ?`, [contactId]),
   ]);
 
+  if (json) return jsonResponse({ ok: true, id: contactId });
   return redirectWithFlash(
     `/accounts/${contact.account_id}?tab=contacts`,
     `Contact "${displayName}" deleted.`

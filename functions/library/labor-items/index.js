@@ -15,6 +15,7 @@ import {
   fmtDollar,
 } from '../../lib/pricing.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
+import { listBulkEditScript } from '../../lib/list-bulk-edit.js';
 
 export async function onRequestGet(context) {
   return renderList(context, {});
@@ -76,7 +77,7 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
       <div class="card-header">
         <h1>Direct Labor library</h1>
         <div style="display:flex;align-items:center;gap:0.5rem">
-          ${listToolbar({ id: 'labor', count: rows.length, columns })}
+          ${listToolbar({ id: 'labor', count: rows.length, columns, bulk: true })}
           <a class="btn" href="/library">\u2190 Library</a>
         </div>
       </div>
@@ -126,6 +127,9 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
             </table>
           </div>
           <script>${raw(listScript('pms.libLabor.v1', 'description', 'asc'))}</script>
+          <script>${raw(listBulkEditScript({
+            deleteUrl: '/library/labor-items/:id/delete',
+          }))}</script>
         `}
     </section>
   `;

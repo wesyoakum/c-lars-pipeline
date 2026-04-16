@@ -14,6 +14,7 @@ import {
   fmtDollar,
 } from '../../lib/pricing.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
+import { listBulkEditScript } from '../../lib/list-bulk-edit.js';
 
 export async function onRequestGet(context) {
   return renderList(context, {});
@@ -100,7 +101,7 @@ async function renderList(context, { values = {}, errors = {} } = {}) {
       <div class="card-header">
         <h1>Price Builds Library</h1>
         <div style="display:flex;align-items:center;gap:0.5rem">
-          ${listToolbar({ id: 'builds', count: summaries.length, columns })}
+          ${listToolbar({ id: 'builds', count: summaries.length, columns, bulk: true })}
           <a class="btn" href="/library">\u2190 Library</a>
         </div>
       </div>
@@ -146,6 +147,9 @@ async function renderList(context, { values = {}, errors = {} } = {}) {
             </table>
           </div>
           <script>${raw(listScript('pms.libBuilds.v1', 'name', 'asc'))}</script>
+          <script>${raw(listBulkEditScript({
+            deleteUrl: '/library/builds/:id/delete',
+          }))}</script>
         `}
     </section>
   `;

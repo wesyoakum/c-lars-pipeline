@@ -18,10 +18,23 @@ import { auditStmt } from '../../lib/audit.js';
 import { layout, htmlResponse } from '../../lib/layout.js';
 import { redirectWithFlash } from '../../lib/http.js';
 
+function wantsJson(request) {
+  const a = request.headers.get('accept') || '';
+  return a.includes('application/json') && !a.includes('text/html');
+}
+
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
 export async function onRequestPost(context) {
-  const { env, data, params } = context;
+  const { env, data, request, params } = context;
   const user = data?.user;
   const accountId = params.id;
+  const json = wantsJson(request);
 
   const account = await one(
     env.DB,
@@ -29,6 +42,7 @@ export async function onRequestPost(context) {
     [accountId]
   );
   if (!account) {
+    if (json) return jsonResponse({ ok: false, error: 'Account not found' }, 404);
     return htmlResponse(
       layout(
         'Not found',
@@ -47,11 +61,9 @@ export async function onRequestPost(context) {
     [accountId]
   );
   if (oppCount?.n > 0) {
-    return redirectWithFlash(
-      `/accounts/${accountId}`,
-      `Cannot delete: ${oppCount.n} opportunit${oppCount.n === 1 ? 'y' : 'ies'} reference this account.`,
-      'error'
-    );
+    const msg = `Cannot delete: ${oppCount.n} opportunit${oppCount.n === 1 ? 'y' : 'ies'} reference this account.`;
+    if (json) return jsonResponse({ ok: false, error: msg }, 409);
+    return redirectWithFlash(`/accounts/${accountId}`, msg, 'error');
   }
 
   const contacts = await all(
@@ -90,5 +102,6 @@ export async function onRequestPost(context) {
 
   await batch(env.DB, statements);
 
+  if (json) return jsonResponse({ ok: true, id: accountId });
   return redirectWithFlash(`/accounts`, `Deleted account "${account.name}".`);
 }
