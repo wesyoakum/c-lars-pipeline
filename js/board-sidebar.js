@@ -93,6 +93,26 @@
     return 'normal';                      // green
   }
 
+  // Place a task in one of the sidebar's two task cards.
+  //   'todo'         → overdue + today + tomorrow (urgent stuff)
+  //   'coming-soon'  → 2 to 7 days out
+  //   'later'        → > 7 days
+  //   'none'         → no due date
+  function taskDueBucket(task) {
+    if (!task || !task.due_at) return 'none';
+    var d = new Date(task.due_at);
+    if (isNaN(d.getTime())) return 'none';
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var target = new Date(d);
+    target.setHours(0, 0, 0, 0);
+    var diffDays = Math.round((target.getTime() - today.getTime()) / 86400000);
+    if (diffDays < 0) return 'todo';        // overdue
+    if (diffDays <= 1) return 'todo';       // today / tomorrow
+    if (diffDays <= 7) return 'coming-soon';
+    return 'later';
+  }
+
   // Resize a textarea to fit its content. Cap at a reasonable max so
   // it doesn't take over the whole sidebar on a long message.
   function autoResize(el, maxPx) {
@@ -175,14 +195,22 @@
         return m + red;
       },
 
-      // Tasks visible in the right zone. Pending always; completed only
-      // when "show complete" is toggled on.
-      get visibleTasks() {
-        var pending = this.modules.my_tasks || [];
+      // Top card — overdue + today + tomorrow. Recently-completed
+      // tasks fold in here when "show complete" is toggled on.
+      get todoTasks() {
+        var pending = (this.modules.my_tasks || []).filter(function (t) {
+          return taskDueBucket(t) === 'todo';
+        });
         if (!this.showCompleted) return pending;
         var done = this.modules.my_tasks_done || [];
-        // Pending first (by existing due-order), then completed (newest first).
         return pending.concat(done);
+      },
+
+      // Second card — anything due in the next 2 to 7 days.
+      get comingSoonTasks() {
+        return (this.modules.my_tasks || []).filter(function (t) {
+          return taskDueBucket(t) === 'coming-soon';
+        });
       },
 
       // Combined list of "notes" — private + shared + public-mentions.

@@ -308,11 +308,12 @@ const BOARD_RIGHT_MARKUP = (
     'x-show="$store.board && !$store.board.isCollapsed" ' +
     'aria-label="Whiteboard sidebar">' +
 
-    // ---------- Zone 1: Tasks ----------
+    // ---------- Zone 1a: To-Do (overdue + today + tomorrow) ----------
     '<section class="board-zone board-zone-tasks" ' +
       ':class="$store.board.showCompleted ? \'board-tasks-show-done\' : \'\'">' +
       // Hide button \u2014 small chevron pointing right (toward the edge
-      // the board collapses into). Click hides both sidebars for 5 min.
+      // the board collapses into). Lives on the topmost task card and
+      // hides both sidebars for 5 min on click.
       '<button type="button" class="board-hide-peek" ' +
         '@click="$store.board.hideFor(5)" ' +
         'title="Hide board for 5 min" aria-label="Hide board">' +
@@ -320,16 +321,40 @@ const BOARD_RIGHT_MARKUP = (
           '<polygon points="5,3 12,8 5,13"/>' +
         '</svg>' +
       '</button>' +
-      '<h3 class="board-zone-heading">Tasks</h3>' +
+      '<h3 class="board-zone-heading">To-Do</h3>' +
       '<button type="button" class="board-tasks-toggle" ' +
         ':class="$store.board.showCompleted ? \'active\' : \'\'" ' +
         '@click="$store.board.toggleShowCompleted()" ' +
         'x-text="$store.board.showCompleted ? \'hide complete\' : \'show complete\'"></button>' +
-      '<template x-if="$store.board.visibleTasks.length === 0">' +
-        '<p class="board-zone-empty">No open tasks.</p>' +
+      '<template x-if="$store.board.todoTasks.length === 0">' +
+        '<p class="board-zone-empty">Nothing due today or tomorrow.</p>' +
       '</template>' +
       '<ul class="board-task-list">' +
-        '<template x-for="t in $store.board.visibleTasks" :key="t.id">' +
+        '<template x-for="t in $store.board.todoTasks" :key="t.id">' +
+          '<li :class="$store.board.taskItemClass(t)">' +
+            '<button type="button" class="board-task-dot" ' +
+              ':title="t.status === \'completed\' ? \'Mark incomplete\' : \'Mark complete\'" ' +
+              '@click.stop="$store.board.toggleTask(t)"></button>' +
+            '<span class="board-task-prefix" ' +
+              'x-text="$store.board.taskPrefix(t)" ' +
+              'x-show="$store.board.taskPrefix(t)"></span>' +
+            '<a :href="\'/activities\'" class="board-task-link">' +
+              '<span class="board-task-text" ' +
+                'x-html="$store.board.renderBody((t.subject || t.body || \'\'))"></span>' +
+            '</a>' +
+          '</li>' +
+        '</template>' +
+      '</ul>' +
+    '</section>' +
+
+    // ---------- Zone 1b: Coming Soon (2\u20137 days out) ----------
+    '<section class="board-zone board-zone-tasks">' +
+      '<h3 class="board-zone-heading">Coming Soon</h3>' +
+      '<template x-if="$store.board.comingSoonTasks.length === 0">' +
+        '<p class="board-zone-empty">Nothing in the next week.</p>' +
+      '</template>' +
+      '<ul class="board-task-list">' +
+        '<template x-for="t in $store.board.comingSoonTasks" :key="t.id">' +
           '<li :class="$store.board.taskItemClass(t)">' +
             '<button type="button" class="board-task-dot" ' +
               ':title="t.status === \'completed\' ? \'Mark incomplete\' : \'Mark complete\'" ' +
