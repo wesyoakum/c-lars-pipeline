@@ -308,13 +308,29 @@ const BOARD_RIGHT_MARKUP = (
     'x-show="$store.board && !$store.board.isCollapsed" ' +
     'aria-label="Whiteboard sidebar">' +
 
-    '<button type="button" class="board-hide-handle" ' +
-      'title="Hide for 5 min" aria-label="Hide sidebar" ' +
-      '@click="$store.board.hideFor(5)">\u00D7</button>' +
-
     // ---------- Zone 1: Tasks ----------
     '<section class="board-zone board-zone-tasks" ' +
       ':class="$store.board.showCompleted ? \'board-tasks-show-done\' : \'\'">' +
+      // "Peek over the wall" icon \u2014 hide both sidebars for 5 min.
+      // Replaces the old plain-X handle that lived in the sidebar corner.
+      '<button type="button" class="board-hide-peek" ' +
+        '@click="$store.board.hideFor(5)" ' +
+        'title="Hide board for 5 min" aria-label="Hide board">' +
+        '<svg viewBox="0 0 32 20" width="24" height="15" aria-hidden="true">' +
+          '<g fill="currentColor">' +
+            // fence / wall the figure peeks over
+            '<rect x="1" y="14" width="30" height="3" rx="1.5"/>' +
+            // head
+            '<ellipse cx="16" cy="9" rx="6" ry="6"/>' +
+            // two hand-bumps gripping the wall
+            '<ellipse cx="6" cy="13" rx="1.5" ry="2"/>' +
+            '<ellipse cx="26" cy="13" rx="1.5" ry="2"/>' +
+          '</g>' +
+          // eyes \u2014 hollow circles in the head (bg-coloured)
+          '<circle cx="14" cy="9.5" r="1" fill="#fff"/>' +
+          '<circle cx="18" cy="9.5" r="1" fill="#fff"/>' +
+        '</svg>' +
+      '</button>' +
       '<h3 class="board-zone-heading">Tasks</h3>' +
       '<button type="button" class="board-tasks-toggle" ' +
         ':class="$store.board.showCompleted ? \'active\' : \'\'" ' +
