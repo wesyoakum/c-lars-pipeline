@@ -3476,7 +3476,7 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
      reserves extra height for hover-lift + shadow bleed, but once the
      user scrolls the page they want the saved notes closer to the
      post-its than the safe padding would give. */
-  margin-top: -40px;
+  margin-top: -55px;
 }
 
 /* Each note is wrapped in a .board-card-stack so a long body can
