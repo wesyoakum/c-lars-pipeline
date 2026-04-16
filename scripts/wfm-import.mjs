@@ -23,7 +23,7 @@
 //     a constraint error instead of silently double-inserting. `external_id`
 //     is a name-derived slug so it's stable across re-runs of the same
 //     source file.
-//   - Supports entities: `accounts`, `contacts`. Adding opportunities /
+//   - Supports entities: `accounts`, `contacts`, `opportunities`. Adding
 //     quotes is a matter of adding another `buildXxxStatements()` function
 //     and a case to the switch below.
 
@@ -92,7 +92,7 @@ function printUsage() {
   console.log(`
 scripts/wfm-import.mjs — WFM → PMS importer
 
-  --entity <name>   One of: accounts, contacts   (opportunities/quotes TBD)
+  --entity <name>   One of: accounts, contacts, opportunities   (quotes TBD)
   --file <path>     Path to the WFM .xlsx export
   --dry-run         Parse + build SQL + preview CSV, do not touch the DB
   --commit          Actually execute the generated SQL via wrangler
@@ -584,6 +584,441 @@ function buildContactsStatements(rows, accountLookup) {
 }
 
 // ---------------------------------------------------------------------
+// Entity: opportunities
+// ---------------------------------------------------------------------
+
+/**
+ * Load the contact lookup built by the contacts phase. JSON array of
+ * { id, account_id, first_name, last_name } for every WFM-origin
+ * contact in the remote D1. Exported via MCP after the contacts import.
+ */
+function loadContactLookup() {
+  const file = path.join(OUT_DIR, 'wfm-contacts-lookup.json');
+  if (!fs.existsSync(file)) {
+    throw new Error(
+      `Missing contact lookup: ${file}\n` +
+      `Import contacts first and export the lookup from D1 with:\n` +
+      `  SELECT id, account_id, first_name, last_name FROM contacts\n` +
+      `  WHERE external_source='wfm';`
+    );
+  }
+  const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+  // Key: `${account_id}::${lower(first last)}`
+  const byAcctAndName = new Map();
+  for (const row of data) {
+    const fullName = [row.first_name, row.last_name]
+      .filter(Boolean)
+      .join(' ')
+      .trim()
+      .toLowerCase();
+    if (!fullName) continue;
+    byAcctAndName.set(`${row.account_id}::${fullName}`, row);
+  }
+  return byAcctAndName;
+}
+
+/**
+ * WFM Leads export quirks: the Account column is sometimes a slightly
+ * different name than the one the accounts importer loaded, or an
+ * outright different account. These remaps run BEFORE slug matching.
+ *
+ *   - 'iSOC' is a misread of 'WASSOC'; 2 rows remapped.
+ *   - Excel truncated "Govt of Canada, Defence and Marine Procurement
+ *     Branch" with a trailing ellipsis; handled below.
+ */
+const OPP_ACCOUNT_NAME_REMAP = {
+  'iSOC': 'WASSOC',
+};
+
+/**
+ * Strip the Excel-truncation ellipsis and, if that leaves a prefix,
+ * try to match any PMS account whose name starts with that prefix.
+ * Returns the full name if resolved, else the input unchanged.
+ */
+function resolveTruncatedAccountName(raw, accountLookupByName) {
+  const trimmed = raw.trim();
+  if (!/\.{2,}$/.test(trimmed)) return trimmed;
+  const stem = trimmed.replace(/\.{2,}$/, '').trim();
+  if (!stem) return trimmed;
+  for (const fullName of accountLookupByName.keys()) {
+    if (fullName.startsWith(stem)) return fullName;
+  }
+  return trimmed;
+}
+
+/**
+ * WFM owners → PMS user IDs. Only Wes has a real login; the other three
+ * were seeded as stubs (role='sales', active=1) specifically so the
+ * import preserves attribution. Null (1 lead) defaults to Wes as the
+ * importing admin.
+ */
+const OPP_OWNER_TO_USER_ID = {
+  'Wes Yoakum':       'user-wes-yoakum',
+  'Kat Deno':         'user-kat-deno',
+  'Sara Patterson':   'user-sara-patterson',
+  'Adam Janac':       'user-adam-janac',
+};
+
+/**
+ * (WFM Stage, WFM Status) → PMS stage key.
+ *
+ * Status takes priority when Won/Lost: every Won maps to closed_won and
+ * every Lost maps to closed_lost, EXCEPT the single Won + "6 Incomplete"
+ * row which maps to closed_died (per user direction — the deal closed
+ * without ever being fully spec'd so "won" isn't really true).
+ *
+ * close_reason is intentionally NOT populated — the stage column alone
+ * carries the close state. The column stays NULL for all 196 rows.
+ */
+function mapStage(wfmStage, wfmStatus) {
+  const status = (wfmStatus || '').trim();
+  const stage = (wfmStage || '').trim();
+
+  if (status === 'Won') {
+    return stage === '6 Incomplete' ? 'closed_died' : 'closed_won';
+  }
+  if (status === 'Lost') return 'closed_lost';
+
+  // Active (or anything else — fall through to stage-based mapping)
+  switch (stage) {
+    case 'Spares Quoted':
+    case '4 Quoted':
+      return 'quote_submitted';
+    case 'Spares RFQ':
+    case '3 Opportunity':
+      return 'rfq_received';
+    case '5 Negotiation':
+      return 'quote_under_revision';
+    case '2 Lead':
+    case '1 Prospect':
+    case 'Uncategorized':
+    default:
+      return 'lead';
+  }
+}
+
+/**
+ * Transaction type: Spares for any WFM stage starting with "Spares"
+ * (Spares RFQ, Spares Quoted — 108 rows). Everything else → EPS
+ * (Engineered Products & Services — the highest-value class; user
+ * will re-tag any that should be refurb/service manually afterward).
+ */
+function mapTransactionType(wfmStage) {
+  const s = (wfmStage || '').trim();
+  return /^Spares\b/i.test(s) ? 'spares' : 'eps';
+}
+
+/**
+ * stage_definitions default_probability mirror. Kept in sync via a query
+ * on the live DB at planning time; safer than a runtime fetch because
+ * this runs offline. All 4 transaction_type variants share identical
+ * default_probability values for each stage_key, so a single map works.
+ */
+const STAGE_DEFAULT_PROBABILITY = {
+  lead: 5,
+  rfq_received: 10,
+  awaiting_client_feedback: 20,
+  quote_drafted: 40,
+  quote_submitted: 60,
+  quote_under_revision: 65,
+  revised_quote_submitted: 75,
+  closed_won: 95,
+  oc_issued: 97,
+  ntp_draft: 98,
+  ntp_issued: 100,
+  closed_lost: 0,
+  closed_died: 0,
+};
+
+/**
+ * Excel serial (1900 date system) → ISO 'YYYY-MM-DD'. Matches how the
+ * xlsx package exposes raw date serials when `raw: true` is set.
+ */
+function excelSerialToIso(serial) {
+  if (serial == null || serial === '') return null;
+  const n = Number(serial);
+  if (!Number.isFinite(n)) return null;
+  // 1900 date system epoch is Dec 30 1899 (accounts for the leap-year bug)
+  const ms = Date.UTC(1899, 11, 30) + n * 86400000;
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/**
+ * XLSX is read with `raw: false`, which means Excel date cells come through
+ * as formatted strings (e.g. "4/3/2026") instead of serials. Numeric values
+ * (pure integer serials) also get stringified — "46027". Accept either and
+ * produce { serial, iso } so callers can sort chronologically (via serial)
+ * and emit ISO dates for storage.
+ */
+function coerceWfmDate(rawDate) {
+  if (rawDate == null || rawDate === '') return { serial: null, iso: null };
+  // Pure numeric serial path.
+  const asStr = String(rawDate).trim();
+  if (/^-?\d+(\.\d+)?$/.test(asStr)) {
+    const n = Number(asStr);
+    return { serial: n, iso: excelSerialToIso(n) };
+  }
+  // Date-string path ("4/3/2026", "2026-04-03", etc.). We parse via Date
+  // constructor and convert back to a synthesized serial for ordering.
+  const parsed = new Date(asStr);
+  if (Number.isNaN(parsed.getTime())) return { serial: null, iso: null };
+  const iso = parsed.toISOString().slice(0, 10);
+  const serial = Math.floor((parsed.getTime() - Date.UTC(1899, 11, 30)) / 86400000);
+  return { serial, iso };
+}
+
+/**
+ * Build the SQL + preview rows for the opportunities import.
+ *
+ * Column semantics (matches the opportunities schema as of migration 0028):
+ *   - id:                    fresh UUID v4
+ *   - number:                'WFM01-NNNN' (chronological by WFM Date,
+ *                            oldest = 0001; easy to spot-as-imported
+ *                            and easy to rename later)
+ *   - account_id:            slug-match to accounts.external_id
+ *   - primary_contact_id:    lookup by (account_id, lower(first last)),
+ *                            NULL on no match
+ *   - title:                 WFM Name, verbatim trim
+ *   - description:           NULL (Hot Sheet intentionally dropped)
+ *   - transaction_type:      mapTransactionType()
+ *   - stage:                 mapStage()
+ *   - stage_entered_at:      WFM Date (ISO)
+ *   - probability:           STAGE_DEFAULT_PROBABILITY[stage]
+ *   - estimated_value_usd:   WFM Est. Value (zeros → NULL: "not estimated")
+ *   - currency:              'USD'
+ *   - expected_close_date:   WFM Date (Active only)
+ *   - actual_close_date:     WFM Date (Won/Lost/died only)
+ *   - close_reason:          NULL (stage carries the close state)
+ *   - source / rfq_format / all BANT / loss_reason_tag: NULL
+ *   - owner_user_id:         OPP_OWNER_TO_USER_ID[Owner]
+ *   - salesperson_user_id:   same as owner
+ *   - external_source:       'wfm'
+ *   - external_id:           '<account-slug>::<title-slug>::<date-serial>'
+ *                            (three-part: 7 duplicate Names exist — need
+ *                            date to disambiguate)
+ *   - created_at:            WFM Date (user direction — use WFM Date, not
+ *                            now(), so the pipeline history looks right)
+ *   - updated_at:            now()
+ *   - created_by_user_id:    IMPORT_USER_ID
+ *   - All the later migration columns (rfq_received_date, rfq_due_date,
+ *     rfi_due_date, quoted_date, customer_po_number, bant_authority_contact_id):
+ *     NULL.
+ *
+ * Also writes an audit_events row per opportunity with event_type='created'.
+ */
+function buildOpportunitiesStatements(rows, accountLookup, contactLookup) {
+  const ts = now();
+  const sqlStatements = [];
+  const previewRows = [];
+  const summaryRows = [];
+
+  // Also index accounts by full name for truncation-recovery.
+  const accountLookupByName = new Map();
+  for (const acct of accountLookup.values()) {
+    accountLookupByName.set(acct.name, acct);
+  }
+
+  let skippedNoAccount = 0;
+
+  // Precompute per-row resolution so we can sort by date BEFORE numbering.
+  const resolved = [];
+  for (const rawRow of rows) {
+    const title = (rawRow['Name'] ?? '').toString().trim();
+    if (!title) continue;
+
+    // Account resolution: iSOC→WASSOC remap, then truncation recovery,
+    // then slug match.
+    let rawAccount = (rawRow['Account'] ?? '').toString().trim();
+    if (OPP_ACCOUNT_NAME_REMAP[rawAccount]) {
+      rawAccount = OPP_ACCOUNT_NAME_REMAP[rawAccount];
+    }
+    const normalizedAccount = resolveTruncatedAccountName(rawAccount, accountLookupByName);
+    const accountSlug = slugify(normalizedAccount);
+    const account = accountLookup.get(accountSlug);
+    if (!account) {
+      console.warn(`  ! no account for opp "${title}" / "${rawAccount}" (slug="${accountSlug}") — skipped`);
+      skippedNoAccount++;
+      continue;
+    }
+
+    const { serial: dateSerial, iso: dateIso } = coerceWfmDate(rawRow['Date']);
+
+    const status = (rawRow['Status'] ?? '').toString().trim();
+    const wfmStage = (rawRow['Stage'] ?? '').toString().trim();
+    const stage = mapStage(wfmStage, status);
+    const transactionType = mapTransactionType(wfmStage);
+    const probability = STAGE_DEFAULT_PROBABILITY[stage] ?? null;
+
+    // Est. Value: 0 becomes NULL ("not yet estimated" for early-stage leads).
+    // XLSX raw:false returns formatted strings — "2,189,480.00" — strip the
+    // thousand-separator commas before Number()-ing.
+    const rawValue = rawRow['Est. Value'];
+    const cleanValue = rawValue != null && rawValue !== ''
+      ? Number(String(rawValue).replace(/,/g, ''))
+      : NaN;
+    const value = Number.isFinite(cleanValue) && cleanValue > 0 ? cleanValue : null;
+
+    // Contact: lookup by (account_id, lower(full name))
+    const contactName = (rawRow['Contact'] ?? '').toString().trim();
+    let contactId = null;
+    if (contactName) {
+      const hit = contactLookup.get(`${account.id}::${contactName.toLowerCase()}`);
+      if (hit) contactId = hit.id;
+    }
+
+    // Owner: falls back to import user if blank/unknown
+    const ownerRaw = (rawRow['Owner'] ?? '').toString().trim();
+    const ownerUserId = OPP_OWNER_TO_USER_ID[ownerRaw] ?? IMPORT_USER_ID;
+
+    // Dates: created_at / stage_entered_at = WFM Date; close dates by status.
+    const createdAt = dateIso ? `${dateIso}T00:00:00.000Z` : ts;
+    const stageEnteredAt = createdAt;
+    const isClosed = status === 'Won' || status === 'Lost';
+    const expectedClose = isClosed ? null : dateIso;
+    const actualClose = isClosed ? dateIso : null;
+
+    // Hot Sheet intentionally dropped.
+    resolved.push({
+      id: uuid(),
+      account,
+      title,
+      contactId,
+      contactName,
+      dateSerial,
+      dateIso,
+      wfmStage,
+      status,
+      stage,
+      transactionType,
+      probability,
+      value,
+      ownerUserId,
+      ownerRaw,
+      createdAt,
+      stageEnteredAt,
+      expectedClose,
+      actualClose,
+    });
+  }
+
+  // Chronological numbering: oldest WFM Date → WFM01-0001.
+  resolved.sort((a, b) => {
+    const ax = a.dateSerial ?? Infinity;
+    const bx = b.dateSerial ?? Infinity;
+    if (ax !== bx) return ax - bx;
+    // Secondary sort by title to keep numbering deterministic for ties.
+    return a.title.localeCompare(b.title);
+  });
+
+  resolved.forEach((r, idx) => {
+    const number = `WFM01-${String(idx + 1).padStart(4, '0')}`;
+    const extId = `${r.account.external_id}::${slugify(r.title)}::${r.dateSerial ?? 'nodate'}`;
+
+    // opportunities row
+    sqlStatements.push(
+      [
+        `INSERT INTO opportunities`,
+        `  (id, number, account_id, primary_contact_id, title, description,`,
+        `   transaction_type, stage, stage_entered_at, probability,`,
+        `   estimated_value_usd, currency,`,
+        `   expected_close_date, actual_close_date,`,
+        `   source, rfq_format,`,
+        `   bant_budget, bant_authority, bant_need, bant_timeline,`,
+        `   close_reason, loss_reason_tag,`,
+        `   owner_user_id, salesperson_user_id,`,
+        `   external_source, external_id,`,
+        `   created_at, updated_at, created_by_user_id,`,
+        `   bant_authority_contact_id,`,
+        `   rfq_received_date, rfq_due_date, rfi_due_date, quoted_date,`,
+        `   customer_po_number)`,
+        `VALUES (`,
+        `  ${sqlLit(r.id)}, ${sqlLit(number)}, ${sqlLit(r.account.id)}, ${sqlLit(r.contactId)}, ${sqlLit(r.title)}, NULL,`,
+        `  ${sqlLit(r.transactionType)}, ${sqlLit(r.stage)}, ${sqlLit(r.stageEnteredAt)}, ${sqlLit(r.probability)},`,
+        `  ${sqlLit(r.value)}, 'USD',`,
+        `  ${sqlLit(r.expectedClose)}, ${sqlLit(r.actualClose)},`,
+        `  NULL, NULL,`,
+        `  NULL, NULL, NULL, NULL,`,
+        `  NULL, NULL,`,
+        `  ${sqlLit(r.ownerUserId)}, ${sqlLit(r.ownerUserId)},`,
+        `  ${sqlLit(EXTERNAL_SOURCE)}, ${sqlLit(extId)},`,
+        `  ${sqlLit(r.createdAt)}, ${sqlLit(ts)}, ${sqlLit(IMPORT_USER_ID)},`,
+        `  NULL,`,
+        `  NULL, NULL, NULL, NULL,`,
+        `  NULL`,
+        `);`,
+      ].join('\n')
+    );
+
+    // audit event
+    const auditId = uuid();
+    const changesJson = JSON.stringify({
+      number,
+      account_id: r.account.id,
+      account_name: r.account.name,
+      title: r.title,
+      transaction_type: r.transactionType,
+      stage: r.stage,
+      wfm_stage: r.wfmStage,
+      wfm_status: r.status,
+      estimated_value_usd: r.value,
+      wfm_owner: r.ownerRaw || null,
+      owner_user_id: r.ownerUserId,
+      primary_contact_id: r.contactId,
+      wfm_contact: r.contactName || null,
+      created_at: r.createdAt,
+      external_source: EXTERNAL_SOURCE,
+      external_id: extId,
+      import_source_file: 'WFM_Leads.xlsx',
+    });
+    sqlStatements.push(
+      [
+        `INSERT INTO audit_events`,
+        `  (id, entity_type, entity_id, event_type, user_id, at,`,
+        `   summary, changes_json, override_reason)`,
+        `VALUES (`,
+        `  ${sqlLit(auditId)}, 'opportunity', ${sqlLit(r.id)}, 'created',`,
+        `  ${sqlLit(IMPORT_USER_ID)}, ${sqlLit(ts)},`,
+        `  ${sqlLit(`Imported from WFM: "${r.title}" @ ${r.account.name} (${number})`)}, ${sqlLit(changesJson)}, NULL`,
+        `);`,
+      ].join('\n')
+    );
+
+    previewRows.push({
+      number,
+      new_opp_id: r.id,
+      title: r.title,
+      account_name: r.account.name,
+      transaction_type: r.transactionType,
+      stage: r.stage,
+      wfm_stage: r.wfmStage,
+      wfm_status: r.status,
+      estimated_value_usd: r.value ?? '',
+      owner: r.ownerRaw || '',
+      owner_user_id: r.ownerUserId,
+      contact: r.contactName || '',
+      contact_id: r.contactId || '',
+      date: r.dateIso || '',
+      external_id: extId,
+    });
+
+    summaryRows.push({
+      number,
+      new_opp_id: r.id,
+      wfm_title: r.title,
+      account_id: r.account.id,
+      external_id: extId,
+      status: 'pending',
+    });
+  });
+
+  if (skippedNoAccount > 0) {
+    console.log(`  Skipped ${skippedNoAccount} rows with no matching account.`);
+  }
+
+  return { sqlStatements, previewRows, summaryRows };
+}
+
+// ---------------------------------------------------------------------
 // wrangler runner
 // ---------------------------------------------------------------------
 
@@ -657,8 +1092,21 @@ function main() {
       ({ sqlStatements, previewRows, summaryRows } = buildContactsStatements(rows, accountLookup));
       break;
     }
+    case 'opportunities': {
+      const accountLookup = loadAccountLookup();
+      const contactLookup = loadContactLookup();
+      console.log(
+        `Loaded ${accountLookup.size} WFM-origin accounts and ${contactLookup.size} WFM-origin contacts from lookups.`
+      );
+      ({ sqlStatements, previewRows, summaryRows } = buildOpportunitiesStatements(
+        rows,
+        accountLookup,
+        contactLookup
+      ));
+      break;
+    }
     default:
-      fail(`Unknown --entity: ${args.entity}. Supported: accounts, contacts`);
+      fail(`Unknown --entity: ${args.entity}. Supported: accounts, contacts, opportunities`);
   }
 
   console.log(`Generated ${sqlStatements.length} SQL statements for ${previewRows.length} ${args.entity}.`);
