@@ -292,10 +292,18 @@ const WIZARD_MODAL_MARKUP = (
 // /js/board-sidebar.js; this is just the static DOM + Alpine bindings.
 // Uses string concatenation so it drops into layout()'s shell without
 // escaping conflicts (same pattern as WIZARD_MODAL_MARKUP above).
+//
+// Three zones, top to bottom:
+//   1. Tasks     — bulleted list with colored priority dots
+//   2. Notes     — stack of sticky notes (blank stack = compose affordance)
+//   3. Messages  — direct-message chat bubbles with sender prefix
+//
+// No module reorder, no module collapse, no header chrome. The goal is
+// "glance at the fridge door" — minimal UI, maximal content.
 const BOARD_SIDEBAR_MARKUP = (
   '<div class="board-root" x-data x-cloak>' +
 
-  // ---------- Collapsed strip (fridge-door closed) ----------
+  // Collapsed strip (compact edge affordance to reopen after hide)
   '<button type="button" class="board-strip" ' +
     'x-show="$store.board && $store.board.isCollapsed" ' +
     '@click="$store.board.expandNow()" ' +
@@ -304,79 +312,60 @@ const BOARD_SIDEBAR_MARKUP = (
     '<span class="board-strip-badge" ' +
       'x-show="$store.board && $store.board.collapsedBadge > 0" ' +
       'x-text="$store.board && $store.board.collapsedBadge"></span>' +
-    '<span class="board-strip-timer" ' +
-      'x-text="$store.board && $store.board.collapsedRemainingLabel"></span>' +
   '</button>' +
 
-  // ---------- Expanded sidebar ----------
   '<aside class="board-sidebar" ' +
     'x-show="$store.board && !$store.board.isCollapsed" ' +
     'aria-label="Whiteboard sidebar">' +
 
-    // Header
-    '<div class="board-header">' +
-      '<strong class="board-title">Board</strong>' +
-      '<div class="board-header-actions">' +
-        '<button type="button" class="board-icon-btn" ' +
-          'title="New card" aria-label="New card" ' +
-          '@click="$store.board.openComposer()">+ New</button>' +
-        '<div class="board-hide-menu" x-data="{ open: false }" @click.outside="open = false">' +
-          '<button type="button" class="board-icon-btn" ' +
-            'title="Hide" aria-label="Hide sidebar" ' +
-            '@click="open = !open">Hide\u25BE</button>' +
-          '<div class="board-hide-dropdown" x-show="open" x-cloak @click="open = false">' +
-            '<button type="button" @click="$store.board.hideFor(5)">5 min</button>' +
-            '<button type="button" @click="$store.board.hideFor(30)">30 min</button>' +
-            '<button type="button" @click="$store.board.hideFor(120)">2 hours</button>' +
-            '<button type="button" @click="$store.board.hideFor(\'tomorrow\')">Until tomorrow</button>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-    '</div>' +
+    // Tiny "hide" handle — always present but subtle
+    '<button type="button" class="board-hide-handle" ' +
+      'title="Hide for 5 min" aria-label="Hide sidebar" ' +
+      '@click="$store.board.hideFor(5)">\u00D7</button>' +
 
-    // Composer (inline new-card form)
-    '<div class="board-composer" x-show="$store.board.composer.open" x-cloak>' +
-      // Scope picker
-      '<div class="board-composer-scope">' +
-        '<label><input type="radio" name="b_scope" value="private" ' +
-          'x-model="$store.board.composer.scope"> Private</label>' +
-        '<label><input type="radio" name="b_scope" value="public" ' +
-          'x-model="$store.board.composer.scope"> Shared</label>' +
-        '<label><input type="radio" name="b_scope" value="direct" ' +
-          'x-model="$store.board.composer.scope"> Direct</label>' +
-      '</div>' +
-
-      // Target picker (only for scope=direct)
-      '<div class="board-composer-target" x-show="$store.board.composer.scope === \'direct\'">' +
-        '<template x-if="$store.board.composer.target">' +
-          '<div class="board-composer-target-pill">' +
-            'To: <strong x-text="$store.board.composer.target.label"></strong>' +
-            '<button type="button" class="board-mini-btn" @click="$store.board.clearTarget()">\u00D7</button>' +
-          '</div>' +
+    // ---------- Zone 1: Tasks ----------
+    '<section class="board-zone board-zone-tasks">' +
+      '<h3 class="board-zone-heading">Tasks</h3>' +
+      '<template x-if="$store.board.moduleItems(\'my_tasks\').length === 0">' +
+        '<p class="board-zone-empty">No open tasks.</p>' +
+      '</template>' +
+      '<ul class="board-task-list">' +
+        '<template x-for="t in $store.board.moduleItems(\'my_tasks\')" :key="t.id">' +
+          '<li :class="\'board-task-item board-task-priority-\' + $store.board.taskPriority(t)">' +
+            '<a :href="\'/activities\'" class="board-task-link">' +
+              '<span class="board-task-prefix" ' +
+                'x-text="$store.board.taskPrefix(t)" ' +
+                'x-show="$store.board.taskPrefix(t)"></span>' +
+              '<span class="board-task-dot"></span>' +
+              '<span class="board-task-text" ' +
+                'x-html="$store.board.renderBody((t.subject || t.body || \'\'))"></span>' +
+            '</a>' +
+          '</li>' +
         '</template>' +
-        '<template x-if="!$store.board.composer.target">' +
-          '<div>' +
-            '<input type="text" class="board-composer-target-input" ' +
-              'placeholder="Recipient name\u2026" ' +
-              'x-on:input="$store.board.searchTargets($event.target.value)">' +
-            '<div class="board-target-results" x-show="$store.board.targetResults.length">' +
-              '<template x-for="(r, i) in $store.board.targetResults" :key="r.ref_id">' +
-                '<button type="button" class="board-target-result" ' +
-                  ':class="{ active: i === $store.board.targetSelectedIndex }" ' +
-                  '@click="$store.board.pickTarget(r)">' +
-                  '<span x-text="r.label"></span>' +
-                  '<small x-text="r.sub"></small>' +
-                '</button>' +
-              '</template>' +
-            '</div>' +
-          '</div>' +
-        '</template>' +
+      '</ul>' +
+    '</section>' +
+
+    // ---------- Zone 2: Notes (sticky note pad) ----------
+    '<section class="board-zone board-zone-notes">' +
+
+      // Compose stack — three blank colored cards, or the active composer
+      '<div class="board-notes-stack" x-show="!$store.board.composer.open">' +
+        '<button type="button" class="board-stack-note board-stack-note-yellow" ' +
+          'title="New yellow note" aria-label="New yellow note" ' +
+          '@click="$store.board.openComposer({ color: \'yellow\' })"></button>' +
+        '<button type="button" class="board-stack-note board-stack-note-pink" ' +
+          'title="New pink note" aria-label="New pink note" ' +
+          '@click="$store.board.openComposer({ color: \'pink\' })"></button>' +
+        '<button type="button" class="board-stack-note board-stack-note-blue" ' +
+          'title="New blue note" aria-label="New blue note" ' +
+          '@click="$store.board.openComposer({ color: \'blue\' })"></button>' +
       '</div>' +
 
-      // Body textarea + @-autocomplete
-      '<div class="board-composer-body">' +
+      // Active composer (slides over stack when open)
+      '<div :class="\'board-composer board-card board-card-color-\' + $store.board.composer.color" ' +
+        'x-show="$store.board.composer.open" x-cloak>' +
         '<textarea id="board-composer-textarea" class="board-composer-textarea" ' +
-          'rows="3" placeholder="What\'s on your mind? Use @ to link." ' +
+          'rows="4" placeholder="Jot a note\u2026 @ to link" ' +
           ':value="$store.board.composer.body" ' +
           '@input="$store.board.onBodyInput(\'composer\', $event.target)" ' +
           '@keydown="$store.board.onBodyKeydown(\'composer\', $event.target, $event)"></textarea>' +
@@ -392,176 +381,157 @@ const BOARD_SIDEBAR_MARKUP = (
             '</button>' +
           '</template>' +
         '</div>' +
-      '</div>' +
-
-      // Color + flag pickers
-      '<div class="board-composer-styles">' +
-        '<div class="board-color-picker">' +
-          '<template x-for="c in $store.board.colors" :key="c">' +
-            '<button type="button" class="board-color-swatch" ' +
-              ':class="\'board-color-swatch-\' + c + ($store.board.composer.color === c ? \' selected\' : \'\')" ' +
-              ':title="c" ' +
-              '@click="$store.board.composer.color = c"></button>' +
-          '</template>' +
-        '</div>' +
-        '<div class="board-flag-picker">' +
-          '<template x-for="f in $store.board.flags" :key="f || \'none\'">' +
-            '<button type="button" class="board-flag-dot" ' +
-              ':class="(f ? \'board-flag-dot-\' + f : \'board-flag-dot-none\') + ($store.board.composer.flag === f ? \' selected\' : \'\')" ' +
-              ':title="f || \'No flag\'" ' +
-              '@click="$store.board.composer.flag = f"></button>' +
-          '</template>' +
-        '</div>' +
-      '</div>' +
-
-      // Actions
-      '<div class="board-composer-actions">' +
-        '<span class="board-composer-error" x-show="$store.board.composer.error" x-text="$store.board.composer.error"></span>' +
-        '<button type="button" class="btn btn-sm" @click="$store.board.cancelComposer()">Cancel</button>' +
-        '<button type="button" class="btn btn-sm primary" ' +
-          ':disabled="$store.board.composer.submitting" ' +
-          '@click="$store.board.submitComposer()">' +
-          '<span x-show="!$store.board.composer.submitting">Post</span>' +
-          '<span x-show="$store.board.composer.submitting">Saving\u2026</span>' +
-        '</button>' +
-      '</div>' +
-    '</div>' + // /.board-composer
-
-    // Modules list (ordered per user prefs)
-    '<div class="board-modules">' +
-      '<template x-for="mKey in $store.board.orderedModules" :key="mKey">' +
-        '<section class="board-module">' +
-
-          // Module header
-          '<header class="board-module-header" @click="$store.board.toggleModuleCollapse(mKey)">' +
-            '<span class="board-module-caret" x-text="$store.board.isModuleCollapsed(mKey) ? \'\u25B8\' : \'\u25BE\'"></span>' +
-            '<span class="board-module-title" x-text="$store.board.moduleLabel(mKey)"></span>' +
-            '<span class="board-module-count" x-text="$store.board.moduleCount(mKey)"></span>' +
-            '<span class="board-module-spacer"></span>' +
-            '<button type="button" class="board-mini-btn" title="Move up" ' +
-              '@click.stop="$store.board.moveModule(mKey, -1)">\u25B4</button>' +
-            '<button type="button" class="board-mini-btn" title="Move down" ' +
-              '@click.stop="$store.board.moveModule(mKey, 1)">\u25BE</button>' +
-          '</header>' +
-
-          // Module body
-          '<div class="board-module-body" x-show="!$store.board.isModuleCollapsed(mKey)">' +
-
-            // Empty state
-            '<template x-if="$store.board.moduleItems(mKey).length === 0">' +
-              '<p class="board-module-empty" x-text="' +
-                'mKey === \'my_tasks\' ? \'No open tasks.\' : ' +
-                'mKey === \'mentions\' ? \'No mentions.\' : \'No cards yet.\'"></p>' +
+        '<div class="board-composer-row">' +
+          '<div class="board-composer-scope-mini">' +
+            '<label><input type="radio" name="b_scope" value="private" ' +
+              'x-model="$store.board.composer.scope"> private</label>' +
+            '<label><input type="radio" name="b_scope" value="public" ' +
+              'x-model="$store.board.composer.scope"> shared</label>' +
+          '</div>' +
+          '<div class="board-color-picker-mini">' +
+            '<template x-for="c in $store.board.colors" :key="c">' +
+              '<button type="button" class="board-color-swatch" ' +
+                ':class="\'board-color-swatch-\' + c + ($store.board.composer.color === c ? \' selected\' : \'\')" ' +
+                ':title="c" ' +
+                '@click="$store.board.composer.color = c"></button>' +
             '</template>' +
+          '</div>' +
+        '</div>' +
+        '<div class="board-composer-actions">' +
+          '<span class="board-composer-error" x-show="$store.board.composer.error" x-text="$store.board.composer.error"></span>' +
+          '<button type="button" class="board-link-btn" @click="$store.board.cancelComposer()">cancel</button>' +
+          '<button type="button" class="board-link-btn board-link-btn-primary" ' +
+            ':disabled="$store.board.composer.submitting" ' +
+            '@click="$store.board.submitComposer()" ' +
+            'x-text="$store.board.composer.submitting ? \'posting\u2026\' : \'post\'"></button>' +
+        '</div>' +
+      '</div>' +
 
-            // My Tasks: read-only task cards that deep-link to activities page
-            '<template x-if="mKey === \'my_tasks\'">' +
-              '<ul class="board-task-list">' +
-                '<template x-for="t in $store.board.moduleItems(\'my_tasks\')" :key="t.id">' +
-                  '<li class="board-task-item">' +
-                    '<a :href="\'/activities\'" class="board-task-link">' +
-                      '<span class="board-task-body" x-text="(t.subject || t.body || \'\').slice(0, 120)"></span>' +
-                      '<span class="board-task-due" ' +
-                        'x-show="t.due_at" ' +
-                        'x-text="$store.board.dueLabel(t.due_at)"></span>' +
-                    '</a>' +
-                  '</li>' +
-                '</template>' +
-              '</ul>' +
-            '</template>' +
+      // Saved notes (private + shared + public-mentions) — below the stack
+      '<div class="board-notes-list">' +
+        '<template x-for="card in $store.board.allNotes" :key="card.id">' +
+          '<article :class="$store.board.cardClass(card)">' +
 
-            // Other modules: note cards
-            '<template x-if="mKey !== \'my_tasks\'">' +
-              '<div class="board-card-list">' +
-                '<template x-for="card in $store.board.moduleItems(mKey)" :key="card.id">' +
-                  '<article :class="$store.board.cardClass(card)">' +
-
-                    // Edit mode
-                    '<template x-if="$store.board.editing.cardId === card.id">' +
-                      '<div class="board-card-editing">' +
-                        '<textarea :id="\'board-edit-textarea-\' + card.id" ' +
-                          'class="board-card-edit-textarea" rows="3" ' +
-                          ':value="$store.board.editing.body" ' +
-                          '@input="$store.board.onBodyInput(\'editing\', $event.target)" ' +
-                          '@keydown="$store.board.onBodyKeydown(\'editing\', $event.target, $event)"></textarea>' +
-                        '<div class="board-mention-popup" ' +
-                          'x-show="$store.board.mention.active && $store.board.mention.for === \'editing\' && $store.board.mention.results.length" x-cloak>' +
-                          '<template x-for="(r, i) in $store.board.mention.results" :key="r.ref_type + r.ref_id">' +
-                            '<button type="button" class="board-mention-opt" ' +
-                              ':class="{ active: i === $store.board.mention.selectedIndex }" ' +
-                              '@click="$store.board.pickMention(r, document.getElementById(\'board-edit-textarea-\' + card.id))">' +
-                              '<span class="board-mention-type" x-text="r.ref_type"></span>' +
-                              '<span class="board-mention-label" x-text="r.label"></span>' +
-                              '<small x-text="r.sub"></small>' +
-                            '</button>' +
-                          '</template>' +
-                        '</div>' +
-                        '<div class="board-card-edit-styles">' +
-                          '<div class="board-color-picker">' +
-                            '<template x-for="c in $store.board.colors" :key="c">' +
-                              '<button type="button" class="board-color-swatch" ' +
-                                ':class="\'board-color-swatch-\' + c + ($store.board.editing.color === c ? \' selected\' : \'\')" ' +
-                                '@click="$store.board.editing.color = c"></button>' +
-                            '</template>' +
-                          '</div>' +
-                          '<div class="board-flag-picker">' +
-                            '<template x-for="f in $store.board.flags" :key="f || \'none\'">' +
-                              '<button type="button" class="board-flag-dot" ' +
-                                ':class="(f ? \'board-flag-dot-\' + f : \'board-flag-dot-none\') + ($store.board.editing.flag === f ? \' selected\' : \'\')" ' +
-                                '@click="$store.board.editing.flag = f"></button>' +
-                            '</template>' +
-                          '</div>' +
-                        '</div>' +
-                        '<div class="board-card-edit-actions">' +
-                          '<span class="board-composer-error" x-show="$store.board.editing.error" x-text="$store.board.editing.error"></span>' +
-                          '<button type="button" class="btn btn-sm" @click="$store.board.cancelEdit()">Cancel</button>' +
-                          '<button type="button" class="btn btn-sm primary" ' +
-                            ':disabled="$store.board.editing.submitting" ' +
-                            '@click="$store.board.saveEdit()">Save</button>' +
-                        '</div>' +
-                      '</div>' +
+            '<template x-if="$store.board.editing.cardId === card.id">' +
+              '<div class="board-card-editing">' +
+                '<textarea :id="\'board-edit-textarea-\' + card.id" ' +
+                  'class="board-card-edit-textarea" rows="3" ' +
+                  ':value="$store.board.editing.body" ' +
+                  '@input="$store.board.onBodyInput(\'editing\', $event.target)" ' +
+                  '@keydown="$store.board.onBodyKeydown(\'editing\', $event.target, $event)"></textarea>' +
+                '<div class="board-mention-popup" ' +
+                  'x-show="$store.board.mention.active && $store.board.mention.for === \'editing\' && $store.board.mention.results.length" x-cloak>' +
+                  '<template x-for="(r, i) in $store.board.mention.results" :key="r.ref_type + r.ref_id">' +
+                    '<button type="button" class="board-mention-opt" ' +
+                      ':class="{ active: i === $store.board.mention.selectedIndex }" ' +
+                      '@click="$store.board.pickMention(r, document.getElementById(\'board-edit-textarea-\' + card.id))">' +
+                      '<span class="board-mention-type" x-text="r.ref_type"></span>' +
+                      '<span class="board-mention-label" x-text="r.label"></span>' +
+                      '<small x-text="r.sub"></small>' +
+                    '</button>' +
+                  '</template>' +
+                '</div>' +
+                '<div class="board-composer-row">' +
+                  '<div class="board-color-picker-mini">' +
+                    '<template x-for="c in $store.board.colors" :key="c">' +
+                      '<button type="button" class="board-color-swatch" ' +
+                        ':class="\'board-color-swatch-\' + c + ($store.board.editing.color === c ? \' selected\' : \'\')" ' +
+                        '@click="$store.board.editing.color = c"></button>' +
                     '</template>' +
-
-                    // Display mode
-                    '<template x-if="$store.board.editing.cardId !== card.id">' +
-                      '<div class="board-card-display">' +
-                        '<div class="board-card-body" ' +
-                          'x-html="$store.board.renderBody(card.body)" ' +
-                          '@click="$store.board.startEdit(card)"></div>' +
-                        '<div class="board-card-footer">' +
-                          '<span class="board-card-author" ' +
-                            ':title="$store.board.authorLabel(card)" ' +
-                            'x-text="$store.board.authorInitials(card)"></span>' +
-                          '<span class="board-card-time" x-text="$store.board.relativeTime(card.created_at)"></span>' +
-                          '<span class="board-card-spacer"></span>' +
-                          '<button type="button" class="board-mini-btn" title="Pin" ' +
-                            '@click.stop="$store.board.togglePin(card)" ' +
-                            'x-text="card.pinned ? \'\u2605\' : \'\u2606\'"></button>' +
-                          '<div class="board-snooze-menu" x-data="{ open: false }" @click.outside="open = false">' +
-                            '<button type="button" class="board-mini-btn" title="Snooze" ' +
-                              '@click.stop="open = !open">\u23F1</button>' +
-                            '<div class="board-hide-dropdown" x-show="open" x-cloak @click="open = false">' +
-                              '<button type="button" @click.stop="$store.board.snoozeCard(card, 5); open = false">5 min</button>' +
-                              '<button type="button" @click.stop="$store.board.snoozeCard(card, 30); open = false">30 min</button>' +
-                              '<button type="button" @click.stop="$store.board.snoozeCard(card, 120); open = false">2 hours</button>' +
-                              '<button type="button" @click.stop="$store.board.snoozeCard(card, \'tomorrow\'); open = false">Tomorrow</button>' +
-                            '</div>' +
-                          '</div>' +
-                          '<button type="button" class="board-mini-btn" title="Archive" ' +
-                            '@click.stop="$store.board.archiveCard(card)">\u00D7</button>' +
-                        '</div>' +
-                      '</div>' +
-                    '</template>' +
-
-                  '</article>' +
-                '</template>' +
+                  '</div>' +
+                '</div>' +
+                '<div class="board-composer-actions">' +
+                  '<span class="board-composer-error" x-show="$store.board.editing.error" x-text="$store.board.editing.error"></span>' +
+                  '<button type="button" class="board-link-btn" @click="$store.board.archiveCard(card)">delete</button>' +
+                  '<button type="button" class="board-link-btn" @click="$store.board.cancelEdit()">cancel</button>' +
+                  '<button type="button" class="board-link-btn board-link-btn-primary" ' +
+                    ':disabled="$store.board.editing.submitting" ' +
+                    '@click="$store.board.saveEdit()">save</button>' +
+                '</div>' +
               '</div>' +
             '</template>' +
 
-          '</div>' + // /.board-module-body
-        '</section>' +
+            '<template x-if="$store.board.editing.cardId !== card.id">' +
+              '<div class="board-card-body" ' +
+                'x-html="$store.board.renderBody(card.body)" ' +
+                '@click="$store.board.startEdit(card)"></div>' +
+            '</template>' +
+
+          '</article>' +
+        '</template>' +
+      '</div>' +
+
+    '</section>' +
+
+    // ---------- Zone 3: Messages (chat bubbles) ----------
+    '<section class="board-zone board-zone-messages">' +
+      '<template x-if="$store.board.messages.length === 0 && !$store.board.messageComposer.open">' +
+        '<button type="button" class="board-message-compose-btn" ' +
+          '@click="$store.board.openMessageComposer()">+ message someone</button>' +
       '</template>' +
-    '</div>' + // /.board-modules
+
+      '<div class="board-message-list">' +
+        '<template x-for="msg in $store.board.messages" :key="msg.id">' +
+          '<div :class="\'board-message board-message-\' + (msg.from_me ? \'out\' : \'in\')">' +
+            '<span class="board-message-prefix" x-text="$store.board.messagePrefix(msg) + \'-\'"></span>' +
+            '<span class="board-message-body" x-html="$store.board.renderBody(msg.body)"></span>' +
+          '</div>' +
+        '</template>' +
+      '</div>' +
+
+      '<div class="board-message-composer" x-show="$store.board.messageComposer.open" x-cloak>' +
+        '<div class="board-message-composer-target">' +
+          '<template x-if="$store.board.messageComposer.target">' +
+            '<span class="board-message-to">to <strong x-text="$store.board.messageComposer.target.label"></strong> ' +
+              '<button type="button" class="board-link-btn" @click="$store.board.clearMessageTarget()">change</button>' +
+            '</span>' +
+          '</template>' +
+          '<template x-if="!$store.board.messageComposer.target">' +
+            '<div class="board-target-picker">' +
+              '<input type="text" class="board-target-input" ' +
+                'placeholder="who?" ' +
+                'x-on:input="$store.board.searchMessageTargets($event.target.value)">' +
+              '<div class="board-target-results" x-show="$store.board.messageTargetResults.length">' +
+                '<template x-for="r in $store.board.messageTargetResults" :key="r.ref_id">' +
+                  '<button type="button" class="board-target-result" ' +
+                    '@click="$store.board.pickMessageTarget(r)">' +
+                    '<span x-text="r.label"></span>' +
+                  '</button>' +
+                '</template>' +
+              '</div>' +
+            '</div>' +
+          '</template>' +
+        '</div>' +
+        '<textarea id="board-message-textarea" class="board-message-textarea" ' +
+          'rows="2" placeholder="message\u2026 @ to link" ' +
+          ':value="$store.board.messageComposer.body" ' +
+          '@input="$store.board.onBodyInput(\'messageComposer\', $event.target)" ' +
+          '@keydown="$store.board.onBodyKeydown(\'messageComposer\', $event.target, $event)"></textarea>' +
+        '<div class="board-mention-popup" ' +
+          'x-show="$store.board.mention.active && $store.board.mention.for === \'messageComposer\' && $store.board.mention.results.length" x-cloak>' +
+          '<template x-for="(r, i) in $store.board.mention.results" :key="r.ref_type + r.ref_id">' +
+            '<button type="button" class="board-mention-opt" ' +
+              ':class="{ active: i === $store.board.mention.selectedIndex }" ' +
+              '@click="$store.board.pickMention(r, document.getElementById(\'board-message-textarea\'))">' +
+              '<span class="board-mention-type" x-text="r.ref_type"></span>' +
+              '<span class="board-mention-label" x-text="r.label"></span>' +
+            '</button>' +
+          '</template>' +
+        '</div>' +
+        '<div class="board-composer-actions">' +
+          '<span class="board-composer-error" x-show="$store.board.messageComposer.error" x-text="$store.board.messageComposer.error"></span>' +
+          '<button type="button" class="board-link-btn" @click="$store.board.cancelMessageComposer()">cancel</button>' +
+          '<button type="button" class="board-link-btn board-link-btn-primary" ' +
+            ':disabled="$store.board.messageComposer.submitting" ' +
+            '@click="$store.board.submitMessageComposer()" ' +
+            'x-text="$store.board.messageComposer.submitting ? \'sending\u2026\' : \'send\'"></button>' +
+        '</div>' +
+      '</div>' +
+
+      '<button type="button" class="board-message-compose-btn" ' +
+        'x-show="$store.board.messages.length > 0 && !$store.board.messageComposer.open" ' +
+        '@click="$store.board.openMessageComposer()">+ new message</button>' +
+    '</section>' +
 
   '</aside>' +
   '</div>' // /.board-root
@@ -614,6 +584,9 @@ export function layout(title, body, opts = {}) {
   <link rel="icon" type="image/svg+xml" href="/img/logo.svg">
   <link rel="icon" type="image/png" sizes="120x120" href="/img/logo-120.png">
   <link rel="stylesheet" href="/css/pms.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600;700&family=Kalam:wght@300;400;700&display=swap" rel="stylesheet">
   <script defer src="/js/htmx.min.js"></script>
   <!-- wizard-modal.js (engine) + per-wizard configs MUST load before
        alpine.min.js. Alpine 3's bundle auto-calls Alpine.start() as

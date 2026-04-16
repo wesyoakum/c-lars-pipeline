@@ -89,7 +89,9 @@ export async function onRequestGet(context) {
         WHERE c.archived_at IS NULL
           AND (c.snooze_until IS NULL OR c.snooze_until < ?)
           AND (
-            (c.scope = 'direct' AND c.target_user_id = ?)
+            -- Direct messages involving me (in either direction) so
+            -- the messages zone can render a proper chat thread.
+            (c.scope = 'direct' AND (c.target_user_id = ? OR c.author_user_id = ?))
             OR (
               c.scope = 'public'
               AND EXISTS (
@@ -100,7 +102,7 @@ export async function onRequestGet(context) {
           )
         ORDER BY c.pinned DESC, c.created_at DESC
         LIMIT 50`,
-      [nowIso, user.id, user.id]),
+      [nowIso, user.id, user.id, user.id]),
   ]);
 
   // Bundle refs for all note-type cards in one query, fan out client-side.
@@ -113,6 +115,11 @@ export async function onRequestGet(context) {
   return json({
     prefs,
     server_time: nowIso,
+    user: {
+      id: user.id,
+      display_name: user.display_name || '',
+      email: user.email || '',
+    },
     modules: {
       my_tasks: myTasks,
       my_notes: myNotes,
