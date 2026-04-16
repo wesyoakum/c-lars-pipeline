@@ -2885,6 +2885,46 @@ tr.line-option td:first-child {
   font-weight: 600;
 }
 
+/* Tasks page: click-to-complete circle in the "Done" column. Empty
+   circle when pending; filled with a checkmark when completed. */
+.task-complete-toggle {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 2px solid var(--fg-muted);
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background 0.12s ease, border-color 0.12s ease;
+  position: relative;
+}
+.task-complete-toggle:hover {
+  border-color: var(--accent);
+  background: rgba(0, 0, 0, 0.04);
+}
+.task-complete-toggle.is-completed {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.task-complete-toggle.is-completed::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 5px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+/* The "Done" column header is a tiny check mark — keep it narrow. */
+th.col-done, td.col-done {
+  width: 32px;
+  text-align: center;
+}
+
 /* -- Documents --------------------------------------------------------- */
 
 .pill-task    { background: #ddf4ff; color: #0550ae; }

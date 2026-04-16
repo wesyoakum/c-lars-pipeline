@@ -80,6 +80,7 @@ export async function onRequestGet(context) {
   ).length;
 
   const columns = [
+    { key: 'done',          label: '\u2713',       sort: 'text',   filter: null,     default: true },
     { key: 'open',          label: '\u2197',      sort: 'text',   filter: null,     default: true },
     { key: 'subject',       label: 'Subject',     sort: 'text',   filter: 'text',   default: true },
     { key: 'type_label',    label: 'Type',         sort: 'text',   filter: 'select', default: true },
@@ -93,6 +94,9 @@ export async function onRequestGet(context) {
     const isOverdue = a.status === 'pending' && a.due_at && a.due_at < new Date().toISOString().slice(0, 10);
     return {
       id: a.id,
+      // `done` is a sort/filter-friendly proxy for status. Sorting on it
+      // groups pending tasks above completed ones.
+      done: a.status === 'completed' ? '1' : '0',
       subject: a.subject ?? '',
       body_preview: a.body ? (a.body.length > 80 ? a.body.slice(0, 80) + '...' : a.body) : '',
       type: a.type,
@@ -151,6 +155,12 @@ export async function onRequestGet(context) {
                   <tr data-row-id="${escape(r.id)}"
                       ${raw(rowDataAttrs(columns, r))}
                       class="${r.isCompleted ? 'row-muted' : ''} ${r.isOverdue ? 'row-overdue' : ''}">
+                    <td class="col-done" data-col="done">
+                      <button type="button"
+                              class="task-complete-toggle ${r.isCompleted ? 'is-completed' : ''}"
+                              title="${r.isCompleted ? 'Mark pending' : 'Mark complete'}"
+                              aria-label="${r.isCompleted ? 'Mark pending' : 'Mark complete'}"></button>
+                    </td>
                     <td class="col-open" data-col="open">
                       <a class="row-open-link" href="/activities/${escape(r.id)}" title="Open activity" aria-label="Open activity">\u2197</a>
                     </td>
@@ -179,6 +189,7 @@ export async function onRequestGet(context) {
             // Column key `due` maps to patch field `due_at`.
             fieldAttrMap: { due_at: 'due' },
           }))}</script>
+          <script>${raw(taskCompleteToggleScript())}</script>
         `}
     </section>
   `;
@@ -190,6 +201,78 @@ export async function onRequestGet(context) {
     flash,
     breadcrumbs: [{ label: 'Tasks & Activities' }],
   }));
+}
+
+/**
+ * Client script: click the circle in the "Done" column to flip a task's
+ * status pending ↔ completed. Optimistic UI: paints immediately, then
+ * reverts if the patch comes back with !ok. Stops propagation so the
+ * inline-edit handler on the same tbody doesn't try to open an editor.
+ */
+function taskCompleteToggleScript() {
+  return `
+(function() {
+  var host = document.querySelector('.opp-list');
+  if (!host) return;
+  var tbody = host.querySelector('[data-role="rows"]');
+  if (!tbody) return;
+
+  tbody.addEventListener('click', function(e) {
+    var btn = e.target.closest('.task-complete-toggle');
+    if (!btn || !tbody.contains(btn)) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    var tr = btn.closest('tr[data-row-id]');
+    if (!tr) return;
+    var id = tr.dataset.rowId;
+    var wasCompleted = btn.classList.contains('is-completed');
+    var newStatus = wasCompleted ? 'pending' : 'completed';
+
+    // Optimistic flip.
+    paint(tr, btn, newStatus);
+
+    fetch('/activities/' + encodeURIComponent(id) + '/patch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ field: 'status', value: newStatus }),
+    })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data || !data.ok) {
+          paint(tr, btn, wasCompleted ? 'completed' : 'pending');
+          if (data && data.error) {
+            btn.title = data.error;
+            setTimeout(function() {
+              btn.title = wasCompleted ? 'Mark complete' : 'Mark pending';
+            }, 2500);
+          }
+        }
+      })
+      .catch(function() {
+        paint(tr, btn, wasCompleted ? 'completed' : 'pending');
+      });
+  });
+
+  function paint(tr, btn, status) {
+    var done = status === 'completed';
+    btn.classList.toggle('is-completed', done);
+    btn.title = done ? 'Mark pending' : 'Mark complete';
+    btn.setAttribute('aria-label', btn.title);
+    tr.classList.toggle('row-muted', done);
+    // Keep the row's data-* attributes in sync so list-table.js's
+    // sort/filter/quicksearch see the new status without a reload.
+    tr.setAttribute('data-done', done ? '1' : '0');
+    tr.setAttribute('data-status_label', done ? 'Completed' : 'Pending');
+    // Update the status pill in the same row.
+    var pill = tr.querySelector('.col-status_label .pill');
+    if (pill) {
+      pill.textContent = done ? 'Completed' : 'Pending';
+      pill.classList.toggle('pill-success', done);
+    }
+  }
+})();
+`;
 }
 
 // POST /activities — Create a new activity.
