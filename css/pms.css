@@ -113,6 +113,35 @@ code {
 .nav-link:hover  { background: var(--bg-alt); text-decoration: none; }
 .nav-link.active { background: var(--bg-alt); font-weight: 600; }
 
+/* Sub-navigation tab strip (e.g. Accounts ↔ Contacts under /accounts). */
+.subnav-tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 1rem;
+}
+.subnav-tab {
+  color: var(--fg-muted);
+  padding: 0.5rem 1rem;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-top-left-radius: var(--radius);
+  border-top-right-radius: var(--radius);
+  margin-bottom: -1px;
+  font-weight: 500;
+}
+.subnav-tab:hover {
+  background: var(--bg-alt);
+  text-decoration: none;
+  color: var(--fg);
+}
+.subnav-tab.active {
+  background: var(--bg);
+  border-color: var(--border);
+  color: var(--fg);
+  font-weight: 600;
+}
+
 .header-right {
   display: flex;
   align-items: center;

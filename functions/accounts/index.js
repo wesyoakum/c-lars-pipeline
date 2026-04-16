@@ -6,7 +6,7 @@
 import { all, stmt, batch } from '../lib/db.js';
 import { auditStmt } from '../lib/audit.js';
 import { validateAccount } from '../lib/validators.js';
-import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
+import { layout, htmlResponse, html, raw, escape, subnavTabs } from '../lib/layout.js';
 import { uuid, now } from '../lib/ids.js';
 import {
   redirectWithFlash,
@@ -113,7 +113,16 @@ export async function onRequestGet(context) {
     updated: (r.updated_at ?? '').slice(0, 10),
   }));
 
+  const tabs = subnavTabs(
+    [
+      { href: '/accounts', label: 'Accounts' },
+      { href: '/accounts/contacts', label: 'Contacts' },
+    ],
+    '/accounts'
+  );
+
   const body = html`
+    ${tabs}
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Accounts</h1>

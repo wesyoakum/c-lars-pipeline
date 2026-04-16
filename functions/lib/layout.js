@@ -330,13 +330,13 @@ export function layout(title, body, opts = {}) {
       <a href="/"><img src="/img/logo-120.png" alt="C-LARS" class="brand-logo"><strong>PMS</strong></a>
     </div>
     <nav class="site-nav">
+      ${navLink('/accounts', 'Accounts', activeNav)}
       ${navLink('/opportunities', 'Opportunities', activeNav)}
       ${navLink('/quotes', 'Quotes', activeNav)}
       ${navLink('/activities', 'Tasks', activeNav)}
       ${navLink('/documents/library', 'Documents', activeNav)}
       ${navLink('/library', 'Library', activeNav)}
       ${navLink('/reports', 'Reports', activeNav)}
-      ${navLink('/accounts', 'Accounts', activeNav)}
       ${navLink('/jobs', 'Jobs', activeNav)}
     </nav>
     <div class="header-right">
@@ -380,6 +380,26 @@ ${body}
 function navLink(href, label, active) {
   const isActive = active && href.startsWith(active);
   return `<a href="${href}" class="${isActive ? 'nav-link active' : 'nav-link'}">${escape(label)}</a>`;
+}
+
+/**
+ * Sub-navigation tab strip. Renders a horizontal row of tab-styled links,
+ * one of which is marked active by comparing its href to `activePath`.
+ *
+ * Use this for intra-section navigation like /accounts ↔ /accounts/contacts,
+ * where both pages live under the same top-level nav (Accounts) but show
+ * different tables. Each tab is a plain server-side navigation — no Alpine,
+ * no client tab component.
+ *
+ * tabs: [{ href, label }, …]
+ */
+export function subnavTabs(tabs, activePath) {
+  return html`<nav class="subnav-tabs" aria-label="Section tabs">
+    ${tabs.map(t => {
+      const isActive = t.href === activePath;
+      return html`<a href="${escape(t.href)}" class="${isActive ? 'subnav-tab active' : 'subnav-tab'}">${escape(t.label)}</a>`;
+    })}
+  </nav>`;
 }
 
 /**
