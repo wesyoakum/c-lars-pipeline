@@ -113,6 +113,21 @@
     return 'later';
   }
 
+  // Best-effort sync clipboard write for browsers without async API
+  // (or insecure-context fallbacks). No-op on failure.
+  function fallbackCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch (e) {}
+  }
+
   // Resize a textarea to fit its content. Cap at a reasonable max so
   // it doesn't take over the whole sidebar on a long message.
   function autoResize(el, maxPx) {
@@ -400,6 +415,25 @@
         }).catch(function () { self.poll(); });
       },
 
+      // Permanently delete a task. Optimistic remove from both arrays;
+      // re-syncs from server on failure. Confirms because this is
+      // destructive (no undo).
+      deleteTask: function (task) {
+        if (!task || !task.id) return;
+        var label = (task.subject || task.body || 'this task').slice(0, 60);
+        if (!confirm('Delete "' + label + '"? This cannot be undone.')) return;
+        var self = this;
+        self.modules.my_tasks = (self.modules.my_tasks || []).filter(function (t) { return t.id !== task.id; });
+        self.modules.my_tasks_done = (self.modules.my_tasks_done || []).filter(function (t) { return t.id !== task.id; });
+        fetch('/activities/' + encodeURIComponent(task.id) + '/delete', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'accept': 'application/json' },
+        }).then(function (res) {
+          if (!res.ok) self.poll();
+        }).catch(function () { self.poll(); });
+      },
+
       // ---- Note composer (sticky-pad stack) ----
       openComposer: function (defaults) {
         defaults = defaults || {};
@@ -532,6 +566,61 @@
           credentials: 'same-origin',
           headers: { 'accept': 'application/json' },
         }).catch(function () { self.poll(); });
+      },
+
+      // Toggle the pinned state of a note or message. Pinned cards sort
+      // to the top of their module and don't auto-archive. Optimistic;
+      // re-syncs on failure.
+      togglePin: function (card) {
+        if (!card || !card.id) return;
+        var self = this;
+        var nextPinned = card.pinned ? 0 : 1;
+        card.pinned = nextPinned; // local update
+        // Re-sort affected modules immediately so the card jumps to its
+        // new position in the list.
+        Object.keys(self.modules).forEach(function (k) {
+          if (k === 'my_tasks' || k === 'my_tasks_done') return;
+          self.modules[k] = (self.modules[k] || []).slice().sort(function (a, b) {
+            if (a.pinned !== b.pinned) return (b.pinned || 0) - (a.pinned || 0);
+            return (b.created_at || '').localeCompare(a.created_at || '');
+          });
+        });
+        fetch('/board/cards/' + encodeURIComponent(card.id) + '/pin', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json', 'accept': 'application/json' },
+          body: JSON.stringify({ pinned: !!nextPinned }),
+        }).then(function (res) {
+          if (!res.ok) self.poll();
+        }).catch(function () { self.poll(); });
+      },
+
+      // Copy the card body to the clipboard. We strip the @[type:id|label]
+      // ref markers down to plain "@label" so the clipboard text matches
+      // what the user sees on screen. Falls back to a hidden textarea +
+      // execCommand for browsers without the async clipboard API
+      // (or when not in a secure context).
+      copyCard: function (card) {
+        if (!card) return;
+        var raw = card.body || '';
+        var plain = raw.replace(
+          /@\[(?:user|opportunity|quote|account|document):[^|\]]+\|([^\]]*)\]/g,
+          '@$1'
+        );
+        var done = function () {
+          card.__copied = true;
+          var c = card;
+          setTimeout(function () { c.__copied = false; }, 1200);
+        };
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(plain).then(done, function () {
+              fallbackCopy(plain); done();
+            });
+            return;
+          }
+        } catch (e) {}
+        fallbackCopy(plain); done();
       },
 
       // ---- Message composer ----

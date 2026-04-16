@@ -102,6 +102,7 @@ export async function onRequestGet(context) {
                 ${rowData.map(r => html`
                   <tr data-row-id="${escape(r.id)}"
                       data-opp_id="${escape(r.opp_id)}"
+                      class="${(r.status === 'dead' || r.status === 'rejected' || r.status === 'expired') ? 'row-muted' : ''}"
                       ${raw(rowDataAttrs(columns, r))}>
                     <td class="col-open" data-col="open">
                       <a class="row-open-link" href="/opportunities/${escape(r.opp_id)}/quotes/${escape(r.id)}" title="Open quote" aria-label="Open quote">\u2197</a>

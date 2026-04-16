@@ -3326,6 +3326,32 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 .board-task-link:hover { color: #000; text-decoration: none; }
 .board-task-text { word-break: break-word; }
 
+/* Per-row delete X — appears on row hover, sits at the right edge. */
+.board-task-delete {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: rgba(0,0,0,0.35);
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  flex-shrink: 0;
+}
+.board-task-item:hover .board-task-delete,
+.board-task-delete:focus { opacity: 1; }
+.board-task-delete:hover {
+  background: rgba(0,0,0,0.08);
+  color: #c0392b;
+}
+
 /* ---------- Notes zone (sticky pad) ---------- */
 .board-zone-notes {
   position: relative;
@@ -3334,7 +3360,7 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 .board-notes-stack {
   position: relative;
   height: 95px;
-  margin: 0.5rem 0 0.85rem;
+  margin: 0.5rem 0 1.6rem;
 }
 .board-stack-note {
   position: absolute;
@@ -3363,7 +3389,7 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
-  padding: 0.25rem 0.3rem;
+  padding: 0.6rem 0.3rem 0.25rem;
 }
 .board-card {
   position: relative;
@@ -3439,6 +3465,71 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 .board-card-delete:hover {
   background: rgba(0,0,0,0.08);
   color: #c0392b;
+}
+
+/* Copy button — sits to the LEFT of the delete X, same hover behavior */
+.board-card-copy {
+  position: absolute;
+  top: 2px;
+  right: 24px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: rgba(0,0,0,0.35);
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 4;
+}
+.board-card:hover .board-card-copy,
+.board-card-copy:focus { opacity: 1; }
+.board-card-copy:hover {
+  background: rgba(0,0,0,0.08);
+  color: var(--accent);
+}
+
+/* Pin button — leftmost of the three top-right affordances. Stays
+   visible even when un-hovered if the card is currently pinned, so
+   the pinned state is always glanceable. */
+.board-card-pin {
+  position: absolute;
+  top: 2px;
+  right: 44px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: rgba(0,0,0,0.35);
+  font-size: 0.8rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  z-index: 4;
+}
+.board-card:hover .board-card-pin,
+.board-card-pin:focus,
+.board-card-pin.is-pinned { opacity: 1; }
+.board-card-pin.is-pinned {
+  color: #c0392b;
+  transform: rotate(-20deg);
+}
+.board-card-pin:hover {
+  background: rgba(0,0,0,0.08);
+  color: var(--accent);
 }
 
 /* Composer (new note) + edit-in-place — no save/cancel buttons */

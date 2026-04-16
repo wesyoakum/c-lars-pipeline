@@ -342,6 +342,9 @@ const BOARD_RIGHT_MARKUP = (
               '<span class="board-task-text" ' +
                 'x-html="$store.board.renderBody((t.subject || t.body || \'\'))"></span>' +
             '</a>' +
+            '<button type="button" class="board-task-delete" ' +
+              '@click.stop="$store.board.deleteTask(t)" ' +
+              'title="Delete task" aria-label="Delete task">\u00D7</button>' +
           '</li>' +
         '</template>' +
       '</ul>' +
@@ -366,6 +369,9 @@ const BOARD_RIGHT_MARKUP = (
               '<span class="board-task-text" ' +
                 'x-html="$store.board.renderBody((t.subject || t.body || \'\'))"></span>' +
             '</a>' +
+            '<button type="button" class="board-task-delete" ' +
+              '@click.stop="$store.board.deleteTask(t)" ' +
+              'title="Delete task" aria-label="Delete task">\u00D7</button>' +
           '</li>' +
         '</template>' +
       '</ul>' +
@@ -444,8 +450,23 @@ const BOARD_RIGHT_MARKUP = (
         '<template x-for="card in $store.board.allNotes" :key="card.id">' +
           '<article :class="$store.board.cardClass(card)">' +
 
-            // X delete on hover (always present, opacity controlled by CSS).
-            // Skipped while in edit mode for this card to avoid two close affordances.
+            // Pin + Copy + X delete on hover (opacity controlled by CSS).
+            // Pin stays visible when active even on un-hover. All three
+            // skipped while in edit mode to avoid competing affordances.
+            '<button type="button" class="board-card-pin" ' +
+              ':class="card.pinned ? \'is-pinned\' : \'\'" ' +
+              'x-show="$store.board.editing.cardId !== card.id" ' +
+              '@click.stop="$store.board.togglePin(card)" ' +
+              ':title="card.pinned ? \'Unpin\' : \'Pin to top\'" ' +
+              ':aria-label="card.pinned ? \'Unpin\' : \'Pin to top\'">\u{1F4CC}</button>' +
+            '<button type="button" class="board-card-copy" ' +
+              'x-show="$store.board.editing.cardId !== card.id" ' +
+              '@click.stop="$store.board.copyCard(card)" ' +
+              ':title="card.__copied ? \'Copied!\' : \'Copy text\'" ' +
+              'aria-label="Copy text">' +
+              '<span x-show="!card.__copied">\u29C9</span>' +
+              '<span x-show="card.__copied" x-cloak>\u2713</span>' +
+            '</button>' +
             '<button type="button" class="board-card-delete" ' +
               'x-show="$store.board.editing.cardId !== card.id" ' +
               '@click.stop="$store.board.archiveCard(card)" ' +
