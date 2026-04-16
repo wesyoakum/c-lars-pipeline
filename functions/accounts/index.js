@@ -126,7 +126,7 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Accounts</h1>
-        ${listToolbar({ id: 'acct', count: rows.length, columns, newHref: '/accounts/new', newLabel: 'New account' })}
+        ${listToolbar({ id: 'acct', count: rows.length, columns, newOnClick: "window.PMS.openWizard('account', {})", newLabel: 'New account' })}
       </div>
 
       ${rows.length === 0
@@ -199,16 +199,53 @@ export async function onRequestGet(context) {
 }
 
 /**
+ * Detects a request coming from the wizard modal or any XHR-style
+ * client. We check three signals:
+ *   - the wizard posts `source=wizard` in the form body
+ *   - most clients send `x-requested-with: XMLHttpRequest`
+ *   - an `accept: application/json` header with no text/html preference
+ * Any of those is enough to switch the handler into JSON mode.
+ */
+function isAjaxRequest(request, input) {
+  if (input?.source === 'wizard' || input?.source === 'modal') return true;
+  const xrw = request.headers.get('x-requested-with');
+  if (xrw && xrw.toLowerCase() === 'xmlhttprequest') return true;
+  const accept = request.headers.get('accept') || '';
+  return accept.includes('application/json') && !accept.includes('text/html');
+}
+
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
+}
+
+/**
  * POST /accounts — create a new account.
+ *
+ * Three response modes:
+ *   1. AJAX (source=wizard, x-requested-with, or JSON accept header):
+ *      returns { ok: true, id, redirectUrl } or { ok: false, error, errors }
+ *   2. Popup mode (isPopupMode true): postMessage + close the popup
+ *   3. Classic form submit: re-render with errors or redirect-with-flash
  */
 export async function onRequestPost(context) {
   const { env, data, request } = context;
   const user = data?.user;
   const input = await formBody(request);
+  const ajax = isAjaxRequest(request, input);
   const { ok, value, errors } = validateAccount(input);
   const submittedAddresses = parseAddressForm(input);
 
   if (!ok) {
+    if (ajax) {
+      const firstError = Object.values(errors)[0] || 'Invalid input.';
+      return jsonResponse({ ok: false, error: firstError, errors }, 400);
+    }
     // Re-render the new form with the errors inline. Hand back the parsed
     // address rows so the user doesn't lose them.
     const { renderNewForm } = await import('./new.js');
@@ -280,6 +317,15 @@ export async function onRequestPost(context) {
   );
 
   await batch(env.DB, statements);
+
+  if (ajax) {
+    return jsonResponse({
+      ok: true,
+      id,
+      name: value.name,
+      redirectUrl: `/accounts/${id}`,
+    });
+  }
 
   if (isPopupMode(request, input)) {
     return popupCloseResponse('pms.account.created', {

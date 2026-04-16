@@ -163,81 +163,98 @@ const NOTIFICATION_STORE_SCRIPT = (
   "});\n"
 );
 
-// Global task modal (T+) — Alpine store + helper.
+// Global wizard modal — Alpine store + injected markup.
 //
-// Lives in every authenticated page so any button anywhere can
-// trigger it. Callers open the modal by dispatching a window event
-// or calling window.PMS.openTaskModal():
+// One modal, many wizards. Each wizard (task, account, contact,
+// opportunity, quote, job) is a small config file under /js/wizards/
+// that registers itself with the engine in /js/wizard-modal.js.
 //
-//   <button onclick="window.PMS.openTaskModal({ opportunity_id: '...' })">+ Task</button>
+// Opened via:
+//   <button onclick="window.PMS.openWizard('task', { opportunity_id: '...' })">+ Task</button>
+//   <button onclick="window.PMS.openWizard('account', {})">+ New account</button>
 //
 // or via a custom event:
+//   window.dispatchEvent(new CustomEvent('pms:open-wizard',
+//     { detail: { key: 'account', prefill: {} } }))
 //
-//   window.dispatchEvent(new CustomEvent('pms:open-task-modal', { detail: { opportunity_id: '...' } }))
-//
-// Prefill shape (all optional):
-//   { opportunity_id, quote_id, account_id, link_label, reload_on_success }
-//
-// If link_label is provided, the picker collapses into a pinned
-// "Linked to: <label>" row so the user doesn't have to re-select.
+// Back-compat: window.PMS.openTaskModal(prefill) maps to openWizard('task', prefill).
 //
 // Picker data (users, open opps, recent quotes, accounts) is fetched
-// lazily the first time the modal opens on a page, from
-// /activities/picker-data.
+// lazily from /activities/picker-data the first time a wizard with a
+// user-select or entity-select step opens on a page.
 //
 // All wizard logic (date parsing, fuzzy match, step state, submit)
-// lives in /js/task-modal.js. This file just emits the static DOM.
+// lives in /js/wizard-modal.js. This markup is just the static DOM.
 // Uses string concatenation (no template literals) so it drops into
 // layout()'s shell without escaping issues.
-const TASK_MODAL_MARKUP = (
-  '<div class="task-modal-overlay" x-data x-show="$store.taskModal.open" x-cloak ' +
-  '@keydown.escape.window="$store.taskModal.closeModal()" ' +
-  '@click.self="$store.taskModal.closeModal()" style="display:none">' +
+const WIZARD_MODAL_MARKUP = (
+  '<div class="task-modal-overlay" x-data x-show="$store.wizard.open" x-cloak ' +
+  '@keydown.escape.window="$store.wizard.closeModal()" ' +
+  '@click.self="$store.wizard.closeModal()" style="display:none">' +
   '<div class="task-modal task-modal-wizard" @click.stop>' +
   '<div class="task-modal-header">' +
-  '<h3>New task</h3>' +
-  '<button type="button" class="task-modal-close" @click="$store.taskModal.closeModal()" aria-label="Close">&times;</button>' +
+  '<h3 x-text="$store.wizard.title()"></h3>' +
+  '<button type="button" class="task-modal-close" @click="$store.wizard.closeModal()" aria-label="Close">&times;</button>' +
   '</div>' +
   '<div class="task-modal-body">' +
 
-  // Pinned linked-to indicator (only when the caller locked a link).
-  '<div class="task-wizard-pinned" x-show="$store.taskModal.prefillLocked">' +
-  '<span class="task-wizard-pinned-label">Linked to</span>' +
-  '<strong x-text="$store.taskModal.prefillLockedLabel"></strong>' +
+  // Pinned row (e.g. "Linked to: <record>") — only shown if the wizard
+  // config's applyPrefill returned { locked: true, label: ... }.
+  '<div class="task-wizard-pinned" x-show="$store.wizard.pinnedValue">' +
+  '<span class="task-wizard-pinned-label" x-text="$store.wizard.pinnedPrefix"></span>' +
+  '<strong x-text="$store.wizard.pinnedValue"></strong>' +
   '</div>' +
 
-  // Big prompt
-  '<div class="task-wizard-prompt" x-text="$store.taskModal.currentPrompt()"></div>' +
+  // Big prompt (the current step's question)
+  '<div class="task-wizard-prompt" x-text="$store.wizard.currentPrompt()"></div>' +
 
-  // Input area: textarea for multiline steps, input for the rest.
+  // Input area: textarea / text input / select depending on step.type.
   '<div class="task-wizard-input-wrap">' +
-  '<template x-if="$store.taskModal.isMultilineStep()">' +
-  '<textarea id="task-wizard-input" class="task-wizard-input task-wizard-input-textarea" ' +
-  'x-model="$store.taskModal.typedInput" ' +
-  '@input="$store.taskModal.onInputChange()" ' +
-  '@keydown.tab.prevent="$store.taskModal.advance()" ' +
-  '@keydown.shift.tab.prevent="$store.taskModal.goBack()" ' +
-  'rows="3" placeholder="Type your task..." autocomplete="off"></textarea>' +
-  '</template>' +
-  '<template x-if="!$store.taskModal.isMultilineStep()">' +
-  '<input id="task-wizard-input" class="task-wizard-input" type="text" ' +
-  'x-model="$store.taskModal.typedInput" ' +
-  '@input="$store.taskModal.onInputChange()" ' +
-  '@keydown.tab.prevent="$store.taskModal.advance()" ' +
-  '@keydown.shift.tab.prevent="$store.taskModal.goBack()" ' +
-  '@keydown.enter.prevent="$store.taskModal.advance()" ' +
-  '@keydown.arrow-down.prevent="$store.taskModal.moveSuggestion(1)" ' +
-  '@keydown.arrow-up.prevent="$store.taskModal.moveSuggestion(-1)" ' +
-  'placeholder="Start typing..." autocomplete="off">' +
+
+  // Textarea (multi-line text)
+  '<template x-if="$store.wizard.isMultilineStep()">' +
+  '<textarea id="wizard-input" class="task-wizard-input task-wizard-input-textarea" ' +
+  'x-model="$store.wizard.typedInput" ' +
+  '@input="$store.wizard.onInputChange()" ' +
+  '@keydown.tab.prevent="$store.wizard.advance()" ' +
+  '@keydown.shift.tab.prevent="$store.wizard.goBack()" ' +
+  'rows="3" ' +
+  ':placeholder="$store.wizard.currentPlaceholder()" autocomplete="off"></textarea>' +
   '</template>' +
 
-  // Suggestions dropdown (assignee + link steps only).
-  '<div class="task-wizard-suggestions" x-show="$store.taskModal.visibleSuggestions().length > 0">' +
-  '<template x-for="(sug, idx) in $store.taskModal.visibleSuggestions()" :key="sug.id">' +
+  // Select (dropdown)
+  '<template x-if="$store.wizard.isSelectStep()">' +
+  '<select id="wizard-input" class="task-wizard-input" ' +
+  'x-model="$store.wizard.typedInput" ' +
+  '@keydown.tab.prevent="$store.wizard.advance()" ' +
+  '@keydown.shift.tab.prevent="$store.wizard.goBack()" ' +
+  '@keydown.enter.prevent="$store.wizard.advance()">' +
+  '<template x-for="opt in $store.wizard.selectOptions()" :key="opt.value">' +
+  '<option :value="opt.value" x-text="opt.label"></option>' +
+  '</template>' +
+  '</select>' +
+  '</template>' +
+
+  // Single-line input (text / date / user-select / entity-select)
+  '<template x-if="!$store.wizard.isMultilineStep() && !$store.wizard.isSelectStep()">' +
+  '<input id="wizard-input" class="task-wizard-input" type="text" ' +
+  'x-model="$store.wizard.typedInput" ' +
+  '@input="$store.wizard.onInputChange()" ' +
+  '@keydown.tab.prevent="$store.wizard.advance()" ' +
+  '@keydown.shift.tab.prevent="$store.wizard.goBack()" ' +
+  '@keydown.enter.prevent="$store.wizard.advance()" ' +
+  '@keydown.arrow-down.prevent="$store.wizard.moveSuggestion(1)" ' +
+  '@keydown.arrow-up.prevent="$store.wizard.moveSuggestion(-1)" ' +
+  ':placeholder="$store.wizard.currentPlaceholder()" autocomplete="off">' +
+  '</template>' +
+
+  // Suggestions dropdown (user-select + entity-select steps).
+  '<div class="task-wizard-suggestions" x-show="$store.wizard.visibleSuggestions().length > 0">' +
+  '<template x-for="(sug, idx) in $store.wizard.visibleSuggestions()" :key="sug.id">' +
   '<button type="button" class="task-wizard-suggestion" ' +
-  ':class="idx === $store.taskModal.suggestionIndex ? \'active\' : \'\'" ' +
-  '@mouseenter="$store.taskModal.suggestionIndex = idx" ' +
-  '@click="$store.taskModal.pickSuggestion(idx)">' +
+  ':class="idx === $store.wizard.suggestionIndex ? \'active\' : \'\'" ' +
+  '@mouseenter="$store.wizard.suggestionIndex = idx" ' +
+  '@click="$store.wizard.pickSuggestion(idx)">' +
   '<span class="task-wizard-suggestion-type" x-text="sug.typeLabel" x-show="sug.typeLabel"></span>' +
   '<span class="task-wizard-suggestion-main" x-text="sug.label"></span>' +
   '<span class="task-wizard-suggestion-sub" x-text="sug.sub" x-show="sug.sub"></span>' +
@@ -247,24 +264,24 @@ const TASK_MODAL_MARKUP = (
 
   '</div>' + // /.task-wizard-input-wrap
 
-  // Action bar: hint on the left, Back + Create task on the right.
+  // Action bar: hint on the left, Back + submit on the right.
   '<div class="task-wizard-actionbar">' +
-  '<span class="task-wizard-help" x-text="$store.taskModal.currentHint()"></span>' +
+  '<span class="task-wizard-help" x-text="$store.wizard.currentHint()"></span>' +
   '<div class="task-wizard-actions">' +
-  '<button type="button" class="btn btn-sm" @click="$store.taskModal.goBack()" ' +
-  ':disabled="$store.taskModal.stepIndex === 0 || $store.taskModal.submitting" ' +
-  'x-show="$store.taskModal.stepIndex > 0">Back</button>' +
+  '<button type="button" class="btn btn-sm" @click="$store.wizard.goBack()" ' +
+  ':disabled="$store.wizard.stepIndex === 0 || $store.wizard.submitting" ' +
+  'x-show="$store.wizard.stepIndex > 0">Back</button>' +
   '<button type="button" class="btn btn-sm primary" ' +
-  '@click="$store.taskModal.submit()" ' +
-  ':disabled="!$store.taskModal.canSubmit() || $store.taskModal.submitting">' +
-  '<span x-show="!$store.taskModal.submitting">Create task</span>' +
-  '<span x-show="$store.taskModal.submitting">Saving\u2026</span>' +
+  '@click="$store.wizard.submit()" ' +
+  ':disabled="!$store.wizard.canSubmit() || $store.wizard.submitting">' +
+  '<span x-show="!$store.wizard.submitting" x-text="$store.wizard.submitLabel()"></span>' +
+  '<span x-show="$store.wizard.submitting">Saving\u2026</span>' +
   '</button>' +
   '</div>' +
   '</div>' +
 
   // Error message
-  '<div class="task-modal-error" x-show="$store.taskModal.error" x-text="$store.taskModal.error"></div>' +
+  '<div class="task-modal-error" x-show="$store.wizard.error" x-text="$store.wizard.error"></div>' +
 
   '</div>' + // /.task-modal-body
   '</div>' + // /.task-modal
@@ -301,11 +318,14 @@ export function layout(title, body, opts = {}) {
   <link rel="icon" type="image/png" sizes="120x120" href="/img/logo-120.png">
   <link rel="stylesheet" href="/css/pms.css">
   <script defer src="/js/htmx.min.js"></script>
-  <!-- task-modal.js MUST load before alpine.min.js. Alpine 3's bundle
-       auto-calls Alpine.start() as soon as it parses, which fires
-       'alpine:init' synchronously. Any listener added after that is
-       too late and the store never registers. -->
-  <script defer src="/js/task-modal.js"></script>
+  <!-- wizard-modal.js (engine) + per-wizard configs MUST load before
+       alpine.min.js. Alpine 3's bundle auto-calls Alpine.start() as
+       soon as it parses, which fires 'alpine:init' synchronously. Any
+       listener added after that is too late and the store never
+       registers. Defer preserves source-order execution. -->
+  <script defer src="/js/wizard-modal.js"></script>
+  <script defer src="/js/wizards/task.js"></script>
+  <script defer src="/js/wizards/account.js"></script>
   <script defer src="/js/alpine.min.js"></script>
   <script defer src="/js/live-calc.js"></script>
   <script defer src="/js/account-picker.js"></script>
@@ -350,7 +370,7 @@ export function layout(title, body, opts = {}) {
       </div>
     </template>
   </div>
-  ${TASK_MODAL_MARKUP}` : ''}
+  ${WIZARD_MODAL_MARKUP}` : ''}
   ${flash ? `<div class="flash flash-${escape(flash.kind ?? 'info')}">${escape(flash.message)}</div>` : ''}
   <main class="site-main">
 ${breadcrumbHtml}

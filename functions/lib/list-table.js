@@ -39,13 +39,18 @@ import { html, escape } from './layout.js';
  * Standard toolbar: quicksearch + count + optional columns-menu + optional new button.
  *
  *   listToolbar({ id: 'quotes', count: rows.length, columns, newHref: '/quotes/new' })
+ *   listToolbar({ id: 'acct',   count, columns, newOnClick: "window.PMS.openWizard('account', {})", newLabel: 'New account' })
+ *
+ * Exactly one of `newHref` (renders an <a>) or `newOnClick` (renders a
+ * <button> with the given onclick JS expression) should be provided to
+ * get a "+ New" button. Pass neither to omit the button entirely.
  *
  * When `columns` (array of column defs) is provided, a hamburger icon
  * is rendered; clicking it opens a dropdown with show/hide checkboxes
  * and up/down reorder buttons for each column. Pass `null`/omit to
  * suppress the columns menu entirely.
  */
-export function listToolbar({ id, count, columns = null, newHref, newLabel = 'New' } = {}) {
+export function listToolbar({ id, count, columns = null, newHref, newOnClick, newLabel = 'New' } = {}) {
   const showMenu = Array.isArray(columns) && columns.length > 0;
   return html`
     <div class="toolbar-right">
@@ -84,7 +89,11 @@ export function listToolbar({ id, count, columns = null, newHref, newLabel = 'Ne
           </div>
         </details>
       ` : ''}
-      ${newHref ? html`
+      ${newOnClick ? html`
+        <button type="button" class="icon-btn primary" onclick="${escape(newOnClick)}" title="${escape(newLabel)}">
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="10" y1="4" x2="10" y2="16"/><line x1="4" y1="10" x2="16" y2="10"/></svg>
+        </button>
+      ` : newHref ? html`
         <a class="icon-btn primary" href="${escape(newHref)}" title="${escape(newLabel)}">
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="10" y1="4" x2="10" y2="16"/><line x1="4" y1="10" x2="16" y2="10"/></svg>
         </a>
