@@ -451,10 +451,21 @@ const BOARD_RIGHT_MARKUP = (
           // Wrapper holds the primary card + any "extra pages" when
           // a long body has been split. Classes drive the collapsed
           // stacked-paper look (single peeking edge) vs. expanded
-          // stack of full cards.
+          // stack of full cards. draggable=true is gated to private
+          // notes only (your own notepad) so cross-user reorders
+          // can\u2019t happen \u2014 see isDraggable() in board-sidebar.js.
           '<div :class="\'board-card-stack \' + ' +
             '($store.board.hasMorePages(card) ? \'board-card-stack-multi \' : \'\') + ' +
-            '(card.__expanded ? \'is-expanded\' : \'is-collapsed\')">' +
+            '($store.board.isDraggable(card) ? \'is-draggable \' : \'\') + ' +
+            '($store.board.drag.id === card.id ? \'is-dragging \' : \'\') + ' +
+            '($store.board.drag.targetId === card.id ? (\'drag-over-\' + ($store.board.drag.mode || \'above\') + \' \') : \'\') + ' +
+            '(card.__expanded ? \'is-expanded\' : \'is-collapsed\')" ' +
+            ':draggable="$store.board.isDraggable(card)" ' +
+            '@dragstart="$store.board.onDragStart(card, $event)" ' +
+            '@dragover="$store.board.onDragOver(card, $event)" ' +
+            '@dragleave="$store.board.onDragLeave(card)" ' +
+            '@drop="$store.board.onDrop(card, $event)" ' +
+            '@dragend="$store.board.onDragEnd()">' +
           '<article :class="$store.board.cardClass(card)">' +
 
             // Pin + Copy + X delete on hover (opacity controlled by CSS).

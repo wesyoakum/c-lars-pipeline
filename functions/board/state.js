@@ -34,7 +34,8 @@ function json(data, status = 200) {
 
 const CARD_SELECT_COLS = `
   c.id, c.author_user_id, c.scope, c.target_user_id, c.body,
-  c.color, c.flag, c.pinned, c.snooze_until, c.created_at, c.updated_at,
+  c.color, c.flag, c.pinned, c.sort_order, c.snooze_until,
+  c.created_at, c.updated_at,
   u.display_name AS author_display_name, u.email AS author_email`;
 
 export async function onRequestGet(context) {
@@ -86,7 +87,7 @@ export async function onRequestGet(context) {
           AND c.author_user_id = ?
           AND c.archived_at IS NULL
           AND (c.snooze_until IS NULL OR c.snooze_until < ?)
-        ORDER BY c.pinned DESC, c.created_at DESC
+        ORDER BY c.pinned DESC, c.sort_order DESC, c.created_at DESC
         LIMIT 50`,
       [user.id, nowIso]),
 
@@ -97,7 +98,7 @@ export async function onRequestGet(context) {
         WHERE c.scope = 'public'
           AND c.archived_at IS NULL
           AND (c.snooze_until IS NULL OR c.snooze_until < ?)
-        ORDER BY c.pinned DESC, c.created_at DESC
+        ORDER BY c.pinned DESC, c.sort_order DESC, c.created_at DESC
         LIMIT 50`,
       [nowIso]),
 
@@ -123,7 +124,7 @@ export async function onRequestGet(context) {
               )
             )
           )
-        ORDER BY c.pinned DESC, c.created_at DESC
+        ORDER BY c.pinned DESC, c.sort_order DESC, c.created_at DESC
         LIMIT 100`,
       [nowIso, user.id, user.id, user.id]),
   ]);

@@ -91,13 +91,19 @@ export async function onRequestPost(context) {
   const id = uuid();
   const ts = now();
 
+  // sort_order: epoch ms of insert time. Higher = closer to top so
+  // the natural "newest first" default works without a separate
+  // tiebreaker. Drag-to-reorder later overwrites this with a
+  // computed midpoint between two neighbors' sort_orders.
+  const sortOrder = Date.now();
+
   await run(
     env.DB,
     `INSERT INTO board_cards
        (id, author_user_id, scope, target_user_id, body, color, flag, pinned,
-        snooze_until, archived_at, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)`,
-    [id, user.id, scope, targetUserId, body, color, flag, pinned, ts, ts]
+        snooze_until, archived_at, created_at, updated_at, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)`,
+    [id, user.id, scope, targetUserId, body, color, flag, pinned, ts, ts, sortOrder]
   );
 
   if (refs.length > 0) await rewriteCardRefs(env.DB, id, refs);

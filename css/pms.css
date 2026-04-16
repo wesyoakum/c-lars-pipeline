@@ -3398,6 +3398,31 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
    more paper underneath. When expanded, the extras render as full
    cards stacked vertically below. */
 .board-card-stack { position: relative; display: flex; flex-direction: column; gap: 0.55rem; }
+/* Drag handle scoped to private notes (your own notepad). The whole
+   wrapper is the drag handle so users can grab anywhere on the card. */
+.board-card-stack.is-draggable { cursor: grab; }
+.board-card-stack.is-draggable:active { cursor: grabbing; }
+.board-card-stack.is-dragging { opacity: 0.4; }
+/* Drop indicator: a 3px accent line above or below the target,
+   showing exactly where the dragged card will land. */
+.board-card-stack.drag-over-above::before,
+.board-card-stack.drag-over-below::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 3px;
+  background: var(--accent, #2d8a3e);
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 6;
+}
+.board-card-stack.drag-over-above::before { top: -5px; }
+.board-card-stack.drag-over-below::after  { bottom: -5px; }
+/* Buttons inside the wrapper shouldn't intercept the drag handle, but
+   should still be clickable. The standard pattern is just to let the
+   browser handle it: buttons are not draggable by default, so dragging
+   one falls through to the parent. No extra CSS needed. */
 .board-card-stack-multi.is-collapsed > article:first-child::after {
   /* Peeking edge of "page 2" in collapsed state. background:inherit
      so the peek matches the card color automatically. */

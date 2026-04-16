@@ -100,6 +100,17 @@ export async function onRequestPatch(context) {
     updates.push('pinned = ?');
     values.push(payload.pinned ? 1 : 0);
   }
+  if ('sort_order' in payload) {
+    // Drag-to-reorder. Client computes the midpoint between the two
+    // neighbors' sort_orders; we just persist it. REAL column so float
+    // precision lasts for many drags before a renumber is ever needed.
+    const n = Number(payload.sort_order);
+    if (!Number.isFinite(n)) {
+      return json({ ok: false, error: 'sort_order must be a finite number.' }, 400);
+    }
+    updates.push('sort_order = ?');
+    values.push(n);
+  }
 
   if (updates.length === 0) return json({ ok: false, error: 'Nothing to update.' }, 400);
 

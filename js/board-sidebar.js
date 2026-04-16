@@ -246,11 +246,20 @@
             out.push(c);
           }
         }
-        out.sort(function (a, b) {
-          if (a.pinned !== b.pinned) return (b.pinned || 0) - (a.pinned || 0);
-          return (b.created_at || '').localeCompare(a.created_at || '');
-        });
+        out.sort(this.noteSort);
         return out;
+      },
+
+      // Shared comparator used by allNotes + every place we re-sort
+      // modules locally after a togglePin / drop / etc. Keep this in
+      // sync with the server's ORDER BY in functions/board/state.js.
+      noteSort: function (a, b) {
+        if ((a.pinned || 0) !== (b.pinned || 0)) return (b.pinned || 0) - (a.pinned || 0);
+        var as = a.sort_order, bs = b.sort_order;
+        if (as != null && bs != null && as !== bs) return bs - as;
+        if (as != null && bs == null) return -1;
+        if (as == null && bs != null) return 1;
+        return (b.created_at || '').localeCompare(a.created_at || '');
       },
 
       // Direct messages — broadcasts (target_user_id IS NULL) plus
@@ -346,6 +355,116 @@
       toggleExpand: function (card) {
         if (!card) return;
         card.__expanded = !card.__expanded;
+      },
+
+      // ---- Drag-to-reorder ----
+      // Scoped to private notes only so a user reordering their own
+      // notepad never affects what other users see in their Shared
+      // Board. Backend's canEdit guard would reject anyway, but we
+      // gate the affordance client-side so non-draggable cards don't
+      // even show the move cursor.
+      drag: { id: null, targetId: null, mode: null },
+      isDraggable: function (card) {
+        if (!card) return false;
+        if (this.editing.cardId === card.id) return false;
+        return card.scope === 'private' && card.author_user_id === this.userId;
+      },
+      onDragStart: function (card, ev) {
+        if (!this.isDraggable(card)) {
+          if (ev && ev.preventDefault) ev.preventDefault();
+          return;
+        }
+        this.drag.id = card.id;
+        this.drag.targetId = null;
+        this.drag.mode = null;
+        if (ev && ev.dataTransfer) {
+          ev.dataTransfer.effectAllowed = 'move';
+          // Some browsers require any setData call for drag to fire.
+          try { ev.dataTransfer.setData('text/plain', card.id); } catch (e) {}
+        }
+      },
+      onDragOver: function (card, ev) {
+        if (!this.drag.id) return;
+        if (this.drag.id === card.id) return;
+        if (!this.isDraggable(card)) return;
+        ev.preventDefault();
+        // Above/below split by the midpoint of the drop target's bbox.
+        var el = ev.currentTarget;
+        var rect = el.getBoundingClientRect();
+        var below = ev.clientY > rect.top + rect.height / 2;
+        this.drag.targetId = card.id;
+        this.drag.mode = below ? 'below' : 'above';
+        if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move';
+      },
+      onDragLeave: function (card) {
+        if (this.drag.targetId === card.id) {
+          this.drag.targetId = null;
+          this.drag.mode = null;
+        }
+      },
+      onDrop: function (card, ev) {
+        ev.preventDefault();
+        var draggedId = this.drag.id;
+        var mode = this.drag.mode;
+        var targetId = card.id;
+        this.onDragEnd();
+        if (!draggedId || draggedId === targetId) return;
+
+        var notes = this.allNotes;
+        var dragged = null;
+        for (var i = 0; i < notes.length; i++) {
+          if (notes[i].id === draggedId) { dragged = notes[i]; break; }
+        }
+        if (!dragged) return;
+
+        // Compute the insert slot in the list AFTER removing the dragged
+        // card, so the predecessor / successor sort_orders are correct
+        // even when dragging into an adjacent slot.
+        var pruned = notes.filter(function (c) { return c.id !== draggedId; });
+        var ti = -1;
+        for (var k = 0; k < pruned.length; k++) {
+          if (pruned[k].id === targetId) { ti = k; break; }
+        }
+        if (ti < 0) return;
+        var insertSlot = (mode === 'below') ? ti + 1 : ti;
+
+        var pred = (insertSlot > 0) ? pruned[insertSlot - 1] : null;
+        var succ = (insertSlot < pruned.length) ? pruned[insertSlot] : null;
+        var predSort = pred && pred.sort_order != null ? pred.sort_order : null;
+        var succSort = succ && succ.sort_order != null ? succ.sort_order : null;
+
+        var newSort;
+        if (predSort != null && succSort != null) {
+          newSort = (predSort + succSort) / 2;
+        } else if (predSort != null) {
+          newSort = predSort - 1000; // dropped at the bottom
+        } else if (succSort != null) {
+          newSort = succSort + 1000; // dropped at the top
+        } else {
+          newSort = Date.now();
+        }
+
+        // Optimistic local update + re-sort.
+        dragged.sort_order = newSort;
+        var self = this;
+        Object.keys(self.modules).forEach(function (k) {
+          if (k === 'my_tasks' || k === 'my_tasks_done') return;
+          self.modules[k] = (self.modules[k] || []).slice().sort(self.noteSort);
+        });
+
+        fetch('/board/cards/' + encodeURIComponent(draggedId), {
+          method: 'PATCH',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json', 'accept': 'application/json' },
+          body: JSON.stringify({ sort_order: newSort }),
+        }).then(function (res) {
+          if (!res.ok) self.poll();
+        }).catch(function () { self.poll(); });
+      },
+      onDragEnd: function () {
+        this.drag.id = null;
+        this.drag.targetId = null;
+        this.drag.mode = null;
       },
 
       // ---- Lifecycle ----
@@ -623,10 +742,7 @@
         // new position in the list.
         Object.keys(self.modules).forEach(function (k) {
           if (k === 'my_tasks' || k === 'my_tasks_done') return;
-          self.modules[k] = (self.modules[k] || []).slice().sort(function (a, b) {
-            if (a.pinned !== b.pinned) return (b.pinned || 0) - (a.pinned || 0);
-            return (b.created_at || '').localeCompare(a.created_at || '');
-          });
+          self.modules[k] = (self.modules[k] || []).slice().sort(self.noteSort);
         });
         fetch('/board/cards/' + encodeURIComponent(card.id) + '/pin', {
           method: 'POST',
