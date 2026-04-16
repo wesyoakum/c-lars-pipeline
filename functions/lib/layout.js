@@ -288,22 +288,20 @@ const WIZARD_MODAL_MARKUP = (
   '</div>'   // /.task-modal-overlay
 );
 
-// Right-edge "whiteboard / fridge door" sidebar. Store + logic live in
-// /js/board-sidebar.js; this is just the static DOM + Alpine bindings.
-// Uses string concatenation so it drops into layout()'s shell without
-// escaping conflicts (same pattern as WIZARD_MODAL_MARKUP above).
+// Board sidebars — split into two fixed-positioned panels that sit in
+// the free space to the left and right of the centered .site-main
+// content (max-width 1100px). Both share the same Alpine $store.board.
 //
-// Three zones, top to bottom:
-//   1. Tasks     — bulleted list with colored priority dots
-//   2. Notes     — stack of sticky notes (blank stack = compose affordance)
-//   3. Messages  — direct-message chat bubbles with sender prefix
+// Right panel:  Tasks (with click-to-toggle dots, hover "show complete")
+//                + Notes (sticky-pad stack with inline composer/edit)
+// Left  panel:  Messages (chat bubbles with always-open composer at bottom)
 //
-// No module reorder, no module collapse, no header chrome. The goal is
-// "glance at the fridge door" — minimal UI, maximal content.
-const BOARD_SIDEBAR_MARKUP = (
-  '<div class="board-root" x-data x-cloak>' +
+// Both panels are hidden via @media when the viewport doesn't have
+// enough free margin to host them — the centered content always wins.
+const BOARD_RIGHT_MARKUP = (
+  '<div class="board-root board-root-right" x-data x-cloak>' +
 
-  // Collapsed strip (compact edge affordance to reopen after hide)
+  // Collapsed strip (after a Hide). Sits in same fixed slot.
   '<button type="button" class="board-strip" ' +
     'x-show="$store.board && $store.board.isCollapsed" ' +
     '@click="$store.board.expandNow()" ' +
@@ -314,29 +312,35 @@ const BOARD_SIDEBAR_MARKUP = (
       'x-text="$store.board && $store.board.collapsedBadge"></span>' +
   '</button>' +
 
-  '<aside class="board-sidebar" ' +
+  '<aside class="board-sidebar board-sidebar-right" ' +
     'x-show="$store.board && !$store.board.isCollapsed" ' +
     'aria-label="Whiteboard sidebar">' +
 
-    // Tiny "hide" handle — always present but subtle
     '<button type="button" class="board-hide-handle" ' +
       'title="Hide for 5 min" aria-label="Hide sidebar" ' +
       '@click="$store.board.hideFor(5)">\u00D7</button>' +
 
     // ---------- Zone 1: Tasks ----------
-    '<section class="board-zone board-zone-tasks">' +
+    '<section class="board-zone board-zone-tasks" ' +
+      ':class="$store.board.showCompleted ? \'board-tasks-show-done\' : \'\'">' +
       '<h3 class="board-zone-heading">Tasks</h3>' +
-      '<template x-if="$store.board.moduleItems(\'my_tasks\').length === 0">' +
+      '<button type="button" class="board-tasks-toggle" ' +
+        ':class="$store.board.showCompleted ? \'active\' : \'\'" ' +
+        '@click="$store.board.toggleShowCompleted()" ' +
+        'x-text="$store.board.showCompleted ? \'hide complete\' : \'show complete\'"></button>' +
+      '<template x-if="$store.board.visibleTasks.length === 0">' +
         '<p class="board-zone-empty">No open tasks.</p>' +
       '</template>' +
       '<ul class="board-task-list">' +
-        '<template x-for="t in $store.board.moduleItems(\'my_tasks\')" :key="t.id">' +
-          '<li :class="\'board-task-item board-task-priority-\' + $store.board.taskPriority(t)">' +
+        '<template x-for="t in $store.board.visibleTasks" :key="t.id">' +
+          '<li :class="$store.board.taskItemClass(t)">' +
+            '<button type="button" class="board-task-dot" ' +
+              ':title="t.status === \'completed\' ? \'Mark incomplete\' : \'Mark complete\'" ' +
+              '@click.stop="$store.board.toggleTask(t)"></button>' +
+            '<span class="board-task-prefix" ' +
+              'x-text="$store.board.taskPrefix(t)" ' +
+              'x-show="$store.board.taskPrefix(t)"></span>' +
             '<a :href="\'/activities\'" class="board-task-link">' +
-              '<span class="board-task-prefix" ' +
-                'x-text="$store.board.taskPrefix(t)" ' +
-                'x-show="$store.board.taskPrefix(t)"></span>' +
-              '<span class="board-task-dot"></span>' +
               '<span class="board-task-text" ' +
                 'x-html="$store.board.renderBody((t.subject || t.body || \'\'))"></span>' +
             '</a>' +
@@ -361,11 +365,14 @@ const BOARD_SIDEBAR_MARKUP = (
           '@click="$store.board.openComposer({ color: \'blue\' })"></button>' +
       '</div>' +
 
-      // Active composer (slides over stack when open)
+      // Active composer (slides over stack when open). Enter saves,
+      // Escape cancels. No save/cancel buttons. Delete = X (top-right
+      // on hover) which only appears when editing an existing card,
+      // so the composer here doesn't show one.
       '<div :class="\'board-composer board-card board-card-color-\' + $store.board.composer.color" ' +
         'x-show="$store.board.composer.open" x-cloak>' +
         '<textarea id="board-composer-textarea" class="board-composer-textarea" ' +
-          'rows="4" placeholder="Jot a note\u2026 @ to link" ' +
+          'rows="2" placeholder="Jot a note\u2026 (@ to link, Enter to save, Esc to cancel)" ' +
           ':value="$store.board.composer.body" ' +
           '@input="$store.board.onBodyInput(\'composer\', $event.target)" ' +
           '@keydown="$store.board.onBodyKeydown(\'composer\', $event.target, $event)"></textarea>' +
@@ -381,29 +388,28 @@ const BOARD_SIDEBAR_MARKUP = (
             '</button>' +
           '</template>' +
         '</div>' +
-        '<div class="board-composer-row">' +
+        '<div class="board-composer-toolbar">' +
           '<div class="board-composer-scope-mini">' +
             '<label><input type="radio" name="b_scope" value="private" ' +
               'x-model="$store.board.composer.scope"> private</label>' +
             '<label><input type="radio" name="b_scope" value="public" ' +
               'x-model="$store.board.composer.scope"> shared</label>' +
           '</div>' +
-          '<div class="board-color-picker-mini">' +
-            '<template x-for="c in $store.board.colors" :key="c">' +
-              '<button type="button" class="board-color-swatch" ' +
-                ':class="\'board-color-swatch-\' + c + ($store.board.composer.color === c ? \' selected\' : \'\')" ' +
-                ':title="c" ' +
-                '@click="$store.board.composer.color = c"></button>' +
-            '</template>' +
+          '<div class="board-color-picker">' +
+            '<button type="button" ' +
+              ':class="\'board-color-current color-\' + $store.board.composer.color" ' +
+              'title="Color" aria-label="Color"></button>' +
+            '<div class="board-color-options">' +
+              '<template x-for="c in $store.board.colors" :key="c">' +
+                '<button type="button" class="board-color-swatch" ' +
+                  ':class="\'board-color-swatch-\' + c + ($store.board.composer.color === c ? \' selected\' : \'\')" ' +
+                  ':title="c" ' +
+                  '@click="$store.board.composer.color = c"></button>' +
+              '</template>' +
+            '</div>' +
           '</div>' +
-        '</div>' +
-        '<div class="board-composer-actions">' +
           '<span class="board-composer-error" x-show="$store.board.composer.error" x-text="$store.board.composer.error"></span>' +
-          '<button type="button" class="board-link-btn" @click="$store.board.cancelComposer()">cancel</button>' +
-          '<button type="button" class="board-link-btn board-link-btn-primary" ' +
-            ':disabled="$store.board.composer.submitting" ' +
-            '@click="$store.board.submitComposer()" ' +
-            'x-text="$store.board.composer.submitting ? \'posting\u2026\' : \'post\'"></button>' +
+          '<span class="board-composer-hint" x-show="!$store.board.composer.error">Enter \u2192 save</span>' +
         '</div>' +
       '</div>' +
 
@@ -412,10 +418,17 @@ const BOARD_SIDEBAR_MARKUP = (
         '<template x-for="card in $store.board.allNotes" :key="card.id">' +
           '<article :class="$store.board.cardClass(card)">' +
 
+            // X delete on hover (always present, opacity controlled by CSS).
+            // Skipped while in edit mode for this card to avoid two close affordances.
+            '<button type="button" class="board-card-delete" ' +
+              'x-show="$store.board.editing.cardId !== card.id" ' +
+              '@click.stop="$store.board.archiveCard(card)" ' +
+              'title="Delete" aria-label="Delete">\u00D7</button>' +
+
             '<template x-if="$store.board.editing.cardId === card.id">' +
               '<div class="board-card-editing">' +
                 '<textarea :id="\'board-edit-textarea-\' + card.id" ' +
-                  'class="board-card-edit-textarea" rows="3" ' +
+                  'class="board-card-edit-textarea" rows="2" ' +
                   ':value="$store.board.editing.body" ' +
                   '@input="$store.board.onBodyInput(\'editing\', $event.target)" ' +
                   '@keydown="$store.board.onBodyKeydown(\'editing\', $event.target, $event)"></textarea>' +
@@ -431,22 +444,21 @@ const BOARD_SIDEBAR_MARKUP = (
                     '</button>' +
                   '</template>' +
                 '</div>' +
-                '<div class="board-composer-row">' +
-                  '<div class="board-color-picker-mini">' +
-                    '<template x-for="c in $store.board.colors" :key="c">' +
-                      '<button type="button" class="board-color-swatch" ' +
-                        ':class="\'board-color-swatch-\' + c + ($store.board.editing.color === c ? \' selected\' : \'\')" ' +
-                        '@click="$store.board.editing.color = c"></button>' +
-                    '</template>' +
+                '<div class="board-composer-toolbar">' +
+                  '<div class="board-color-picker">' +
+                    '<button type="button" ' +
+                      ':class="\'board-color-current color-\' + $store.board.editing.color" ' +
+                      'title="Color" aria-label="Color"></button>' +
+                    '<div class="board-color-options">' +
+                      '<template x-for="c in $store.board.colors" :key="c">' +
+                        '<button type="button" class="board-color-swatch" ' +
+                          ':class="\'board-color-swatch-\' + c + ($store.board.editing.color === c ? \' selected\' : \'\')" ' +
+                          '@click="$store.board.editing.color = c"></button>' +
+                      '</template>' +
+                    '</div>' +
                   '</div>' +
-                '</div>' +
-                '<div class="board-composer-actions">' +
                   '<span class="board-composer-error" x-show="$store.board.editing.error" x-text="$store.board.editing.error"></span>' +
-                  '<button type="button" class="board-link-btn" @click="$store.board.archiveCard(card)">delete</button>' +
-                  '<button type="button" class="board-link-btn" @click="$store.board.cancelEdit()">cancel</button>' +
-                  '<button type="button" class="board-link-btn board-link-btn-primary" ' +
-                    ':disabled="$store.board.editing.submitting" ' +
-                    '@click="$store.board.saveEdit()">save</button>' +
+                  '<span class="board-composer-hint" x-show="!$store.board.editing.error">Enter \u2192 save \u00B7 Esc \u2192 cancel</span>' +
                 '</div>' +
               '</div>' +
             '</template>' +
@@ -463,14 +475,23 @@ const BOARD_SIDEBAR_MARKUP = (
 
     '</section>' +
 
-    // ---------- Zone 3: Messages (chat bubbles) ----------
-    '<section class="board-zone board-zone-messages">' +
-      '<template x-if="$store.board.messages.length === 0 && !$store.board.messageComposer.open">' +
-        '<button type="button" class="board-message-compose-btn" ' +
-          '@click="$store.board.openMessageComposer()">+ message someone</button>' +
-      '</template>' +
+  '</aside>' +
+  '</div>' // /.board-root-right
+);
 
-      '<div class="board-message-list">' +
+const BOARD_LEFT_MARKUP = (
+  '<div class="board-root board-root-left" x-data x-cloak>' +
+    '<aside class="board-sidebar board-sidebar-left" ' +
+      'x-show="$store.board && !$store.board.isCollapsed" ' +
+      'aria-label="Messages sidebar">' +
+
+      '<h3 class="board-zone-heading">Messages</h3>' +
+
+      // Scrollable message list (chat thread, oldest \u2192 newest)
+      '<div class="board-message-list" x-ref="msgList">' +
+        '<template x-if="$store.board.messages.length === 0">' +
+          '<p class="board-zone-empty">No messages yet \u2014 say hi.</p>' +
+        '</template>' +
         '<template x-for="msg in $store.board.messages" :key="msg.id">' +
           '<div :class="\'board-message board-message-\' + (msg.from_me ? \'out\' : \'in\')">' +
             '<span class="board-message-prefix" x-text="$store.board.messagePrefix(msg) + \'-\'"></span>' +
@@ -479,31 +500,12 @@ const BOARD_SIDEBAR_MARKUP = (
         '</template>' +
       '</div>' +
 
-      '<div class="board-message-composer" x-show="$store.board.messageComposer.open" x-cloak>' +
-        '<div class="board-message-composer-target">' +
-          '<template x-if="$store.board.messageComposer.target">' +
-            '<span class="board-message-to">to <strong x-text="$store.board.messageComposer.target.label"></strong> ' +
-              '<button type="button" class="board-link-btn" @click="$store.board.clearMessageTarget()">change</button>' +
-            '</span>' +
-          '</template>' +
-          '<template x-if="!$store.board.messageComposer.target">' +
-            '<div class="board-target-picker">' +
-              '<input type="text" class="board-target-input" ' +
-                'placeholder="who?" ' +
-                'x-on:input="$store.board.searchMessageTargets($event.target.value)">' +
-              '<div class="board-target-results" x-show="$store.board.messageTargetResults.length">' +
-                '<template x-for="r in $store.board.messageTargetResults" :key="r.ref_id">' +
-                  '<button type="button" class="board-target-result" ' +
-                    '@click="$store.board.pickMessageTarget(r)">' +
-                    '<span x-text="r.label"></span>' +
-                  '</button>' +
-                '</template>' +
-              '</div>' +
-            '</div>' +
-          '</template>' +
-        '</div>' +
+      // Always-open composer pinned to the bottom. Type, hit Enter to
+      // send, Shift+Enter for newline, Escape to clear. @user mentions
+      // direct the message; no mentions \u2192 broadcast to everyone.
+      '<div class="board-message-composer">' +
         '<textarea id="board-message-textarea" class="board-message-textarea" ' +
-          'rows="2" placeholder="message\u2026 @ to link" ' +
+          'rows="1" placeholder="Type a message\u2026 (@ to address someone)" ' +
           ':value="$store.board.messageComposer.body" ' +
           '@input="$store.board.onBodyInput(\'messageComposer\', $event.target)" ' +
           '@keydown="$store.board.onBodyKeydown(\'messageComposer\', $event.target, $event)"></textarea>' +
@@ -518,42 +520,18 @@ const BOARD_SIDEBAR_MARKUP = (
             '</button>' +
           '</template>' +
         '</div>' +
-        '<div class="board-composer-actions">' +
-          '<span class="board-composer-error" x-show="$store.board.messageComposer.error" x-text="$store.board.messageComposer.error"></span>' +
-          '<button type="button" class="board-link-btn" @click="$store.board.cancelMessageComposer()">cancel</button>' +
-          '<button type="button" class="board-link-btn board-link-btn-primary" ' +
-            ':disabled="$store.board.messageComposer.submitting" ' +
-            '@click="$store.board.submitMessageComposer()" ' +
-            'x-text="$store.board.messageComposer.submitting ? \'sending\u2026\' : \'send\'"></button>' +
-        '</div>' +
+        '<div class="board-message-error" x-show="$store.board.messageComposer.error" ' +
+          'x-text="$store.board.messageComposer.error"></div>' +
       '</div>' +
 
-      '<button type="button" class="board-message-compose-btn" ' +
-        'x-show="$store.board.messages.length > 0 && !$store.board.messageComposer.open" ' +
-        '@click="$store.board.openMessageComposer()">+ new message</button>' +
-    '</section>' +
-
-  '</aside>' +
-  '</div>' // /.board-root
+    '</aside>' +
+  '</div>'
 );
 
-// Reflect sidebar collapsed/expanded state onto <body> so CSS can
-// adjust main-content padding-right. Lives in layout so it's inlined
-// once and doesn't need its own JS file.
-const BOARD_BODY_CLASS_SCRIPT = (
-  "document.addEventListener('alpine:init', function () {\n" +
-  "  queueMicrotask(function () {\n" +
-  "    if (!window.Alpine || !Alpine.effect) return;\n" +
-  "    Alpine.effect(function () {\n" +
-  "      var s = Alpine.store('board');\n" +
-  "      if (!s) return;\n" +
-  "      var collapsed = !!s.isCollapsed;\n" +
-  "      document.body.classList.toggle('board-collapsed', collapsed);\n" +
-  "      document.body.classList.toggle('board-expanded', !collapsed);\n" +
-  "    });\n" +
-  "  });\n" +
-  "});\n"
-);
+// (Previously the sidebar overlaid the page and required body-class
+// gymnastics to push main-content padding. Sidebars now sit in the
+// natural left/right margin of the centered .site-main, so no body
+// class is needed — they just appear or disappear via @media.)
 
 /**
  * Full-page HTML shell: includes nav, user badge, and slot for body.
@@ -642,7 +620,8 @@ export function layout(title, body, opts = {}) {
     </template>
   </div>
   ${WIZARD_MODAL_MARKUP}
-  ${BOARD_SIDEBAR_MARKUP}` : ''}
+  ${BOARD_LEFT_MARKUP}
+  ${BOARD_RIGHT_MARKUP}` : ''}
   ${flash ? `<div class="flash flash-${escape(flash.kind ?? 'info')}">${escape(flash.message)}</div>` : ''}
   <main class="site-main">
 ${breadcrumbHtml}
@@ -653,7 +632,6 @@ ${body}
   </footer>
   ${versionTag ? `<div class="version-badge">${versionTag}</div>` : ''}
   ${user ? `<script>${NOTIFICATION_STORE_SCRIPT}</script>` : ''}
-  ${user ? `<script>${BOARD_BODY_CLASS_SCRIPT}</script>` : ''}
 </body>
 </html>`;
 }

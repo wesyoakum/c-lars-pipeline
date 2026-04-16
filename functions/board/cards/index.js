@@ -8,9 +8,16 @@
 //     body:    string,                            (required, non-empty after trim)
 //     color:   'yellow' | 'pink' | 'blue' | 'green' | 'orange' | 'white',
 //     flag:    'red' | 'yellow' | 'green' | null,
-//     target_user_id: uuid,                       (required if scope='direct')
+//     target_user_id: uuid | null,                (optional for 'direct'; see below)
 //     pinned:  bool                               (default false)
 //   }
+//
+// For scope='direct' (chat messages):
+//   - If target_user_id is supplied explicitly, use that.
+//   - Else if the body contains exactly one @user mention, target that user.
+//   - Else target_user_id stays NULL → broadcast (visible to everyone in
+//     the team chat). State endpoint surfaces NULL-target direct cards
+//     to all users.
 //
 // Returns: { ok: true, card: {...} }
 
@@ -56,14 +63,25 @@ export async function onRequestPost(context) {
     return json({ ok: false, error: e.message }, 400);
   }
 
+  // Parse refs once — also used to infer message target below.
+  const refs = parseRefs(body);
+
   let targetUserId = null;
   if (scope === 'direct') {
-    targetUserId = (payload.target_user_id || '').toString();
-    if (!targetUserId) return json({ ok: false, error: 'target_user_id required for direct scope.' }, 400);
-    // Sanity-check the target exists and is active — otherwise the
-    // recipient could never see the card.
-    const target = await one(env.DB, 'SELECT id FROM users WHERE id = ? AND active = 1', [targetUserId]);
-    if (!target) return json({ ok: false, error: 'Target user not found.' }, 400);
+    if (payload.target_user_id) {
+      // Explicit target (legacy callers / future direct-DM UI).
+      targetUserId = payload.target_user_id.toString();
+    } else {
+      // Auto-target from @user mentions: exactly one user mention
+      // becomes a directed message; zero or many means broadcast.
+      const userRefs = refs.filter((r) => r.ref_type === 'user');
+      if (userRefs.length === 1) targetUserId = userRefs[0].ref_id;
+    }
+    if (targetUserId) {
+      const target = await one(env.DB, 'SELECT id FROM users WHERE id = ? AND active = 1', [targetUserId]);
+      if (!target) return json({ ok: false, error: 'Target user not found.' }, 400);
+    }
+    // else NULL → broadcast (visible to everyone in the chat).
   }
 
   const color = normalizeColor(payload.color);
@@ -82,7 +100,6 @@ export async function onRequestPost(context) {
     [id, user.id, scope, targetUserId, body, color, flag, pinned, ts, ts]
   );
 
-  const refs = parseRefs(body);
   if (refs.length > 0) await rewriteCardRefs(env.DB, id, refs);
 
   return json({

@@ -3005,17 +3005,22 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 }
 
 /* =====================================================================
-   Board sidebar — right-edge whiteboard / fridge door
+   Board sidebars — handwritten / fridge-door panels in page margins
    =====================================================================
-   Three zones, top→bottom: Tasks · Notes · Messages.
-   Handwritten aesthetic — no chrome, no borders, no module headers.
-   Body class toggled by BOARD_BODY_CLASS_SCRIPT so CSS can shift the
-   main content's right padding to avoid overlap. Below 1100px we
-   hide the sidebar entirely (content uses full width).
+   Two fixed-positioned sidebars sit in the free space to the LEFT and
+   RIGHT of the centered .site-main (max-width 1100px) — they never
+   overlap content. Below a viewport threshold (no free margin) they
+   simply disappear.
+
+   RIGHT panel: Tasks (clickable dots toggle complete; hover-shows
+                "show complete") + Notes (sticky-pad stack).
+   LEFT  panel: Messages (chat bubbles + always-open composer).
    ===================================================================== */
 
 :root {
-  --board-width: 300px;
+  --board-width: 260px;
+  --board-content-max: 1100px;     /* matches --maxw */
+  --board-gap: 14px;
   --board-hand: 'Caveat', 'Kalam', 'Segoe Script', 'Bradley Hand', cursive;
   --board-note-yellow: #fff4b8;
   --board-note-pink:   #ffd6e4;
@@ -3023,53 +3028,93 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   --board-note-green:  #cff0d4;
   --board-note-orange: #ffdcb8;
   --board-note-white:  #ffffff;
-  --board-msg-bg:      #d4f0d2;  /* sage chat bubble */
-  --board-msg-bg-in:   #ffe9c7;  /* warm tan for received */
+  --board-msg-bg:      #d4f0d2;    /* sage chat bubble (sent) */
+  --board-msg-bg-in:   #ffe9c7;    /* warm tan (received) */
+  --board-ink-blue:    #2a4a7f;
 }
 
 .board-root {
   position: fixed;
   top: 0;
-  right: 0;
   bottom: 0;
-  z-index: 900;
+  width: var(--board-width);
+  z-index: 50;
   pointer-events: none;
+  font-family: var(--board-hand);
 }
 .board-root > * { pointer-events: auto; }
 
-body.board-expanded .site-main,
-body.board-expanded .site-header,
-body.board-expanded .site-footer { padding-right: calc(var(--board-width) + 1rem); }
-body.board-collapsed .site-main,
-body.board-collapsed .site-header,
-body.board-collapsed .site-footer { padding-right: 32px; }
-
-@media (max-width: 1100px) {
-  .board-root { display: none; }
-  body.board-expanded .site-main,
-  body.board-expanded .site-header,
-  body.board-expanded .site-footer,
-  body.board-collapsed .site-main,
-  body.board-collapsed .site-header,
-  body.board-collapsed .site-footer { padding-right: 1.5rem; }
+/* Right panel: just outside the right edge of centered content */
+.board-root-right {
+  left: calc(50% + (var(--board-content-max) / 2) + var(--board-gap));
+}
+/* Left panel: just outside the left edge of centered content */
+.board-root-left {
+  right: calc(50% + (var(--board-content-max) / 2) + var(--board-gap));
 }
 
-/* ---------- Collapsed strip ---------- */
+/* When viewport doesn't have free margin, hide. The right panel
+   disappears first (smaller threshold) because Tasks/Notes are denser
+   and we'd rather give the page back. The left messages panel needs
+   enough room on BOTH sides to show. */
+@media (max-width: 1700px) { .board-root-left  { display: none; } }
+@media (max-width: 1400px) { .board-root-right { display: none; } }
+
+/* ---------- Sidebar shell ---------- */
+.board-sidebar {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1rem 0.6rem 1rem 0.6rem;
+  overflow-y: auto;
+  overflow-x: visible;
+  color: #1f2328;
+  background: transparent;
+}
+.board-sidebar-left { padding-bottom: 0.5rem; }
+.board-sidebar::-webkit-scrollbar { width: 6px; }
+.board-sidebar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 3px; }
+
+.board-hide-handle {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: rgba(0,0,0,0.3);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 50%;
+  z-index: 5;
+}
+.board-hide-handle:hover {
+  background: rgba(0,0,0,0.06);
+  color: rgba(0,0,0,0.65);
+}
+
+/* Strip stays as a tiny floating chip in the right margin once hidden */
 .board-strip {
-  position: fixed;
-  top: 0; right: 0; bottom: 0;
-  width: 24px;
-  background: var(--bg-alt);
-  border-left: 1px solid var(--border);
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  right: 4px;
+  background: rgba(255,255,255,0.85);
+  border: 1px solid rgba(0,0,0,0.15);
   color: var(--fg-muted);
   cursor: pointer;
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 1rem 0;
-  gap: 0.5rem;
+  padding: 0.6rem 0.3rem;
+  gap: 0.4rem;
+  border-radius: 6px;
+  z-index: 5;
 }
-.board-strip:hover { background: var(--bg); color: var(--fg); }
+.board-strip:hover { background: #fff; color: var(--fg); }
 .board-strip-label {
   writing-mode: vertical-rl;
   transform: rotate(180deg);
@@ -3088,53 +3133,14 @@ body.board-collapsed .site-footer { padding-right: 32px; }
   text-align: center;
 }
 
-/* ---------- Sidebar shell ---------- */
-.board-sidebar {
-  position: fixed;
-  top: 0; right: 0; bottom: 0;
-  width: var(--board-width);
-  background: transparent; /* blends into page — "fridge door" */
-  display: flex;
-  flex-direction: column;
-  gap: 0.8rem;
-  font-family: var(--board-hand);
-  padding: 1rem 0.9rem 1rem 0.5rem;
-  overflow-y: auto;
-  overflow-x: hidden;
-  color: #1f2328;
-}
-.board-sidebar::-webkit-scrollbar { width: 6px; }
-.board-sidebar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 3px; }
-
-.board-hide-handle {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  background: transparent;
-  border: none;
-  color: rgba(0,0,0,0.35);
-  font-size: 1.1rem;
-  line-height: 1;
-  cursor: pointer;
-  padding: 4px 6px;
-  border-radius: 50%;
-}
-.board-hide-handle:hover {
-  background: rgba(0,0,0,0.06);
-  color: rgba(0,0,0,0.65);
-}
-
-/* ---------- Zones ---------- */
-.board-zone {
-  display: flex;
-  flex-direction: column;
-}
+/* ---------- Zone heading (handwritten blue, underlined) ---------- */
+.board-zone { display: flex; flex-direction: column; }
 .board-zone-heading {
   font-family: var(--board-hand);
-  font-size: 1.8rem;
+  font-size: 1.7rem;
   font-weight: 700;
-  color: #2a4a7f;              /* inky blue like the mockup */
-  margin: 0 0 0.15rem 0.6rem;
+  color: var(--board-ink-blue);
+  margin: 0 0 0.15rem 0.5rem;
   letter-spacing: 0.02em;
   text-decoration: underline;
   text-decoration-thickness: 2px;
@@ -3149,63 +3155,120 @@ body.board-collapsed .site-footer { padding-right: 32px; }
   font-style: italic;
 }
 
-/* ---------- Zone 1: Tasks ---------- */
+/* ---------- Tasks zone ---------- */
 .board-zone-tasks {
+  position: relative;
   background: rgba(255,255,255,0.6);
   border: 1px solid rgba(0,0,0,0.12);
   border-radius: 4px;
   padding: 0.5rem 0.6rem 0.7rem;
   box-shadow: 0 1px 2px rgba(0,0,0,0.04);
 }
+/* "show complete" toggle — only revealed on hover */
+.board-tasks-toggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: rgba(0,0,0,0.4);
+  font-family: var(--font);
+  font-size: 0.7rem;
+  cursor: pointer;
+  padding: 0.1rem 0.3rem;
+  opacity: 0;
+  transition: opacity 0.15s;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.board-zone-tasks:hover .board-tasks-toggle,
+.board-tasks-toggle:focus,
+.board-tasks-toggle.active { opacity: 1; }
+.board-tasks-toggle.active { color: var(--board-ink-blue); }
+
 .board-task-list {
   list-style: none;
   margin: 0;
-  padding: 0 0 0 0.4rem;
+  padding: 0 0 0 0.2rem;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.4rem;
 }
 .board-task-item {
   display: flex;
   align-items: baseline;
+  gap: 0.4rem;
   font-family: var(--board-hand);
   font-size: 1.2rem;
   line-height: 1.2;
 }
-.board-task-link {
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  color: #1f2328;
-  text-decoration: none;
-  width: 100%;
-}
-.board-task-link:hover { text-decoration: none; color: #000; }
 .board-task-prefix {
   color: #c0392b;
   font-weight: 700;
   font-size: 1.3rem;
 }
+/* Click target — clickable dot toggles complete */
 .board-task-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
+  position: relative;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   border: 1.5px solid rgba(0,0,0,0.4);
+  background: transparent;
   flex-shrink: 0;
-  transform: translateY(-2px);
+  transform: translateY(1px);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+.board-task-dot:hover {
+  transform: translateY(1px) scale(1.18);
+  box-shadow: 0 0 0 2px rgba(42,74,127,0.15);
 }
 .board-task-priority-overdue .board-task-dot,
-.board-task-priority-urgent  .board-task-dot  { background: #c0392b; border-color: #a02319; }
-.board-task-priority-soon    .board-task-dot  { background: #2a76d6; border-color: #1955a5; }
-.board-task-priority-week    .board-task-dot  { background: #e0b400; border-color: #ae8a00; }
-.board-task-priority-normal  .board-task-dot  { background: #2d8a3e; border-color: #1e6a2a; }
-.board-task-priority-none    .board-task-dot  { background: #7a7f87; border-color: #4a4f58; }
+.board-task-priority-urgent  .board-task-dot { background: #c0392b; border-color: #a02319; }
+.board-task-priority-soon    .board-task-dot { background: #2a76d6; border-color: #1955a5; }
+.board-task-priority-week    .board-task-dot { background: #e0b400; border-color: #ae8a00; }
+.board-task-priority-normal  .board-task-dot { background: #2d8a3e; border-color: #1e6a2a; }
+.board-task-priority-none    .board-task-dot { background: #7a7f87; border-color: #4a4f58; }
+
+.board-task-completed .board-task-dot {
+  background: #2d8a3e;
+  border-color: #1e6a2a;
+}
+.board-task-completed .board-task-dot::after {
+  content: '\2713';
+  position: absolute;
+  top: -2px;
+  left: 1px;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 700;
+}
+.board-task-completed .board-task-text {
+  text-decoration: line-through;
+  color: rgba(0,0,0,0.45);
+}
+
 .board-task-priority-overdue .board-task-text,
 .board-task-priority-urgent  .board-task-text { color: #c0392b; font-weight: 600; }
-.board-task-text { flex: 1; word-break: break-word; }
+.board-task-completed.board-task-priority-overdue .board-task-text,
+.board-task-completed.board-task-priority-urgent  .board-task-text {
+  color: rgba(0,0,0,0.45);
+  font-weight: normal;
+}
 
-/* ---------- Zone 2: Notes (sticky-note pad) ---------- */
+.board-task-link {
+  flex: 1;
+  color: inherit;
+  text-decoration: none;
+  word-break: break-word;
+}
+.board-task-link:hover { color: #000; text-decoration: none; }
+.board-task-text { word-break: break-word; }
+
+/* ---------- Notes zone (sticky pad) ---------- */
 .board-zone-notes {
   position: relative;
   min-height: 150px;
@@ -3231,29 +3294,11 @@ body.board-collapsed .site-footer { padding-right: 32px; }
   transform: translateY(-2px) rotate(0deg) !important;
   z-index: 10;
 }
-.board-stack-note-yellow {
-  background: var(--board-note-yellow);
-  left: 20px;
-  top: 5px;
-  transform: rotate(-5deg);
-  z-index: 1;
-}
-.board-stack-note-pink {
-  background: var(--board-note-pink);
-  left: 75px;
-  top: 15px;
-  transform: rotate(3deg);
-  z-index: 2;
-}
-.board-stack-note-blue {
-  background: var(--board-note-blue);
-  left: 130px;
-  top: 8px;
-  transform: rotate(-2deg);
-  z-index: 3;
-}
+.board-stack-note-yellow { background: var(--board-note-yellow); left: 20px;  top: 5px;  transform: rotate(-5deg); z-index: 1; }
+.board-stack-note-pink   { background: var(--board-note-pink);   left: 75px;  top: 15px; transform: rotate(3deg);  z-index: 2; }
+.board-stack-note-blue   { background: var(--board-note-blue);   left: 130px; top: 8px;  transform: rotate(-2deg); z-index: 3; }
 
-/* Saved notes (private + shared + public-mentions) below the stack */
+/* Saved notes list */
 .board-notes-list {
   display: flex;
   flex-direction: column;
@@ -3264,7 +3309,7 @@ body.board-collapsed .site-footer { padding-right: 32px; }
   position: relative;
   border: 1px solid rgba(0,0,0,0.1);
   border-radius: 2px;
-  padding: 0.6rem 0.7rem 0.5rem;
+  padding: 0.55rem 0.7rem 0.5rem;
   box-shadow: 2px 3px 6px rgba(0,0,0,0.12);
   color: #1f2328;
   font-family: var(--board-hand);
@@ -3307,14 +3352,45 @@ body.board-collapsed .site-footer { padding-right: 32px; }
   min-height: 1em;
 }
 
-.board-composer {
+/* X delete in top-right of card on hover (replaces dedicated delete btn) */
+.board-card-delete {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: rgba(0,0,0,0.35);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  z-index: 4;
+}
+.board-card:hover .board-card-delete,
+.board-card-delete:focus { opacity: 1; }
+.board-card-delete:hover {
+  background: rgba(0,0,0,0.08);
+  color: #c0392b;
+}
+
+/* Composer (new note) + edit-in-place — no save/cancel buttons */
+.board-composer,
+.board-card-editing {
   font-family: var(--board-hand);
-  padding: 0.6rem 0.7rem 0.4rem;
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  margin: 0.5rem 0 0.8rem;
+  gap: 0.25rem;
+  position: relative;
 }
+.board-composer { padding: 0.55rem 0.7rem 0.45rem; margin: 0.5rem 0 0.8rem; }
 .board-composer-textarea,
 .board-card-edit-textarea {
   width: 100%;
@@ -3324,26 +3400,81 @@ body.board-collapsed .site-footer { padding-right: 32px; }
   font-family: var(--board-hand);
   font-size: 1.15rem;
   line-height: 1.3;
-  resize: vertical;
-  min-height: 3em;
+  resize: none;
+  min-height: 2.4em;
   color: #1f2328;
   outline: none;
+  overflow: hidden; /* JS auto-resizes; show scroll only if max hit */
 }
-.board-composer-textarea:focus,
-.board-card-edit-textarea:focus {
-  background: rgba(255,255,255,0.35);
-}
-.board-card-editing {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-.board-composer-row {
+
+.board-composer-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.5rem;
+  font-family: var(--font);
+  font-size: 0.7rem;
+  color: rgba(0,0,0,0.55);
+  flex-wrap: wrap;
 }
+.board-composer-hint {
+  margin-left: auto;
+  font-style: italic;
+  font-size: 0.7rem;
+  color: rgba(0,0,0,0.4);
+}
+.board-composer-error {
+  color: #c0392b;
+  font-size: 0.72rem;
+  font-family: var(--font);
+}
+
+/* Color picker — collapsed swatch, expand on hover */
+.board-color-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.board-color-current {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(0,0,0,0.3);
+  cursor: pointer;
+  padding: 0;
+  background: var(--board-note-yellow);
+}
+.board-color-options {
+  display: none;
+  gap: 0.25rem;
+  margin-left: 0.4rem;
+}
+.board-color-picker:hover .board-color-options,
+.board-color-picker:focus-within .board-color-options { display: inline-flex; }
+.board-color-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(0,0,0,0.2);
+  cursor: pointer;
+  padding: 0;
+}
+.board-color-swatch.selected {
+  outline: 2px solid var(--board-ink-blue);
+  outline-offset: 1px;
+}
+.board-color-swatch-yellow,
+.board-color-current.color-yellow { background: var(--board-note-yellow); }
+.board-color-swatch-pink,
+.board-color-current.color-pink   { background: var(--board-note-pink); }
+.board-color-swatch-blue,
+.board-color-current.color-blue   { background: var(--board-note-blue); }
+.board-color-swatch-green,
+.board-color-current.color-green  { background: var(--board-note-green); }
+.board-color-swatch-orange,
+.board-color-current.color-orange { background: var(--board-note-orange); }
+.board-color-swatch-white,
+.board-color-current.color-white  { background: var(--board-note-white); }
+
 .board-composer-scope-mini {
   display: flex;
   gap: 0.5rem;
@@ -3357,72 +3488,26 @@ body.board-collapsed .site-footer { padding-right: 32px; }
   gap: 0.2rem;
   cursor: pointer;
 }
-.board-color-picker-mini {
-  display: flex;
-  gap: 0.25rem;
-}
-.board-color-swatch {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 1.5px solid rgba(0,0,0,0.2);
-  cursor: pointer;
-  padding: 0;
-}
-.board-color-swatch.selected {
-  outline: 2px solid #2a4a7f;
-  outline-offset: 1px;
-}
-.board-color-swatch-yellow { background: var(--board-note-yellow); }
-.board-color-swatch-pink   { background: var(--board-note-pink); }
-.board-color-swatch-blue   { background: var(--board-note-blue); }
-.board-color-swatch-green  { background: var(--board-note-green); }
-.board-color-swatch-orange { background: var(--board-note-orange); }
-.board-color-swatch-white  { background: var(--board-note-white); }
 
-.board-composer-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  justify-content: flex-end;
-  font-family: var(--font);
-  font-size: 0.78rem;
-}
-.board-composer-error {
-  margin-right: auto;
-  color: #c0392b;
-  font-size: 0.75rem;
-}
-.board-link-btn {
-  background: none;
-  border: none;
-  color: rgba(0,0,0,0.55);
-  cursor: pointer;
-  padding: 0.15rem 0.25rem;
-  font-family: var(--font);
-  font-size: 0.78rem;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.board-link-btn:hover { color: #1f2328; }
-.board-link-btn-primary { color: #2a4a7f; font-weight: 600; }
-.board-link-btn:disabled { opacity: 0.5; cursor: default; }
-
-/* ---------- Zone 3: Messages (chat bubbles) ---------- */
-.board-zone-messages {
-  margin-top: 0.4rem;
+/* ---------- Messages zone (left sidebar) ---------- */
+.board-zone-messages,
+.board-sidebar-left {
+  /* messages list grows; composer pinned to bottom */
 }
 .board-message-list {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
   padding: 0.3rem 0.3rem;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 .board-message {
   font-family: var(--board-hand);
   font-size: 1.05rem;
   line-height: 1.25;
-  padding: 0.45rem 0.7rem;
+  padding: 0.4rem 0.65rem;
   border-radius: 12px;
   max-width: 92%;
   box-shadow: 0 1px 2px rgba(0,0,0,0.08);
@@ -3444,96 +3529,39 @@ body.board-collapsed .site-footer { padding-right: 32px; }
   margin-right: 0.25rem;
 }
 
-.board-message-compose-btn {
-  align-self: center;
-  margin-top: 0.5rem;
-  background: transparent;
-  border: 1px dashed rgba(0,0,0,0.3);
-  color: rgba(0,0,0,0.55);
-  border-radius: 999px;
-  padding: 0.25rem 0.8rem;
-  font-family: var(--board-hand);
-  font-size: 1rem;
-  cursor: pointer;
-}
-.board-message-compose-btn:hover {
-  background: rgba(255,255,255,0.5);
-  color: #1f2328;
-}
-
 .board-message-composer {
   background: rgba(255,255,255,0.65);
   border: 1px solid rgba(0,0,0,0.12);
   border-radius: 8px;
-  padding: 0.5rem 0.6rem;
+  padding: 0.4rem 0.55rem 0.3rem;
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.2rem;
   margin-top: 0.4rem;
   position: relative;
+  flex-shrink: 0;
 }
-.board-message-composer-target {
-  font-family: var(--font);
-  font-size: 0.8rem;
-  color: rgba(0,0,0,0.6);
-}
-.board-message-to strong {
-  font-family: var(--board-hand);
-  font-size: 1rem;
-  color: #1f2328;
-  margin-right: 0.3rem;
-}
-.board-target-picker { position: relative; }
-.board-target-input {
-  width: 100%;
-  padding: 0.2rem 0.4rem;
-  border: 1px solid rgba(0,0,0,0.15);
-  border-radius: 4px;
-  font-family: var(--font);
-  font-size: 0.85rem;
-  background: #fff;
-}
-.board-target-results {
-  position: absolute;
-  top: calc(100% + 2px);
-  left: 0; right: 0;
-  background: #fff;
-  border: 1px solid rgba(0,0,0,0.15);
-  border-radius: 4px;
-  max-height: 180px;
-  overflow-y: auto;
-  z-index: 50;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-}
-.board-target-result {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 0.35rem 0.55rem;
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid rgba(0,0,0,0.08);
-  cursor: pointer;
-  font-family: var(--font);
-  font-size: 0.85rem;
-}
-.board-target-result:last-child { border-bottom: none; }
-.board-target-result:hover { background: rgba(0,0,0,0.04); }
 .board-message-textarea {
   width: 100%;
-  padding: 0.25rem 0.35rem;
+  padding: 0.2rem 0.35rem;
   border: none;
   background: transparent;
   font-family: var(--board-hand);
   font-size: 1.1rem;
   line-height: 1.3;
-  resize: vertical;
-  min-height: 2em;
+  resize: none;
+  min-height: 1.4em;
   color: #1f2328;
   outline: none;
+  overflow: hidden;
+}
+.board-message-error {
+  color: #c0392b;
+  font-size: 0.72rem;
+  font-family: var(--font);
 }
 
-/* ---------- Mentions (inline styled text, no pill) ---------- */
+/* ---------- Inline mentions (no pill, just coloured bold text) ---------- */
 .board-mention {
   font-weight: 600;
   text-decoration: none;
@@ -3545,7 +3573,7 @@ body.board-collapsed .site-footer { padding-right: 32px; }
 .board-mention-document    { color: #4a4a4a; font-style: italic; }
 .board-mention:hover       { text-decoration: underline; }
 
-/* Mention autocomplete popup (same pattern, tamer styling) */
+/* Mention autocomplete popup */
 .board-mention-popup {
   position: absolute;
   left: 0; right: 0;

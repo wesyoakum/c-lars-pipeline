@@ -1,21 +1,21 @@
 // js/board-sidebar.js
 //
-// Right-edge whiteboard / fridge-door sidebar. Three zones:
-//   1. Tasks    — pending tasks assigned to me (read-only, from activities)
-//   2. Notes    — private + shared sticky notes (stack of blank notes
-//                 is the compose affordance; click a color to write)
-//   3. Messages — direct-message chat bubbles (scope='direct' where I'm
-//                 author or target)
+// Whiteboard / fridge-door sidebars. Two panels, one Alpine store:
+//   * RIGHT: Tasks + Notes
+//       - Tasks: bulleted list, click dot to toggle complete/incomplete,
+//         hover the zone to reveal "show complete" toggle
+//       - Notes: sticky-pad stack as compose affordance, click a card
+//         to edit in place. Enter saves, Escape cancels, Shift+Enter
+//         inserts a newline. Hover shows X delete in the corner. Color
+//         picker collapses to one swatch and expands on hover.
+//   * LEFT:  Messages
+//       - Always-open composer at the bottom. Type, Enter sends,
+//         Shift+Enter newline, Escape clears. @user mention sets the
+//         direct target (one mention) or just notifies (multiple).
+//         No mention = broadcast (visible to everyone).
 //
-// Design notes:
-//   * No module reorder, no module collapse, no header chrome. The
-//     user's mockup was "glance at the fridge" — minimal UI, maximal
-//     content.
-//   * Polls /board/state every 30s.
-//   * @[<type>:<id>|<label>] markers in card bodies render as inline
-//     styled text (not pill chips) via renderCardBody().
-//   * Sidebar hide uses server-side hidden_until so the collapsed
-//     state persists across devices.
+// Polls /board/state every 30s. @[type:id|label] markers in card bodies
+// render as inline coloured text via renderCardBody().
 
 (function () {
   'use strict';
@@ -91,6 +91,17 @@
     return 'normal';                      // green
   }
 
+  // Resize a textarea to fit its content. Cap at a reasonable max so
+  // it doesn't take over the whole sidebar on a long message.
+  function autoResize(el, maxPx) {
+    if (!el) return;
+    el.style.height = 'auto';
+    var max = maxPx || 240;
+    var h = Math.min(el.scrollHeight, max);
+    el.style.height = h + 'px';
+    el.style.overflowY = el.scrollHeight > max ? 'auto' : 'hidden';
+  }
+
   document.addEventListener('alpine:init', function () {
     Alpine.store('board', {
       // ---- State ----
@@ -99,7 +110,7 @@
       tickHandle: null,
       pollMs: 30000,
 
-      modules: { my_tasks: [], my_notes: [], shared: [], mentions: [] },
+      modules: { my_tasks: [], my_tasks_done: [], my_notes: [], shared: [], mentions: [] },
       prefs: {
         module_order: ['my_tasks', 'my_notes', 'shared', 'mentions'],
         module_collapsed: {},
@@ -108,6 +119,9 @@
       serverTime: null,
       nowMs: Date.now(),
       userId: (window.PMS && window.PMS.userId) || null,
+
+      // Tasks zone
+      showCompleted: false,
 
       composer: {
         open: false,
@@ -128,14 +142,10 @@
       },
 
       messageComposer: {
-        open: false,
         body: '',
-        target: null,
         submitting: false,
         error: null,
       },
-
-      messageTargetResults: [],
 
       mention: {
         active: false,
@@ -162,10 +172,21 @@
         return m + red;
       },
 
+      // Tasks visible in the right zone. Pending always; completed only
+      // when "show complete" is toggled on.
+      get visibleTasks() {
+        var pending = this.modules.my_tasks || [];
+        if (!this.showCompleted) return pending;
+        var done = this.modules.my_tasks_done || [];
+        // Pending first (by existing due-order), then completed (newest first).
+        return pending.concat(done);
+      },
+
       // Combined list of "notes" — private + shared + public-mentions.
       // Ordered by pinned first, then newest first. Dedupe by id because
       // a public card that @-mentions me shows up in both shared and
-      // mentions.
+      // mentions. Direct (chat) cards are excluded — they live in the
+      // messages zone.
       get allNotes() {
         var seen = Object.create(null);
         var out = [];
@@ -175,8 +196,6 @@
             var c = lists[i][j];
             if (!c || !c.id || seen[c.id]) continue;
             seen[c.id] = true;
-            // Only surface 'direct' messages in the Messages zone,
-            // not here.
             if (c.scope === 'direct') continue;
             out.push(c);
           }
@@ -188,16 +207,14 @@
         return out;
       },
 
-      // Direct messages involving me (sent or received). Ordered oldest
-      // first so the thread reads top-to-bottom like a chat.
+      // Direct messages — broadcasts (target_user_id IS NULL) plus
+      // anything to/from me. Oldest first so the thread reads
+      // top-to-bottom like a chat.
       get messages() {
+        var me = this.userId;
         var list = (this.modules.mentions || [])
           .filter(function (c) { return c && c.scope === 'direct'; })
           .slice();
-        // The /board/state mentions module includes direct-TO-me. We
-        // also want direct-FROM-me (server will be extended to include
-        // these — see below). For now flag each with from_me.
-        var me = this.userId;
         list.forEach(function (c) {
           c.from_me = me && c.author_user_id === me;
         });
@@ -211,8 +228,14 @@
 
       taskPriority: function (t) { return derivePriority(t); },
       taskPrefix: function (t) {
+        if (t && t.status === 'completed') return '';
         var p = derivePriority(t);
         return p === 'overdue' ? '!!' : '';
+      },
+      taskItemClass: function (t) {
+        var cls = 'board-task-item board-task-priority-' + this.taskPriority(t);
+        if (t && t.status === 'completed') cls += ' board-task-completed';
+        return cls;
       },
 
       messagePrefix: function (msg) {
@@ -230,8 +253,6 @@
         var cls = 'board-card board-card-color-' + (card.color || 'yellow');
         if (card.flag) cls += ' board-card-flag-' + card.flag;
         if (card.pinned) cls += ' board-card-pinned';
-        // Each card gets one of three subtle rotations for that
-        // "tacked on the fridge" look. Deterministic per card id.
         var h = 0;
         for (var i = 0; i < (card.id || '').length; i++) h = (h * 31 + card.id.charCodeAt(i)) & 0xffff;
         cls += ' board-card-tilt-' + (h % 3);
@@ -253,7 +274,7 @@
           .then(function (res) { return res.ok ? res.json() : null; })
           .then(function (data) {
             if (!data) return;
-            self.modules = data.modules || { my_tasks: [], my_notes: [], shared: [], mentions: [] };
+            self.modules = data.modules || { my_tasks: [], my_tasks_done: [], my_notes: [], shared: [], mentions: [] };
             if (data.prefs) self.prefs = data.prefs;
             if (data.user && data.user.id) {
               self.userId = data.user.id;
@@ -308,6 +329,38 @@
         });
       },
 
+      // ---- Tasks ----
+      toggleShowCompleted: function () {
+        this.showCompleted = !this.showCompleted;
+      },
+
+      toggleTask: function (task) {
+        if (!task || !task.id) return;
+        var self = this;
+        var nowComplete = task.status !== 'completed';
+        // Optimistic local move between the two arrays so the UI
+        // updates immediately.
+        if (nowComplete) {
+          self.modules.my_tasks = (self.modules.my_tasks || []).filter(function (t) { return t.id !== task.id; });
+          task.status = 'completed';
+          task.completed_at = new Date().toISOString();
+          self.modules.my_tasks_done = [task].concat(self.modules.my_tasks_done || []);
+        } else {
+          self.modules.my_tasks_done = (self.modules.my_tasks_done || []).filter(function (t) { return t.id !== task.id; });
+          task.status = 'pending';
+          task.completed_at = null;
+          self.modules.my_tasks = [task].concat(self.modules.my_tasks || []);
+        }
+        fetch('/activities/' + encodeURIComponent(task.id) + '/patch', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json', 'accept': 'application/json' },
+          body: JSON.stringify({ field: 'status', value: nowComplete ? 'completed' : 'pending' }),
+        }).then(function (res) {
+          if (!res.ok) self.poll(); // re-sync on error
+        }).catch(function () { self.poll(); });
+      },
+
       // ---- Note composer (sticky-pad stack) ----
       openComposer: function (defaults) {
         defaults = defaults || {};
@@ -320,7 +373,7 @@
         this.closeMention();
         setTimeout(function () {
           var el = document.getElementById('board-composer-textarea');
-          if (el) el.focus();
+          if (el) { el.focus(); autoResize(el); }
         }, 30);
       },
 
@@ -334,7 +387,7 @@
         var self = this;
         if (self.composer.submitting) return;
         var body = (self.composer.body || '').trim();
-        if (!body) { self.composer.error = 'Write something first.'; return; }
+        if (!body) { self.cancelComposer(); return; }
         self.composer.submitting = true;
         self.composer.error = null;
         fetch('/board/cards', {
@@ -372,9 +425,14 @@
         this.editing.submitting = false;
         this.editing.error = null;
         this.closeMention();
+        var cardId = card.id;
         setTimeout(function () {
-          var el = document.getElementById('board-edit-textarea-' + card.id);
-          if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+          var el = document.getElementById('board-edit-textarea-' + cardId);
+          if (el) {
+            el.focus();
+            el.setSelectionRange(el.value.length, el.value.length);
+            autoResize(el);
+          }
         }, 30);
       },
 
@@ -417,10 +475,10 @@
         if (!card || !card.id) return;
         var self = this;
         Object.keys(self.modules).forEach(function (k) {
-          if (k === 'my_tasks') return;
+          if (k === 'my_tasks' || k === 'my_tasks_done') return;
           self.modules[k] = self.modules[k].filter(function (c) { return c.id !== card.id; });
         });
-        self.editing.cardId = null;
+        if (self.editing.cardId === card.id) self.editing.cardId = null;
         fetch('/board/cards/' + encodeURIComponent(card.id), {
           method: 'DELETE',
           credentials: 'same-origin',
@@ -428,31 +486,12 @@
         }).catch(function () { self.poll(); });
       },
 
-      // ---- Message composer (direct-scope chat) ----
-      openMessageComposer: function () {
-        this.messageComposer.open = true;
-        this.messageComposer.body = '';
-        this.messageComposer.target = null;
-        this.messageComposer.submitting = false;
-        this.messageComposer.error = null;
-        this.messageTargetResults = [];
-        this.closeMention();
-      },
-
-      cancelMessageComposer: function () {
-        this.messageComposer.open = false;
-        this.messageComposer.error = null;
-        this.closeMention();
-      },
-
+      // ---- Message composer ----
       submitMessageComposer: function () {
         var self = this;
         if (self.messageComposer.submitting) return;
         var body = (self.messageComposer.body || '').trim();
-        if (!body) { self.messageComposer.error = 'Write something first.'; return; }
-        if (!self.messageComposer.target || !self.messageComposer.target.id) {
-          self.messageComposer.error = 'Pick a recipient.'; return;
-        }
+        if (!body) return;
         self.messageComposer.submitting = true;
         self.messageComposer.error = null;
         fetch('/board/cards', {
@@ -463,7 +502,8 @@
             body: self.messageComposer.body,
             color: 'white',
             scope: 'direct',
-            target_user_id: self.messageComposer.target.id,
+            // No target_user_id; server picks one if exactly one @user
+            // mention is found, else broadcasts (NULL).
           }),
         })
           .then(function (res) { return res.json().then(function (d) { return { ok: res.ok, d: d }; }); })
@@ -473,7 +513,9 @@
               self.messageComposer.error = (r.d && r.d.error) || 'Could not send.';
               return;
             }
-            self.messageComposer.open = false;
+            self.messageComposer.body = '';
+            var ta = document.getElementById('board-message-textarea');
+            if (ta) autoResize(ta);
             self.poll();
           })
           .catch(function () {
@@ -482,34 +524,19 @@
           });
       },
 
-      searchMessageTargets: function (q) {
-        var self = this;
-        fetch('/board/mention-search?q=' + encodeURIComponent(q || '') + '&limit=10', {
-          credentials: 'same-origin',
-          headers: { 'accept': 'application/json' },
-        })
-          .then(function (res) { return res.ok ? res.json() : null; })
-          .then(function (data) {
-            var all = (data && data.results) || [];
-            self.messageTargetResults = all.filter(function (r) { return r.ref_type === 'user'; });
-          })
-          .catch(function () { /* ignore */ });
+      cancelMessageComposer: function () {
+        this.messageComposer.body = '';
+        this.messageComposer.error = null;
+        this.closeMention();
+        var ta = document.getElementById('board-message-textarea');
+        if (ta) autoResize(ta);
       },
 
-      pickMessageTarget: function (result) {
-        if (!result) return;
-        this.messageComposer.target = { id: result.ref_id, label: result.label };
-        this.messageTargetResults = [];
-      },
-
-      clearMessageTarget: function () {
-        this.messageComposer.target = null;
-      },
-
-      // ---- @-autocomplete (shared across composer / editing / messageComposer) ----
+      // ---- Body input + Enter/Esc/Shift-Enter handling ----
       onBodyInput: function (scope, textarea) {
         var val = textarea.value;
         this[scope].body = val;
+        autoResize(textarea, scope === 'messageComposer' ? 180 : 240);
         var caret = textarea.selectionStart || 0;
         var trigger = -1;
         var i = caret - 1;
@@ -537,25 +564,53 @@
       },
 
       onBodyKeydown: function (scope, textarea, event) {
-        if (!this.mention.active) return;
-        if (event.key === 'ArrowDown') {
-          event.preventDefault();
-          if (this.mention.results.length) {
-            this.mention.selectedIndex = (this.mention.selectedIndex + 1) % this.mention.results.length;
-          }
-        } else if (event.key === 'ArrowUp') {
-          event.preventDefault();
-          if (this.mention.results.length) {
-            this.mention.selectedIndex = (this.mention.selectedIndex + this.mention.results.length - 1) % this.mention.results.length;
-          }
-        } else if (event.key === 'Enter' || event.key === 'Tab') {
-          if (this.mention.results.length) {
+        // Mention popup nav takes precedence
+        if (this.mention.active && this.mention.for === scope) {
+          if (event.key === 'ArrowDown') {
             event.preventDefault();
-            this.pickMention(this.mention.results[this.mention.selectedIndex], textarea);
+            if (this.mention.results.length) {
+              this.mention.selectedIndex = (this.mention.selectedIndex + 1) % this.mention.results.length;
+            }
+            return;
           }
-        } else if (event.key === 'Escape') {
+          if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            if (this.mention.results.length) {
+              this.mention.selectedIndex = (this.mention.selectedIndex + this.mention.results.length - 1) % this.mention.results.length;
+            }
+            return;
+          }
+          if (event.key === 'Enter' || event.key === 'Tab') {
+            if (this.mention.results.length) {
+              event.preventDefault();
+              this.pickMention(this.mention.results[this.mention.selectedIndex], textarea);
+              return;
+            }
+          }
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            this.closeMention();
+            return;
+          }
+        }
+
+        // Composer / edit / message keyboard contracts:
+        //   Enter (no shift)  → submit
+        //   Shift+Enter       → newline (default browser behavior)
+        //   Escape            → cancel / clear
+        if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
           event.preventDefault();
-          this.closeMention();
+          if (scope === 'composer') this.submitComposer();
+          else if (scope === 'editing') this.saveEdit();
+          else if (scope === 'messageComposer') this.submitMessageComposer();
+          return;
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          if (scope === 'composer') this.cancelComposer();
+          else if (scope === 'editing') this.cancelEdit();
+          else if (scope === 'messageComposer') this.cancelMessageComposer();
+          return;
         }
       },
 
@@ -595,6 +650,7 @@
             if (typeof textarea.setSelectionRange === 'function') {
               textarea.setSelectionRange(newCaret, newCaret);
               textarea.focus();
+              autoResize(textarea, scope === 'messageComposer' ? 180 : 240);
             }
           }, 0);
         }

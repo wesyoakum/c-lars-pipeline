@@ -7,10 +7,12 @@
 //     prefs:        { module_order, module_collapsed, hidden_until },
 //     server_time:  ISO-8601 now (client uses this for snooze calc),
 //     modules: {
-//       my_tasks:   [ ...pending tasks assigned to me ],
-//       my_notes:   [ ...my private cards ],
-//       shared:     [ ...public cards ],
-//       mentions:   [ ...direct-to-me or public-with-@me cards ]
+//       my_tasks:        [ ...pending tasks assigned to me ],
+//       my_tasks_done:   [ ...recently completed tasks (last 14 days) ],
+//       my_notes:        [ ...my private cards ],
+//       shared:          [ ...public cards ],
+//       mentions:        [ ...messages relevant to me — direct broadcasts,
+//                            direct-to/from-me, or public mentioning me ]
 //     }
 //   }
 //
@@ -42,11 +44,16 @@ export async function onRequestGet(context) {
 
   const nowIso = new Date().toISOString();
 
-  const [prefs, myTasks, myNotes, shared, mentions] = await Promise.all([
+  // Recently-completed window for the "show complete" toggle in the
+  // tasks zone. 14 days is generous enough to feel useful, tight
+  // enough to keep the payload small.
+  const completedSinceIso = new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString();
+
+  const [prefs, myTasks, myTasksDone, myNotes, shared, mentions] = await Promise.all([
     getPrefs(env.DB, user.id),
 
     all(env.DB,
-      `SELECT id, subject, body, due_at, remind_at,
+      `SELECT id, subject, body, due_at, remind_at, status, completed_at,
               opportunity_id, quote_id, account_id
          FROM activities
         WHERE assigned_user_id = ?
@@ -58,6 +65,18 @@ export async function onRequestGet(context) {
           created_at DESC
         LIMIT 50`,
       [user.id]),
+
+    all(env.DB,
+      `SELECT id, subject, body, due_at, remind_at, status, completed_at,
+              opportunity_id, quote_id, account_id
+         FROM activities
+        WHERE assigned_user_id = ?
+          AND status = 'completed'
+          AND type = 'task'
+          AND completed_at >= ?
+        ORDER BY completed_at DESC
+        LIMIT 30`,
+      [user.id, completedSinceIso]),
 
     all(env.DB,
       `SELECT ${CARD_SELECT_COLS}
@@ -89,9 +108,13 @@ export async function onRequestGet(context) {
         WHERE c.archived_at IS NULL
           AND (c.snooze_until IS NULL OR c.snooze_until < ?)
           AND (
-            -- Direct messages involving me (in either direction) so
-            -- the messages zone can render a proper chat thread.
-            (c.scope = 'direct' AND (c.target_user_id = ? OR c.author_user_id = ?))
+            -- Direct chat: broadcasts (NULL target) are visible to
+            -- everyone; targeted DMs only to author or recipient.
+            (c.scope = 'direct' AND (
+              c.target_user_id IS NULL
+              OR c.target_user_id = ?
+              OR c.author_user_id = ?
+            ))
             OR (
               c.scope = 'public'
               AND EXISTS (
@@ -101,7 +124,7 @@ export async function onRequestGet(context) {
             )
           )
         ORDER BY c.pinned DESC, c.created_at DESC
-        LIMIT 50`,
+        LIMIT 100`,
       [nowIso, user.id, user.id, user.id]),
   ]);
 
@@ -122,6 +145,7 @@ export async function onRequestGet(context) {
     },
     modules: {
       my_tasks: myTasks,
+      my_tasks_done: myTasksDone,
       my_notes: myNotes,
       shared,
       mentions,
