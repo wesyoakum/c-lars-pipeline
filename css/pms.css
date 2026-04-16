@@ -3079,8 +3079,10 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 .board-sidebar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 3px; }
 
 /* Peek-over-the-wall hide button — sits at the top-right corner of
-   the Tasks card. Click hides both sidebars for 5 min. The icon
-   doubles as the metaphor: the figure ducks back behind the wall. */
+   the Tasks card. Click hides both sidebars for 5 min. Two SVGs are
+   layered in the button: the "peek" (head up) shows by default, the
+   "hide" (head ducked, fingertips still gripping) shows on hover —
+   so the icon previews what the click will do. */
 .board-hide-peek {
   position: absolute;
   top: 6px;
@@ -3093,15 +3095,16 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   border-radius: 6px;
   line-height: 0;
   z-index: 6;
-  transition: color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 .board-hide-peek:hover {
   background: rgba(0,0,0,0.06);
   color: rgba(0,0,0,0.8);
-  /* tiny ducking motion on hover */
-  transform: translateY(1px);
 }
 .board-hide-peek svg { display: block; }
+.board-hide-peek .peek-icon-down { display: none; }
+.board-hide-peek:hover .peek-icon-up { display: none; }
+.board-hide-peek:hover .peek-icon-down { display: block; }
 
 /* Restore button — lives in .header-right to the left of the bell.
    Only shown while the board is collapsed (Alpine controls visibility).

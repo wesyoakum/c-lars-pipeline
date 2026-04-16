@@ -312,22 +312,32 @@ const BOARD_RIGHT_MARKUP = (
     '<section class="board-zone board-zone-tasks" ' +
       ':class="$store.board.showCompleted ? \'board-tasks-show-done\' : \'\'">' +
       // "Peek over the wall" icon \u2014 hide both sidebars for 5 min.
-      // Replaces the old plain-X handle that lived in the sidebar corner.
-      // Dome head + fingertip bumps gripping the wall.
+      // Two SVGs in one button: peek (head visible) is the default,
+      // hide (head ducked behind wall, fingertips still gripping)
+      // appears on hover to preview what the click will do.
       '<button type="button" class="board-hide-peek" ' +
         '@click="$store.board.hideFor(5)" ' +
         'title="Hide board for 5 min" aria-label="Hide board">' +
-        '<svg viewBox="0 0 100 60" width="32" height="19" aria-hidden="true">' +
+        // peek (default)
+        '<svg class="peek-icon-up" viewBox="0 0 100 60" width="32" height="19" aria-hidden="true">' +
           '<g fill="currentColor">' +
-            // wall
             '<rect x="2" y="46" width="96" height="10" rx="5"/>' +
-            // head: dome rising out of the wall
             '<path d="M 32 46 Q 32 11 50 11 Q 68 11 68 46 Z"/>' +
-            // left fingertips (3 bumps)
             '<circle cx="10" cy="46" r="3"/>' +
             '<circle cx="17" cy="46" r="3"/>' +
             '<circle cx="24" cy="46" r="3"/>' +
-            // right fingertips (3 bumps)
+            '<circle cx="76" cy="46" r="3"/>' +
+            '<circle cx="83" cy="46" r="3"/>' +
+            '<circle cx="90" cy="46" r="3"/>' +
+          '</g>' +
+        '</svg>' +
+        // hide (hover) \u2014 head is gone, just wall + fingertips
+        '<svg class="peek-icon-down" viewBox="0 0 100 60" width="32" height="19" aria-hidden="true">' +
+          '<g fill="currentColor">' +
+            '<rect x="2" y="46" width="96" height="10" rx="5"/>' +
+            '<circle cx="10" cy="46" r="3"/>' +
+            '<circle cx="17" cy="46" r="3"/>' +
+            '<circle cx="24" cy="46" r="3"/>' +
             '<circle cx="76" cy="46" r="3"/>' +
             '<circle cx="83" cy="46" r="3"/>' +
             '<circle cx="90" cy="46" r="3"/>' +
