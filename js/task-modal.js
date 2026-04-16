@@ -390,23 +390,6 @@
       canSubmit: function () {
         return !!(this.answers.body || '').trim();
       },
-      truncate: function (s, n) {
-        s = String(s || '').replace(/\s+/g, ' ').trim();
-        return s.length > n ? s.slice(0, n - 1) + '\u2026' : s;
-      },
-
-      chipsList: function () {
-        var chips = [];
-        var a = this.answers;
-        if (a.body) chips.push({ stepIndex: 0, label: 'Task', value: this.truncate(a.body, 36) });
-        if (a.assigneeLabel) chips.push({ stepIndex: 1, label: 'Assigned', value: a.assigneeLabel });
-        if (a.due) chips.push({ stepIndex: 2, label: 'Due', value: formatDateDisplay(a.due) });
-        if (a.remind) chips.push({ stepIndex: 3, label: 'Remind', value: formatDateDisplay(a.remind) });
-        if (a.linkLabel && !this.prefillLocked) {
-          chips.push({ stepIndex: 4, label: 'Linked', value: a.linkLabel });
-        }
-        return chips;
-      },
 
       visibleSuggestions: function () {
         var step = this.currentStep();
@@ -647,15 +630,6 @@
       goBack: function () {
         if (this.stepIndex <= 0) return;
         this.stepIndex -= 1;
-        this.typedInput = this.currentTypedForStep();
-        this.suggestionIndex = 0;
-        this.focusInput();
-      },
-
-      jumpTo: function (idx) {
-        if (idx < 0 || idx >= STEPS.length) return;
-        if (idx === 4 && this.prefillLocked) return;
-        this.stepIndex = idx;
         this.typedInput = this.currentTypedForStep();
         this.suggestionIndex = 0;
         this.focusInput();

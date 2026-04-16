@@ -206,16 +206,6 @@ const TASK_MODAL_MARKUP = (
   '<strong x-text="$store.taskModal.prefillLockedLabel"></strong>' +
   '</div>' +
 
-  // Chips row: prior answers, click to jump back.
-  '<div class="task-wizard-chips" x-show="$store.taskModal.chipsList().length > 0">' +
-  '<template x-for="(chip, i) in $store.taskModal.chipsList()" :key="i">' +
-  '<button type="button" class="task-wizard-chip" @click="$store.taskModal.jumpTo(chip.stepIndex)">' +
-  '<span class="task-wizard-chip-label" x-text="chip.label"></span>' +
-  '<span class="task-wizard-chip-value" x-text="chip.value"></span>' +
-  '</button>' +
-  '</template>' +
-  '</div>' +
-
   // Big prompt
   '<div class="task-wizard-prompt" x-text="$store.taskModal.currentPrompt()"></div>' +
 
@@ -257,26 +247,24 @@ const TASK_MODAL_MARKUP = (
 
   '</div>' + // /.task-wizard-input-wrap
 
-  // Help text
-  '<div class="task-wizard-help" x-text="$store.taskModal.currentHint()"></div>' +
-
-  // Error message
-  '<div class="task-modal-error" x-show="$store.taskModal.error" x-text="$store.taskModal.error"></div>' +
-
-  // Footer: Cancel / Back / Create
-  '<div class="task-modal-footer">' +
-  '<button type="button" class="btn" @click="$store.taskModal.closeModal()" ' +
-  ':disabled="$store.taskModal.submitting">Cancel</button>' +
-  '<button type="button" class="btn" @click="$store.taskModal.goBack()" ' +
+  // Action bar: hint on the left, Back + Create task on the right.
+  '<div class="task-wizard-actionbar">' +
+  '<span class="task-wizard-help" x-text="$store.taskModal.currentHint()"></span>' +
+  '<div class="task-wizard-actions">' +
+  '<button type="button" class="btn btn-sm" @click="$store.taskModal.goBack()" ' +
   ':disabled="$store.taskModal.stepIndex === 0 || $store.taskModal.submitting" ' +
   'x-show="$store.taskModal.stepIndex > 0">Back</button>' +
-  '<button type="button" class="btn primary" ' +
+  '<button type="button" class="btn btn-sm primary" ' +
   '@click="$store.taskModal.submit()" ' +
   ':disabled="!$store.taskModal.canSubmit() || $store.taskModal.submitting">' +
   '<span x-show="!$store.taskModal.submitting">Create task</span>' +
   '<span x-show="$store.taskModal.submitting">Saving\u2026</span>' +
   '</button>' +
   '</div>' +
+  '</div>' +
+
+  // Error message
+  '<div class="task-modal-error" x-show="$store.taskModal.error" x-text="$store.taskModal.error"></div>' +
 
   '</div>' + // /.task-modal-body
   '</div>' + // /.task-modal
