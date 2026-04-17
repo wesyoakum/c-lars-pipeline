@@ -1517,8 +1517,14 @@ fieldset.qualification-box select {
 .opp-list {
   margin-top: 1rem;
   max-width: 100%;
-  overflow-x: auto;
-  overflow-y: clip;
+  /* overflow-x: clip + overflow-y: visible — clips wide tables without
+     establishing a scroll container, so position:sticky descendants
+     (thead) latch to the body scrollport instead of this element.
+     Horizontal scroll is driven externally by .opp-list-hscroll,
+     which sets table.style.left via listScript. */
+  overflow-x: clip;
+  overflow-y: visible;
+  position: relative;
 }
 
 /* Proxy horizontal scrollbar rendered just above the table so the
@@ -1623,16 +1629,19 @@ fieldset.qualification-box select {
   font-size: 0.75em;
 }
 
-/* Sticky thead is disabled for now — .opp-list has overflow-x: auto
-   (needed for horizontal scrolling of wide tables), which coerces it
-   into a Y scroll container too. That makes position:sticky scope to
-   .opp-list, not the viewport, so `top:` pushes thead inside the
-   container instead of parking it at the top of the screen. Proper
-   body-scroll-sticky thead would need a two-table split (head table
-   outside the horizontal-scroll wrapper, body table inside it) —
-   deferred as a follow-up. */
+/* Sticky thead — .opp-list uses overflow-x:clip + overflow-y:visible,
+   which clips wide tables without establishing a scroll container.
+   That lets position:sticky on the th latch to the body scrollport,
+   parking the thead just below the sticky site-header and hscroll
+   proxy. Horizontal scroll is driven by listScript, which translates
+   the table via CSS `left` (not scrollLeft, which overflow:clip
+   forbids). */
 .opp-list-table thead th {
   padding: 0;
+  position: sticky;
+  top: calc(var(--site-header-h, 53px) + 14px);
+  z-index: 4;
+  background: var(--bg-alt);
 }
 
 /* Draggable column resize grip. Straddles the column boundary so the

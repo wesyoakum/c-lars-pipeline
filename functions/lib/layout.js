@@ -123,7 +123,7 @@ const BACK_TO_TOP_SCRIPT = (
   "\n" +
   "  var btn = document.querySelector('.back-to-top');\n" +
   "  if (!btn) return;\n" +
-  "  var SHOW_AT = 400;\n" +
+  "  var SHOW_AT = 150;\n" +
   "  function update() {\n" +
   "    var y = window.scrollY || document.documentElement.scrollTop || 0;\n" +
   "    btn.dataset.visible = (y > SHOW_AT) ? '1' : '0';\n" +

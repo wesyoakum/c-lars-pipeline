@@ -947,14 +947,26 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
 
     // -- Proxy horizontal scrollbar --------------------------------------
     //
-    // A sticky bar rendered just above .opp-list. It contains an inner
-    // div sized to match the table's scrollWidth so the browser shows a
-    // native scrollbar. scrollLeft is synced bidirectionally with the
-    // real .opp-list container. Hidden when the table fits horizontally.
+    // .opp-list uses overflow-x: clip so sticky thead can latch to the
+    // body scrollport. clip forbids scrollLeft, so horizontal scroll
+    // is driven externally: this proxy scrollbar renders at the top of
+    // the viewport, and its scrollLeft sets the table style.left so
+    // the table slides behind .opp-list clip rect. Hidden when the
+    // table fits.
 
     var hscroll = null;
     var hscrollInner = null;
-    var hscrollSyncing = false;
+
+    function getTableEl() {
+      return host.querySelector('.opp-list-table');
+    }
+
+    function applyTableOffset() {
+      var table = getTableEl();
+      if (!table || !hscroll) return;
+      table.style.position = 'relative';
+      table.style.left = (-hscroll.scrollLeft) + 'px';
+    }
 
     function ensureHScroll() {
       if (hscroll) return hscroll;
@@ -964,30 +976,26 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       hscrollInner.className = 'opp-list-hscroll-inner';
       hscroll.appendChild(hscrollInner);
       host.parentNode.insertBefore(hscroll, host);
-      hscroll.addEventListener('scroll', function() {
-        if (hscrollSyncing) return;
-        hscrollSyncing = true;
-        host.scrollLeft = hscroll.scrollLeft;
-        hscrollSyncing = false;
-      });
-      host.addEventListener('scroll', function() {
-        if (hscrollSyncing) return;
-        hscrollSyncing = true;
-        hscroll.scrollLeft = host.scrollLeft;
-        hscrollSyncing = false;
-      });
+      hscroll.addEventListener('scroll', applyTableOffset);
       return hscroll;
     }
 
     function syncHScroll() {
       ensureHScroll();
-      var sw = host.scrollWidth;
-      var cw = host.clientWidth;
-      if (sw > cw + 1) {
-        hscrollInner.style.width = sw + 'px';
+      var table = getTableEl();
+      var tableW = table ? table.offsetWidth : 0;
+      var hostW = host.clientWidth;
+      if (tableW > hostW + 1) {
+        hscrollInner.style.width = tableW + 'px';
         hscroll.hidden = false;
+        // Clamp scroll position if the table got narrower.
+        var max = Math.max(0, tableW - hostW);
+        if (hscroll.scrollLeft > max) hscroll.scrollLeft = max;
+        applyTableOffset();
       } else {
         hscroll.hidden = true;
+        hscroll.scrollLeft = 0;
+        if (table) table.style.left = '0px';
       }
     }
 
