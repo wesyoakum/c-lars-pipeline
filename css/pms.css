@@ -21,6 +21,7 @@
   --radius:   6px;
   --font:     -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --site-header-h: 53px;
 }
 
 * { box-sizing: border-box; }
@@ -57,6 +58,12 @@ code {
   padding: 0.75rem 1.5rem;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
+  /* Sticky so the nav stays visible while scrolling long pages
+     (list tables, quote detail, etc.). z-index sits above the
+     sticky list-table thead (z-index: 4) but below modals (9999). */
+  position: sticky;
+  top: 0;
+  z-index: 40;
 }
 
 .brand {
@@ -1502,14 +1509,40 @@ fieldset.qualification-box select {
 /* ---------- Opportunities list (Alpine advanced table) ---------- */
 
 /* Horizontal scroll when the table is wider than its container.
-   max-width:100% keeps the scroll container itself bounded by .card,
-   and overflow-x:auto puts a scrollbar on the wrapper instead of
-   letting the table push the page wider than the viewport. */
+   max-width:100% keeps the scroll container bounded by .card.
+   overflow-y: clip (instead of the default auto it'd get coerced
+   to when overflow-x is set) keeps vertical out of this box's
+   scroll context, so the sticky thead below latches to the body
+   scroll instead of this container. */
 .opp-list {
   margin-top: 1rem;
   max-width: 100%;
   overflow-x: auto;
+  overflow-y: clip;
 }
+
+/* Proxy horizontal scrollbar rendered just above the table so the
+   user can scroll left/right without chasing a scrollbar off the
+   bottom of a long table. listScript injects this div and syncs
+   scrollLeft in both directions. Hidden when the table fits.
+   Sticky to the top of the viewport — parks just under the sticky
+   .site-header, with the sticky thead parking just below it. */
+.opp-list-hscroll {
+  position: sticky;
+  top: var(--site-header-h, 53px);
+  z-index: 5;
+  background: var(--bg);
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin-bottom: 0;
+  /* Some browsers hide the scrollbar when the container is 0-height;
+     make sure there's room for the native scrollbar. */
+  height: 14px;
+}
+.opp-list-hscroll-inner {
+  height: 1px;
+}
+.opp-list-hscroll[hidden] { display: none; }
 .opp-list-toolbar {
   display: flex;
   justify-content: space-between;
@@ -1581,7 +1614,20 @@ fieldset.qualification-box select {
   font-size: 0.75em;
 }
 
-.opp-list-table thead th { padding: 0; position: relative; }
+/* Sticky thead — because .opp-list uses overflow-y: clip (not auto),
+   position:sticky here latches to the body scroll context, keeping
+   column headers visible as the user scrolls a long page. top
+   offsets by --site-header-h so the sticky thead parks just under
+   the sticky .site-header (see :root declaration in this file).
+   z-index sits above the col-resize-grip (3) and below the column
+   filter popover (1000). */
+.opp-list-table thead th {
+  padding: 0;
+  position: sticky;
+  top: calc(var(--site-header-h, 53px) + 14px);
+  z-index: 4;
+  background: var(--bg-alt);
+}
 
 /* Draggable column resize grip. Straddles the column boundary so the
    hit target is 10px wide (5px on each side of the divider). The grip
@@ -4377,4 +4423,49 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   margin-top: 1rem;
   padding-top: 0.75rem;
   border-top: 1px solid var(--border);
+}
+
+/* ---------- Back-to-top floating button ----------
+   Fixed bottom-right, fades in once the page has scrolled far
+   enough to warrant it. Hidden by default via the data attribute
+   so the button doesn't flash on every page load before the
+   inline scroll listener in layout.js runs. */
+.back-to-top {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  z-index: 25;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+}
+.back-to-top[data-visible="1"] {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+.back-to-top:hover {
+  background: var(--bg-alt);
+}
+.back-to-top svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }

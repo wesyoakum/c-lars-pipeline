@@ -99,6 +99,43 @@ import { VERSION } from './version.js';
 // Store method is named `start()` (not `init()`) to avoid Alpine v3's
 // auto-invocation of store.init() — we want explicit control so the
 // polling loop starts exactly once.
+// Back-to-top floating button. Shows once the page has scrolled far
+// enough to justify it; a click smooth-scrolls window to the top. A
+// secondary threshold keeps the button hidden on short pages (no
+// point in a back-to-top when the whole page fits). Written as a
+// plain string (no backticks) so it drops cleanly into the layout
+// template literal.
+const BACK_TO_TOP_SCRIPT = (
+  "(function () {\n" +
+  "  // Keep the --site-header-h CSS variable in sync with the actual\n" +
+  "  // rendered header height so the sticky thead and sticky hscroll\n" +
+  "  // proxy park flush against the bottom of .site-header on every\n" +
+  "  // viewport (mobile wrapping, zoom, etc).\n" +
+  "  var header = document.querySelector('.site-header');\n" +
+  "  function syncHeaderVar() {\n" +
+  "    if (!header) return;\n" +
+  "    var h = header.offsetHeight;\n" +
+  "    if (h > 0) document.documentElement.style.setProperty('--site-header-h', h + 'px');\n" +
+  "  }\n" +
+  "  syncHeaderVar();\n" +
+  "  window.addEventListener('resize', syncHeaderVar);\n" +
+  "  if (window.ResizeObserver && header) { try { new ResizeObserver(syncHeaderVar).observe(header); } catch (_) {} }\n" +
+  "\n" +
+  "  var btn = document.querySelector('.back-to-top');\n" +
+  "  if (!btn) return;\n" +
+  "  var SHOW_AT = 400;\n" +
+  "  function update() {\n" +
+  "    var y = window.scrollY || document.documentElement.scrollTop || 0;\n" +
+  "    btn.dataset.visible = (y > SHOW_AT) ? '1' : '0';\n" +
+  "  }\n" +
+  "  btn.addEventListener('click', function () {\n" +
+  "    window.scrollTo({ top: 0, behavior: 'smooth' });\n" +
+  "  });\n" +
+  "  window.addEventListener('scroll', update, { passive: true });\n" +
+  "  update();\n" +
+  "})();\n"
+);
+
 const NOTIFICATION_STORE_SCRIPT = (
   "document.addEventListener('alpine:init', function () {\n" +
   "  Alpine.store('notifications', {\n" +
@@ -1030,6 +1067,10 @@ ${body}
     <small>C-LARS Pipeline Management System</small>
   </footer>
   ${versionTag ? `<div class="version-badge">${versionTag}</div>` : ''}
+  <button type="button" class="back-to-top" aria-label="Back to top" data-visible="0">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 14 12 8 18 14"/></svg>
+  </button>
+  <script>${BACK_TO_TOP_SCRIPT}</script>
   ${user ? `<script>${NOTIFICATION_STORE_SCRIPT}</script>` : ''}
   ${user ? `<script>${BLOCKER_MODAL_STORE_SCRIPT}</script>` : ''}
 </body>

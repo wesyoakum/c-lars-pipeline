@@ -945,6 +945,52 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       });
     }
 
+    // -- Proxy horizontal scrollbar --------------------------------------
+    //
+    // A sticky bar rendered just above .opp-list. It contains an inner
+    // div sized to match the table's scrollWidth so the browser shows a
+    // native scrollbar. scrollLeft is synced bidirectionally with the
+    // real .opp-list container. Hidden when the table fits horizontally.
+
+    var hscroll = null;
+    var hscrollInner = null;
+    var hscrollSyncing = false;
+
+    function ensureHScroll() {
+      if (hscroll) return hscroll;
+      hscroll = document.createElement('div');
+      hscroll.className = 'opp-list-hscroll';
+      hscrollInner = document.createElement('div');
+      hscrollInner.className = 'opp-list-hscroll-inner';
+      hscroll.appendChild(hscrollInner);
+      host.parentNode.insertBefore(hscroll, host);
+      hscroll.addEventListener('scroll', function() {
+        if (hscrollSyncing) return;
+        hscrollSyncing = true;
+        host.scrollLeft = hscroll.scrollLeft;
+        hscrollSyncing = false;
+      });
+      host.addEventListener('scroll', function() {
+        if (hscrollSyncing) return;
+        hscrollSyncing = true;
+        hscroll.scrollLeft = host.scrollLeft;
+        hscrollSyncing = false;
+      });
+      return hscroll;
+    }
+
+    function syncHScroll() {
+      ensureHScroll();
+      var sw = host.scrollWidth;
+      var cw = host.clientWidth;
+      if (sw > cw + 1) {
+        hscrollInner.style.width = sw + 'px';
+        hscroll.hidden = false;
+      } else {
+        hscroll.hidden = true;
+      }
+    }
+
     // -- Init ------------------------------------------------------------
 
     // Only reorder columns if the columns menu exists (some pages skip it).
@@ -958,6 +1004,18 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     updateSortIndicators();
     applySort();
     applyFilters();
+    syncHScroll();
+
+    // Re-measure on viewport resize — the table width or the container
+    // clientWidth may change, toggling whether the proxy is needed.
+    window.addEventListener('resize', syncHScroll);
+    // Also re-sync after any column resize/visibility change. The
+    // existing syncTableWidth() already runs after these, so we wrap it.
+    var _origSyncTableWidth = syncTableWidth;
+    syncTableWidth = function() {
+      _origSyncTableWidth();
+      syncHScroll();
+    };
   } catch (err) {
     console.error('list controller failed:', err);
   }
