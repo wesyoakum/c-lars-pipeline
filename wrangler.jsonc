@@ -23,15 +23,15 @@
   ],
 
   "vars": {
-    // The middleware's resolveUser() returns the dev stub user
-    // (wes.yoakum@c-lars.com) when PMS_ENV !== 'production' and no Access
-    // header is present. Set to 'production' once Cloudflare Access is
-    // configured in front of the site.
+    // PMS_ENV=production: requests without a Cf-Access-Authenticated-User-Email
+    // header return 401. Cloudflare Access is in front of c-lars-pms.pages.dev,
+    // so every real request has this header. Local dev overrides PMS_ENV to
+    // 'development' via .dev.vars so the dev stub user still works locally.
     //
     // ConvertAPI secret for .docx → PDF conversion is set via
     // `wrangler pages secret put CONVERTAPI_SECRET` (not listed here
     // to avoid binding name conflict).
-    "PMS_ENV": "development",
+    "PMS_ENV": "production",
     "CF_ACCESS_TEAM_DOMAIN": "c-lars.cloudflareaccess.com",
     "CF_ACCESS_AUD": ""
   }
