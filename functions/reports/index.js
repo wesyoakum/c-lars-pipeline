@@ -50,6 +50,8 @@ export async function onRequestGet(context) {
   const [
     newOppsWeekly,
     quotesIssuedWeekly,
+    newOppsMonthly,
+    quotesIssuedMonthly,
     quoteOutcomeRows,
     pipelineByOwner,
     pipelineByStage,
@@ -91,6 +93,39 @@ export async function onRequestGet(context) {
           )
         GROUP BY week
         ORDER BY week`),
+    // Monthly buckets — strftime('%Y-%m', ...) gives "2026-04" style
+    // keys. 12 months of history; back-filled client-side so the chart
+    // is continuous even in months with no activity.
+    all(env.DB,
+      `SELECT strftime('%Y-%m', created_at) AS month,
+              date(MIN(created_at)) AS any_day,
+              COUNT(*) AS n,
+              COALESCE(SUM(estimated_value_usd), 0) AS total_value
+         FROM opportunities
+        WHERE created_at >= ${monthCutoff}
+        GROUP BY month
+        ORDER BY month`),
+    all(env.DB,
+      // Monthly twin of the weekly "quotes issued" query — same
+      // COALESCE(submitted_at, created_at), same status filter, same
+      // "keep only the latest issued revision per (opp, quote_seq)"
+      // predicate. Only the bucketing key changes.
+      `SELECT strftime('%Y-%m', COALESCE(q.submitted_at, q.created_at)) AS month,
+              date(MIN(COALESCE(q.submitted_at, q.created_at))) AS any_day,
+              COUNT(*) AS n,
+              COALESCE(SUM(q.total_price), 0) AS total_value
+         FROM quotes q
+        WHERE q.status IN ('issued','revision_issued','accepted','rejected','expired','completed')
+          AND COALESCE(q.submitted_at, q.created_at) >= ${monthCutoff}
+          AND NOT EXISTS (
+            SELECT 1 FROM quotes q2
+             WHERE q2.opportunity_id = q.opportunity_id
+               AND q2.quote_seq = q.quote_seq
+               AND q2.status IN ('issued','revision_issued','accepted','rejected','expired','completed')
+               AND COALESCE(q2.submitted_at, q2.created_at) > COALESCE(q.submitted_at, q.created_at)
+          )
+        GROUP BY month
+        ORDER BY month`),
     all(env.DB,
       // Same COALESCE + status filter logic as the weekly chart.
       // 'dead' is included here because the outcome bucket maps it to
@@ -205,6 +240,44 @@ export async function onRequestGet(context) {
 
   const newOppsSeries = weekSeries(newOppsWeekly);
   const quotesIssuedSeries = weekSeries(quotesIssuedWeekly);
+
+  // ---- Monthly-chart label computation --------------------------------
+  //
+  // Bucketed by strftime('%Y-%m', ...) on the server; we back-fill 12
+  // months ending on the current month so the chart is continuous even
+  // when nothing landed in a given month.
+  const monthLabel = (ym) => {
+    // ym is "YYYY-MM"
+    const [y, m] = ym.split('-').map(Number);
+    const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${names[m - 1]} ${y}`;
+  };
+  function monthSeries(rows) {
+    const byKey = new Map();
+    for (const r of rows) {
+      if (!r.month) continue;
+      byKey.set(r.month, { n: r.n || 0, value: r.total_value || 0 });
+    }
+    const out = [];
+    const now = new Date();
+    const thisY = now.getUTCFullYear();
+    const thisM = now.getUTCMonth(); // 0..11
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(Date.UTC(thisY, thisM - i, 1));
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+      const existing = byKey.get(key);
+      out.push({
+        key,
+        label: monthLabel(key),
+        n: existing ? existing.n : 0,
+        value: existing ? existing.value : 0,
+      });
+    }
+    return out;
+  }
+
+  const newOppsMonthlySeries = monthSeries(newOppsMonthly);
+  const quotesIssuedMonthlySeries = monthSeries(quotesIssuedMonthly);
 
   const executiveTab = html`
     <div class="dashboard-metrics" style="margin-bottom:1rem">
@@ -398,6 +471,8 @@ export async function onRequestGet(context) {
   const activityPayload = JSON.stringify({
     newOpps: newOppsSeries,
     quotesIssued: quotesIssuedSeries,
+    newOppsMonthly: newOppsMonthlySeries,
+    quotesIssuedMonthly: quotesIssuedMonthlySeries,
     outcomes: outcomeRows,
   });
 
@@ -421,7 +496,25 @@ export async function onRequestGet(context) {
       <div class="chart-wrap chart-wrap-wide"><canvas id="act-quotes-issued"></canvas></div>
     </section>
 
-    <section class="card" x-data="outcomePie()" x-init="init()">
+    <section class="card">
+      <h2>New opportunities by month</h2>
+      <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">
+        Count (left axis) and total estimated value (right axis) of opportunities created
+        each month, last 12 months.
+      </p>
+      <div class="chart-wrap chart-wrap-wide"><canvas id="act-new-opps-month"></canvas></div>
+    </section>
+
+    <section class="card">
+      <h2>Quotes issued by month</h2>
+      <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">
+        Count (left axis) and total quoted value (right axis) of quotes issued each month,
+        last 12 months. Same "latest issued revision per quote" rollup as the weekly chart.
+      </p>
+      <div class="chart-wrap chart-wrap-wide"><canvas id="act-quotes-issued-month"></canvas></div>
+    </section>
+
+    <section class="card outcome-pie-card" x-data="outcomePie()" x-init="init()">
       <div class="card-header">
         <h2>Outcome of issued quotes</h2>
         <div style="display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center">
@@ -529,13 +622,18 @@ function buildActivityChartsScript(payloadJson) {
         chart: null,
         total: 0,
         init: function () {
+          // Chart.js is loaded via <script defer>, same as Alpine —
+          // defer scripts run in document order, so alpine.min.js
+          // (earlier in layout) executes before chart.min.js. At the
+          // moment Alpine invokes this init, Chart may still be
+          // undefined. requestAnimationFrame turned out unreliable in
+          // practice (the callback chain silently dropped on some
+          // load orderings), so we poll with setTimeout instead.
           var self = this;
-          // Defer until both the canvas is in the DOM and Chart.js
-          // has loaded. Chart.js is loaded via a regular (non-deferred)
-          // <script> tag earlier in the layout, so by the time Alpine
-          // evaluates x-init, Chart is usually already available —
-          // but we still requestAnimationFrame to be safe.
-          requestAnimationFrame(function () { self.render(); });
+          (function waitForChart() {
+            if (typeof Chart !== 'undefined') { self.render(); return; }
+            setTimeout(waitForChart, 50);
+          })();
         },
         render: function () {
           if (typeof Chart === 'undefined') return;
@@ -680,6 +778,10 @@ function buildActivityChartsScript(payloadJson) {
 
   makeWeeklyChart('act-new-opps', DATA.newOpps, 'New opportunities', 'Estimated value');
   makeWeeklyChart('act-quotes-issued', DATA.quotesIssued, 'Quotes issued', 'Quoted value');
+  // Monthly variants reuse the same bar+line factory — the series
+  // shape is identical ({ label, n, value } per bucket).
+  makeWeeklyChart('act-new-opps-month', DATA.newOppsMonthly, 'New opportunities', 'Estimated value');
+  makeWeeklyChart('act-quotes-issued-month', DATA.quotesIssuedMonthly, 'Quotes issued', 'Quoted value');
   } // end drawWeeklies
 
   if (document.readyState === 'loading') {

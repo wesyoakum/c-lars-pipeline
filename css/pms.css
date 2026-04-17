@@ -2976,6 +2976,16 @@ tr.line-option td:first-child {
 .chart-wrap.chart-wrap-wide { height: 220px; }
 .chart-wrap.chart-wrap-tall { height: 320px; }
 .chart-wrap.chart-wrap-fill { height: 100%; }
+
+/* Outcome-of-issued-quotes pie: half page on wider viewports so the
+   doughnut + bottom legend have room without stretching across the
+   whole page. Falls back to full width on narrow screens. */
+.outcome-pie-card {
+  max-width: calc(50% - 0.5rem);
+}
+@media (max-width: 900px) {
+  .outcome-pie-card { max-width: 100%; }
+}
 .chart-wrap > canvas {
   position: absolute;
   inset: 0;
