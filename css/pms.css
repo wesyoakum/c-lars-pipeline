@@ -1358,7 +1358,9 @@ fieldset.qualification-box select {
   gap: 0.3rem;
   flex-wrap: wrap;
 }
-/* Trailing blank row in auto-save mode: subtle visual demotion, still usable. */
+/* Trailing blank row in auto-save mode: subtle visual demotion, still usable.
+   The blank row keeps the normal input styling so it reads as "type here to
+   add an address"; saved rows below get stripped-back styling. */
 .address-row-blank {
   border-left-color: var(--border);
   opacity: 0.72;
@@ -1372,6 +1374,56 @@ fieldset.qualification-box select {
 .address-editor-status.ok       { color: var(--success, #2d8f4e); }
 .address-editor-status.muted    { color: var(--fg-muted); }
 .address-editor-status.error    { color: var(--danger, #c33); }
+
+/* ---- Saved rows: display like the rest of the detail page ---- */
+/* Strip input chrome from saved rows so they read as plain text, matching
+   the `ie-display` vibe of Alias / Website / Owner / Notes on this page.
+   Focus brings the input chrome back so it's still obvious the field is
+   editable. */
+.address-row:not(.address-row-blank) .address-row-label,
+.address-row:not(.address-row-blank) .address-row-text {
+  border-color: transparent;
+  background: transparent;
+  padding: 0.15rem 0.25rem;
+}
+.address-row:not(.address-row-blank) .address-row-text {
+  min-height: 0;
+}
+.address-row:not(.address-row-blank) .address-row-label:hover,
+.address-row:not(.address-row-blank) .address-row-text:hover {
+  border-color: var(--border);
+  background: var(--bg);
+}
+.address-row:not(.address-row-blank) .address-row-label:focus,
+.address-row:not(.address-row-blank) .address-row-text:focus {
+  border-color: var(--accent, var(--border));
+  background: var(--bg);
+  padding: 0.35rem 0.6rem;
+}
+/* Label in saved rows is italic-muted when empty, matching the `—` em-dash
+   pattern used by ie-display elsewhere. */
+.address-row:not(.address-row-blank) .address-row-label::placeholder {
+  color: var(--fg-muted);
+  font-style: italic;
+}
+/* Demote the Default checkbox + Remove button until the row is hovered or
+   focused — saved rows should read as data, not as a form. */
+.address-row:not(.address-row-blank) .address-row-default,
+.address-row:not(.address-row-blank) .address-row-head .btn.danger {
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+.address-row:not(.address-row-blank):hover .address-row-default,
+.address-row:not(.address-row-blank):focus-within .address-row-default,
+.address-row:not(.address-row-blank):hover .address-row-head .btn.danger,
+.address-row:not(.address-row-blank):focus-within .address-row-head .btn.danger {
+  opacity: 1;
+}
+/* Default-checked rows always show the badge so users know which address
+   is the default without having to hover. */
+.address-row:not(.address-row-blank) .address-row-default:has(input:checked) {
+  opacity: 1;
+}
 .address-row-head {
   display: flex;
   gap: 0.5rem;
