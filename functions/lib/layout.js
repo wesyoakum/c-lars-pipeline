@@ -1036,6 +1036,7 @@ export function layout(title, body, opts = {}) {
       ${navLink('/library', 'Library', activeNav)}
       ${navLink('/reports', 'Reports', activeNav)}
       ${navLink('/jobs', 'Jobs', activeNav)}
+      ${navLink('/settings', 'Settings', activeNav)}
     </nav>
     <div class="header-right">
       ${user ? BOARD_RESTORE_HEADER_BTN : ''}
