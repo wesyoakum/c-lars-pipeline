@@ -63,58 +63,14 @@ export async function onRequestGet(context) {
     );
   }
 
-  // Read filter params from the query string.
-  const qp = url.searchParams;
-  const filters = {
-    user_id:     (qp.get('user_id') || '').trim(),
-    from:        (qp.get('from') || '').trim(),      // yyyy-mm-dd
-    to:          (qp.get('to') || '').trim(),        // yyyy-mm-dd
-    entity_type: (qp.get('entity_type') || '').trim(),
-    event_type:  (qp.get('event_type') || '').trim(),
-    q:           (qp.get('q') || '').trim(),
-  };
-  const page = Math.max(1, parseInt(qp.get('page'), 10) || 1);
+  const page = Math.max(1, parseInt(url.searchParams.get('page'), 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
 
-  // Build the WHERE clause incrementally so we can re-use it for count
-  // + page queries.
-  const clauses = [];
-  const params = [];
-  if (filters.user_id) {
-    clauses.push('e.user_id = ?');
-    params.push(filters.user_id);
-  }
-  if (filters.from) {
-    clauses.push('e.at >= ?');
-    params.push(filters.from + 'T00:00:00Z');
-  }
-  if (filters.to) {
-    // Inclusive end-of-day: add 24h so the filter captures everything
-    // logged on the selected end date.
-    clauses.push('e.at < ?');
-    const d = new Date(filters.to + 'T00:00:00Z');
-    d.setUTCDate(d.getUTCDate() + 1);
-    params.push(d.toISOString());
-  }
-  if (filters.entity_type) {
-    clauses.push('e.entity_type = ?');
-    params.push(filters.entity_type);
-  }
-  if (filters.event_type) {
-    clauses.push('e.event_type = ?');
-    params.push(filters.event_type);
-  }
-  if (filters.q) {
-    clauses.push('e.summary LIKE ?');
-    params.push('%' + filters.q + '%');
-  }
-  const where = clauses.length ? 'WHERE ' + clauses.join(' AND ') : '';
-
-  // Total + page of rows.
+  // Narrowing happens inside list-table's per-column filters + quicksearch;
+  // the server just pages through everything in reverse-chrono order.
   const totalRow = await one(
     env.DB,
-    `SELECT COUNT(*) AS n FROM audit_events e ${where}`,
-    params
+    `SELECT COUNT(*) AS n FROM audit_events`
   );
   const total = totalRow?.n ?? 0;
 
@@ -126,25 +82,9 @@ export async function onRequestGet(context) {
             u.email AS user_email, u.display_name AS user_name
        FROM audit_events e
        LEFT JOIN users u ON u.id = e.user_id
-       ${where}
       ORDER BY e.at DESC, e.id DESC
       LIMIT ? OFFSET ?`,
-    [...params, PAGE_SIZE, offset]
-  );
-
-  // Filter dropdown options. Distinct entity/event types straight from
-  // the table so new types land here automatically.
-  const entityTypes = await all(
-    env.DB,
-    `SELECT DISTINCT entity_type FROM audit_events ORDER BY entity_type`
-  );
-  const eventTypes = await all(
-    env.DB,
-    `SELECT DISTINCT event_type FROM audit_events ORDER BY event_type`
-  );
-  const users = await all(
-    env.DB,
-    `SELECT id, email, display_name FROM users ORDER BY email`
+    [PAGE_SIZE, offset]
   );
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -180,16 +120,8 @@ export async function onRequestGet(context) {
     is_system: !r.user_id,
   }));
 
-  // Preserve all current filters on the prev/next links.
-  function pageHref(n) {
-    const p = new URLSearchParams();
-    for (const [k, v] of Object.entries(filters)) {
-      if (v) p.set(k, v);
-    }
-    if (n > 1) p.set('page', String(n));
-    const qs = p.toString();
-    return '/settings/history' + (qs ? '?' + qs : '');
-  }
+  const pageHref = (n) =>
+    '/settings/history' + (n > 1 ? `?page=${n}` : '');
 
   const body = html`
     ${settingsSubNav('history', true)}
@@ -201,65 +133,13 @@ export async function onRequestGet(context) {
       </div>
 
       <p class="muted">
-        Every mutation in the app writes an audit row. Filter by who,
-        when, what kind of record, or search the summary text.
+        Every mutation in the app writes an audit row. Click a column
+        header to sort or filter; use the search box to narrow the
+        current page.
       </p>
 
-      <form method="get" action="/settings/history" class="history-filters"
-            style="display:flex;flex-wrap:wrap;gap:0.75rem;align-items:flex-end;margin-bottom:1rem">
-        <label style="display:flex;flex-direction:column;gap:0.2rem">
-          <span class="muted" style="font-size:0.8em">User</span>
-          <select name="user_id" style="min-width:12rem">
-            <option value="">(any)</option>
-            ${users.map(u => html`
-              <option value="${escape(u.id)}" ${filters.user_id === u.id ? raw('selected') : ''}>
-                ${escape(u.display_name || u.email)}
-              </option>
-            `)}
-          </select>
-        </label>
-        <label style="display:flex;flex-direction:column;gap:0.2rem">
-          <span class="muted" style="font-size:0.8em">From</span>
-          <input type="date" name="from" value="${escape(filters.from)}">
-        </label>
-        <label style="display:flex;flex-direction:column;gap:0.2rem">
-          <span class="muted" style="font-size:0.8em">To</span>
-          <input type="date" name="to" value="${escape(filters.to)}">
-        </label>
-        <label style="display:flex;flex-direction:column;gap:0.2rem">
-          <span class="muted" style="font-size:0.8em">Entity type</span>
-          <select name="entity_type">
-            <option value="">(any)</option>
-            ${entityTypes.map(r => html`
-              <option value="${escape(r.entity_type)}" ${filters.entity_type === r.entity_type ? raw('selected') : ''}>
-                ${escape(r.entity_type)}
-              </option>
-            `)}
-          </select>
-        </label>
-        <label style="display:flex;flex-direction:column;gap:0.2rem">
-          <span class="muted" style="font-size:0.8em">Event type</span>
-          <select name="event_type">
-            <option value="">(any)</option>
-            ${eventTypes.map(r => html`
-              <option value="${escape(r.event_type)}" ${filters.event_type === r.event_type ? raw('selected') : ''}>
-                ${escape(r.event_type)}
-              </option>
-            `)}
-          </select>
-        </label>
-        <label style="display:flex;flex-direction:column;gap:0.2rem;flex:1 1 12rem">
-          <span class="muted" style="font-size:0.8em">Search summary</span>
-          <input type="search" name="q" value="${escape(filters.q)}" placeholder="e.g. accepted">
-        </label>
-        <div style="display:flex;gap:0.5rem">
-          <button type="submit" class="btn primary">Apply</button>
-          <a class="btn" href="/settings/history">Reset</a>
-        </div>
-      </form>
-
       ${rowData.length === 0
-        ? html`<p class="muted">No events match these filters.</p>`
+        ? html`<p class="muted">No events yet.</p>`
         : html`
           <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
             <table class="data opp-list-table">
