@@ -3798,12 +3798,27 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   margin-top: -45px;
 }
 /* Cap each post-it page to a square silhouette. The card width is set
-   by the sidebar (~240px), so max-height ≈ width keeps a single page
-   looking like a real square sticky note. Bodies longer than one page
-   are already paginated by splitPages() in board-sidebar.js, so this
-   cap shouldn't clip properly-paginated text. */
+   by the sidebar (~240px), so aspect-ratio: 1/1 keeps a single page
+   looking like a real square sticky note — never taller than wide.
+   Bodies longer than one page are already paginated by splitPages() in
+   board-sidebar.js, so this cap shouldn't clip properly-paginated text.
+   overflow stays on the card so long bodies don't blow the square out,
+   but pin/copy/delete chips live at top:2px (well inside the card's
+   border-radius) so they're not clipped. Editing mode opts out of the
+   aspect ratio so the textarea can grow to fit what the user types. */
 .board-notes-list .board-card {
-  max-height: 240px;
+  aspect-ratio: 1 / 1;
+  max-width: 100%;
+  overflow: hidden;
+}
+.board-notes-list .board-card:has(.board-card-editing) {
+  aspect-ratio: auto;
+  overflow: visible;
+}
+/* Multi-page stacks: extra pages are also squares so the stack reads
+   as a sequence of uniform sticky notes. */
+.board-notes-list .board-card-page-extra {
+  aspect-ratio: 1 / 1;
   overflow: hidden;
 }
 
