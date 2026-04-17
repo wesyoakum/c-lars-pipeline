@@ -33,6 +33,8 @@
   "vars": {
     // The public URL of the Pages deployment. The Worker POSTs to
     // `${PMS_URL}/api/cron/sweep`.
-    "PMS_URL": "https://pms.c-lars.com"
+    // Temporarily pointed at the raw Pages URL until the custom domain
+    // pms.c-lars.com is wired up. Switch back when the custom domain is live.
+    "PMS_URL": "https://c-lars-pms.pages.dev"
   }
 }
