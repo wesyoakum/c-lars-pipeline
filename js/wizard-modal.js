@@ -871,8 +871,22 @@
               }
               this.typedInput = this.currentTypedForStep();
               this.error = null;
-              // Advance past the now-filled step.
-              this.advance();
+              // Move to the next step WITHOUT re-running parseStep. The
+              // child's setAnswer has already populated the parent
+              // answer with the newly-created record's id; running
+              // parseStep again would re-parse typedInput against the
+              // stale picker list (which doesn't yet include the new
+              // record), fall through to the still-present
+              // "+ New <thing>" synthetic suggestion, and re-open the
+              // child wizard — infinite loop.
+              var idx = this.stepIndex + 1;
+              var steps = this.steps();
+              while (idx < steps.length && this.shouldSkipStep(steps[idx])) idx++;
+              if (idx >= steps.length) { this.submit(); return; }
+              this.stepIndex = idx;
+              this.typedInput = this.currentTypedForStep();
+              this.suggestionIndex = 0;
+              this.focusInput();
             });
             return '__child__';
           }
