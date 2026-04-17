@@ -357,16 +357,63 @@ function getPath(obj, path) {
  */
 function buildEventKey(triggerName, payload) {
   switch (triggerName) {
+    // ---- Quote lifecycle (inline) ------------------------------------
     case 'quote.issued':
       // Include status so 'issued' and 'revision_issued' don't collapse
       // if we ever re-issue the same quote row.
       return `quote.issued:${payload?.quote?.id}:${payload?.quote?.status}:${payload?.quote?.submitted_at ?? ''}`;
+    case 'quote.accepted':
+    case 'quote.rejected':
+    case 'quote.expired':
+      // Terminal statuses on a quote only happen once, so (trigger,
+      // quote_id) is a stable key — but include updated_at as a tie-
+      // breaker in case a quote somehow bounces through the status.
+      return `${triggerName}:${payload?.quote?.id}:${payload?.quote?.updated_at ?? ''}`;
+    case 'quote.revised':
+      // New revision creates a fresh quote row, so quote.id alone is
+      // enough — no two revise events collapse.
+      return `quote.revised:${payload?.quote?.id}`;
+
+    // ---- Opportunity lifecycle ---------------------------------------
     case 'opportunity.stage_changed':
       return `stage_changed:${payload?.opportunity?.id}:${payload?.stage_from ?? ''}:${payload?.stage_to ?? ''}`;
+
+    // ---- Job lifecycle (inline) --------------------------------------
+    case 'oc.issued':
+      // Include oc_number so an amended OC (rare) doesn't collapse
+      // with the original issuance.
+      return `oc.issued:${payload?.job?.id}:${payload?.job?.oc_number ?? ''}`;
+    case 'ntp.issued':
+      return `ntp.issued:${payload?.job?.id}:${payload?.job?.ntp_number ?? ''}`;
+    case 'authorization.received':
+      return `authorization.received:${payload?.job?.id}:${payload?.job?.authorization_received_at ?? ''}`;
+    case 'job.handed_off':
+      return `job.handed_off:${payload?.job?.id}:${payload?.job?.handed_off_at ?? ''}`;
+    case 'job.completed':
+      // Jobs can only flip to 'complete' once per lifetime, so id alone
+      // is stable.
+      return `job.completed:${payload?.job?.id}`;
+
+    // ---- Tasks -------------------------------------------------------
     case 'task.completed':
       return `task.completed:${payload?.task?.id}:${payload?.task?.completed_at ?? ''}`;
+
+    // ---- Cron sweeps -------------------------------------------------
+    // Bucketed by the sweep window (YYYY-MM-DD) carried in payload.bucket
+    // so rules can re-fire daily ("remind me every day until I act").
+    case 'quote.expiring_soon':
+      return `quote.expiring_soon:${payload?.quote?.id}:${payload?.bucket ?? ''}`;
+    case 'task.overdue':
+      return `task.overdue:${payload?.task?.id}:${payload?.bucket ?? ''}`;
+    case 'opportunity.stalled':
+      return `opportunity.stalled:${payload?.opportunity?.id}:${payload?.bucket ?? ''}`;
+    case 'price_build.stale':
+      return `price_build.stale:${payload?.cost_build?.id}:${payload?.bucket ?? ''}`;
+
+    // ---- System ------------------------------------------------------
     case 'system.error':
       return `system.error:${payload?.error?.code ?? ''}:${payload?.error?.dedupe_key ?? uuid()}`;
+
     default:
       // Fall back to a random key so unmatched events still work but
       // don't dedupe.
