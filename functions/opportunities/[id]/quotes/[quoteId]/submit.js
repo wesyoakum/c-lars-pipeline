@@ -75,31 +75,31 @@ export async function onRequestPost(context) {
   await batch(env.DB, statements);
 
   // Auto-tasks Phase 1 — fire quote.issued event into the rules engine.
-  // Running inline (not waitUntil) so any error surfaces in the flash
-  // message instead of being silently swallowed by the runtime shutdown.
-  // Will be moved back to waitUntil once verified working.
-  let autoTaskResult = null;
-  let autoTaskError = null;
-  try {
-    const [freshQuote, opp, account] = await Promise.all([
-      one(env.DB, 'SELECT * FROM quotes WHERE id = ?', [quoteId]),
-      one(env.DB, 'SELECT * FROM opportunities WHERE id = ?', [oppId]),
-      one(env.DB,
-        `SELECT a.* FROM accounts a
-           JOIN opportunities o ON o.account_id = a.id
-          WHERE o.id = ?`,
-        [oppId]),
-    ]);
-    autoTaskResult = await fireEvent(env, 'quote.issued', {
-      trigger: { user, at: ts },
-      quote: freshQuote,
-      opportunity: opp,
-      account,
-    }, user);
-  } catch (err) {
-    autoTaskError = err?.message || String(err);
-    console.error('fireEvent(quote.issued) failed:', autoTaskError);
-  }
+  // waitUntil keeps rule evaluation off the critical path; failures
+  // never roll back a successful quote issue.
+  context.waitUntil(
+    (async () => {
+      try {
+        const [freshQuote, opp, account] = await Promise.all([
+          one(env.DB, 'SELECT * FROM quotes WHERE id = ?', [quoteId]),
+          one(env.DB, 'SELECT * FROM opportunities WHERE id = ?', [oppId]),
+          one(env.DB,
+            `SELECT a.* FROM accounts a
+               JOIN opportunities o ON o.account_id = a.id
+              WHERE o.id = ?`,
+            [oppId]),
+        ]);
+        await fireEvent(env, 'quote.issued', {
+          trigger: { user, at: ts },
+          quote: freshQuote,
+          opportunity: opp,
+          account,
+        }, user);
+      } catch (err) {
+        console.error('fireEvent(quote.issued) failed:', err?.message || err);
+      }
+    })()
+  );
 
   // Auto-generate PDF in the background (non-blocking)
   context.waitUntil(
@@ -159,17 +159,8 @@ export async function onRequestPost(context) {
     })()
   );
 
-  // Temporary debug annotation — strip once auto-tasks Phase 1 is
-  // verified working end-to-end.
-  let debugSuffix = '';
-  if (autoTaskError) {
-    debugSuffix = ` [auto-tasks ERROR: ${autoTaskError}]`;
-  } else if (autoTaskResult) {
-    debugSuffix = ` [auto-tasks fired=${autoTaskResult.fired} skipped=${autoTaskResult.skipped}]`;
-  }
-
   return redirectWithFlash(
     `/opportunities/${oppId}/quotes/${quoteId}`,
-    `Issued ${quote.number} Rev ${quote.revision}.${debugSuffix}`
+    `Issued ${quote.number} Rev ${quote.revision}.`
   );
 }

@@ -54,11 +54,7 @@ import { notify } from './notify.js';
  * @returns {Promise<{fired: number, skipped: number}>}
  */
 export async function fireEvent(env, triggerName, payload, user) {
-  console.log('[auto-tasks] fireEvent start:', triggerName);
-  if (!env?.DB || !triggerName) {
-    console.log('[auto-tasks] missing env.DB or triggerName, aborting');
-    return { fired: 0, skipped: 0 };
-  }
+  if (!env?.DB || !triggerName) return { fired: 0, skipped: 0 };
 
   // Load all active rules bound to this trigger. Small table, no
   // pagination — expected to stay under a few dozen rows for a long
@@ -70,7 +66,6 @@ export async function fireEvent(env, triggerName, payload, user) {
       WHERE trigger = ? AND active = 1`,
     [triggerName]
   );
-  console.log('[auto-tasks]', triggerName, 'matched', rules.length, 'rules');
   if (rules.length === 0) return { fired: 0, skipped: 0 };
 
   let fired = 0;
@@ -392,19 +387,12 @@ async function createTaskFromRule({ env, rule, template, payload, user, eventKey
     'SELECT id FROM task_rule_fires WHERE rule_id = ? AND event_key = ?',
     [rule.id, eventKey]
   );
-  if (prior) {
-    console.log('[auto-tasks] rule', rule.id, 'already fired for', eventKey);
-    return false;
-  }
+  if (prior) return false;
 
   const tz = rule.tz || 'America/Chicago';
   const subject = renderTemplate(template.title, payload);
   const body = template.body ? renderTemplate(template.body, payload) : null;
-  if (!subject) {
-    console.log('[auto-tasks] rule', rule.id, 'empty subject after render');
-    return false;
-  }
-  console.log('[auto-tasks] creating task for rule', rule.id, 'subject:', subject);
+  if (!subject) return false;
 
   const assignee =
     resolveAssignee(template.assignee, payload) ??
