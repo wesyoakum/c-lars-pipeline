@@ -123,10 +123,24 @@ const BACK_TO_TOP_SCRIPT = (
   "\n" +
   "  var btn = document.querySelector('.back-to-top');\n" +
   "  if (!btn) return;\n" +
+  "  // Show the back-to-top button whenever a sticky table header is\n" +
+  "  // currently pinned to the top of the viewport, OR on pages without\n" +
+  "  // a list table once the user has scrolled a meaningful amount.\n" +
   "  var SHOW_AT = 150;\n" +
   "  function update() {\n" +
+  "    var headerH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--site-header-h'), 10) || 53;\n" +
+  "    var threshold = headerH + 14;\n" +
+  "    var lists = document.querySelectorAll('.opp-list');\n" +
+  "    var headerPinned = false;\n" +
+  "    for (var i = 0; i < lists.length; i++) {\n" +
+  "      var r = lists[i].getBoundingClientRect();\n" +
+  "      // Thead is pinned when the list has scrolled past the sticky\n" +
+  "      // threshold AND the table bottom is still below it.\n" +
+  "      if (r.top < threshold && r.bottom > threshold + 40) { headerPinned = true; break; }\n" +
+  "    }\n" +
   "    var y = window.scrollY || document.documentElement.scrollTop || 0;\n" +
-  "    btn.dataset.visible = (y > SHOW_AT) ? '1' : '0';\n" +
+  "    var show = headerPinned || (lists.length === 0 && y > SHOW_AT);\n" +
+  "    btn.dataset.visible = show ? '1' : '0';\n" +
   "  }\n" +
   "  btn.addEventListener('click', function () {\n" +
   "    window.scrollTo({ top: 0, behavior: 'smooth' });\n" +
