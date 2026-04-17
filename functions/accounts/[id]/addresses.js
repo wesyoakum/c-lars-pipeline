@@ -32,12 +32,15 @@ export async function onRequestPost(context) {
   // First default-or-first wins per kind — keeps the denormalized
   // address_billing / address_physical columns on accounts consistent with
   // the normalized account_addresses rows.
+  // 'both' rows contend for both slots — they show up in either lookup.
+  const isBilling = (a) => a.kind === 'billing' || a.kind === 'both';
+  const isPhysical = (a) => a.kind === 'physical' || a.kind === 'both';
   const firstBilling =
-    submittedAddresses.find((a) => a.kind === 'billing' && a.is_default) ||
-    submittedAddresses.find((a) => a.kind === 'billing');
+    submittedAddresses.find((a) => isBilling(a) && a.is_default) ||
+    submittedAddresses.find((a) => isBilling(a));
   const firstPhysical =
-    submittedAddresses.find((a) => a.kind === 'physical' && a.is_default) ||
-    submittedAddresses.find((a) => a.kind === 'physical');
+    submittedAddresses.find((a) => isPhysical(a) && a.is_default) ||
+    submittedAddresses.find((a) => isPhysical(a));
 
   const newBilling = firstBilling?.address ?? null;
   const newPhysical = firstPhysical?.address ?? null;

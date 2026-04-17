@@ -965,13 +965,16 @@ export async function onRequestPost(context) {
   const existingAddresses = await loadAddresses(env.DB, accountId);
 
   // Keep the denormalized convenience columns on accounts in sync with the
-  // submitted list (first default-or-first wins per kind).
+  // submitted list (first default-or-first wins per kind). 'both' rows
+  // show up under both billing and physical.
+  const isBilling = (a) => a.kind === 'billing' || a.kind === 'both';
+  const isPhysical = (a) => a.kind === 'physical' || a.kind === 'both';
   const firstBilling =
-    submittedAddresses.find((a) => a.kind === 'billing' && a.is_default) ||
-    submittedAddresses.find((a) => a.kind === 'billing');
+    submittedAddresses.find((a) => isBilling(a) && a.is_default) ||
+    submittedAddresses.find((a) => isBilling(a));
   const firstPhysical =
-    submittedAddresses.find((a) => a.kind === 'physical' && a.is_default) ||
-    submittedAddresses.find((a) => a.kind === 'physical');
+    submittedAddresses.find((a) => isPhysical(a) && a.is_default) ||
+    submittedAddresses.find((a) => isPhysical(a));
 
   const ts = now();
   const after = {

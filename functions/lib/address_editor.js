@@ -5,7 +5,11 @@
 //
 // UI model: accounts have a flat list of address rows, each with
 //   { id, kind, label, address, is_default }
-// where kind ∈ {'billing', 'physical'}.
+// where kind ∈ {'billing', 'physical', 'both'}. The UI presents kind
+// as two independent checkboxes (Billing / Physical); storing as
+// 'both' is just the serialized form of "both checkboxes checked".
+// A 'both' row counts as both the billing and physical address when
+// callers pick a default.
 //
 // Client side: Alpine.js component keeps an array of rows in memory and
 // re-renders on add/remove. On submit, the current list is serialized
@@ -23,7 +27,17 @@ import { all, stmt } from './db.js';
 import { uuid, now } from './ids.js';
 import { html, raw, escape } from './layout.js';
 
-const VALID_KINDS = new Set(['billing', 'physical']);
+const VALID_KINDS = new Set(['billing', 'physical', 'both']);
+
+// Returns true when this row counts toward the given denormalized kind.
+// 'both' rows count for both billing and physical; plain billing/physical
+// rows only count for their own kind.
+function matchesKind(row, kind) {
+  if (!row) return false;
+  if (row.kind === kind) return true;
+  if (row.kind === 'both' && (kind === 'billing' || kind === 'physical')) return true;
+  return false;
+}
 
 /**
  * Render the Alpine-powered address editor block. `initial` is an array
@@ -52,22 +66,25 @@ export function renderAddressEditor(initial = []) {
       <div class="address-editor-header">
         <strong>Addresses</strong>
         <div class="address-editor-actions">
-          <button type="button" class="btn btn-sm" @click="add('billing')">+ Billing</button>
-          <button type="button" class="btn btn-sm" @click="add('physical')">+ Physical</button>
+          <button type="button" class="btn btn-sm" @click="add()">+ Address</button>
         </div>
       </div>
 
       <template x-if="addresses.length === 0">
-        <p class="muted">No addresses yet. Use the buttons above to add a billing or physical address.</p>
+        <p class="muted">No addresses yet. Use the button above to add one.</p>
       </template>
 
       <template x-for="(a, i) in addresses" :key="i">
         <div class="address-row" :class="'address-row-' + a.kind">
           <div class="address-row-head">
-            <select x-model="a.kind" class="address-row-kind">
-              <option value="billing">Billing</option>
-              <option value="physical">Physical</option>
-            </select>
+            <div class="address-row-kind-pills">
+              <button type="button" class="pill pill-toggle"
+                      :class="{ 'pill-active': a.kind === 'billing' || a.kind === 'both' }"
+                      @click="setKindFlag(i, 'billing', !(a.kind === 'billing' || a.kind === 'both'))">Billing</button>
+              <button type="button" class="pill pill-toggle"
+                      :class="{ 'pill-active': a.kind === 'physical' || a.kind === 'both' }"
+                      @click="setKindFlag(i, 'physical', !(a.kind === 'physical' || a.kind === 'both'))">Physical</button>
+            </div>
             <input type="text" x-model="a.label" placeholder="Label (e.g. HQ, Main shop, Houston delivery)"
                    class="address-row-label">
             <label class="checkbox address-row-default">
@@ -115,9 +132,12 @@ export function addressEditorScript() {
         var initial = [];
         try { initial = JSON.parse(raw) || []; } catch (e) { initial = []; }
         this.addresses = initial.map(function(a) {
+          var kind = 'billing';
+          if (a.kind === 'physical') kind = 'physical';
+          else if (a.kind === 'both') kind = 'both';
           return {
             id: a.id || '',
-            kind: a.kind === 'physical' ? 'physical' : 'billing',
+            kind: kind,
             label: a.label || '',
             address: a.address || '',
             is_default: !!a.is_default,
@@ -125,24 +145,67 @@ export function addressEditorScript() {
         });
       },
       add: function(kind) {
+        // Default new rows to 'billing' when no explicit kind is supplied
+        // (the header now has a single "+ Address" button; kind is then
+        // toggled via the per-row checkboxes).
+        var k = kind || 'billing';
         this.addresses.push({
           id: '',
-          kind: kind,
+          kind: k,
           label: '',
           address: '',
-          is_default: this.addresses.filter(function(a) { return a.kind === kind; }).length === 0,
+          // New row claims default for every slot it covers that has no
+          // existing defaulted row. 'both' rows check both slots.
+          is_default: !this.hasDefaultForAnySlot(k),
         });
       },
       remove: function(i) {
         this.addresses.splice(i, 1);
       },
+      setKindFlag: function(i, flag, on) {
+        // Toggle one of the two kind checkboxes (Billing / Physical).
+        // The stored `kind` is the combined state: neither checked is
+        // treated as falling back to 'billing' (a row has to be one or
+        // the other — address rows without a designated use aren't
+        // meaningful).
+        var row = this.addresses[i];
+        if (!row) return;
+        var bill = row.kind === 'billing' || row.kind === 'both';
+        var phys = row.kind === 'physical' || row.kind === 'both';
+        if (flag === 'billing') bill = !!on;
+        if (flag === 'physical') phys = !!on;
+        if (bill && phys) row.kind = 'both';
+        else if (phys) row.kind = 'physical';
+        else row.kind = 'billing'; // fallback when user unchecks everything
+      },
+      hasDefaultForAnySlot: function(kind) {
+        // Does any existing row already claim the default flag for one
+        // of the slots this new kind would occupy?
+        var slots = kind === 'both' ? ['billing', 'physical']
+                  : kind === 'physical' ? ['physical']
+                  : ['billing'];
+        return this.addresses.some(function(a) {
+          if (!a.is_default) return false;
+          return slots.some(function(s) {
+            return a.kind === s || a.kind === 'both';
+          });
+        });
+      },
       enforceDefault: function(i) {
-        // Only one default per kind.
+        // Only one default per slot. A 'both' row claims both slots,
+        // so flipping its default on must clear any competing default
+        // in either slot.
         var row = this.addresses[i];
         if (!row.is_default) return;
-        var kind = row.kind;
+        var slotsClaimed = row.kind === 'both' ? ['billing', 'physical']
+                         : [row.kind];
         this.addresses.forEach(function(a, j) {
-          if (j !== i && a.kind === kind) a.is_default = false;
+          if (j === i) return;
+          if (!a.is_default) return;
+          var aSlots = a.kind === 'both' ? ['billing', 'physical']
+                     : [a.kind];
+          var overlap = aSlots.some(function(s) { return slotsClaimed.indexOf(s) !== -1; });
+          if (overlap) a.is_default = false;
         });
       },
     };
@@ -177,7 +240,9 @@ export function parseAddressForm(formValues) {
   const out = [];
   for (const entry of parsed) {
     if (!entry || typeof entry !== 'object') continue;
-    const kind = entry.kind === 'physical' ? 'physical' : 'billing';
+    let kind = 'billing';
+    if (entry.kind === 'physical') kind = 'physical';
+    else if (entry.kind === 'both') kind = 'both';
     const address = typeof entry.address === 'string' ? entry.address.trim() : '';
     if (!address) continue;
     out.push({
@@ -188,19 +253,32 @@ export function parseAddressForm(formValues) {
       is_default: !!entry.is_default,
     });
   }
-  // Enforce one default per kind: if multiple are flagged, first wins.
-  // If none are flagged for a kind that has rows, promote the first.
+  // Enforce one default per denormalized kind. 'both' rows compete
+  // with billing rows AND with physical rows — so if a billing row
+  // and a 'both' row both claim is_default, the first one wins for
+  // the billing slot and the 'both' row also contends for the
+  // physical slot. We track the two slots independently.
   const seenDefault = { billing: false, physical: false };
   for (const row of out) {
+    if (!row.is_default) continue;
+    const bSlot = row.kind === 'billing' || row.kind === 'both';
+    const pSlot = row.kind === 'physical' || row.kind === 'both';
+    if (bSlot && seenDefault.billing) row.is_default = false;
+    else if (pSlot && seenDefault.physical) row.is_default = false;
     if (row.is_default) {
-      if (seenDefault[row.kind]) row.is_default = false;
-      else seenDefault[row.kind] = true;
+      if (bSlot) seenDefault.billing = true;
+      if (pSlot) seenDefault.physical = true;
     }
   }
-  for (const kind of ['billing', 'physical']) {
-    if (seenDefault[kind]) continue;
-    const first = out.find((r) => r.kind === kind);
+  // Promote-first: ensure each slot has a default if any candidate exists.
+  if (!seenDefault.billing) {
+    const first = out.find((r) => r.kind === 'billing' || r.kind === 'both');
     if (first) first.is_default = true;
+  }
+  if (!seenDefault.physical) {
+    const first = out.find((r) => r.kind === 'physical' || r.kind === 'both');
+    // Avoid double-promoting a row we just marked default above.
+    if (first && !first.is_default) first.is_default = true;
   }
   return out;
 }
@@ -311,8 +389,10 @@ export function renderAddressView(addresses) {
   if (!addresses || addresses.length === 0) {
     return html`<p class="muted">No addresses on file.</p>`;
   }
-  const billing = addresses.filter((a) => a.kind === 'billing');
-  const physical = addresses.filter((a) => a.kind === 'physical');
+  // 'both' rows appear under each section; the 'both' marker lets viewers
+  // see the row is pulling double-duty in either grouping.
+  const billing = addresses.filter((a) => a.kind === 'billing' || a.kind === 'both');
+  const physical = addresses.filter((a) => a.kind === 'physical' || a.kind === 'both');
   return html`
     <div class="address-view">
       ${billing.length > 0

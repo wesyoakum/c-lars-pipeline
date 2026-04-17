@@ -99,9 +99,11 @@ export async function getQuoteDocData(env, quoteId) {
       )
     : [];
 
+  // 'both' rows count as billing too.
+  const isBilling = (a) => a.kind === 'billing' || a.kind === 'both';
   const billingAddr = addresses.find(a => a.id === quote.billing_address_id)
-    || addresses.find(a => a.kind === 'billing' && a.is_default)
-    || addresses.find(a => a.kind === 'billing')
+    || addresses.find(a => isBilling(a) && a.is_default)
+    || addresses.find(a => isBilling(a))
     || addresses[0];
 
   // Line items

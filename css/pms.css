@@ -1348,6 +1348,16 @@ fieldset.qualification-box select {
 }
 .address-row-billing  { border-left-color: #54aeff; }
 .address-row-physical { border-left-color: #4ac26b; }
+/* 'both' rows split the billing + physical colors as a vertical gradient */
+.address-row-both {
+  border-left-color: #54aeff;
+  border-image: linear-gradient(to bottom, #54aeff 50%, #4ac26b 50%) 1;
+}
+.address-row-kind-pills {
+  display: flex;
+  gap: 0.3rem;
+  flex-wrap: wrap;
+}
 .address-row-head {
   display: flex;
   gap: 0.5rem;

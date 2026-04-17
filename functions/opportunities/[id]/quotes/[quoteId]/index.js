@@ -143,8 +143,8 @@ export async function onRequestGet(context) {
 
   const patchUrl = `/opportunities/${oppId}/quotes/${quoteId}/patch`;
 
-  // Pick the default address to show
-  const defaultAddr = addresses.find(a => a.kind === 'billing' && a.is_default)
+  // Pick the default address to show. 'both' rows count as billing.
+  const defaultAddr = addresses.find(a => (a.kind === 'billing' || a.kind === 'both') && a.is_default)
     || addresses.find(a => a.is_default)
     || addresses[0]
     || null;

@@ -375,12 +375,15 @@ export async function onRequestPost(context) {
   // Denormalized convenience columns on accounts: pick the first default
   // billing / physical (or just the first of each kind) so legacy readers
   // that still hit accounts.address_billing / address_physical keep working.
+  // 'both' rows count toward either slot.
+  const isBilling = (a) => a.kind === 'billing' || a.kind === 'both';
+  const isPhysical = (a) => a.kind === 'physical' || a.kind === 'both';
   const firstBilling =
-    submittedAddresses.find((a) => a.kind === 'billing' && a.is_default) ||
-    submittedAddresses.find((a) => a.kind === 'billing');
+    submittedAddresses.find((a) => isBilling(a) && a.is_default) ||
+    submittedAddresses.find((a) => isBilling(a));
   const firstPhysical =
-    submittedAddresses.find((a) => a.kind === 'physical' && a.is_default) ||
-    submittedAddresses.find((a) => a.kind === 'physical');
+    submittedAddresses.find((a) => isPhysical(a) && a.is_default) ||
+    submittedAddresses.find((a) => isPhysical(a));
 
   const statements = [
     stmt(
