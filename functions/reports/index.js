@@ -68,35 +68,48 @@ export async function onRequestGet(context) {
         GROUP BY week
         ORDER BY week`),
     all(env.DB,
-      `SELECT strftime('%Y-%W', q.submitted_at) AS week,
-              date(MIN(q.submitted_at)) AS any_day,
+      // Imported WFM quotes have NULL submitted_at because WFM didn't
+      // expose an issue date in its export; we fall back to created_at
+      // (set during import to "Valid Until", which is ~30 days after
+      // issue but close enough for weekly buckets). For quotes issued
+      // natively in PMS, submitted_at is populated by submit.js and
+      // takes precedence. The status filter keeps drafts out — only
+      // count quotes that are (or were) actually issued.
+      `SELECT strftime('%Y-%W', COALESCE(q.submitted_at, q.created_at)) AS week,
+              date(MIN(COALESCE(q.submitted_at, q.created_at))) AS any_day,
               COUNT(*) AS n,
               COALESCE(SUM(q.total_price), 0) AS total_value
          FROM quotes q
-        WHERE q.submitted_at IS NOT NULL
-          AND q.submitted_at >= ${weekCutoff}
+        WHERE q.status IN ('issued','revision_issued','accepted','rejected','expired','completed')
+          AND COALESCE(q.submitted_at, q.created_at) >= ${weekCutoff}
           AND NOT EXISTS (
             SELECT 1 FROM quotes q2
              WHERE q2.opportunity_id = q.opportunity_id
                AND q2.quote_seq = q.quote_seq
-               AND q2.submitted_at IS NOT NULL
-               AND q2.submitted_at > q.submitted_at
+               AND q2.status IN ('issued','revision_issued','accepted','rejected','expired','completed')
+               AND COALESCE(q2.submitted_at, q2.created_at) > COALESCE(q.submitted_at, q.created_at)
           )
         GROUP BY week
         ORDER BY week`),
     all(env.DB,
-      `SELECT q.id, q.submitted_at, q.status, q.quote_type, q.total_price
+      // Same COALESCE + status filter logic as the weekly chart.
+      // 'dead' is included here because the outcome bucket maps it to
+      // 'cancelled' for the pie — it represents a quote that was once
+      // live but got superseded/abandoned.
+      `SELECT q.id,
+              COALESCE(q.submitted_at, q.created_at) AS submitted_at,
+              q.status, q.quote_type, q.total_price
          FROM quotes q
-        WHERE q.submitted_at IS NOT NULL
-          AND q.submitted_at >= ${monthCutoff}
+        WHERE q.status IN ('issued','revision_issued','accepted','rejected','expired','completed','dead')
+          AND COALESCE(q.submitted_at, q.created_at) >= ${monthCutoff}
           AND NOT EXISTS (
             SELECT 1 FROM quotes q2
              WHERE q2.opportunity_id = q.opportunity_id
                AND q2.quote_seq = q.quote_seq
-               AND q2.submitted_at IS NOT NULL
-               AND q2.submitted_at > q.submitted_at
+               AND q2.status IN ('issued','revision_issued','accepted','rejected','expired','completed','dead')
+               AND COALESCE(q2.submitted_at, q2.created_at) > COALESCE(q.submitted_at, q.created_at)
           )
-        ORDER BY q.submitted_at DESC`),
+        ORDER BY COALESCE(q.submitted_at, q.created_at) DESC`),
     all(env.DB,
       `SELECT COALESCE(u.display_name, u.email, 'Unassigned') AS owner_name,
               COUNT(*) AS n, COALESCE(SUM(o.estimated_value_usd), 0) AS total_value
