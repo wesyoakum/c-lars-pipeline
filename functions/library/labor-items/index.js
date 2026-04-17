@@ -15,6 +15,7 @@ import {
   fmtDollar,
 } from '../../lib/pricing.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
+import { librarySubNav } from '../../lib/library-subnav.js';
 
 export async function onRequestGet(context) {
   return renderList(context, {});
@@ -72,13 +73,12 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
   const errText = (k) => (errors[k] ? html`<small class="error">${errors[k]}</small>` : '');
 
   const body = html`
+    ${librarySubNav('labor-items')}
+
     <section class="card">
       <div class="card-header">
         <h1>Direct Labor library</h1>
-        <div style="display:flex;align-items:center;gap:0.5rem">
-          ${listToolbar({ id: 'labor', count: rows.length, columns })}
-          <a class="btn" href="/library">\u2190 Library</a>
-        </div>
+        ${listToolbar({ id: 'labor', count: rows.length, columns })}
       </div>
 
       <p class="muted">
