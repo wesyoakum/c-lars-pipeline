@@ -846,6 +846,22 @@
             if (ca.prefillFromTyped) {
               childPrefill[ca.prefillFromTyped] = (this.typedInput || '').trim();
             }
+            // Optional: let the parent seed additional prefill entries
+            // from its already-answered steps (e.g. quote wizard pins
+            // the chosen account into the new-opportunity child so the
+            // account step skips).
+            if (typeof ca.mergePrefill === 'function') {
+              try {
+                var extra = ca.mergePrefill(this.answers);
+                if (extra && typeof extra === 'object') {
+                  for (var mk in extra) {
+                    if (Object.prototype.hasOwnProperty.call(extra, mk)) {
+                      childPrefill[mk] = extra[mk];
+                    }
+                  }
+                }
+              } catch (e) { /* ignore */ }
+            }
             var stepKey = step.key;
             this.openAsChild(ca.wizardKey, childPrefill, function (result, childAnswers) {
               // Restore-then-fill the parent step's answer.

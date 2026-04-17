@@ -7,18 +7,21 @@
 //   1. account       — "Which account is this for?"          (entity-select, kind=account)
 //   2. opportunity   — "Which opportunity on <account>?"     (entity-select, kind=opportunity, filtered by chosen account)
 //   3. quote_type    — "What kind of quote?"                 (select, fixed list)
+//   4. title         — "What's this quote for?"              (text, required)
+//   5. description   — "Any notes for the quote?"            (textarea, optional)
 //
 // On submit we POST form-encoded to the existing
 // /opportunities/:oppId/quotes endpoint — that's already the canonical
 // create path (validation, numbering, term defaults, audit trail all
 // live there). The wizard is just a nicer UI on top of it.
 //
-// "No match?" bail-out: if the user types an account that doesn't
-// exist, a small "+ Create new account" button under the hint opens
-// the account wizard with the typed name pre-filled. The account
-// wizard redirects to /accounts/:id on success (its default); the
-// user then navigates back to Quotes and starts the quote wizard
-// again. Nested-wizard chaining (return-to-parent) is deferred.
+// Inline-create: if the user types an account that doesn't exist a
+// "+ New account" row appears at the bottom of the suggestions. Picking
+// it opens the account wizard as a child; on success the engine pops
+// back here with the new account filled in. Same pattern for the
+// opportunity step — "+ New opportunity" opens the opportunity wizard
+// child, prefilled with the account we already picked and the title
+// the user started typing.
 
 (function () {
   'use strict';
@@ -90,7 +93,7 @@
         // calls currentPrompt() which reads step.prompt — plain string.
         // To keep the dynamic version, we just use a generic prompt.
         prompt: 'Which opportunity?',
-        hint: 'Open opportunities on the selected account only.',
+        hint: 'Open opportunities on the selected account only. Pick "+ New opportunity" to create one inline.',
         entityKinds: ['opportunity'],
         required: true,
         requiredError: 'Pick an opportunity, or create one first from the account page.',
@@ -106,15 +109,59 @@
           return !!(ctx && ctx.pinnedValue && ctx.pinnedPrefix === 'Opportunity'
                    && answers.opportunity && answers.opportunity.id);
         },
+        // Inline-create: open the opportunity wizard with the account
+        // already pinned and the user's typed text seeded as the title.
+        // On success the engine pops back here with the new opp filled.
+        createAction: {
+          label: '+ New opportunity',
+          typeLabel: 'New',
+          subFromTyped: true,
+          wizardKey: 'opportunity',
+          prefillFromTyped: 'title',
+          // Pull the parent's account answer into the child prefill so
+          // the account step skips in the opportunity wizard.
+          mergePrefill: function (answers) {
+            var acc = answers && answers.account;
+            if (!acc || !acc.id) return null;
+            return {
+              account_id: acc.id,
+              account_label: acc.label || ''
+            };
+          },
+          setAnswer: function (result, childAnswers) {
+            var title = (childAnswers && childAnswers.title) || (result && result.title) || '';
+            return {
+              kind: 'opportunity',
+              id: result && result.id,
+              label: title
+            };
+          }
+        },
       },
       {
         key: 'quote_type',
         type: 'select',
         prompt: 'What kind of quote?',
-        hint: 'Tab or Enter to create. Shift+Tab to go back.',
+        hint: 'Tab or Enter to continue. Shift+Tab to go back.',
         options: QUOTE_TYPE_OPTIONS,
         required: true,
         requiredError: 'Please pick a quote type.',
+      },
+      {
+        key: 'title',
+        type: 'text',
+        prompt: 'What\u2019s this quote for?',
+        hint: 'A short title. Tab to continue.',
+        placeholder: 'e.g. Spare seals for pump station',
+        required: true,
+        requiredError: 'Title is required.'
+      },
+      {
+        key: 'description',
+        type: 'textarea',
+        prompt: 'Any notes for the quote?',
+        hint: 'Optional. Press Tab to create the quote.',
+        placeholder: 'Context, scope, customer asks\u2026'
       },
     ],
 
@@ -123,6 +170,8 @@
         account: null,      // { kind:'account', id, label }
         opportunity: null,  // { kind:'opportunity', id, label }
         quote_type: null,   // { value, label }
+        title: '',
+        description: ''
       };
     },
 
@@ -170,8 +219,12 @@
 
       var fd = new FormData();
       fd.append('quote_type', qt);
-      // Optional: leave valid_until/title blank — server seeds defaults
-      // and we land the user on the draft detail page to fill in.
+      var title = (answers.title || '').trim();
+      if (title) fd.append('title', title);
+      var description = (answers.description || '').trim();
+      if (description) fd.append('description', description);
+      // valid_until stays blank — server seeds a default from the
+      // quote_type. The draft lands on the detail page for edits.
 
       var url = '/opportunities/' + encodeURIComponent(oppId) + '/quotes';
       return fetch(url, {
