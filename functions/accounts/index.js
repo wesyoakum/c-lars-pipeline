@@ -239,9 +239,11 @@ export async function onRequestGet(context) {
                       <a class="row-open-link" href="${escape(r.open_href)}" title="${r.is_group ? 'Open group' : 'Open account'}" aria-label="${r.is_group ? 'Open group' : 'Open account'}">\u2197</a>
                     </td>
                     <td class="col-name" data-col="name">
-                      ${r.is_group || prefs.show_alias
-                        ? html`<span class="cell-text">${escape(r.name_display)}</span>`
-                        : ieText('name', r.name_display)}
+                      ${r.is_group
+                        ? html`<span class="ie-display">${escape(r.name_display)}</span>`
+                        : (prefs.show_alias
+                            ? html`<span class="cell-text">${escape(r.name_display)}</span>`
+                            : ieText('name', r.name_display))}
                     </td>
                     <td class="col-alias" data-col="alias">
                       ${r.is_group
