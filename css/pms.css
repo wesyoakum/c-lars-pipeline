@@ -2626,6 +2626,11 @@ textarea.ie-input { width: 100%; min-width: 12rem; resize: vertical; }
 .icon-btn:hover { background: var(--bg-alt); }
 .icon-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
 .icon-btn.primary:hover { background: var(--accent-hover); }
+/* Toggle buttons (e.g. bulk-edit-toggle) use .active to indicate the
+   mode is currently on. Without this the button looks identical pressed
+   vs un-pressed, making toggles feel broken. */
+.icon-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.icon-btn.active:hover { background: var(--accent-hover); }
 .icon-btn svg { display: block; }
 
 .toolbar-right {
@@ -3263,6 +3268,9 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 
 /* ---------- Zone heading (handwritten blue, underlined) ---------- */
 .board-zone { display: flex; flex-direction: column; }
+/* Messages zone heading ("Message Everyone") right-justified so the
+   underline trails off toward the chat bubble flow below it. */
+.board-zone-messages .board-zone-heading { text-align: right; }
 .board-zone-heading {
   font-family: var(--board-hand);
   font-size: 1.7rem;
@@ -3477,6 +3485,15 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
      user scrolls the page they want the saved notes closer to the
      post-its than the safe padding would give. */
   margin-top: -55px;
+}
+/* Cap each post-it page to a square silhouette. The card width is set
+   by the sidebar (~240px), so max-height ≈ width keeps a single page
+   looking like a real square sticky note. Bodies longer than one page
+   are already paginated by splitPages() in board-sidebar.js, so this
+   cap shouldn't clip properly-paginated text. */
+.board-notes-list .board-card {
+  max-height: 240px;
+  overflow: hidden;
 }
 
 /* Each note is wrapped in a .board-card-stack so a long body can
@@ -3901,7 +3918,7 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease;
   z-index: 5;
 }
-.board-message-emphasize { right: 26px; }
+.board-message-emphasize { left: 6px; }
 .board-message-delete    { right: 6px; font-size: 14px; line-height: 0.9; }
 .board-message:hover .board-message-emphasize,
 .board-message:hover .board-message-delete,
@@ -3912,6 +3929,21 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   color: #b07d00;
   border-color: #e0b400;
   background: #fff8d8;
+  /* Pulse a few times on page load so the recipient's eye is drawn
+     to emphasized messages. Runs once per render — Alpine re-creates
+     these elements on each fresh page load, so the animation fires
+     naturally without needing JS. */
+  animation: board-emphasize-blink 0.7s ease-in-out 3;
+}
+@keyframes board-emphasize-blink {
+  0%, 100% {
+    box-shadow: 0 1px 2px rgba(0,0,0,0.15), 0 0 0 0 rgba(224,180,0,0);
+    background: #fff8d8;
+  }
+  50% {
+    box-shadow: 0 1px 3px rgba(0,0,0,0.18), 0 0 10px 3px rgba(224,180,0,0.85);
+    background: #ffe98a;
+  }
 }
 .board-message-emphasize:hover { color: #b07d00; border-color: #e0b400; }
 .board-message-delete:hover    { color: #c0392b; border-color: #c0392b; }

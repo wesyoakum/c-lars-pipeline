@@ -79,8 +79,8 @@ export async function onRequestGet(context) {
     { key: 'segment',       label: 'Segment',   sort: 'text',   filter: 'select', default: true },
     { key: 'status',        label: 'Status',    sort: 'text',   filter: 'select', default: true },
     { key: 'phone',         label: 'Phone',     sort: 'text',   filter: 'text',   default: true },
-    { key: 'contact_count', label: 'Contacts',  sort: 'number', filter: null,     default: true },
-    { key: 'opp_count',     label: 'Opps',      sort: 'number', filter: null,     default: true },
+    { key: 'contact_count', label: 'Contacts',  sort: 'number', filter: 'range',  default: true },
+    { key: 'opp_count',     label: 'Opps',      sort: 'number', filter: 'range',  default: true },
     { key: 'website',       label: 'Website',   sort: 'text',   filter: 'text',   default: false },
     { key: 'updated',       label: 'Updated',   sort: 'date',   filter: 'text',   default: true },
   ];

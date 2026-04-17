@@ -383,19 +383,19 @@ const BOARD_RIGHT_MARKUP = (
       // Compose stack — five blank colored cards, or the active composer
       '<div class="board-notes-stack" x-show="!$store.board.composer.open">' +
         '<button type="button" class="board-stack-note board-stack-note-yellow" ' +
-          'title="New yellow note" aria-label="New yellow note" ' +
+          'title="New yellow post-it" aria-label="New yellow post-it" ' +
           '@click="$store.board.openComposer({ color: \'yellow\' })"></button>' +
         '<button type="button" class="board-stack-note board-stack-note-pink" ' +
-          'title="New pink note" aria-label="New pink note" ' +
+          'title="New pink post-it" aria-label="New pink post-it" ' +
           '@click="$store.board.openComposer({ color: \'pink\' })"></button>' +
         '<button type="button" class="board-stack-note board-stack-note-blue" ' +
-          'title="New blue note" aria-label="New blue note" ' +
+          'title="New blue post-it" aria-label="New blue post-it" ' +
           '@click="$store.board.openComposer({ color: \'blue\' })"></button>' +
         '<button type="button" class="board-stack-note board-stack-note-green" ' +
-          'title="New green note" aria-label="New green note" ' +
+          'title="New green post-it" aria-label="New green post-it" ' +
           '@click="$store.board.openComposer({ color: \'green\' })"></button>' +
         '<button type="button" class="board-stack-note board-stack-note-orange" ' +
-          'title="New orange note" aria-label="New orange note" ' +
+          'title="New orange post-it" aria-label="New orange post-it" ' +
           '@click="$store.board.openComposer({ color: \'orange\' })"></button>' +
       '</div>' +
 
@@ -406,7 +406,7 @@ const BOARD_RIGHT_MARKUP = (
       '<div :class="\'board-composer board-card board-card-color-\' + $store.board.composer.color" ' +
         'x-show="$store.board.composer.open" x-cloak>' +
         '<textarea id="board-composer-textarea" class="board-composer-textarea" ' +
-          'rows="2" placeholder="Jot a note\u2026 (@ to link, Enter to save, Esc to cancel)" ' +
+          'rows="2" placeholder="Jot a post-it\u2026 (@ to link, Enter to save, Esc to cancel)" ' +
           ':value="$store.board.composer.body" ' +
           '@input="$store.board.onBodyInput(\'composer\', $event.target)" ' +
           '@keydown="$store.board.onBodyKeydown(\'composer\', $event.target, $event)"></textarea>' +
@@ -441,7 +441,7 @@ const BOARD_RIGHT_MARKUP = (
           // but @Someone adds that user to board_card_refs and the note
           // shows up in their Mentions module. Hint at this in the corner.
           '<span class="board-composer-share-hint" ' +
-            ':title="$store.board.composer.body.indexOf(\'@\') >= 0 ? \'This note will be shared with mentioned users.\' : \'Only you will see this. Type @ to share with someone.\'" ' +
+            ':title="$store.board.composer.body.indexOf(\'@\') >= 0 ? \'This post-it will be shared with mentioned users.\' : \'Only you will see this. Type @ to share with someone.\'" ' +
             'x-text="$store.board.composer.body.indexOf(\'@\') >= 0 ? \'Shared\' : \'Private\'"></span>' +
         '</div>' +
       '</div>' +
@@ -530,7 +530,7 @@ const BOARD_RIGHT_MARKUP = (
                   '</div>' +
                   '<span class="board-composer-error" x-show="$store.board.editing.error" x-text="$store.board.editing.error"></span>' +
                   '<span class="board-composer-share-hint" ' +
-                    ':title="$store.board.editing.body.indexOf(\'@\') >= 0 ? \'This note is shared with mentioned users.\' : \'Only you will see this. Type @ to share with someone.\'" ' +
+                    ':title="$store.board.editing.body.indexOf(\'@\') >= 0 ? \'This post-it is shared with mentioned users.\' : \'Only you will see this. Type @ to share with someone.\'" ' +
                     'x-text="$store.board.editing.body.indexOf(\'@\') >= 0 ? \'Shared\' : \'Private\'"></span>' +
                 '</div>' +
               '</div>' +
