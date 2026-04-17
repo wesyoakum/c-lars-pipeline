@@ -16,6 +16,7 @@ import { layout, htmlResponse, html, escape, raw } from '../lib/layout.js';
 import { readFlash } from '../lib/http.js';
 import { hasRole } from '../lib/auth.js';
 import { settingsSubNav } from '../lib/settings-subnav.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 
 const PAGE_SIZE = 50;
 
@@ -148,6 +149,37 @@ export async function onRequestGet(context) {
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  // Columns for the standard list-table renderer. All cells render
+  // server-side; list-table adds per-column sort, filter, quicksearch,
+  // and column show/hide/reorder on the current page only — the
+  // server-side filter form above handles cross-page narrowing.
+  const columns = [
+    { key: 'when',        label: 'When',    sort: 'date',   filter: 'text',   default: true  },
+    { key: 'user',        label: 'User',    sort: 'text',   filter: 'select', default: true  },
+    { key: 'entity_type', label: 'Entity',  sort: 'text',   filter: 'select', default: true  },
+    { key: 'entity_id',   label: 'Id',      sort: 'text',   filter: 'text',   default: false },
+    { key: 'event_type',  label: 'Event',   sort: 'text',   filter: 'select', default: true  },
+    { key: 'summary',     label: 'Summary', sort: 'text',   filter: 'text',   default: true  },
+  ];
+
+  // Shape rows for both data-attributes (sort/filter/quicksearch) and
+  // display. `when_display` is the scannable yyyy-mm-dd hh:mm form;
+  // `when` stays ISO so date-sort orders correctly.
+  const rowData = rows.map((r) => ({
+    id: r.id,
+    when: r.at ?? '',
+    when_display: formatAt(r.at),
+    user: r.user_id ? (r.user_name || r.user_email || r.user_id) : 'system',
+    entity_type: r.entity_type ?? '',
+    entity_id: r.entity_id ?? '',
+    entity_id_short: shortId(r.entity_id),
+    event_type: r.event_type ?? '',
+    summary: r.summary ?? '',
+    changes_json: r.changes_json,
+    override_reason: r.override_reason,
+    is_system: !r.user_id,
+  }));
+
   // Preserve all current filters on the prev/next links.
   function pageHref(n) {
     const p = new URLSearchParams();
@@ -165,7 +197,7 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1>History</h1>
-        <span class="muted" style="font-size:0.85em">${total} event${total === 1 ? '' : 's'}</span>
+        ${listToolbar({ id: 'history', count: total, columns })}
       </div>
 
       <p class="muted">
@@ -226,38 +258,38 @@ export async function onRequestGet(context) {
         </div>
       </form>
 
-      ${rows.length === 0
+      ${rowData.length === 0
         ? html`<p class="muted">No events match these filters.</p>`
         : html`
-          <div class="table-wrap">
-            <table class="data">
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>User</th>
-                  <th>Entity</th>
-                  <th>Event</th>
-                  <th>Summary</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${rows.map(r => {
+          <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
+            <table class="data opp-list-table">
+              ${listTableHead(columns, rowData)}
+              <tbody data-role="rows">
+                ${rowData.map((r) => {
                   const hrefFn = ENTITY_HREF[r.entity_type];
-                  const entityCell = hrefFn
-                    ? html`<a href="${escape(hrefFn(r.entity_id))}"><code>${escape(shortId(r.entity_id))}</code></a>`
-                    : html`<code>${escape(shortId(r.entity_id))}</code>`;
                   return html`
-                    <tr>
-                      <td><small title="${escape(r.at || '')}">${escape(formatAt(r.at))}</small></td>
-                      <td>${r.user_id
-                        ? html`<small>${escape(r.user_name || r.user_email || r.user_id)}</small>`
-                        : html`<small class="muted">system</small>`}</td>
-                      <td>
-                        <small class="muted">${escape(r.entity_type)}</small>
-                        <br>${entityCell}
+                    <tr data-row-id="${escape(r.id)}"
+                        ${raw(rowDataAttrs(columns, r))}>
+                      <td class="col-when" data-col="when">
+                        <small title="${escape(r.when)}">${escape(r.when_display)}</small>
                       </td>
-                      <td><code>${escape(r.event_type)}</code></td>
-                      <td>
+                      <td class="col-user" data-col="user">
+                        ${r.is_system
+                          ? html`<small class="muted">system</small>`
+                          : html`<small>${escape(r.user)}</small>`}
+                      </td>
+                      <td class="col-entity_type" data-col="entity_type">
+                        <small>${escape(r.entity_type)}</small>
+                      </td>
+                      <td class="col-entity_id" data-col="entity_id">
+                        ${hrefFn
+                          ? html`<a href="${escape(hrefFn(r.entity_id))}"><code>${escape(r.entity_id_short)}</code></a>`
+                          : html`<code>${escape(r.entity_id_short)}</code>`}
+                      </td>
+                      <td class="col-event_type" data-col="event_type">
+                        <code>${escape(r.event_type)}</code>
+                      </td>
+                      <td class="col-summary" data-col="summary">
                         ${r.summary ? html`<div>${escape(r.summary)}</div>` : ''}
                         ${r.changes_json
                           ? html`<details style="margin-top:0.25rem">
@@ -279,7 +311,7 @@ export async function onRequestGet(context) {
 
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.75rem">
             <span class="muted" style="font-size:0.85em">
-              Page ${page} of ${pageCount} \u2022 showing ${rows.length} of ${total}
+              Page ${page} of ${pageCount} \u2022 showing ${rowData.length} of ${total}
             </span>
             <div style="display:flex;gap:0.5rem">
               ${page > 1
@@ -290,6 +322,7 @@ export async function onRequestGet(context) {
                 : html`<button class="btn" disabled>Next \u2192</button>`}
             </div>
           </div>
+          <script>${raw(listScript('pms.history.v1', 'when', 'desc'))}</script>
         `}
     </section>
   `;
