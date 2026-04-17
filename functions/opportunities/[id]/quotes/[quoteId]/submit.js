@@ -21,6 +21,7 @@ import {
   buildQuoteFilenameContext,
 } from '../../../../lib/filename-templates.js';
 import { fireEvent, reportError } from '../../../../lib/auto-tasks.js';
+import { getEffectiveValidityDays } from '../../../../lib/quote-term-defaults.js';
 
 export async function onRequestPost(context) {
   const { env, data, params } = context;
@@ -47,14 +48,29 @@ export async function onRequestPost(context) {
   const snapshot = await snapshotGoverningDocs(env.DB);
   const ts = now();
 
+  // Lock valid_until at issuance: submitted_at + N days (per quote_type
+  // default from quote_term_defaults, migration 0038). If the user
+  // explicitly set a date on the draft it wins — we only compute when
+  // the column is still NULL.
+  let lockedValidUntil = quote.valid_until;
+  if (!lockedValidUntil) {
+    const n = await getEffectiveValidityDays(env, quote.quote_type, 14);
+    const base = new Date(ts);
+    base.setUTCHours(0, 0, 0, 0);
+    base.setUTCDate(base.getUTCDate() + n);
+    lockedValidUntil = base.toISOString().slice(0, 10);
+  }
+
   const statements = [
     stmt(env.DB,
       `UPDATE quotes
           SET status = ?, submitted_at = ?, submitted_by_user_id = ?,
+              valid_until = ?,
               tc_revision = ?, warranty_revision = ?, rate_schedule_revision = ?, sop_revision = ?,
               updated_at = ?
         WHERE id = ?`,
       [targetStatus, ts, user?.id ?? null,
+       lockedValidUntil,
        snapshot.tc_revision, snapshot.warranty_revision,
        snapshot.rate_schedule_revision, snapshot.sop_revision,
        ts, quoteId]),

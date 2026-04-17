@@ -23,7 +23,51 @@ import { one, all, stmt, batch } from './db.js';
 import { auditStmt } from './audit.js';
 
 /** Fields that support per-quote-type defaults. */
-export const QUOTE_TERM_FIELDS = new Set(['payment_terms', 'delivery_terms']);
+export const QUOTE_TERM_FIELDS = new Set(['payment_terms', 'delivery_terms', 'validity_days']);
+
+/** Quote types that can carry a validity_days default. Mirrors
+ *  ALL_QUOTE_TYPES from validators.js; duplicated here to avoid an
+ *  import cycle. */
+export const VALIDITY_DAYS_TYPES = [
+  'spares',
+  'service',
+  'eps',
+  'refurb_baseline',
+  'refurb_modified',
+  'refurb_supplemental',
+];
+
+/**
+ * Load the validity-days default (as a positive integer) for a single
+ * quote_type. Returns `fallback` (default 14) when no row exists or
+ * the stored value isn't a positive integer.
+ */
+export async function getQuoteValidityDays(env, quoteType, fallback = 14) {
+  const raw = await getQuoteTermDefault(env, quoteType, 'validity_days', '');
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return n;
+}
+
+/**
+ * Compute the effective validity-days for a (possibly hybrid)
+ * quote_type string. Takes the minimum across parts — a hybrid quote
+ * inherits the shortest window, matching the prior conservative
+ * behavior ("spares-or-service → 14, otherwise 30").
+ */
+export async function getEffectiveValidityDays(env, quoteTypeRaw, fallback = 14) {
+  const parts = String(quoteTypeRaw || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  if (parts.length === 0) return fallback;
+  let min = null;
+  for (const p of parts) {
+    const n = await getQuoteValidityDays(env, p, fallback);
+    if (min === null || n < min) min = n;
+  }
+  return min ?? fallback;
+}
 
 /**
  * Load a single default by (quote_type, field). Returns the raw string

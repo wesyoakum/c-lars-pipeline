@@ -15,9 +15,11 @@
 // layout.js in the same change.
 
 import { one } from '../lib/db.js';
-import { layout, htmlResponse, html, escape } from '../lib/layout.js';
+import { layout, htmlResponse, html, raw } from '../lib/layout.js';
 import { readFlash } from '../lib/http.js';
 import { hasRole } from '../lib/auth.js';
+import { VALIDITY_DAYS_TYPES, getQuoteValidityDays } from '../lib/quote-term-defaults.js';
+import { QUOTE_TYPE_LABELS } from '../lib/validators.js';
 
 export async function onRequestGet(context) {
   const { env, data, request } = context;
@@ -46,9 +48,16 @@ export async function onRequestGet(context) {
   // Admin counts for the Auto-Task Rules card.
   let ruleCount = null;
   let activeCount = null;
+  let validityDays = null;
   if (isAdmin) {
     ruleCount = await one(env.DB, 'SELECT COUNT(*) AS n FROM task_rules');
     activeCount = await one(env.DB, 'SELECT COUNT(*) AS n FROM task_rules WHERE active = 1');
+    // Current per-quote-type validity days — used by the Settings editor
+    // below. getQuoteValidityDays falls back to 14 when no row exists.
+    validityDays = {};
+    for (const qt of VALIDITY_DAYS_TYPES) {
+      validityDays[qt] = await getQuoteValidityDays(env, qt, 14);
+    }
   }
 
   const sa = prefs.show_alias ? 1 : 0;
@@ -119,6 +128,38 @@ export async function onRequestGet(context) {
     </section>
 
     ${isAdmin ? html`
+      <section class="card" x-data="quoteValidityEditor(${JSON.stringify(validityDays || {})})">
+        <h2>Quote expiration defaults</h2>
+        <p class="muted">
+          How many days from issuance each quote type stays valid.
+          Drafts display "today + N" live; the date locks to
+          <code>submitted_at + N</code> when the quote is issued.
+          Hybrid quotes use the shortest window across their parts.
+        </p>
+        <table class="meta-table" style="max-width:24rem">
+          <thead>
+            <tr><th style="text-align:left">Quote type</th><th style="text-align:right">Days</th></tr>
+          </thead>
+          <tbody>
+            ${VALIDITY_DAYS_TYPES.map(qt => html`
+              <tr>
+                <td>${QUOTE_TYPE_LABELS[qt] || qt}</td>
+                <td style="text-align:right">
+                  <input type="number" min="1" max="3650" step="1"
+                         x-model.number="days['${qt}']"
+                         @change="save('${qt}', $event.target.value)"
+                         :disabled="busy['${qt}']"
+                         style="width:5rem;text-align:right">
+                </td>
+              </tr>
+            `)}
+          </tbody>
+        </table>
+        <p class="muted" style="margin-top:0.5rem;font-size:0.85em">
+          Changes save automatically when you leave the field.
+        </p>
+      </section>
+
       <section class="card">
         <h2>Admin tools</h2>
         <p class="muted">Configuration that affects every user.</p>
@@ -137,7 +178,7 @@ export async function onRequestGet(context) {
       </section>
     ` : ''}
 
-    <script>${SETTINGS_PREFS_SCRIPT}</script>
+    <script>${raw(SETTINGS_PREFS_SCRIPT)}</script>
   `;
 
   return htmlResponse(
@@ -219,6 +260,45 @@ document.addEventListener('alpine:init', function () {
           alert('Saved as site-wide defaults.');
         }).catch(function (err) {
           self.busy = false;
+          alert('Could not save: ' + (err && err.message ? err.message : 'unknown error'));
+        });
+      },
+    };
+  });
+
+  // Quote validity-days editor. One number input per quote_type; each
+  // @change POSTs to /settings/quote-validity-days which upserts the
+  // (type, 'validity_days') row in quote_term_defaults. Busy flag is
+  // per-type so two adjacent inputs can't trample each other.
+  Alpine.data('quoteValidityEditor', function (initial) {
+    var days = {};
+    var busy = {};
+    Object.keys(initial || {}).forEach(function (k) {
+      days[k] = Number(initial[k]) || 14;
+      busy[k] = false;
+    });
+    return {
+      days: days,
+      busy: busy,
+      save: function (quoteType, rawValue) {
+        var self = this;
+        var n = parseInt(rawValue, 10);
+        if (!Number.isFinite(n) || n <= 0) {
+          alert('Days must be a positive whole number.');
+          return;
+        }
+        self.busy[quoteType] = true;
+        fetch('/settings/quote-validity-days', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ quote_type: quoteType, days: n }),
+        }).then(function (r) {
+          self.busy[quoteType] = false;
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          self.days[quoteType] = n;
+        }).catch(function (err) {
+          self.busy[quoteType] = false;
           alert('Could not save: ' + (err && err.message ? err.message : 'unknown error'));
         });
       },

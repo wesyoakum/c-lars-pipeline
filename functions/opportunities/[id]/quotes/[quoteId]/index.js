@@ -35,7 +35,7 @@ import {
   readDiscountFromRow,
 } from '../../../../lib/pricing.js';
 import { templateTypeForQuote, templateManagerHtml } from '../../../../lib/template-catalog.js';
-import { loadQuoteTermDefaultsMap } from '../../../../lib/quote-term-defaults.js';
+import { loadQuoteTermDefaultsMap, getEffectiveValidityDays } from '../../../../lib/quote-term-defaults.js';
 
 const READ_ONLY_STATUSES = new Set([
   'issued', 'revision_issued', 'accepted', 'rejected', 'expired', 'dead',
@@ -121,6 +121,22 @@ export async function onRequestGet(context) {
   // Serialized into JS below so the flatTerms / plainTerms Alpine
   // components can consult (or save) defaults without a round-trip.
   const termDefaults = await loadQuoteTermDefaultsMap(env);
+
+  // Expiration display (Batch 6, migration 0038):
+  //   * If the quote already has a valid_until, show it as-is.
+  //   * Otherwise (draft/revision_draft) compute "today + N" live so
+  //     drafts always display a plausible-looking date. N comes from
+  //     the per-quote-type validity_days default; hybrid quotes use
+  //     the minimum across parts. submit.js freezes the column at
+  //     issuance.
+  let displayValidUntil = quote.valid_until || '';
+  if (!displayValidUntil) {
+    const n = await getEffectiveValidityDays(env, quote.quote_type, 14);
+    const d = new Date();
+    d.setUTCHours(0, 0, 0, 0);
+    d.setUTCDate(d.getUTCDate() + n);
+    displayValidUntil = d.toISOString().slice(0, 10);
+  }
 
   const readOnly = READ_ONLY_STATUSES.has(quote.status);
   // Per-quote display toggle (migration 0027) — hides the discount
@@ -407,7 +423,7 @@ export async function onRequestGet(context) {
             <tr>
               <td class="meta-label">Expiration:</td>
               <td>
-                <div x-data="expirationPicker('${escape(quote.valid_until ?? '')}')">
+                <div x-data="expirationPicker('${escape(displayValidUntil)}')">
                   <div style="display:flex;gap:0.4rem;align-items:center">
                     <input type="text" x-model="textVal" @change="onTextChange()" class="meta-input" ${readOnly ? 'disabled' : ''} placeholder="e.g. 14 days" style="flex:1">
                     ${!readOnly ? html`

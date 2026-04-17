@@ -80,12 +80,10 @@ export async function onRequestPost(context) {
   const hasEps     = parts.includes('eps');
   const hasRefurb  = parts.some(p => p.startsWith('refurb_'));
 
-  if (!value.valid_until) {
-    const days = (hasSpares || hasService) ? 14 : 30;
-    const exp = new Date();
-    exp.setUTCDate(exp.getUTCDate() + days);
-    value.valid_until = exp.toISOString().slice(0, 10);
-  }
+  // Drafts leave valid_until NULL — the detail page renders "today + N"
+  // live from the per-quote-type default (migration 0038), and submit.js
+  // locks the final date as `submitted_at + N` at issuance. N is editable
+  // per type in Settings.
   if (!value.payment_terms) {
     if (hasSpares) {
       value.payment_terms = await getQuoteTermDefault(env, 'spares', 'payment_terms', '');

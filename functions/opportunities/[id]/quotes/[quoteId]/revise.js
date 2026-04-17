@@ -112,7 +112,9 @@ export async function onRequestPost(context) {
         source.quote_type,
         source.title,
         source.description,
-        source.valid_until,
+        // Revision drafts start with NULL valid_until so the detail page
+        // shows a live "today + N" date; submit.js locks it at issuance.
+        null,
         source.currency || 'USD',
         source.subtotal_price ?? 0,
         source.tax_amount ?? 0,
