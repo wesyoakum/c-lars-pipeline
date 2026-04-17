@@ -48,10 +48,14 @@ export async function onRequestGet(context) {
   // Admin counts for the Auto-Task Rules card.
   let ruleCount = null;
   let activeCount = null;
+  let userCount = null;
+  let activeUserCount = null;
   let validityDays = null;
   if (isAdmin) {
     ruleCount = await one(env.DB, 'SELECT COUNT(*) AS n FROM task_rules');
     activeCount = await one(env.DB, 'SELECT COUNT(*) AS n FROM task_rules WHERE active = 1');
+    userCount = await one(env.DB, 'SELECT COUNT(*) AS n FROM users');
+    activeUserCount = await one(env.DB, 'SELECT COUNT(*) AS n FROM users WHERE active = 1');
     // Current per-quote-type validity days — used by the Settings editor
     // below. getQuoteValidityDays falls back to 14 when no row exists.
     validityDays = {};
@@ -171,6 +175,16 @@ export async function onRequestGet(context) {
               <strong>${activeCount?.n ?? 0}</strong> active
               ${ruleCount?.n !== activeCount?.n
                 ? html` / ${ruleCount?.n ?? 0} total`
+                : ''}
+            </p>
+          </a>
+          <a class="library-card" href="/settings/users">
+            <h3>Users</h3>
+            <p class="muted">Everyone who has signed in. Adjust role or mark inactive.</p>
+            <p class="library-count">
+              <strong>${activeUserCount?.n ?? 0}</strong> active
+              ${userCount?.n !== activeUserCount?.n
+                ? html` / ${userCount?.n ?? 0} total`
                 : ''}
             </p>
           </a>
