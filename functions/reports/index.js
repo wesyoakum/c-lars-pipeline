@@ -41,7 +41,11 @@ export async function onRequestGet(context) {
   // submitted_at-based predicate because it handles the edge case where
   // a revision hasn't been issued yet — we want to keep the earlier
   // revision counted until the new one actually ships.
-  const weekCutoff = `date('now', '-26 weeks', 'weekday 1')`;
+  // SQLite's date() modifiers don't include "weeks" — we express 26
+  // weeks as 182 days. Without this the cutoff evaluates to NULL,
+  // WHERE created_at >= NULL is always false, and the chart looks
+  // empty even when data exists. (Same trap bit us shipping v0.205.)
+  const weekCutoff = `date('now', '-182 days')`;
   const monthCutoff = `date('now', '-12 months')`;
   const [
     newOppsWeekly,
