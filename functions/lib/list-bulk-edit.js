@@ -167,7 +167,7 @@ export function listBulkEditScript({ patchUrl, deleteUrl } = {}) {
       busy(false);
       if (failed > 0) {
         var msg = 'Deleted ' + (ids.length - failed) + ', failed ' + failed + '.';
-        if (firstError) msg += '\n\nFirst error: ' + firstError;
+        if (firstError) msg += '\\n\\nFirst error: ' + firstError;
         alert(msg);
       }
       location.reload();
