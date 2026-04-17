@@ -19,6 +19,17 @@ import { findGroupMembers } from '../../../lib/account-groups.js';
 import { parseTransactionTypes } from '../../../lib/validators.js';
 import { loadStageCatalog } from '../../../lib/stages.js';
 
+// Keep in sync with functions/accounts/index.js::SEGMENT_OPTIONS. The
+// member table on this page reuses it for inline segment editing.
+const SEGMENT_OPTIONS = [
+  { value: '',           label: '\u2014 None \u2014' },
+  { value: 'WROV',       label: 'WROV' },
+  { value: 'Research',   label: 'Research' },
+  { value: 'Defense',    label: 'Defense' },
+  { value: 'Commercial', label: 'Commercial' },
+  { value: 'Other',      label: 'Other' },
+];
+
 const TYPE_LABELS = {
   spares: 'Spares',
   eps: 'Engineered Product (EPS)',
@@ -116,13 +127,20 @@ export async function onRequestGet(context) {
     0
   );
 
+  const segmentOptionsJson = JSON.stringify(SEGMENT_OPTIONS);
+
   const body = html`
-    <section class="card">
+    <section class="card" x-data="groupInline('${escape(slug)}')">
       <div class="card-header">
         <div>
-          <h1 class="page-title">${escape(group.label)}</h1>
+          <h1 class="page-title">
+            <span class="ie ie-group-label" data-field="label" data-type="text">
+              <span class="ie-display">${escape(group.label)}</span>
+            </span>
+          </h1>
           <div class="muted" style="font-size:0.9em;margin-top:0.15rem">
             Group rollup across ${group.accounts.length} account${group.accounts.length === 1 ? '' : 's'}
+            \u2014 click the name above to rename the group across every member.
           </div>
         </div>
         <div class="header-actions">
@@ -175,10 +193,24 @@ export async function onRequestGet(context) {
           ${group.accounts.map((a) => {
             const c = countById.get(a.id) || {};
             return html`
-              <tr>
-                <td><a href="/accounts/${escape(a.id)}"><strong>${escape(a.name)}</strong></a></td>
-                <td class="muted">${escape(a.alias || '')}</td>
-                <td>${escape(a.segment || '')}</td>
+              <tr data-acct-id="${escape(a.id)}">
+                <td>
+                  <a href="/accounts/${escape(a.id)}" style="float:right;margin-left:0.5rem">\u2197</a>
+                  <span class="ie" data-field="name" data-type="text" data-acct="${escape(a.id)}">
+                    <span class="ie-display"><strong>${escape(a.name)}</strong></span>
+                  </span>
+                </td>
+                <td>
+                  <span class="ie" data-field="alias" data-type="text" data-acct="${escape(a.id)}">
+                    <span class="ie-display ${a.alias ? '' : 'muted'}">${escape(a.alias || '\u2014')}</span>
+                  </span>
+                </td>
+                <td>
+                  <span class="ie" data-field="segment" data-type="select" data-acct="${escape(a.id)}"
+                        data-options='${escape(segmentOptionsJson)}'>
+                    <span class="ie-display ${a.segment ? '' : 'muted'}">${escape(a.segment || '\u2014')}</span>
+                  </span>
+                </td>
                 <td class="num">${c.contact_count ?? 0}</td>
                 <td class="num">${c.opp_count ?? 0}</td>
               </tr>
@@ -231,8 +263,12 @@ export async function onRequestGet(context) {
     </section>
   `;
 
+  const scriptBlock = html`
+    <script>${raw(groupInlineScript())}</script>
+  `;
+
   return htmlResponse(
-    layout(`${group.label} — Group`, body, {
+    layout(`${group.label} — Group`, html`${body}${scriptBlock}`, {
       user,
       env: data?.env,
       activeNav: '/accounts',
@@ -243,4 +279,146 @@ export async function onRequestGet(context) {
       ],
     })
   );
+}
+
+/**
+ * Alpine component + DOM wiring for inline-edit on the group page.
+ *
+ * Two targets on this page:
+ *   1. The group label in the H1 (data-field="label", no data-acct)
+ *      → POSTs to /accounts/group/:slug/rename and, on success,
+ *        navigates to the new slug URL (since slug is derived from
+ *        the label).
+ *   2. Member-account fields (name / alias / segment) inside the
+ *      member table rows (data-field + data-acct on the <span>)
+ *      → POSTs to /accounts/:id/patch, the same endpoint the
+ *        /accounts list and /accounts/:id detail page use.
+ *
+ * Kept inline here rather than added to lib/list-inline-edit.js
+ * because this page isn't a standard list-table setup — it's a
+ * rollup with two different save behaviors.
+ */
+function groupInlineScript() {
+  return `
+function groupInline(slug) {
+  var renameUrl = '/accounts/group/' + slug + '/rename';
+  return {
+    init: function () {
+      var self = this;
+      this.$el.querySelectorAll('.ie').forEach(function (el) {
+        el.addEventListener('click', function () { self.activate(el); });
+      });
+    },
+    activate: function (el) {
+      if (el.querySelector('.ie-input')) return;
+      var field = el.dataset.field;
+      var type = el.dataset.type;
+      var display = el.querySelector('.ie-display');
+      var currentValue = display.classList.contains('muted') ? '' : display.textContent.trim();
+      if (currentValue === '\u2014') currentValue = '';
+
+      var input;
+      var self = this;
+      if (type === 'select') {
+        input = document.createElement('select');
+        input.className = 'ie-input';
+        var options = [];
+        try { options = JSON.parse(el.dataset.options || '[]'); } catch (e) {}
+        options.forEach(function (o) {
+          var opt = document.createElement('option');
+          opt.value = o.value;
+          opt.textContent = o.label;
+          if (o.value === (currentValue || '')) opt.selected = true;
+          input.appendChild(opt);
+        });
+        input.addEventListener('change', function () { self.save(el, input); });
+        input.addEventListener('blur', function () {
+          setTimeout(function () { self.deactivate(el, input); }, 150);
+        });
+      } else {
+        input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'ie-input';
+        input.value = currentValue;
+        input.addEventListener('blur', function () { self.save(el, input); });
+        input.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') { e.preventDefault(); self.save(el, input); }
+          if (e.key === 'Escape') { self.deactivate(el, input); }
+        });
+      }
+
+      display.style.display = 'none';
+      el.appendChild(input);
+      input.focus();
+      if (input.select) input.select();
+    },
+    save: async function (el, input) {
+      var field = el.dataset.field;
+      var acctId = el.dataset.acct;
+      var value = input.value;
+      this.deactivate(el, input);
+      el.classList.add('ie-saving');
+      try {
+        if (field === 'label' && !acctId) {
+          // Group rename path.
+          var res = await fetch(renameUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ newLabel: value }),
+          });
+          var data = await res.json();
+          if (!data.ok) { this.flash(el, 'error', data.error || 'Rename failed'); return; }
+          if (data.newSlug && data.newSlug !== slug) {
+            // Slug changed — navigate to the new URL so every link /
+            // breadcrumb on the page reflects the rename.
+            window.location.href = '/accounts/group/' + encodeURIComponent(data.newSlug);
+            return;
+          }
+          var display = el.querySelector('.ie-display');
+          display.textContent = data.newLabel || value;
+          this.flash(el, 'saved');
+          return;
+        }
+        // Member-account field patch.
+        var res2 = await fetch('/accounts/' + encodeURIComponent(acctId) + '/patch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ field: field, value: value }),
+        });
+        var data2 = await res2.json();
+        if (!data2.ok) { this.flash(el, 'error', data2.error || 'Save failed'); return; }
+        var display2 = el.querySelector('.ie-display');
+        var saved = data2.value != null ? data2.value : value;
+        if (el.dataset.type === 'select') {
+          var opts = [];
+          try { opts = JSON.parse(el.dataset.options || '[]'); } catch (e) {}
+          var match = opts.filter(function (o) { return o.value === (saved || ''); })[0];
+          display2.textContent = match ? match.label : (saved || '\u2014');
+        } else {
+          display2.textContent = saved || '\u2014';
+        }
+        display2.classList.toggle('muted', !saved);
+        this.flash(el, 'saved');
+      } catch (err) {
+        this.flash(el, 'error', err && err.message ? err.message : 'Save failed');
+      } finally {
+        el.classList.remove('ie-saving');
+      }
+    },
+    deactivate: function (el, input) {
+      if (input && input.parentNode === el) el.removeChild(input);
+      var display = el.querySelector('.ie-display');
+      if (display) display.style.display = '';
+    },
+    flash: function (el, kind, msg) {
+      el.classList.add('ie-' + kind);
+      if (msg) el.title = msg;
+      setTimeout(function () {
+        el.classList.remove('ie-' + kind);
+        if (msg) el.removeAttribute('title');
+      }, kind === 'saved' ? 1200 : 2500);
+    },
+  };
+}
+`;
 }
