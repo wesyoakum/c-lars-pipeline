@@ -87,11 +87,14 @@ async function runSweep(env) {
     return { ok: false, target, startedAt, error: err?.message || String(err) };
   }
 
+  // Read once as text, then try to parse — res.body can only be consumed
+  // one time, so fetch-then-fallback would throw "Body has already been used".
+  const text = await res.text();
   let body;
   try {
-    body = await res.json();
+    body = JSON.parse(text);
   } catch {
-    body = { raw: await res.text() };
+    body = { raw: text };
   }
 
   // Log a compact summary to `wrangler tail` so it's easy to confirm
