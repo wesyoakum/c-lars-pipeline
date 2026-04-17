@@ -33,6 +33,7 @@ export async function onRequestGet(context) {
   const { env, request, data } = context;
   const user = data?.user;
   if (!user || !user.id) return json({ results: [] }, 401);
+  const showAlias = !!(user && user.show_alias);
 
   const url = new URL(request.url);
   const qRaw = (url.searchParams.get('q') || '').trim();
@@ -131,11 +132,17 @@ export async function onRequestGet(context) {
     });
   }
   for (const a of accounts) {
+    // When show_alias is on, surface the alias as the primary label
+    // and keep the legal name as the sub. Otherwise render name first.
+    const primary = showAlias ? (a.alias || a.name) : a.name;
+    const secondary = showAlias
+      ? (a.alias && a.alias !== a.name ? a.name : '')
+      : (a.alias && a.alias !== a.name ? a.alias : '');
     results.push({
       ref_type: 'account',
       ref_id: a.id,
-      label: a.name,
-      sub: a.alias || '',
+      label: primary,
+      sub: secondary,
     });
   }
   for (const d of docs) {

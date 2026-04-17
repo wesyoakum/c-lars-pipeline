@@ -22,6 +22,7 @@
 // which pre-fills the modal via the prefill prop — no picker needed.
 
 import { all } from '../lib/db.js';
+import { buildAccountPickerGroups } from '../lib/account-groups.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -43,6 +44,8 @@ export async function onRequestGet(context) {
       opportunities: [],
       quotes: [],
       accounts: [],
+      groups: [],
+      prefs: { show_alias: 0, group_rollup: 0 },
     }, 200);
   }
 
@@ -65,11 +68,13 @@ export async function onRequestGet(context) {
         ORDER BY updated_at DESC
         LIMIT 200`),
     all(env.DB,
-      `SELECT id, name, alias
+      `SELECT id, name, alias, parent_group
          FROM accounts
         ORDER BY name
         LIMIT 500`),
   ]);
+
+  const groups = buildAccountPickerGroups(accounts);
 
   return json({
     current_user_id: user.id,
@@ -77,5 +82,10 @@ export async function onRequestGet(context) {
     opportunities,
     quotes,
     accounts,
+    groups,
+    prefs: {
+      show_alias: user.show_alias ? 1 : 0,
+      group_rollup: user.group_rollup ? 1 : 0,
+    },
   });
 }

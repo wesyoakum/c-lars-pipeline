@@ -11,6 +11,7 @@ import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
 import { parseTransactionTypes } from '../lib/validators.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
+import { displayAccountName, slugifyGroup } from '../lib/account-groups.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
@@ -31,6 +32,10 @@ export async function onRequestGet(context) {
   const { env, data, request } = context;
   const user = data?.user;
   const url = new URL(request.url);
+  const prefs = {
+    show_alias: !!(user && user.show_alias),
+    group_rollup: !!(user && user.group_rollup),
+  };
 
   const rows = await all(
     env.DB,
@@ -38,7 +43,8 @@ export async function onRequestGet(context) {
             j.oc_number, j.ntp_required,
             j.handed_off_at, j.created_at, j.updated_at,
             o.number AS opp_number, o.title AS opp_title, o.id AS opp_id,
-            a.name AS account_name
+            a.name AS account_name, a.alias AS account_alias,
+            a.parent_group AS account_parent_group
        FROM jobs j
        LEFT JOIN opportunities o ON o.id = j.opportunity_id
        LEFT JOIN accounts a ON a.id = o.account_id
@@ -59,20 +65,30 @@ export async function onRequestGet(context) {
     { key: 'created',      label: 'Created',  sort: 'date',   filter: 'text',   default: false },
   ];
 
-  const rowData = rows.map(r => ({
-    id: r.id,
-    number: r.number ?? '',
-    title: r.title ?? '',
-    account_name: r.account_name ?? '',
-    opp_number: r.opp_number ?? '',
-    opp_id: r.opp_id ?? '',
-    type_label: parseTransactionTypes(r.job_type).map(t => TYPE_LABELS[t] ?? t).join(', ') || r.job_type || '\u2014',
-    status_label: STATUS_LABELS[r.status] ?? r.status ?? '',
-    status: r.status,
-    oc_number: r.oc_number ?? '',
-    updated: (r.updated_at ?? '').slice(0, 10),
-    created: (r.created_at ?? '').slice(0, 10),
-  }));
+  const rowData = rows.map(r => {
+    const isGrouped = !!(prefs.group_rollup && r.account_parent_group);
+    const acctLabel = isGrouped
+      ? r.account_parent_group
+      : displayAccountName({ name: r.account_name, alias: r.account_alias }, prefs);
+    const acctHref = isGrouped
+      ? `/accounts/group/${slugifyGroup(r.account_parent_group)}`
+      : (r.opp_id ? `/opportunities/${r.opp_id}` : '');
+    return {
+      id: r.id,
+      number: r.number ?? '',
+      title: r.title ?? '',
+      account_name: acctLabel || '',
+      account_href: acctHref,
+      opp_number: r.opp_number ?? '',
+      opp_id: r.opp_id ?? '',
+      type_label: parseTransactionTypes(r.job_type).map(t => TYPE_LABELS[t] ?? t).join(', ') || r.job_type || '\u2014',
+      status_label: STATUS_LABELS[r.status] ?? r.status ?? '',
+      status: r.status,
+      oc_number: r.oc_number ?? '',
+      updated: (r.updated_at ?? '').slice(0, 10),
+      created: (r.created_at ?? '').slice(0, 10),
+    };
+  });
 
   const body = html`
     <section class="card">
@@ -98,7 +114,7 @@ export async function onRequestGet(context) {
                     <td class="col-title" data-col="title">
                       ${ieText('title', r.title)}
                     </td>
-                    <td class="col-account_name" data-col="account_name">${r.opp_id ? html`<a href="/opportunities/${escape(r.opp_id)}">${escape(r.account_name)}</a>` : escape(r.account_name)}</td>
+                    <td class="col-account_name" data-col="account_name">${r.account_href ? html`<a href="${escape(r.account_href)}">${escape(r.account_name)}</a>` : escape(r.account_name)}</td>
                     <td class="col-opp_number" data-col="opp_number">${r.opp_id ? html`<a href="/opportunities/${escape(r.opp_id)}">${escape(r.opp_number)}</a>` : escape(r.opp_number)}</td>
                     <td class="col-type_label" data-col="type_label">${escape(r.type_label)}</td>
                     <td class="col-status_label" data-col="status_label"><span class="pill ${r.status === 'handed_off' ? 'pill-success' : r.status === 'cancelled' ? 'pill-locked' : ''}">${escape(r.status_label)}</span></td>

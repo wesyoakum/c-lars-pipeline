@@ -404,6 +404,12 @@ export function oppPickerScript() {
       if (accountSelect.value === '__new__') {
         accountSelect.value = '';
         openPopup('/accounts/new?popup=1', 'pms-new-account');
+      } else if (accountSelect.value === '__back__' || (accountSelect.value && accountSelect.value.indexOf('__group:') === 0)) {
+        // Two-stage account picker transitions (group_rollup mode):
+        // sentinel values that the two-stage builder consumes to swap
+        // options. Don't trigger contacts reload until a real account
+        // is selected.
+        return;
       } else {
         loadContactsFor(accountSelect.value);
       }

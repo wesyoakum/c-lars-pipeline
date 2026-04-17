@@ -228,16 +228,18 @@ function buildAccountsStatements(rows) {
     const id = uuid();
     const slug = slugify(rawName);
 
-    // 1. accounts row
+    // 1. accounts row. Alias defaults to the legal name so the per-user
+    // "Show aliases" toggle (added in migration 0034) never shows blank
+    // cells. Users can edit it later inline on the accounts list.
     sqlStatements.push(
       [
         `INSERT INTO accounts`,
-        `  (id, name, segment, address_billing, address_physical,`,
+        `  (id, name, alias, segment, address_billing, address_physical,`,
         `   phone, website, notes, owner_user_id,`,
         `   external_source, external_id,`,
         `   created_at, updated_at, created_by_user_id)`,
         `VALUES (`,
-        `  ${sqlLit(id)}, ${sqlLit(rawName)}, NULL, ${sqlLit(rawAddress)}, NULL,`,
+        `  ${sqlLit(id)}, ${sqlLit(rawName)}, ${sqlLit(rawName)}, NULL, ${sqlLit(rawAddress)}, NULL,`,
         `  ${sqlLit(rawPhone)}, NULL, NULL, ${sqlLit(IMPORT_USER_ID)},`,
         `  ${sqlLit(EXTERNAL_SOURCE)}, ${sqlLit(slug)},`,
         `  ${sqlLit(ts)}, ${sqlLit(ts)}, ${sqlLit(IMPORT_USER_ID)}`,

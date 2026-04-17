@@ -316,6 +316,8 @@
       opportunities: [],
       quotes: [],
       accounts: [],
+      groups: [],                      // [{ slug, label, member_ids }]
+      prefs: { show_alias: 0, group_rollup: 0 },
       currentUserId: null,
       currentUserObj: null,
 
@@ -324,6 +326,13 @@
       typedInput: '',
       suggestionIndex: 0,
       answers: {},
+
+      // Two-stage account picker: when group_rollup is on and the user
+      // selects a group with multiple members, we don't advance the step
+      // — we drill into a member-pick sub-stage on the same step.
+      // `null` = top-level (groups + ungrouped); `{ slug, label, member_ids }`
+      // = drilled into a specific group's member list.
+      groupDrillDown: null,
 
       // Pinned "Linked to:" row (or similar) — set by config.applyPrefill
       pinnedPrefix: '',
@@ -337,10 +346,16 @@
         return this.steps()[this.stepIndex] || null;
       },
       currentPrompt: function () {
+        if (this.groupDrillDown) {
+          return 'Which account in ' + this.groupDrillDown.label + '?';
+        }
         var s = this.currentStep();
         return s ? (s.prompt || '') : '';
       },
       currentHint: function () {
+        if (this.groupDrillDown) {
+          return 'Pick the specific account. Shift+Tab to back out to the group list.';
+        }
         var s = this.currentStep();
         return s ? (s.hint || '') : '';
       },
@@ -422,23 +437,83 @@
         if (step.type === 'entity-select') {
           var kinds = step.entityKinds || ['opportunity', 'quote', 'account'];
           var ans = this.answers;
-          var filtered = this.linkables.filter(function (l) {
-            if (kinds.indexOf(l.kind) < 0) return false;
-            if (typeof step.filterFn === 'function' && !step.filterFn(l, ans)) return false;
-            return true;
-          });
-          return linkSuggestions(filtered, this.typedInput).map(function (item) {
-            var mainLabel, sub = '';
+          var showAlias = !!(this.prefs && this.prefs.show_alias);
+          var groupRollup = !!(this.prefs && this.prefs.group_rollup);
+          var accountKindAllowed = kinds.indexOf('account') >= 0;
+
+          // Drill-down stage: only this group's members.
+          if (this.groupDrillDown && accountKindAllowed) {
+            var memberSet = {};
+            (this.groupDrillDown.member_ids || []).forEach(function (id) { memberSet[id] = 1; });
+            var members = this.linkables.filter(function (l) {
+              return l.kind === 'account' && memberSet[l.id];
+            });
+            return linkSuggestions(members, this.typedInput).map(function (item) {
+              var mainLabel = showAlias
+                ? (item.alias || item.name)
+                : (item.alias ? item.name + ' (' + item.alias + ')' : item.name);
+              return {
+                id: 'account:' + item.id,
+                kind: 'account',
+                refId: item.id,
+                label: mainLabel,
+                sub: '',
+                typeLabel: 'Account',
+                _item: item
+              };
+            });
+          }
+
+          // Build base list: opps/quotes pass through; accounts swap to
+          // (groups + ungrouped accounts) when group_rollup is on.
+          var pool = [];
+          var accountById = {};
+          this.accounts.forEach(function (a) { accountById[a.id] = a; });
+          for (var i = 0; i < this.linkables.length; i++) {
+            var l = this.linkables[i];
+            if (kinds.indexOf(l.kind) < 0) continue;
+            if (l.kind === 'account' && groupRollup) {
+              var aRow = accountById[l.id];
+              if (aRow && aRow.parent_group) continue; // grouped: skip; group entry below
+            }
+            if (typeof step.filterFn === 'function' && !step.filterFn(l, ans)) continue;
+            pool.push(l);
+          }
+          if (accountKindAllowed && groupRollup) {
+            // Synthesize one entry per group (with member_ids resolved).
+            (this.groups || []).forEach(function (g) {
+              pool.push({
+                kind: 'account-group',
+                id: g.slug,
+                slug: g.slug,
+                label: g.label,
+                member_ids: g.member_ids || [],
+                searchText: g.label
+              });
+            });
+          }
+
+          return linkSuggestions(pool, this.typedInput).map(function (item) {
+            var mainLabel, sub = '', typeLabel = item.kind.charAt(0).toUpperCase() + item.kind.slice(1);
             if (item.kind === 'opportunity') { mainLabel = item.number; sub = item.title || ''; }
             else if (item.kind === 'quote') { mainLabel = item.number; sub = item.title || ''; }
-            else { mainLabel = item.alias ? item.name + ' (' + item.alias + ')' : item.name; }
+            else if (item.kind === 'account-group') {
+              mainLabel = item.label;
+              var n = (item.member_ids || []).length;
+              sub = n === 1 ? '1 account' : n + ' accounts';
+              typeLabel = 'Group';
+            } else {
+              mainLabel = showAlias
+                ? (item.alias || item.name)
+                : (item.alias ? item.name + ' (' + item.alias + ')' : item.name);
+            }
             return {
               id: item.kind + ':' + item.id,
               kind: item.kind,
               refId: item.id,
               label: mainLabel,
               sub: sub,
-              typeLabel: item.kind.charAt(0).toUpperCase() + item.kind.slice(1),
+              typeLabel: typeLabel,
               _item: item
             };
           });
@@ -464,6 +539,7 @@
         this.suggestionIndex = 0;
         this.pinnedPrefix = '';
         this.pinnedValue = '';
+        this.groupDrillDown = null;
 
         // Seed blank answers
         this.answers = (typeof config.blankAnswers === 'function')
@@ -535,6 +611,8 @@
             self.opportunities = data.opportunities || [];
             self.quotes = data.quotes || [];
             self.accounts = data.accounts || [];
+            self.groups = data.groups || [];
+            self.prefs = data.prefs || { show_alias: 0, group_rollup: 0 };
             self.linkables = buildLinkables(data);
             self.currentUserId = data.current_user_id || null;
             if (self.currentUserId) {
@@ -656,24 +734,53 @@
             }
             return true;
           }
-          var kinds = step.entityKinds || ['opportunity', 'quote', 'account'];
-          var ans2 = this.answers;
-          var filtered = this.linkables.filter(function (l) {
-            if (kinds.indexOf(l.kind) < 0) return false;
-            if (typeof step.filterFn === 'function' && !step.filterFn(l, ans2)) return false;
-            return true;
-          });
-          var ls = linkSuggestions(filtered, val);
-          if (ls.length === 0) {
+          // Use the same suggestion list the user is looking at — that
+          // way picking a group drills down, picking an account in
+          // drill-down stage stores the account answer.
+          var sugs = this.visibleSuggestions();
+          if (!sugs || sugs.length === 0) {
             this.error = 'No matching record.' + (step.required ? '' : ' Tab to skip.');
             return false;
           }
-          var pl = ls[Math.max(0, Math.min(this.suggestionIndex, ls.length - 1))];
+          var picked = sugs[Math.max(0, Math.min(this.suggestionIndex, sugs.length - 1))];
+
+          // Account-group picked at the top level: drill down (multi)
+          // or auto-pick the sole member (single).
+          if (picked.kind === 'account-group') {
+            var memberIds = (picked._item && picked._item.member_ids) || [];
+            if (memberIds.length === 1) {
+              var only = this.accounts.filter(function (a) { return a.id === memberIds[0]; })[0];
+              if (only) {
+                var sa = !!(this.prefs && this.prefs.show_alias);
+                var lbl = sa
+                  ? (only.alias || only.name)
+                  : (only.alias ? only.name + ' (' + only.alias + ')' : only.name);
+                this.answers[step.key] = { kind: 'account', id: only.id, label: lbl };
+                this.groupDrillDown = null;
+                return true;
+              }
+            }
+            // Multi-member: enter drill-down. parseStep returns a special
+            // truthy signal; advance() detects it and stays on this step.
+            this.groupDrillDown = {
+              slug: picked._item.slug,
+              label: picked._item.label,
+              member_ids: memberIds
+            };
+            this.typedInput = '';
+            this.suggestionIndex = 0;
+            this.error = null;
+            this.answers[step.key] = null;
+            return '__drill__';
+          }
+
+          // Account picked from drill-down stage — clear drill state.
           this.answers[step.key] = {
-            kind: pl.kind,
-            id: pl.id,
-            label: linkableDisplayLabel(pl)
+            kind: picked.kind,
+            id: picked.refId,
+            label: picked.label
           };
+          this.groupDrillDown = null;
           return true;
         }
 
@@ -713,7 +820,11 @@
       },
 
       advance: function () {
-        if (!this.parseStep()) return;
+        var parsed = this.parseStep();
+        if (!parsed) return;
+        // Special signal from the entity-select step: user picked a
+        // multi-member group — stay on the step in drill-down mode.
+        if (parsed === '__drill__') { this.focusInput(); return; }
         var idx = this.stepIndex + 1;
         var steps = this.steps();
         while (idx < steps.length && this.shouldSkipStep(steps[idx])) idx++;
@@ -725,6 +836,16 @@
       },
 
       goBack: function () {
+        // If drilled into a group's member list, back out to the group
+        // list first instead of leaving the step.
+        if (this.groupDrillDown) {
+          this.groupDrillDown = null;
+          this.typedInput = '';
+          this.suggestionIndex = 0;
+          this.error = null;
+          this.focusInput();
+          return;
+        }
         var idx = this.stepIndex - 1;
         var steps = this.steps();
         while (idx >= 0 && this.shouldSkipStep(steps[idx])) idx--;

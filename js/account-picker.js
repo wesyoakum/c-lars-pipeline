@@ -54,6 +54,14 @@
     setGrouped(!isGrouped());
   }
 
+  // Per-user server-side pref. When on, the picker switches from the
+  // optgroup-based flat/grouped toggle to a true two-stage flow:
+  // primary list shows groups + ungrouped; picking a group swaps the
+  // <select> to that group's member list.
+  function isGroupRollup() {
+    return !!(window.PMS && window.PMS.userPrefs && window.PMS.userPrefs.group_rollup);
+  }
+
   // Collect the real account options from a <select> that was rendered
   // server-side as a flat list. Returns an array of:
   //   { value, label, group, isPlaceholder, isAddNew }
@@ -84,6 +92,16 @@
   // Used both by the auto-init pass (on groupable <select>s) and by the
   // opportunity detail page's inline-edit activator.
   function buildSelectOptions(sel, items) {
+    // When the per-user `group_rollup` pref is on, dispatch to the
+    // two-stage builder instead of the optgroup-based flat/grouped
+    // path. The two-stage flow shows groups + ungrouped at the top
+    // level; picking a group swaps the same <select> to that group's
+    // member accounts.
+    if (isGroupRollup()) {
+      buildTwoStage(sel, items);
+      return;
+    }
+
     var grouped = isGrouped();
 
     // Remember the current selection so we can restore it after reshuffling.
@@ -152,6 +170,115 @@
     if (it.group) opt.setAttribute('data-group', it.group);
     if (it.selected) opt.selected = true;
     return opt;
+  }
+
+  // Two-stage <select> builder, used when the per-user `group_rollup`
+  // pref is on. The primary stage lists groups (one option per parent
+  // group) + ungrouped accounts. Picking a group swaps the same
+  // <select> to a member-pick stage with a "← Back to groups" sentinel.
+  // A single-member group auto-selects without an extra click.
+  //
+  // The form submits the real account_id once a member is chosen — the
+  // group sentinel value (`__group:<label>`) never reaches the server
+  // because we only allow it as a transient picker state.
+  function buildTwoStage(sel, items) {
+    var initialValue = sel.value;
+    var placeholders = [], specials = [], ungrouped = [], byGroup = {};
+    items.forEach(function (it) {
+      if (it.isPlaceholder) { placeholders.push(it); return; }
+      if (it.isAddNew) { specials.push(it); return; }
+      var g = (it.group || '').trim();
+      if (!g) { ungrouped.push(it); return; }
+      if (!byGroup[g]) byGroup[g] = [];
+      byGroup[g].push(it);
+    });
+
+    // Stash the partition so re-renders (e.g. after a Back) don't have
+    // to re-walk the source items.
+    sel.__pmsTwoStage = {
+      placeholders: placeholders,
+      specials: specials,
+      ungrouped: ungrouped,
+      byGroup: byGroup,
+    };
+
+    // If the initially-selected account belongs to a group, jump
+    // straight into that group's member list so the user sees their
+    // current selection in context.
+    var initialGroupLabel = '';
+    if (initialValue) {
+      Object.keys(byGroup).some(function (g) {
+        if (byGroup[g].some(function (it) { return it.value === initialValue; })) {
+          initialGroupLabel = g;
+          return true;
+        }
+        return false;
+      });
+    }
+
+    if (initialGroupLabel) {
+      renderMembers(sel, initialGroupLabel, initialValue);
+    } else {
+      renderTopLevel(sel, initialValue);
+    }
+
+    if (!sel.__pmsTwoStageBound) {
+      sel.__pmsTwoStageBound = true;
+      sel.addEventListener('change', function () {
+        var v = sel.value;
+        if (v && v.indexOf('__group:') === 0) {
+          var label = v.slice('__group:'.length);
+          var members = (sel.__pmsTwoStage.byGroup[label]) || [];
+          // Single-member group: auto-pick the only member without
+          // forcing a second click.
+          if (members.length === 1) {
+            renderTopLevel(sel, members[0].value);
+            sel.value = members[0].value;
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+            return;
+          }
+          renderMembers(sel, label, '');
+        } else if (v === '__back__') {
+          renderTopLevel(sel, '');
+        }
+      });
+    }
+  }
+
+  function renderTopLevel(sel, restoreValue) {
+    var s = sel.__pmsTwoStage;
+    while (sel.firstChild) sel.removeChild(sel.firstChild);
+    s.placeholders.forEach(function (it) { sel.appendChild(makeOption(it)); });
+    Object.keys(s.byGroup).sort(function (a, b) {
+      return a.toLowerCase().localeCompare(b.toLowerCase());
+    }).forEach(function (g) {
+      var opt = document.createElement('option');
+      opt.value = '__group:' + g;
+      var n = s.byGroup[g].length;
+      opt.textContent = g + (n === 1 ? ' \u2014 1 account' : ' \u2014 ' + n + ' accounts');
+      opt.setAttribute('data-is-group', '1');
+      sel.appendChild(opt);
+    });
+    s.ungrouped.forEach(function (it) { sel.appendChild(makeOption(it)); });
+    s.specials.forEach(function (it) { sel.appendChild(makeOption(it)); });
+    if (restoreValue) sel.value = restoreValue;
+  }
+
+  function renderMembers(sel, label, restoreValue) {
+    var s = sel.__pmsTwoStage;
+    var members = (s.byGroup[label]) || [];
+    while (sel.firstChild) sel.removeChild(sel.firstChild);
+    var back = document.createElement('option');
+    back.value = '__back__';
+    back.textContent = '\u2190 Back to groups';
+    sel.appendChild(back);
+    var heading = document.createElement('option');
+    heading.value = '';
+    heading.textContent = '\u2014 Pick an account in ' + label + ' \u2014';
+    heading.disabled = true;
+    sel.appendChild(heading);
+    members.forEach(function (it) { sel.appendChild(makeOption(it)); });
+    if (restoreValue) sel.value = restoreValue;
   }
 
   // Run through every groupable <select> currently in the DOM and

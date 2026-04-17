@@ -226,10 +226,16 @@ export function listBulkEditScript({ patchUrl, deleteUrl } = {}) {
         var td = document.createElement('td');
         td.className = 'col-bulk-select';
         td.dataset.col = '__bulk__';
-        var cb = document.createElement('input');
-        cb.type = 'checkbox';
-        cb.className = 'bulk-row-select';
-        td.appendChild(cb);
+        // Skip synthetic group-rollup rows (data-is-group="1") on the
+        // accounts list — they aren't real accounts and have no
+        // editable fields or delete URL. They still get a placeholder
+        // td so column alignment stays consistent across the table.
+        if (!tr.hasAttribute('data-is-group')) {
+          var cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.className = 'bulk-row-select';
+          td.appendChild(cb);
+        }
         // Stop the row-level click delegation (inline-edit) from firing
         // when the user just wants to tick the checkbox.
         td.addEventListener('click', function(e) { e.stopPropagation(); });

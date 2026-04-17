@@ -17,6 +17,7 @@ import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
 import { loadStageCatalog } from '../lib/stages.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
+import { displayAccountForGroupMode } from '../lib/account-groups.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
@@ -28,11 +29,18 @@ const TYPE_LABELS = {
 export async function onRequestGet(context) {
   const { env, data, request } = context;
   const user = data?.user;
+  const prefs = {
+    show_alias: !!user?.show_alias,
+    group_rollup: !!user?.group_rollup,
+  };
   const url = new URL(request.url);
 
   // No server-side filter form — all filtering happens in the table
   // controller (per-column + quick search). Pull every row up to a
   // generous limit and let the client narrow it down.
+  // Pull alias + parent_group alongside name so the Account column can
+  // honor the per-user `show_alias` and `group_rollup` toggles via
+  // displayAccountForGroupMode().
   const rows = await all(
     env.DB,
     `SELECT o.id, o.number, o.title, o.transaction_type, o.stage,
@@ -40,7 +48,9 @@ export async function onRequestGet(context) {
             o.created_at, o.updated_at,
             o.expected_close_date, o.rfq_received_date, o.rfq_due_date,
             o.rfi_due_date, o.quoted_date,
-            a.name AS account_name, a.id AS account_id
+            a.name AS account_name, a.alias AS account_alias,
+            a.parent_group AS account_parent_group,
+            a.id AS account_id
        FROM opportunities o
        LEFT JOIN accounts a ON a.id = o.account_id
       ORDER BY o.updated_at DESC
@@ -74,12 +84,23 @@ export async function onRequestGet(context) {
 
   // Shape rows once so each <tr> knows its sort/filter values and the
   // controller can read them off data- attributes without parsing text.
-  const rowData = rows.map((r) => ({
+  const rowData = rows.map((r) => {
+    const acct = displayAccountForGroupMode(
+      {
+        id: r.account_id,
+        name: r.account_name,
+        alias: r.account_alias,
+        parent_group: r.account_parent_group,
+      },
+      prefs
+    );
+    return ({
     id: r.id,
     number: r.number ?? '',
     title: r.title ?? '',
     account_id: r.account_id ?? '',
-    account_name: r.account_name ?? '',
+    account_name: acct.label,
+    account_href: acct.href,
     type_label: parseTransactionTypes(r.transaction_type).map(t => TYPE_LABELS[t] ?? t).join(', ') || '—',
     stage_label: stageLabel(catalog, parseTransactionTypes(r.transaction_type)[0] ?? 'spares', r.stage),
     value: r.estimated_value_usd == null ? '' : Number(r.estimated_value_usd),
@@ -92,7 +113,8 @@ export async function onRequestGet(context) {
     rfq_due: r.rfq_due_date ?? '',
     rfi_due: r.rfi_due_date ?? '',
     quoted: r.quoted_date ?? '',
-  }));
+  });
+  });
 
   const body = html`
     <section class="card">
@@ -136,7 +158,7 @@ export async function onRequestGet(context) {
                       </td>
                       <td class="col-account_name" data-col="account_name">
                         ${r.account_id
-                          ? html`<a href="/accounts/${escape(r.account_id)}">${escape(r.account_name || '—')}</a>`
+                          ? html`<a href="${escape(r.account_href)}">${escape(r.account_name || '—')}</a>`
                           : html`<span class="muted">—</span>`}
                       </td>
                       <td class="col-type_label" data-col="type_label">${escape(r.type_label)}</td>

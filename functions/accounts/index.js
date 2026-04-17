@@ -19,6 +19,7 @@ import { parseAddressForm, buildAddressStatements } from '../lib/address_editor.
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieText, ieSelect, listInlineEditScript } from '../lib/list-inline-edit.js';
 import { listBulkEditScript } from '../lib/list-bulk-edit.js';
+import { slugifyGroup, displayAccountName } from '../lib/account-groups.js';
 
 // Keep in sync with functions/accounts/[id]/index.js::SEGMENT_OPTIONS.
 // Used by the inline-edit select in the segment column.
@@ -41,11 +42,33 @@ const ACTIVE_OPTIONS = [
 
 /**
  * GET /accounts — list accounts with full client-side sort/filter/search.
+ *
+ * Honors two per-user prefs from migration 0034 (set via the gear-icon
+ * settings popup in the header):
+ *
+ *   show_alias    — the Name column displays the alias as plain text
+ *                   (inline-edit disabled for that cell, since the
+ *                   underlying `name` field would still be the patch
+ *                   target). The Alias column always shows alias.
+ *                   Initial server sort is alias-aware.
+ *
+ *   group_rollup  — accounts sharing a parent_group label collapse
+ *                   into one synthetic row per group, with summed
+ *                   counts and a link to /accounts/group/:slug.
+ *                   Inline-edit is disabled on grouped rows.
  */
 export async function onRequestGet(context) {
   const { env, data, request } = context;
   const user = data?.user;
+  const prefs = {
+    show_alias: !!user?.show_alias,
+    group_rollup: !!user?.group_rollup,
+  };
   const url = new URL(request.url);
+
+  const orderBy = prefs.show_alias
+    ? `COALESCE(NULLIF(a.alias, ''), a.name)`
+    : `a.name`;
 
   const rows = await all(
     env.DB,
@@ -54,7 +77,7 @@ export async function onRequestGet(context) {
             (SELECT COUNT(*) FROM contacts c WHERE c.account_id = a.id) AS contact_count,
             (SELECT COUNT(*) FROM opportunities o WHERE o.account_id = a.id) AS opp_count
        FROM accounts a
-      ORDER BY a.name
+      ORDER BY ${orderBy}
       LIMIT 500`
   );
 
@@ -85,8 +108,15 @@ export async function onRequestGet(context) {
     { key: 'updated',       label: 'Updated',   sort: 'date',   filter: 'text',   default: true },
   ];
 
-  const rowData = rows.map(r => ({
+  // Build the per-row payload. When `prefs.show_alias` is on we swap the
+  // value rendered in the Name column to the alias (the legal name is
+  // still on r.name and accessible from the detail page) — the Alias
+  // column always shows alias. The quicksearch blob stays the union of
+  // name + alias + parent_group regardless, so typing any of them works.
+  const baseRows = rows.map(r => ({
     id: r.id,
+    is_group: false,
+    open_href: `/accounts/${r.id}`,
     // `name` is the quicksearch text blob (name + alias + parent_group
     // joined) so typing "helix", "HR" (alias), or "Super Big Corp"
     // (group) all find Helix Robotics Inc. After an inline edit the
@@ -95,7 +125,8 @@ export async function onRequestGet(context) {
     name: [r.name ?? '', r.alias ?? '', r.parent_group ?? '']
       .filter(Boolean)
       .join(' '),
-    name_display: r.name ?? '',
+    name_display: displayAccountName(r, prefs),
+    legal_name: r.name ?? '',
     // Raw alias. Unaliased rows sort as empty strings (list-table.js
     // pushes empty/null to the end). Display uses a muted fallback to
     // the name, handled by ieText({ fallbackText }).
@@ -113,6 +144,64 @@ export async function onRequestGet(context) {
     website: r.website ?? '',
     updated: (r.updated_at ?? '').slice(0, 10),
   }));
+
+  // When `prefs.group_rollup` is on, accounts that share a parent_group
+  // collapse into one synthetic row each. Counts are summed; segment
+  // and status fall back to "Multiple" / "mixed" when members differ.
+  // The synthetic row's open link points to the existing group view
+  // at /accounts/group/:slug.
+  let rowData;
+  if (prefs.group_rollup) {
+    const groupBuckets = new Map();
+    const standalone = [];
+    for (const r of baseRows) {
+      const g = (r.parent_group || '').trim();
+      if (!g) { standalone.push(r); continue; }
+      if (!groupBuckets.has(g)) groupBuckets.set(g, []);
+      groupBuckets.get(g).push(r);
+    }
+    const grouped = [...groupBuckets.entries()].map(([label, members]) => {
+      const slug = slugifyGroup(label);
+      const segments = new Set(members.map((m) => m.segment).filter(Boolean));
+      const statuses = new Set(members.map((m) => m.status));
+      const updated = members.reduce(
+        (max, m) => (m.updated > max ? m.updated : max),
+        ''
+      );
+      const segmentCell = segments.size === 1 ? [...segments][0]
+        : segments.size === 0 ? '' : 'Multiple';
+      const statusCell = statuses.size === 1 ? [...statuses][0] : 'mixed';
+      return {
+        id: 'group:' + slug,
+        is_group: true,
+        open_href: `/accounts/group/${slug}`,
+        // Quicksearch blob: group label + member names + member aliases
+        // so typing the group OR any member still finds the row.
+        name: [label, ...members.map((m) => m.legal_name), ...members.map((m) => m.alias)]
+          .filter(Boolean)
+          .join(' '),
+        name_display: label,
+        legal_name: label,
+        alias: '',
+        parent_group: label,
+        segment: segmentCell,
+        is_active: statuses.size > 1 ? null : (members[0].is_active),
+        status: statusCell,
+        phone: '',
+        contact_count: members.reduce((s, m) => s + (m.contact_count || 0), 0),
+        opp_count: members.reduce((s, m) => s + (m.opp_count || 0), 0),
+        website: '',
+        updated,
+      };
+    });
+    // Merge groups + standalone rows, sorted by display name (matches
+    // the alphabetic ORDER BY behavior the user expects).
+    rowData = [...grouped, ...standalone].sort((a, b) =>
+      (a.name_display || '').toLowerCase().localeCompare((b.name_display || '').toLowerCase())
+    );
+  } else {
+    rowData = baseRows;
+  }
 
   const tabs = subnavTabs(
     [
@@ -144,32 +233,47 @@ export async function onRequestGet(context) {
                   <tr data-row-id="${escape(r.id)}"
                       data-name_display="${escape(r.name_display)}"
                       data-combined-name="name_display alias parent_group"
+                      ${r.is_group ? raw('data-is-group="1"') : ''}
                       ${raw(rowDataAttrs(columns, r))}>
                     <td class="col-open" data-col="open">
-                      <a class="row-open-link" href="/accounts/${escape(r.id)}" title="Open account" aria-label="Open account">\u2197</a>
+                      <a class="row-open-link" href="${escape(r.open_href)}" title="${r.is_group ? 'Open group' : 'Open account'}" aria-label="${r.is_group ? 'Open group' : 'Open account'}">\u2197</a>
                     </td>
                     <td class="col-name" data-col="name">
-                      ${ieText('name', r.name_display)}
+                      ${r.is_group || prefs.show_alias
+                        ? html`<span class="cell-text">${escape(r.name_display)}</span>`
+                        : ieText('name', r.name_display)}
                     </td>
                     <td class="col-alias" data-col="alias">
-                      ${ieText('alias', r.alias, { fallbackText: r.name_display })}
+                      ${r.is_group
+                        ? html`<span class="cell-text muted">\u2014</span>`
+                        : ieText('alias', r.alias, { fallbackText: r.legal_name })}
                     </td>
                     <td class="col-parent_group" data-col="parent_group">
-                      ${ieSelect('parent_group', r.parent_group, groupOptions, { allowNew: true })}
+                      ${r.is_group
+                        ? html`<span class="cell-text">${escape(r.parent_group)}</span>`
+                        : ieSelect('parent_group', r.parent_group, groupOptions, { allowNew: true })}
                     </td>
                     <td class="col-segment" data-col="segment">
-                      ${ieSelect('segment', r.segment, SEGMENT_OPTIONS)}
+                      ${r.is_group
+                        ? html`<span class="cell-text">${escape(r.segment)}</span>`
+                        : ieSelect('segment', r.segment, SEGMENT_OPTIONS)}
                     </td>
                     <td class="col-status" data-col="status">
-                      ${ieSelect('is_active', r.status, ACTIVE_OPTIONS)}
+                      ${r.is_group
+                        ? html`<span class="cell-text">${escape(r.status)}</span>`
+                        : ieSelect('is_active', r.status, ACTIVE_OPTIONS)}
                     </td>
                     <td class="col-phone" data-col="phone">
-                      ${ieText('phone', r.phone, { inputType: 'tel' })}
+                      ${r.is_group
+                        ? html`<span class="cell-text muted">\u2014</span>`
+                        : ieText('phone', r.phone, { inputType: 'tel' })}
                     </td>
                     <td class="col-contact_count num" data-col="contact_count">${r.contact_count}</td>
                     <td class="col-opp_count num" data-col="opp_count">${r.opp_count}</td>
                     <td class="col-website" data-col="website">
-                      ${ieText('website', r.website, { inputType: 'url' })}
+                      ${r.is_group
+                        ? html`<span class="cell-text muted">\u2014</span>`
+                        : ieText('website', r.website, { inputType: 'url' })}
                     </td>
                     <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
                   </tr>

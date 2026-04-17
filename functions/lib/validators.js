@@ -259,9 +259,15 @@ export function validateAccount(input) {
   // Alias defaults to the name with the corporate suffix stripped
   // (", LLC" / ", Inc." / etc.) so list views show the conversational
   // name instead of the legal name. Only applied when the caller didn't
-  // supply an explicit alias.
+  // supply an explicit alias. Migration 0034 guarantees alias is never
+  // null/empty so the per-user "Show aliases" toggle never produces a
+  // blank cell — if both the explicit alias and the derived alias are
+  // empty we fall back to the raw name.
   const rawAlias = trim(input.alias);
-  value.alias = nonEmpty(rawAlias) ? rawAlias : (deriveAlias(value.name) || null);
+  const derived = deriveAlias(value.name);
+  value.alias = nonEmpty(rawAlias)
+    ? rawAlias
+    : (nonEmpty(derived) ? derived : (value.name || null));
 
   value.segment = trim(input.segment) || null;
   value.address_billing = trim(input.address_billing) || null;

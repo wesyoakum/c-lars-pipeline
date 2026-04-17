@@ -1289,6 +1289,13 @@ function oppInline(oppId, accountId) {
         input.addEventListener('change', () => {
           if (input.value === '__new__') {
             this.showNewContactForm(el, input);
+          } else if (input.value === '__back__' || (input.value && input.value.indexOf('__group:') === 0)) {
+            // Two-stage account picker transitions (group_rollup mode):
+            // these are picker-internal sentinels, not real account ids.
+            // The two-stage builder swaps the <select>'s options on the
+            // same event; we just skip the save until a real member id
+            // is selected.
+            return;
           } else {
             this.save(el, input);
           }

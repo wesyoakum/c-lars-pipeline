@@ -57,7 +57,14 @@ export async function onRequestPost(context) {
   const before = await one(env.DB, `SELECT * FROM accounts WHERE id = ?`, [accountId]);
   if (!before) return json({ ok: false, error: 'Not found' }, 404);
 
-  const newValue = coerce(field, rawValue);
+  let newValue = coerce(field, rawValue);
+  // Alias must never be empty — the per-user "Show aliases" toggle relies
+  // on every account having a non-empty alias (see migration 0034). If
+  // the user clears the alias inline, fall back to the legal name rather
+  // than allowing null.
+  if (field === 'alias' && (newValue === null || newValue === '')) {
+    newValue = before.name;
+  }
   const ts = now();
 
   const changes = {};

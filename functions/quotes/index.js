@@ -13,11 +13,16 @@ import {
 } from '../lib/validators.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
+import { displayAccountForGroupMode } from '../lib/account-groups.js';
 
 export async function onRequestGet(context) {
   const { env, data, request } = context;
   const user = data?.user;
   const url = new URL(request.url);
+  const prefs = {
+    show_alias: !!(user && user.show_alias),
+    group_rollup: !!(user && user.group_rollup),
+  };
 
   const rows = await all(
     env.DB,
@@ -26,7 +31,8 @@ export async function onRequestGet(context) {
             q.created_at, q.updated_at,
             q.opportunity_id,
             o.number AS opp_number, o.title AS opp_title,
-            a.name AS account_name, a.id AS account_id
+            a.name AS account_name, a.id AS account_id,
+            a.alias AS account_alias, a.parent_group AS account_parent_group
        FROM quotes q
        LEFT JOIN opportunities o ON o.id = q.opportunity_id
        LEFT JOIN accounts a      ON a.id = o.account_id
@@ -58,30 +64,44 @@ export async function onRequestGet(context) {
     { key: 'created',      label: 'Created',      sort: 'date',   filter: 'text',   default: false },
   ];
 
-  const rowData = rows.map(r => ({
-    id: r.id,
-    opp_id: r.opportunity_id,
-    number: r.number ?? '',
-    revision: r.revision ?? '',
-    type_label: quoteTypeDisplayLabel(r.quote_type),
-    status_label: QUOTE_STATUS_LABELS[r.status] ?? r.status ?? '',
-    status: r.status,
-    title: r.title ?? '',
-    // Combine number + opp title into the filter data so the quicksearch
-    // matches either — typing part of the title finds the row even when the
-    // cell displays the number prominently. The raw number is kept in
-    // `opp_number_display` for the cell render.
-    opp_number: `${r.opp_number ?? ''} ${r.opp_title ?? ''}`.trim(),
-    opp_number_display: r.opp_number ?? '',
-    opp_title: r.opp_title ?? '',
-    account_name: r.account_name ?? '',
-    account_id: r.account_id ?? '',
-    total: r.total_price != null ? Number(r.total_price) : '',
-    total_display: r.total_price != null ? fmtDollar(r.total_price) : '',
-    valid_until: r.valid_until ?? '',
-    updated: (r.updated_at ?? '').slice(0, 10),
-    created: (r.created_at ?? '').slice(0, 10),
-  }));
+  const rowData = rows.map(r => {
+    const acct = r.account_id
+      ? displayAccountForGroupMode(
+          {
+            id: r.account_id,
+            name: r.account_name,
+            alias: r.account_alias,
+            parent_group: r.account_parent_group,
+          },
+          prefs
+        )
+      : { label: '', href: '' };
+    return {
+      id: r.id,
+      opp_id: r.opportunity_id,
+      number: r.number ?? '',
+      revision: r.revision ?? '',
+      type_label: quoteTypeDisplayLabel(r.quote_type),
+      status_label: QUOTE_STATUS_LABELS[r.status] ?? r.status ?? '',
+      status: r.status,
+      title: r.title ?? '',
+      // Combine number + opp title into the filter data so the quicksearch
+      // matches either — typing part of the title finds the row even when the
+      // cell displays the number prominently. The raw number is kept in
+      // `opp_number_display` for the cell render.
+      opp_number: `${r.opp_number ?? ''} ${r.opp_title ?? ''}`.trim(),
+      opp_number_display: r.opp_number ?? '',
+      opp_title: r.opp_title ?? '',
+      account_name: acct.label || '',
+      account_href: acct.href || '',
+      account_id: r.account_id ?? '',
+      total: r.total_price != null ? Number(r.total_price) : '',
+      total_display: r.total_price != null ? fmtDollar(r.total_price) : '',
+      valid_until: r.valid_until ?? '',
+      updated: (r.updated_at ?? '').slice(0, 10),
+      created: (r.created_at ?? '').slice(0, 10),
+    };
+  });
 
   function statusPillClass(s) {
     switch (s) {
@@ -134,7 +154,7 @@ export async function onRequestGet(context) {
                     <td class="col-opp_number" data-col="opp_number"><a href="/opportunities/${escape(r.opp_id)}"><code>${escape(r.opp_number_display)}</code> ${escape(r.opp_title)}</a></td>
                     <td class="col-account_name" data-col="account_name">
                       ${r.account_id
-                        ? html`<a href="/accounts/${escape(r.account_id)}">${escape(r.account_name)}</a>`
+                        ? html`<a href="${escape(r.account_href)}">${escape(r.account_name)}</a>`
                         : html`<span class="muted">\u2014</span>`}
                     </td>
                     <td class="col-status_label" data-col="status_label"><span class="pill ${statusPillClass(r.status)}">${escape(r.status_label)}</span></td>

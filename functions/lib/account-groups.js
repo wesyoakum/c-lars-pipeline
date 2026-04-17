@@ -69,13 +69,84 @@ export async function listGroupLabels(env) {
  * parentheses so it shows up in the picker's flat mode. `group` is
  * null when the account has no parent_group label; the client treats
  * those as "Ungrouped".
+ *
+ * When `prefs.show_alias` is on, the label is just the alias (since
+ * every account is guaranteed to have one); otherwise it falls back
+ * to the legacy "Name (alias)" format.
  */
-export function buildAccountPickerItems(accounts) {
+export function buildAccountPickerItems(accounts, prefs = {}) {
+  const showAlias = !!prefs.show_alias;
   return (accounts || []).map((a) => ({
     value: a.id,
-    label: a.alias ? `${a.name} (${a.alias})` : a.name,
+    label: showAlias
+      ? (a.alias || a.name)
+      : (a.alias ? `${a.name} (${a.alias})` : a.name),
     group: a.parent_group || null,
   }));
+}
+
+/**
+ * Returns the string to render when displaying an account's name,
+ * respecting the per-user `show_alias` preference. Every account is
+ * guaranteed (via app-layer enforcement and migration 0034) to have
+ * a non-empty alias, but we fall back to name defensively.
+ */
+export function displayAccountName(account, prefs = {}) {
+  if (!account) return '';
+  if (prefs.show_alias) return account.alias || account.name || '';
+  return account.name || account.alias || '';
+}
+
+/**
+ * Returns `{ label, href }` for the "Account" cell on entity lists
+ * (opportunities, quotes, jobs, activities, board), respecting both
+ * per-user prefs:
+ *
+ *   - When `group_rollup` is on AND the account belongs to a group,
+ *     the cell shows the group label and links to the group view.
+ *   - Otherwise, the cell shows the displayAccountName and links to
+ *     the per-account detail page.
+ *
+ * Pass a plain object with `id`, `name`, `alias`, `parent_group` keys
+ * — typically the joined fields on a row.
+ */
+export function displayAccountForGroupMode(account, prefs = {}) {
+  if (!account || !account.id) {
+    return { label: '', href: '' };
+  }
+  if (prefs.group_rollup && account.parent_group) {
+    return {
+      label: account.parent_group,
+      href: `/accounts/group/${slugifyGroup(account.parent_group)}`,
+    };
+  }
+  return {
+    label: displayAccountName(account, prefs),
+    href: `/accounts/${account.id}`,
+  };
+}
+
+/**
+ * Shape a list of distinct parent_group labels into the `{ slug, label,
+ * member_ids }` payload used by the two-stage account picker (when the
+ * `group_rollup` pref is on). The picker shows groups + ungrouped
+ * accounts in the primary list; selecting a group then drills into a
+ * member-pick step.
+ *
+ * Accepts the same `accounts` array as `buildAccountPickerItems` —
+ * groups are derived by partitioning on `parent_group`.
+ */
+export function buildAccountPickerGroups(accounts) {
+  const byGroup = new Map();
+  for (const a of accounts || []) {
+    const g = (a.parent_group || '').trim();
+    if (!g) continue;
+    if (!byGroup.has(g)) byGroup.set(g, { slug: slugifyGroup(g), label: g, member_ids: [] });
+    byGroup.get(g).member_ids.push(a.id);
+  }
+  return [...byGroup.values()].sort((a, b) =>
+    a.label.toLowerCase().localeCompare(b.label.toLowerCase())
+  );
 }
 
 /**
