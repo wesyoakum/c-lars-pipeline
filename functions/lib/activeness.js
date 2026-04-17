@@ -15,8 +15,11 @@
 //                           revision_issued, accepted, expired)
 //                  ('completed' is new, hidden, set by cascade
 //                   when a job moves to 'complete')
-//   Opportunity  stage NOT IN (closed_won, closed_lost, closed_abandoned)
+//   Opportunity  stage NOT IN (closed_lost, closed_abandoned)
 //                AND (no quotes OR has >= 1 active quote)
+//                Note: closed_won is treated as active — a closed-won
+//                deal is "live business" worth seeing in working lists
+//                until the job that spawned from it finishes.
 //   Contact      parent account.is_active = 1
 //   Account      is_active = 1
 //
@@ -54,11 +57,18 @@ export const INACTIVE_JOB_STATUSES = [
   'cancelled',
 ];
 
+// Stages that mark an opportunity as "inactive" for the active_only
+// filter. Intentionally excludes `closed_won`: won deals stay in the
+// active list until the downstream job is complete.
 export const CLOSED_OPPORTUNITY_STAGES = [
-  'closed_won',
   'closed_lost',
   'closed_abandoned',
 ];
+
+// Separate constant for the inactive-opportunities section on the
+// account detail page — kept identical to CLOSED_OPPORTUNITY_STAGES
+// for now but named distinctly so intent is obvious at call sites.
+export const INACTIVE_OPPORTUNITY_STAGES = CLOSED_OPPORTUNITY_STAGES;
 
 /**
  * True when the `active_only` user pref is on.

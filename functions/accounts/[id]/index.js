@@ -29,6 +29,7 @@ import {
 import { slugifyGroup, loadSiblingAccounts, listGroupLabels } from '../../lib/account-groups.js';
 import { loadStageCatalog } from '../../lib/stages.js';
 import { fmtDollar } from '../../lib/pricing.js';
+import { INACTIVE_OPPORTUNITY_STAGES } from '../../lib/activeness.js';
 
 const UPDATE_FIELDS = [
   'name',
@@ -295,11 +296,16 @@ export async function onRequestGet(context) {
       title: o.title ?? '',
       typeLabel: oppTypeDisplay(o.transaction_type),
       stageLabel: stageLabelFor(stageCatalog, firstType, o.stage),
+      stage: o.stage,
       value: o.estimated_value_usd,
       owner: userDisplayById.get(o.owner_user_id) ?? '',
       updated: (o.updated_at ?? '').slice(0, 10),
     };
   });
+  // Split into active vs inactive (lost / abandoned). Won opps stay in
+  // the active section until the downstream job finishes.
+  const activeOppRows   = oppRows.filter((o) => !INACTIVE_OPPORTUNITY_STAGES.includes(o.stage));
+  const inactiveOppRows = oppRows.filter((o) =>  INACTIVE_OPPORTUNITY_STAGES.includes(o.stage));
   const quoteRows = accountQuotes.map((q) => ({
     id: q.id,
     opportunity_id: q.opportunity_id,
@@ -498,6 +504,34 @@ export async function onRequestGet(context) {
         `}
     </section>`;
 
+  const renderOppTable = (rows) => html`
+    <table class="data compact">
+      <thead>
+        <tr>
+          <th>Number</th>
+          <th>Title</th>
+          <th>Type</th>
+          <th>Stage</th>
+          <th class="num">Value</th>
+          <th>Owner</th>
+          <th>Updated</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map((o) => html`
+          <tr>
+            <td><a href="/opportunities/${escape(o.id)}"><code>${escape(o.number)}</code></a></td>
+            <td><a href="/opportunities/${escape(o.id)}">${escape(o.title || '(untitled)')}</a></td>
+            <td>${escape(o.typeLabel)}</td>
+            <td><span class="pill">${escape(o.stageLabel)}</span></td>
+            <td class="num">${escape(o.value != null ? fmtDollar(o.value) : '\u2014')}</td>
+            <td>${escape(o.owner)}</td>
+            <td><small class="muted">${escape(o.updated)}</small></td>
+          </tr>
+        `)}
+      </tbody>
+    </table>`;
+
   const opportunitiesTab = html`
     <section class="card">
       <div class="card-header">
@@ -507,35 +541,19 @@ export async function onRequestGet(context) {
       </div>
       ${oppRows.length === 0
         ? html`<p class="muted">No opportunities yet.</p>`
-        : html`
-          <table class="data compact">
-            <thead>
-              <tr>
-                <th>Number</th>
-                <th>Title</th>
-                <th>Type</th>
-                <th>Stage</th>
-                <th class="num">Value</th>
-                <th>Owner</th>
-                <th>Updated</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${oppRows.map((o) => html`
-                <tr>
-                  <td><a href="/opportunities/${escape(o.id)}"><code>${escape(o.number)}</code></a></td>
-                  <td><a href="/opportunities/${escape(o.id)}">${escape(o.title || '(untitled)')}</a></td>
-                  <td>${escape(o.typeLabel)}</td>
-                  <td><span class="pill">${escape(o.stageLabel)}</span></td>
-                  <td class="num">${escape(o.value != null ? fmtDollar(o.value) : '\u2014')}</td>
-                  <td>${escape(o.owner)}</td>
-                  <td><small class="muted">${escape(o.updated)}</small></td>
-                </tr>
-              `)}
-            </tbody>
-          </table>
-        `}
-    </section>`;
+        : activeOppRows.length === 0
+          ? html`<p class="muted">No active opportunities. See inactive below.</p>`
+          : renderOppTable(activeOppRows)}
+    </section>
+    ${inactiveOppRows.length > 0 ? html`
+      <section class="card">
+        <div class="card-header">
+          <h2>Inactive opportunities</h2>
+          <span class="muted">Lost or abandoned. Kept here for history.</span>
+        </div>
+        ${renderOppTable(inactiveOppRows)}
+      </section>
+    ` : ''}`;
 
   const quotesTab = html`
     <section class="card">
