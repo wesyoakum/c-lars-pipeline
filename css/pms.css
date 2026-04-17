@@ -3470,21 +3470,34 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 .board-zone-messages .board-zone-heading,
 .board-sidebar-left > .board-zone-heading { text-align: right; }
 .board-zone-heading {
+  font-family: var(--board-hand);
+  font-size: 1.7rem;
+  font-weight: 700;
+  color: var(--board-ink-blue);
+  margin: 0 0 0.15rem 0.5rem;
+  letter-spacing: 0.02em;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-decoration-color: rgba(42,74,127,0.4);
+  text-underline-offset: 4px;
+}
+/* "Message Everyone" only — matches the message bubbles below, which
+   use the default system font. To-do and Coming soon zones keep the
+   handwriting styling. */
+.board-zone-messages .board-zone-heading,
+.board-sidebar-left > .board-zone-heading {
   font-family: var(--font);
   font-size: 1rem;
   font-weight: 600;
-  color: var(--board-ink-blue);
-  margin: 0 0 0.15rem 0.5rem;
   letter-spacing: 0;
-  text-decoration: underline;
   text-decoration-thickness: 1px;
   text-decoration-color: rgba(42,74,127,0.35);
   text-underline-offset: 3px;
 }
 .board-zone-empty {
   margin: 0.4rem 0.6rem;
-  font-family: var(--font);
-  font-size: 0.85rem;
+  font-family: var(--board-hand);
+  font-size: 1rem;
   color: rgba(0,0,0,0.45);
   font-style: italic;
 }

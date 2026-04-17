@@ -474,10 +474,14 @@ export async function onRequestGet(context) {
     ${bodyMain}
 
     <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      ${tab === 'executive' ? raw(buildChartInitScript('rpt-', chartsJson)) : ''}
-      ${tab === 'activity' ? raw(buildActivityChartsScript(activityPayload)) : ''}
-    });
+    // Alpine's defer-loaded script fires alpine:init BEFORE DOMContentLoaded,
+    // so anything that registers Alpine.data() must run synchronously (not
+    // inside a DOMContentLoaded wrapper) or it misses the event and the
+    // component never gets registered. buildActivityChartsScript now
+    // registers its alpine:init listener up-front and only waits for DOM
+    // readiness before drawing canvases.
+    ${tab === 'executive' ? raw(`document.addEventListener('DOMContentLoaded', function() { ${buildChartInitScript('rpt-', chartsJson)} });`) : ''}
+    ${tab === 'activity' ? raw(buildActivityChartsScript(activityPayload)) : ''}
     </script>
   `;
 
@@ -510,8 +514,92 @@ function formatMoney(n) {
 function buildActivityChartsScript(payloadJson) {
   return `
 (function () {
-  if (typeof Chart === 'undefined') { console.error('Chart.js not loaded'); return; }
   var DATA = ${payloadJson};
+
+  // Register the Alpine component *synchronously* so our alpine:init
+  // listener beats Alpine's start() call. Alpine is loaded via <script
+  // defer>, which runs after HTML parsing but before DOMContentLoaded,
+  // so any Alpine.data() registration inside a DOMContentLoaded callback
+  // is too late — that's why the outcome-pie card was silently empty.
+  document.addEventListener('alpine:init', function () {
+    Alpine.data('outcomePie', function () {
+      return {
+        range: '12m',
+        quoteType: '',
+        chart: null,
+        total: 0,
+        init: function () {
+          var self = this;
+          // Defer until both the canvas is in the DOM and Chart.js
+          // has loaded. Chart.js is loaded via a regular (non-deferred)
+          // <script> tag earlier in the layout, so by the time Alpine
+          // evaluates x-init, Chart is usually already available —
+          // but we still requestAnimationFrame to be safe.
+          requestAnimationFrame(function () { self.render(); });
+        },
+        render: function () {
+          if (typeof Chart === 'undefined') return;
+          var canvas = document.getElementById('act-outcomes');
+          if (!canvas) return;
+          var cutoff = new Date();
+          var months = this.range === '3m' ? 3 : this.range === '6m' ? 6 : 12;
+          cutoff.setMonth(cutoff.getMonth() - months);
+          var cutoffIso = cutoff.toISOString().slice(0, 10);
+          var typeFilter = this.quoteType;
+          var counts = { accepted: 0, rejected: 0, expired: 0, cancelled: 0 };
+          var total = 0;
+          DATA.outcomes.forEach(function (r) {
+            if (!r.submitted_at || r.submitted_at < cutoffIso) return;
+            if (typeFilter && r.quote_type !== typeFilter) return;
+            if (!counts.hasOwnProperty(r.outcome)) return; // pending etc.
+            counts[r.outcome] += 1;
+            total += 1;
+          });
+          this.total = total;
+          var labels = ['Accepted', 'Rejected', 'Expired', 'Cancelled'];
+          var values = [counts.accepted, counts.rejected, counts.expired, counts.cancelled];
+          var colors = [
+            'rgba(26,127,55,0.75)',    // accepted — green
+            'rgba(207,34,46,0.75)',    // rejected — red
+            'rgba(191,135,0,0.75)',    // expired — amber
+            'rgba(130,80,223,0.75)',   // cancelled — purple
+          ];
+          if (this.chart) {
+            this.chart.data.labels = labels;
+            this.chart.data.datasets[0].data = values;
+            this.chart.update();
+            return;
+          }
+          this.chart = new Chart(canvas, {
+            type: 'doughnut',
+            data: {
+              labels: labels,
+              datasets: [{ data: values, backgroundColor: colors }]
+            },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              plugins: {
+                legend: { position: 'bottom' },
+                tooltip: {
+                  callbacks: {
+                    label: function (ctx) {
+                      var v = ctx.parsed;
+                      var pct = total > 0 ? Math.round((v / total) * 100) : 0;
+                      return ctx.label + ': ' + v + ' (' + pct + '%)';
+                    }
+                  }
+                }
+              }
+            }
+          });
+        }
+      };
+    });
+  });
+
+  // Everything below draws the two weekly charts and needs DOM + Chart.js.
+  function drawWeeklies() {
+    if (typeof Chart === 'undefined') { console.error('Chart.js not loaded'); return; }
 
   Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif";
   Chart.defaults.font.size = 12;
@@ -592,83 +680,13 @@ function buildActivityChartsScript(payloadJson) {
 
   makeWeeklyChart('act-new-opps', DATA.newOpps, 'New opportunities', 'Estimated value');
   makeWeeklyChart('act-quotes-issued', DATA.quotesIssued, 'Quotes issued', 'Quoted value');
+  } // end drawWeeklies
 
-  // ---- Outcome doughnut with Alpine-driven toggles ------------------
-  //
-  // Exposed as Alpine.data('outcomePie', ...). The card in the HTML
-  // uses x-init="init()" so the chart renders immediately, and
-  // @click handlers call render() to re-draw after mutating range /
-  // quoteType.
-  document.addEventListener('alpine:init', function () {
-    Alpine.data('outcomePie', function () {
-      return {
-        range: '12m',
-        quoteType: '',
-        chart: null,
-        total: 0,
-        init: function () {
-          var self = this;
-          // Defer until the canvas is in the DOM.
-          requestAnimationFrame(function () { self.render(); });
-        },
-        render: function () {
-          var canvas = document.getElementById('act-outcomes');
-          if (!canvas) return;
-          var cutoff = new Date();
-          var months = this.range === '3m' ? 3 : this.range === '6m' ? 6 : 12;
-          cutoff.setMonth(cutoff.getMonth() - months);
-          var cutoffIso = cutoff.toISOString().slice(0, 10);
-          var typeFilter = this.quoteType;
-          var counts = { accepted: 0, rejected: 0, expired: 0, cancelled: 0 };
-          var total = 0;
-          DATA.outcomes.forEach(function (r) {
-            if (!r.submitted_at || r.submitted_at < cutoffIso) return;
-            if (typeFilter && r.quote_type !== typeFilter) return;
-            if (!counts.hasOwnProperty(r.outcome)) return; // pending etc.
-            counts[r.outcome] += 1;
-            total += 1;
-          });
-          this.total = total;
-          var labels = ['Accepted', 'Rejected', 'Expired', 'Cancelled'];
-          var values = [counts.accepted, counts.rejected, counts.expired, counts.cancelled];
-          var colors = [
-            'rgba(26,127,55,0.75)',    // accepted — green
-            'rgba(207,34,46,0.75)',    // rejected — red
-            'rgba(191,135,0,0.75)',    // expired — amber
-            'rgba(130,80,223,0.75)',   // cancelled — purple
-          ];
-          if (this.chart) {
-            this.chart.data.labels = labels;
-            this.chart.data.datasets[0].data = values;
-            this.chart.update();
-            return;
-          }
-          this.chart = new Chart(canvas, {
-            type: 'doughnut',
-            data: {
-              labels: labels,
-              datasets: [{ data: values, backgroundColor: colors }]
-            },
-            options: {
-              responsive: true, maintainAspectRatio: false,
-              plugins: {
-                legend: { position: 'bottom' },
-                tooltip: {
-                  callbacks: {
-                    label: function (ctx) {
-                      var v = ctx.parsed;
-                      var pct = total > 0 ? Math.round((v / total) * 100) : 0;
-                      return ctx.label + ': ' + v + ' (' + pct + '%)';
-                    }
-                  }
-                }
-              }
-            }
-          });
-        }
-      };
-    });
-  });
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', drawWeeklies);
+  } else {
+    drawWeeklies();
+  }
 })();
 `;
 }
