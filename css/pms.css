@@ -1768,6 +1768,92 @@ body.col-resizing * { cursor: col-resize !important; user-select: none; }
 /* Legacy .opp-list-filter-row and .filter-range rules removed —
    per-column filters now live in the .col-filter-popover above. */
 
+/* ---------- Centered column alignment ----------
+   Applied to all list tables (.opp-list-table) by data-col attribute.
+   Centers: buttons/actions, rev/revision, status/stage, type, counts,
+   and any column whose data-col ends in _at or _date (or known date
+   keys: updated, created, valid_until, close, due).
+   Specificity is raised (table.data.opp-list-table + attr selector) so
+   these rules win against the generic `.num` right-align rule — any
+   count cell that should stay centered just needs its data-col listed.
+   .col-sort is a flex button with justify-content:space-between, so
+   centered header labels also need a justify-content:center override
+   on the button itself.                                              */
+table.data.opp-list-table th[data-col="status"],
+table.data.opp-list-table td[data-col="status"],
+table.data.opp-list-table th[data-col="status_label"],
+table.data.opp-list-table td[data-col="status_label"],
+table.data.opp-list-table th[data-col="stage"],
+table.data.opp-list-table td[data-col="stage"],
+table.data.opp-list-table th[data-col="stage_label"],
+table.data.opp-list-table td[data-col="stage_label"],
+table.data.opp-list-table th[data-col="rev"],
+table.data.opp-list-table td[data-col="rev"],
+table.data.opp-list-table th[data-col="revision"],
+table.data.opp-list-table td[data-col="revision"],
+table.data.opp-list-table th[data-col="type"],
+table.data.opp-list-table td[data-col="type"],
+table.data.opp-list-table th[data-col="type_label"],
+table.data.opp-list-table td[data-col="type_label"],
+table.data.opp-list-table th[data-col="transaction_type"],
+table.data.opp-list-table td[data-col="transaction_type"],
+table.data.opp-list-table th[data-col="quote_type"],
+table.data.opp-list-table td[data-col="quote_type"],
+table.data.opp-list-table th[data-col="contact_count"],
+table.data.opp-list-table td[data-col="contact_count"],
+table.data.opp-list-table th[data-col="opp_count"],
+table.data.opp-list-table td[data-col="opp_count"],
+table.data.opp-list-table th[data-col="done"],
+table.data.opp-list-table td[data-col="done"],
+table.data.opp-list-table th[data-col="updated"],
+table.data.opp-list-table td[data-col="updated"],
+table.data.opp-list-table th[data-col="created"],
+table.data.opp-list-table td[data-col="created"],
+table.data.opp-list-table th[data-col="valid_until"],
+table.data.opp-list-table td[data-col="valid_until"],
+table.data.opp-list-table th[data-col="close"],
+table.data.opp-list-table td[data-col="close"],
+table.data.opp-list-table th[data-col="due"],
+table.data.opp-list-table td[data-col="due"],
+table.data.opp-list-table th[data-col$="_at"],
+table.data.opp-list-table td[data-col$="_at"],
+table.data.opp-list-table th[data-col$="_date"],
+table.data.opp-list-table td[data-col$="_date"],
+table.data.opp-list-table th[data-col$="_received"],
+table.data.opp-list-table td[data-col$="_received"],
+table.data.opp-list-table th[data-col$="_due"],
+table.data.opp-list-table td[data-col$="_due"] {
+  text-align: center;
+}
+
+/* Flip .col-sort justification so the header label (and its sort
+   indicator) sit mid-cell for centered columns. Mirrors the data-col
+   list above. */
+table.data.opp-list-table th[data-col="status"] .col-sort,
+table.data.opp-list-table th[data-col="status_label"] .col-sort,
+table.data.opp-list-table th[data-col="stage"] .col-sort,
+table.data.opp-list-table th[data-col="stage_label"] .col-sort,
+table.data.opp-list-table th[data-col="rev"] .col-sort,
+table.data.opp-list-table th[data-col="revision"] .col-sort,
+table.data.opp-list-table th[data-col="type"] .col-sort,
+table.data.opp-list-table th[data-col="type_label"] .col-sort,
+table.data.opp-list-table th[data-col="transaction_type"] .col-sort,
+table.data.opp-list-table th[data-col="quote_type"] .col-sort,
+table.data.opp-list-table th[data-col="contact_count"] .col-sort,
+table.data.opp-list-table th[data-col="opp_count"] .col-sort,
+table.data.opp-list-table th[data-col="done"] .col-sort,
+table.data.opp-list-table th[data-col="updated"] .col-sort,
+table.data.opp-list-table th[data-col="created"] .col-sort,
+table.data.opp-list-table th[data-col="valid_until"] .col-sort,
+table.data.opp-list-table th[data-col="close"] .col-sort,
+table.data.opp-list-table th[data-col="due"] .col-sort,
+table.data.opp-list-table th[data-col$="_at"] .col-sort,
+table.data.opp-list-table th[data-col$="_date"] .col-sort,
+table.data.opp-list-table th[data-col$="_received"] .col-sort,
+table.data.opp-list-table th[data-col$="_due"] .col-sort {
+  justify-content: center;
+}
+
 /* =====================================================================
    M4 — Library + price build editor
    ===================================================================== */
