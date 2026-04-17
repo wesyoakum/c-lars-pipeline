@@ -23,6 +23,7 @@ const TYPE_LABELS = {
   quote_issued:     'Quote issued',
   quote_expired:    'Quote expired',
   task_overdue:     'Task overdue',
+  task_reminder:    'Task reminder',
   opportunity_won:  'Opportunity won',
   opportunity_lost: 'Opportunity lost',
   note_mention:     'Mention',

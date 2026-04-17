@@ -17,6 +17,7 @@
 // runaway scenario.
 
 import { getUnreadForUser } from '../lib/notify.js';
+import { sweepDueRemindersForUser } from '../lib/auto-tasks.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -33,6 +34,18 @@ export async function onRequestGet(context) {
   const { env, data } = context;
   const user = data?.user;
   if (!user || !user.id) return json({ unread: [] }, 200);
+
+  // Auto-tasks Phase 1 — Cloudflare Pages has no native cron, so we
+  // piggyback on this 30s poll to fire any due task reminders for the
+  // calling user before returning their notifications. Only touches
+  // rows indexed as pending-and-due; typical call does zero work.
+  // Failures here must never block the unread-notification poll, so
+  // the sweep is wrapped in try/catch.
+  try {
+    await sweepDueRemindersForUser(env, user.id);
+  } catch (err) {
+    console.error('reminder sweep during unread poll failed:', err?.message || err);
+  }
 
   const unread = await getUnreadForUser(env.DB, user.id, 20);
   return json({ unread });

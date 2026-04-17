@@ -17,6 +17,7 @@ import { redirectWithFlash, formBody } from '../../lib/http.js';
 import { stageDef, stagesFor, evaluateGate, loadGateContext, GATE_MODE } from '../../lib/stages.js';
 import { notifyStmt } from '../../lib/notify.js';
 import { checkInactivateBlockers, summarizeBlockers } from '../../lib/inactivate-blocker.js';
+import { fireEvent } from '../../lib/auto-tasks.js';
 
 function isAjaxRequest(request, input) {
   if (input?.source === 'wizard' || input?.source === 'modal') return true;
@@ -211,6 +212,30 @@ export async function onRequestPost(context) {
   } catch (err) {
     console.error('stage-change notify fan-out failed:', err?.message || err);
   }
+
+  // Auto-tasks Phase 1 — fire opportunity.stage_changed into the rules
+  // engine. The payload carries the updated opp plus explicit
+  // stage_from / stage_to so condition DSLs can reference them without
+  // digging into the activity row.
+  context.waitUntil(
+    (async () => {
+      try {
+        const fresh = await one(env.DB, 'SELECT * FROM opportunities WHERE id = ?', [oppId]);
+        const account = fresh?.account_id
+          ? await one(env.DB, 'SELECT * FROM accounts WHERE id = ?', [fresh.account_id])
+          : null;
+        await fireEvent(env, 'opportunity.stage_changed', {
+          trigger: { user, at: ts },
+          opportunity: fresh,
+          account,
+          stage_from: opp.stage,
+          stage_to: targetDef.stage_key,
+        }, user);
+      } catch (err) {
+        console.error('fireEvent(opportunity.stage_changed) failed:', err?.message || err);
+      }
+    })()
+  );
 
   // Auto-create Job when closing as won
   let jobNumber = null;

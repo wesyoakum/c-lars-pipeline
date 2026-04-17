@@ -17,6 +17,7 @@ import {
   renderFilenameTemplate,
   buildQuoteFilenameContext,
 } from '../../../../lib/filename-templates.js';
+import { fireEvent, reportError } from '../../../../lib/auto-tasks.js';
 
 export async function onRequestPost(context) {
   const { env, data, params } = context;
@@ -73,6 +74,33 @@ export async function onRequestPost(context) {
 
   await batch(env.DB, statements);
 
+  // Auto-tasks Phase 1 — fire quote.issued event into the rules engine.
+  // waitUntil keeps rule evaluation off the critical path; failures
+  // never roll back a successful quote issue.
+  context.waitUntil(
+    (async () => {
+      try {
+        const [freshQuote, opp, account] = await Promise.all([
+          one(env.DB, 'SELECT * FROM quotes WHERE id = ?', [quoteId]),
+          one(env.DB, 'SELECT * FROM opportunities WHERE id = ?', [oppId]),
+          one(env.DB,
+            `SELECT a.* FROM accounts a
+               JOIN opportunities o ON o.account_id = a.id
+              WHERE o.id = ?`,
+            [oppId]),
+        ]);
+        await fireEvent(env, 'quote.issued', {
+          trigger: { user, at: ts },
+          quote: freshQuote,
+          opportunity: opp,
+          account,
+        }, user);
+      } catch (err) {
+        console.error('fireEvent(quote.issued) failed:', err?.message || err);
+      }
+    })()
+  );
+
   // Auto-generate PDF in the background (non-blocking)
   context.waitUntil(
     (async () => {
@@ -117,6 +145,16 @@ export async function onRequestPost(context) {
         });
       } catch (err) {
         console.error('Auto PDF generation failed:', err);
+        // Fire system.error so auto-task rules (e.g. "investigate PDF
+        // failures") can react. Safe to call inside this catch — it
+        // swallows its own errors.
+        await reportError(env, 'pdf_generation_failed', {
+          summary: `Auto PDF failed for ${quote.number} rev ${quote.revision}`,
+          detail: err?.message || String(err),
+          context: { oppId, quoteId, quote_type: quote.quote_type },
+          user,
+          quote,
+        });
       }
     })()
   );

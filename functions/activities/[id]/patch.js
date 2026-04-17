@@ -8,6 +8,7 @@
 import { one, stmt, batch } from '../../lib/db.js';
 import { auditStmt, diff } from '../../lib/audit.js';
 import { now } from '../../lib/ids.js';
+import { fireEvent } from '../../lib/auto-tasks.js';
 
 // Fields that may be patched inline, with optional coercion.
 const PATCHABLE = new Set([
@@ -85,6 +86,38 @@ export async function onRequestPost(context) {
     ]);
   } catch (e) {
     return json({ ok: false, error: String(e.message ?? e) }, 500);
+  }
+
+  // Auto-tasks Phase 1 — fire task.completed when a task transitions
+  // into the completed state. Only fires on the edge (pending → completed),
+  // not on every patch of an already-completed row.
+  if (
+    field === 'status' &&
+    newValue === 'completed' &&
+    before.status !== 'completed' &&
+    before.type === 'task'
+  ) {
+    try {
+      const freshTask = { ...before, status: 'completed', completed_at: completedAt };
+      const opp = before.opportunity_id
+        ? await one(env.DB, 'SELECT * FROM opportunities WHERE id = ?', [before.opportunity_id])
+        : null;
+      const account = opp?.account_id
+        ? await one(env.DB, 'SELECT * FROM accounts WHERE id = ?', [opp.account_id])
+        : null;
+      // Fire without awaiting — auto-task side effects must never block
+      // the inline-edit response. Failures are logged in the engine.
+      fireEvent(env, 'task.completed', {
+        trigger: { user, at: ts },
+        task: freshTask,
+        opportunity: opp,
+        account,
+      }, user).catch((err) =>
+        console.error('fireEvent(task.completed) failed:', err?.message || err)
+      );
+    } catch (err) {
+      console.error('task.completed payload build failed:', err?.message || err);
+    }
   }
 
   return json({ ok: true, field, value: newValue });
