@@ -1,24 +1,19 @@
-// POST /opportunities/:id/quotes/:quoteId/delete
+// functions/quotes/[id]/delete.js
 //
-// Remove a quote. Terminal / customer-facing statuses are locked —
-// they represent historical facts. Only draft revisions can be
-// removed outright. ON DELETE CASCADE on quote_lines cleans up the
-// child rows automatically.
+// POST /quotes/:id/delete
 //
-// Two response modes (same pattern as the other wizard-era endpoints):
-//   - Classic form submit → redirect-with-flash
-//   - AJAX (x-requested-with / JSON accept / source=bulk) → JSON
-//     { ok, id } / { ok: false, error } so the bulk-edit driver on
-//     the /quotes list can fan out deletes and aggregate errors.
+// Sibling of POST /opportunities/:oppId/quotes/:quoteId/delete —
+// same policy, same audit trail, but keyed only by quote id so the
+// bulk-edit driver on /quotes can target it as `/quotes/:id/delete`
+// (the driver only supports a single `:id` placeholder).
+//
+// Draft / revision_draft quotes only. All customer-facing / terminal
+// statuses are locked for history and refuse with 409.
 
-import { one, stmt, batch } from '../../../../lib/db.js';
-import { auditStmt } from '../../../../lib/audit.js';
-import { redirectWithFlash, formBody } from '../../../../lib/http.js';
+import { one, stmt, batch } from '../../lib/db.js';
+import { auditStmt } from '../../lib/audit.js';
+import { redirectWithFlash, formBody } from '../../lib/http.js';
 
-// Quote statuses we refuse to delete. All of them represent either
-// customer-facing history (issued, accepted, rejected, expired),
-// supersede chains (dead), or post-job terminal state (completed).
-// Draft + revision_draft are the only deletable states.
 const LOCKED_FOR_DELETE = new Set([
   'issued',
   'revision_issued',
@@ -50,8 +45,7 @@ function jsonResponse(payload, status = 200) {
 export async function onRequestPost(context) {
   const { env, data, request, params } = context;
   const user = data?.user;
-  const oppId = params.id;
-  const quoteId = params.quoteId;
+  const quoteId = params.id;
 
   const input = await formBody(request).catch(() => ({}));
   const ajax = isAjaxRequest(request, input);
@@ -61,18 +55,14 @@ export async function onRequestPost(context) {
     'SELECT id, number, revision, status, opportunity_id FROM quotes WHERE id = ?',
     [quoteId]
   );
-  if (!quote || quote.opportunity_id !== oppId) {
+  if (!quote) {
     if (ajax) return jsonResponse({ ok: false, error: 'Quote not found.' }, 404);
     return new Response('Quote not found', { status: 404 });
   }
   if (LOCKED_FOR_DELETE.has(quote.status)) {
-    const msg = `Cannot delete a ${quote.status} quote \u2014 customer-facing / terminal quotes are preserved for history. Revise or re-issue instead.`;
+    const msg = `Cannot delete ${quote.number} \u2014 it's ${quote.status}. Customer-facing / terminal quotes are preserved for history.`;
     if (ajax) return jsonResponse({ ok: false, error: msg }, 409);
-    return redirectWithFlash(
-      `/opportunities/${oppId}/quotes/${quoteId}`,
-      msg,
-      'error'
-    );
+    return redirectWithFlash('/quotes', msg, 'error');
   }
 
   await batch(env.DB, [
@@ -90,7 +80,7 @@ export async function onRequestPost(context) {
     return jsonResponse({ ok: true, id: quoteId });
   }
   return redirectWithFlash(
-    `/opportunities/${oppId}?tab=quotes`,
+    '/quotes',
     `Deleted ${quote.number} Rev ${quote.revision}.`
   );
 }

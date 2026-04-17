@@ -13,6 +13,7 @@ import {
 } from '../lib/validators.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
+import { listBulkEditScript } from '../lib/list-bulk-edit.js';
 import { displayAccountForGroupMode } from '../lib/account-groups.js';
 import { isActiveOnly, quoteActivePredicate } from '../lib/activeness.js';
 
@@ -134,6 +135,12 @@ export async function onRequestGet(context) {
           // endpoint scoped to the chosen opportunity.
           newOnClick: `window.PMS.openWizard('quote', {})`,
           newLabel: 'New quote',
+          // Bulk-delete path. The server rejects terminal statuses
+          // (issued, accepted, rejected, expired, dead, completed) with
+          // 409, so users can multi-select a mix and only the draft
+          // rows actually get deleted \u2014 the bulk driver aggregates the
+          // failures and shows an alert with the first error message.
+          bulk: true,
         })}
       </div>
 
@@ -184,6 +191,13 @@ export async function onRequestGet(context) {
             status_label: { values: ['Draft', 'Issued', 'Expired'] },
           }))}</script>
           <script>${raw(listInlineEditScript('/opportunities/:opp_id/quotes/:id/patch'))}</script>
+          <script>${raw(listBulkEditScript({
+            // Quote list doesn't offer bulk-set (no column makes sense
+            // to bulk-edit across quotes — status changes are gated
+            // by transitions, not free PATCHes). Delete is still useful
+            // for sweeping old drafts.
+            deleteUrl: '/quotes/:id/delete',
+          }))}</script>
         `}
     </section>
   `;
