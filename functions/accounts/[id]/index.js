@@ -365,6 +365,15 @@ export async function onRequestGet(context) {
     link_label: account.alias || account.name,
   });
 
+  // Shared prefill for the "New contact" and "New opportunity" buttons on
+  // this page. The account_label drives the pinned "Account: <name>" row
+  // in the wizard, and account_id seeds the account step so the user
+  // doesn't have to pick it.
+  const acctWizardPrefill = JSON.stringify({
+    account_id: account.id,
+    account_label: account.alias || account.name,
+  });
+
   // ---- Per-tab body fragments -------------------------------------------
 
   const overviewTab = html`
@@ -450,7 +459,8 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h2>Contacts</h2>
-        <a class="btn primary" href="/accounts/${escape(account.id)}/contacts/new">New contact</a>
+        <button class="btn primary" type="button"
+                onclick="window.PMS && window.PMS.openWizard('contact', ${escape(acctWizardPrefill)})">New contact</button>
       </div>
 
       ${contacts.length === 0
@@ -495,7 +505,8 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h2>Opportunities</h2>
-        <a class="btn primary" href="/opportunities/new?account=${escape(account.id)}">New opportunity</a>
+        <button class="btn primary" type="button"
+                onclick="window.PMS && window.PMS.openWizard('opportunity', ${escape(acctWizardPrefill)})">New opportunity</button>
       </div>
       ${oppRows.length === 0
         ? html`<p class="muted">No opportunities yet.</p>`

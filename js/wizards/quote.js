@@ -59,6 +59,12 @@
         entityKinds: ['account'],
         required: true,
         requiredError: 'Pick an account before continuing.',
+        // Skip when the caller prefilled both account + opportunity
+        // (e.g. "+ New quote" on an opportunity detail page).
+        skipWhen: function (answers /*, ctx */) {
+          return !!(answers.account && answers.account.id
+                  && answers.opportunity && answers.opportunity.id);
+        },
         // Synthetic suggestion at the bottom of the list — picking it
         // opens the account wizard inline. After the new account is
         // created, the engine restores this wizard with that account
@@ -94,6 +100,12 @@
           if (!accId) return false;
           return linkable.account_id === accId;
         },
+        // Skip when the caller prefilled an opportunity (e.g. "+ New
+        // quote" on an opportunity detail page).
+        skipWhen: function (answers, ctx) {
+          return !!(ctx && ctx.pinnedValue && ctx.pinnedPrefix === 'Opportunity'
+                   && answers.opportunity && answers.opportunity.id);
+        },
       },
       {
         key: 'quote_type',
@@ -112,6 +124,42 @@
         opportunity: null,  // { kind:'opportunity', id, label }
         quote_type: null,   // { value, label }
       };
+    },
+
+    // Prefill from openWizard('quote', { opportunity_id, opportunity_label,
+    // account_id, account_label, quote_type }). When both opportunity and
+    // account are prefilled, both upstream steps skip and a pinned
+    // "Opportunity: <label>" row shows above the prompt.
+    applyPrefill: function (answers, prefill /*, ctx */) {
+      if (!prefill) return null;
+      if (prefill.account_id) {
+        answers.account = {
+          kind: 'account',
+          id: prefill.account_id,
+          label: prefill.account_label || ''
+        };
+      }
+      if (prefill.opportunity_id) {
+        answers.opportunity = {
+          kind: 'opportunity',
+          id: prefill.opportunity_id,
+          label: prefill.opportunity_label || ''
+        };
+      }
+      if (prefill.quote_type) {
+        // Best-effort: match the string to an option to get the label.
+        var opt = QUOTE_TYPE_OPTIONS.filter(function (o) { return o.value === prefill.quote_type; })[0];
+        if (opt) answers.quote_type = { value: opt.value, label: opt.label };
+      }
+      // Pin on the opportunity when present — that's the most specific
+      // context the user cares about.
+      if (prefill.opportunity_id && prefill.opportunity_label) {
+        return { locked: true, prefix: 'Opportunity', label: prefill.opportunity_label };
+      }
+      if (prefill.account_id && prefill.account_label) {
+        return { locked: true, prefix: 'Account', label: prefill.account_label };
+      }
+      return null;
     },
 
     submit: function (answers /*, ctx */) {

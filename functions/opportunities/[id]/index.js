@@ -385,6 +385,17 @@ export async function onRequestGet(context) {
     image: 'Image / Photo', other: 'Other',
   };
 
+  // ---- Wizard prefills (quote + job buttons in the header) --------------
+  // Shared across the New-quote and New-job icon buttons. Pinned as
+  // "Opportunity: <number> — <title>" in the wizard so the user
+  // doesn't re-confirm context they just came from.
+  const oppWizardPrefill = JSON.stringify({
+    opportunity_id: opp.id,
+    opportunity_label: `${opp.number} — ${opp.title ?? ''}`.trim(),
+    account_id: opp.account_id,
+    account_label: opp.account_name ?? '',
+  });
+
   // ---- Overview tab ------------------------------------------------------
   const overviewTab = html`
     <section class="card" x-data="oppInline('${escape(opp.id)}', '${escape(opp.account_id)}')">
@@ -407,9 +418,16 @@ export async function onRequestGet(context) {
               </span>
           </p>
         </div>
-        <a class="icon-btn primary" href="/opportunities/${escape(opp.id)}?tab=quotes" title="New quote">
-          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="10" y1="4" x2="10" y2="16"/><line x1="4" y1="10" x2="16" y2="10"/></svg>
-        </a>
+        <div style="display:flex;gap:0.4rem">
+          <button class="icon-btn primary" type="button" title="New job"
+                  onclick="window.PMS && window.PMS.openWizard('job', ${escape(oppWizardPrefill)})">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7h14M3 7v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7M7 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+          <button class="icon-btn primary" type="button" title="New quote"
+                  onclick="window.PMS && window.PMS.openWizard('quote', ${escape(oppWizardPrefill)})">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="10" y1="4" x2="10" y2="16"/><line x1="4" y1="10" x2="16" y2="10"/></svg>
+          </button>
+        </div>
       </div>
 
       <!-- Stage carousel -->
