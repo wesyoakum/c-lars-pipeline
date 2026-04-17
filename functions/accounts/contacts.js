@@ -10,7 +10,6 @@ import { layout, htmlResponse, html, raw, escape, subnavTabs } from '../lib/layo
 import { readFlash } from '../lib/http.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieText, ieSelect, listInlineEditScript } from '../lib/list-inline-edit.js';
-import { listBulkEditScript } from '../lib/list-bulk-edit.js';
 import { isActiveOnly, contactActivePredicate } from '../lib/activeness.js';
 
 const PRIMARY_OPTIONS = [
@@ -90,7 +89,7 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Contacts</h1>
-        ${listToolbar({ id: 'contacts', count: rows.length, columns, bulk: true, newOnClick: "window.PMS.openWizard('contact', {})", newLabel: 'New contact' })}
+        ${listToolbar({ id: 'contacts', count: rows.length, columns, newOnClick: "window.PMS.openWizard('contact', {})", newLabel: 'New contact' })}
       </div>
 
       ${rows.length === 0
@@ -143,10 +142,6 @@ export async function onRequestGet(context) {
           </div>
           <script>${raw(listScript('pms.contacts.v1', 'last_name', 'asc'))}</script>
           <script>${raw(listInlineEditScript('/contacts/:id/patch'))}</script>
-          <script>${raw(listBulkEditScript({
-            patchUrl: '/contacts/:id/patch',
-            deleteUrl: '/contacts/:id/delete',
-          }))}</script>
         `}
     </section>
   `;

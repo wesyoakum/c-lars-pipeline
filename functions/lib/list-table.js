@@ -36,11 +36,10 @@ import { html, escape } from './layout.js';
 /* ------------------------------------------------------------------ */
 
 /**
- * Standard toolbar: quicksearch + count + optional columns-menu + optional bulk-edit + optional new button.
+ * Standard toolbar: quicksearch + count + optional columns-menu + optional new button.
  *
  *   listToolbar({ id: 'quotes', count: rows.length, columns, newHref: '/quotes/new' })
  *   listToolbar({ id: 'acct',   count, columns, newOnClick: "window.PMS.openWizard('account', {})", newLabel: 'New account' })
- *   listToolbar({ id: 'acct',   count, columns, bulk: true })
  *
  * Exactly one of `newHref` (renders an <a>) or `newOnClick` (renders a
  * <button> with the given onclick JS expression) should be provided to
@@ -50,15 +49,8 @@ import { html, escape } from './layout.js';
  * is rendered; clicking it opens a dropdown with show/hide checkboxes
  * and up/down reorder buttons for each column. Pass `null`/omit to
  * suppress the columns menu entirely.
- *
- * When `bulk: true` is passed, a checkbox-style toggle button is added
- * to the toolbar. Click it to enable bulk-edit mode — checkboxes
- * appear on every row, plus an action bar above the table with
- * "Set <col> to <value>" and "Delete selected" buttons. Wire it up by
- * also including <script>${raw(listBulkEditScript({patchUrl, deleteUrl}))}</script>
- * — see functions/lib/list-bulk-edit.js.
  */
-export function listToolbar({ id, count, columns = null, newHref, newOnClick, newLabel = 'New', bulk = false } = {}) {
+export function listToolbar({ id, count, columns = null, newHref, newOnClick, newLabel = 'New' } = {}) {
   const showMenu = Array.isArray(columns) && columns.length > 0;
   return html`
     <div class="toolbar-right">
@@ -69,11 +61,6 @@ export function listToolbar({ id, count, columns = null, newHref, newOnClick, ne
         <input type="search" id="${id}-quicksearch" data-role="quicksearch" placeholder="Search...">
       </div>
       <span class="muted" data-role="count" style="font-size:0.8em;white-space:nowrap">${count}</span>
-      ${bulk ? html`
-        <button type="button" class="icon-btn" data-role="bulk-edit-toggle" title="Toggle bulk edit" aria-pressed="false">
-          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="5" height="5"/><rect x="3" y="12" width="5" height="5"/><line x1="11" y1="5.5" x2="17" y2="5.5"/><line x1="11" y1="14.5" x2="17" y2="14.5"/></svg>
-        </button>
-      ` : ''}
       ${showMenu ? html`
         <details class="opp-list-columns" data-role="columns-menu" style="display:inline-block">
           <summary class="icon-btn" title="Columns">

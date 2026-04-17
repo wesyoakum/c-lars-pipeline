@@ -11,7 +11,6 @@ import { uuid, now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 import { fmtDollar } from '../../lib/pricing.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
-import { listBulkEditScript } from '../../lib/list-bulk-edit.js';
 
 export async function onRequestGet(context) {
   return renderList(context, {});
@@ -52,7 +51,7 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
       <div class="card-header">
         <h1>Direct Material library</h1>
         <div style="display:flex;align-items:center;gap:0.5rem">
-          ${listToolbar({ id: 'dm', count: rows.length, columns, bulk: true })}
+          ${listToolbar({ id: 'dm', count: rows.length, columns })}
           <a class="btn" href="/library">\u2190 Library</a>
         </div>
       </div>
@@ -104,9 +103,6 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
             </table>
           </div>
           <script>${raw(listScript('pms.libDm.v1', 'description', 'asc'))}</script>
-          <script>${raw(listBulkEditScript({
-            deleteUrl: '/library/dm-items/:id/delete',
-          }))}</script>
         `}
     </section>
   `;

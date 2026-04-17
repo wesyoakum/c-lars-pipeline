@@ -10,7 +10,6 @@ import { uuid, now } from '../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
-import { listBulkEditScript } from '../lib/list-bulk-edit.js';
 import { isActiveOnly } from '../lib/activeness.js';
 
 const TYPE_LABELS = {
@@ -143,7 +142,7 @@ export async function onRequestGet(context) {
       <div class="card-header">
         <h2>Activities</h2>
         <div class="toolbar-right" style="display:flex;align-items:center;gap:0.5rem">
-          ${listToolbar({ id: 'act', count: activities.length, columns, bulk: true })}
+          ${listToolbar({ id: 'act', count: activities.length, columns })}
           <button class="btn btn-sm primary" type="button"
                   onclick="window.PMS && window.PMS.openTaskModal({})">+ New task</button>
         </div>
@@ -193,10 +192,6 @@ export async function onRequestGet(context) {
           <script>${raw(listInlineEditScript('/activities/:id/patch', {
             // Column key `due` maps to patch field `due_at`.
             fieldAttrMap: { due_at: 'due' },
-          }))}</script>
-          <script>${raw(listBulkEditScript({
-            patchUrl: '/activities/:id/patch',
-            deleteUrl: '/activities/:id/delete',
           }))}</script>
           <script>${raw(taskCompleteToggleScript())}</script>
         `}
