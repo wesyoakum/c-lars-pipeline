@@ -192,9 +192,14 @@ export async function onRequestGet(context) {
                 <button class="btn danger" type="submit">Cancel</button>
               </form>
             ` : ''}
+            ${quote.status === 'accepted' ? html`
+              <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/start-oc" class="inline-form">
+                <button class="btn primary" type="submit" title="Create (or jump to) the job for this opportunity and open the Issue OC form">Start Order Confirmation</button>
+              </form>
+            ` : ''}
             ${quote.status === 'accepted' || quote.status === 'rejected' || quote.status === 'expired' ? html`
               <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
-                <button class="btn primary" type="submit">New revision</button>
+                <button class="btn" type="submit">New revision</button>
               </form>
             ` : ''}
             ${isDraft ? html`
