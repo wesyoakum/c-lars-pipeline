@@ -3269,8 +3269,11 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 /* ---------- Zone heading (handwritten blue, underlined) ---------- */
 .board-zone { display: flex; flex-direction: column; }
 /* Messages zone heading ("Message Everyone") right-justified so the
-   underline trails off toward the chat bubble flow below it. */
-.board-zone-messages .board-zone-heading { text-align: right; }
+   underline trails off toward the chat bubble flow below it. The
+   heading lives directly under .board-sidebar-left in the current
+   markup; the .board-zone-messages selector is kept for legacy. */
+.board-zone-messages .board-zone-heading,
+.board-sidebar-left > .board-zone-heading { text-align: right; }
 .board-zone-heading {
   font-family: var(--board-hand);
   font-size: 1.7rem;
