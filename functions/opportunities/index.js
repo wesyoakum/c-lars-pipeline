@@ -120,7 +120,7 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Opportunities</h1>
-        ${listToolbar({ id: 'opp', count: rows.length, columns, newHref: '/opportunities/new', newLabel: 'New opportunity' })}
+        ${listToolbar({ id: 'opp', count: rows.length, columns, newOnClick: "window.PMS.openWizard('opportunity', {})", newLabel: 'New opportunity' })}
       </div>
 
       ${rows.length === 0
@@ -221,13 +221,41 @@ export async function onRequestGet(context) {
   );
 }
 
+/**
+ * Detects a request coming from the wizard modal or any XHR-style client.
+ * Same three signals as POST /accounts: form source=wizard, an
+ * x-requested-with header, or a JSON-only accept header.
+ */
+function isAjaxRequest(request, input) {
+  if (input?.source === 'wizard' || input?.source === 'modal') return true;
+  const xrw = request.headers.get('x-requested-with');
+  if (xrw && xrw.toLowerCase() === 'xmlhttprequest') return true;
+  const accept = request.headers.get('accept') || '';
+  return accept.includes('application/json') && !accept.includes('text/html');
+}
+
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
+}
+
 export async function onRequestPost(context) {
   const { env, data, request } = context;
   const user = data?.user;
   const input = await formBody(request);
+  const ajax = isAjaxRequest(request, input);
 
   const { ok, value, errors } = validateOpportunity(input);
   if (!ok) {
+    if (ajax) {
+      const firstError = Object.values(errors)[0] || 'Invalid input.';
+      return jsonResponse({ ok: false, error: firstError, errors }, 400);
+    }
     const { renderNewForm } = await import('./new.js');
     return renderNewForm(context, { values: input, errors });
   }
@@ -236,6 +264,12 @@ export async function onRequestPost(context) {
   // blow up mid-batch with a cryptic D1 error.
   const acct = await one(env.DB, 'SELECT id, name FROM accounts WHERE id = ?', [value.account_id]);
   if (!acct) {
+    if (ajax) {
+      return jsonResponse(
+        { ok: false, error: 'Account not found', errors: { account_id: 'Account not found' } },
+        400
+      );
+    }
     const { renderNewForm } = await import('./new.js');
     return renderNewForm(context, {
       values: input,
@@ -339,6 +373,12 @@ export async function onRequestPost(context) {
     ]);
   } catch (e) {
     if (isUniqueNumberError(e)) {
+      if (ajax) {
+        return jsonResponse(
+          { ok: false, error: 'That number is already in use', errors: { number: 'That number is already in use' } },
+          400
+        );
+      }
       const { renderNewForm } = await import('./new.js');
       return renderNewForm(context, {
         values: input,
@@ -346,6 +386,16 @@ export async function onRequestPost(context) {
       });
     }
     throw e;
+  }
+
+  if (ajax) {
+    return jsonResponse({
+      ok: true,
+      id,
+      number,
+      title: value.title,
+      redirectUrl: `/opportunities/${id}`,
+    });
   }
 
   return redirectWithFlash(
