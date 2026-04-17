@@ -19,6 +19,7 @@ import { layout, htmlResponse, html, raw } from '../lib/layout.js';
 import { readFlash } from '../lib/http.js';
 import { hasRole } from '../lib/auth.js';
 import { VALIDITY_DAYS_TYPES, getQuoteValidityDays } from '../lib/quote-term-defaults.js';
+import { loadEpsSchedule } from '../lib/eps-schedule.js';
 import { QUOTE_TYPE_LABELS } from '../lib/validators.js';
 import { settingsSubNav } from '../lib/settings-subnav.js';
 
@@ -48,6 +49,7 @@ export async function onRequestGet(context) {
 
   // Admin-only: per-quote-type validity days for the editor below.
   let validityDays = null;
+  let epsSchedule = null;
   if (isAdmin) {
     // Current per-quote-type validity days — used by the Settings editor
     // below. getQuoteValidityDays falls back to 14 when no row exists.
@@ -55,6 +57,8 @@ export async function onRequestGet(context) {
     for (const qt of VALIDITY_DAYS_TYPES) {
       validityDays[qt] = await getQuoteValidityDays(env, qt, 14);
     }
+    // Current EPS default payment schedule (migration 0040).
+    epsSchedule = await loadEpsSchedule(env);
   }
 
   const sa = prefs.show_alias ? 1 : 0;
@@ -158,6 +162,73 @@ export async function onRequestGet(context) {
         </table>
         <p class="muted" style="margin-top:0.5rem;font-size:0.85em">
           Changes save automatically when you leave the field.
+        </p>
+      </section>
+
+      <section class="card" x-data="epsScheduleEditor(${JSON.stringify(epsSchedule || { rows: [] })})">
+        <h2>EPS default payment schedule</h2>
+        <p class="muted">
+          Milestone rows that populate the "Default EPS Terms" textarea
+          on new EPS quotes. Percentages must sum to exactly 100 —
+          they're applied to the quote total. Use <code>{weeks}</code>
+          in the label to substitute a delivery-week value, computed
+          as <code>floor(num &times; delivery_weeks / den)</code>.
+        </p>
+        <table class="meta-table" style="width:100%">
+          <thead>
+            <tr>
+              <th style="text-align:right;width:5rem">%</th>
+              <th style="text-align:left">Label</th>
+              <th style="text-align:center;width:8rem">ARO num</th>
+              <th style="text-align:center;width:8rem">ARO den</th>
+              <th style="width:3rem"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(row, i) in rows" :key="i">
+              <tr>
+                <td style="text-align:right">
+                  <input type="number" min="0" max="100" step="0.01"
+                         x-model.number="row.percent"
+                         style="width:4.5rem;text-align:right">
+                </td>
+                <td>
+                  <input type="text" x-model="row.label"
+                         placeholder="Due upon …"
+                         style="width:100%">
+                </td>
+                <td style="text-align:center">
+                  <input type="number" min="1" step="1"
+                         x-model="row.weeks_num"
+                         placeholder="—"
+                         style="width:5rem;text-align:right">
+                </td>
+                <td style="text-align:center">
+                  <input type="number" min="1" step="1"
+                         x-model="row.weeks_den"
+                         placeholder="—"
+                         style="width:5rem;text-align:right">
+                </td>
+                <td style="text-align:center">
+                  <button type="button" class="btn btn-xs" @click="removeRow(i)" title="Remove row">&times;</button>
+                </td>
+              </tr>
+            </template>
+            <tr>
+              <td style="text-align:right"><strong x-text="totalPct"></strong></td>
+              <td class="muted" x-text="totalLabel"></td>
+              <td colspan="3"></td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="settings-actions" style="margin-top:0.75rem">
+          <button type="button" class="btn" @click="addRow()">+ Add row</button>
+          <button type="button" class="btn primary" :disabled="busy || !isValid" @click="save()" x-text="saveLabel"></button>
+          <button type="button" class="btn" :disabled="busy" @click="resetToDefault()">Reset to site default</button>
+        </div>
+        <p class="muted" style="margin-top:0.5rem;font-size:0.85em">
+          Example rendered label with <code>delivery_weeks = 9</code>:
+          <code x-text="preview"></code>
         </p>
       </section>
 
@@ -288,6 +359,130 @@ document.addEventListener('alpine:init', function () {
           self.busy = false;
           alert('Could not save: ' + (err && err.message ? err.message : 'unknown error'));
         });
+      },
+    };
+  });
+
+  // EPS default payment-schedule editor. A single blob stored on
+  // site_prefs.eps_schedule (migration 0040). Validates client-side
+  // (percentages must sum to 100) so the Save button is disabled
+  // until the total is correct; the server validates again and is
+  // authoritative.
+  Alpine.data('epsScheduleEditor', function (initial) {
+    function cloneRows(src) {
+      return (src.rows || []).map(function (r) {
+        return {
+          percent: r.percent == null ? '' : Number(r.percent),
+          label: r.label || '',
+          weeks_num: r.weeks_num == null ? '' : String(r.weeks_num),
+          weeks_den: r.weeks_den == null ? '' : String(r.weeks_den),
+        };
+      });
+    }
+    return {
+      rows: cloneRows(initial),
+      busy: false,
+      saveLabel: 'Save EPS schedule',
+      get totalPct() {
+        var sum = 0;
+        this.rows.forEach(function (r) {
+          var n = Number(r.percent);
+          if (Number.isFinite(n)) sum += n;
+        });
+        return Math.round(sum * 100) / 100;
+      },
+      get totalLabel() {
+        var t = this.totalPct;
+        if (Math.abs(t - 100) <= 0.01) return 'Total: 100% \u2713';
+        return 'Total: ' + t + '% (must equal 100)';
+      },
+      get isValid() {
+        if (this.rows.length === 0) return false;
+        if (Math.abs(this.totalPct - 100) > 0.01) return false;
+        for (var i = 0; i < this.rows.length; i++) {
+          var r = this.rows[i];
+          var p = Number(r.percent);
+          if (!Number.isFinite(p) || p <= 0 || p > 100) return false;
+          if (!r.label || !String(r.label).trim()) return false;
+          var hasNum = r.weeks_num !== '' && r.weeks_num != null;
+          var hasDen = r.weeks_den !== '' && r.weeks_den != null;
+          if (hasNum !== hasDen) return false;
+          if (hasNum) {
+            var n = parseInt(r.weeks_num, 10);
+            var d = parseInt(r.weeks_den, 10);
+            if (!Number.isInteger(n) || n <= 0) return false;
+            if (!Number.isInteger(d) || d <= 0) return false;
+          }
+        }
+        return true;
+      },
+      get preview() {
+        // Render with delivery_weeks = 9 for a quick sanity check.
+        var W = 9;
+        var lines = [];
+        this.rows.forEach(function (r) {
+          var label = String(r.label || '');
+          var hasNum = r.weeks_num !== '' && r.weeks_num != null;
+          if (hasNum) {
+            var n = parseInt(r.weeks_num, 10);
+            var d = parseInt(r.weeks_den, 10);
+            if (Number.isInteger(n) && Number.isInteger(d) && d > 0) {
+              var w = Math.floor((n * W) / d);
+              label = label.replace(/\{weeks\}/g, String(w));
+            }
+          }
+          lines.push(r.percent + '% ' + label);
+        });
+        return lines.join(' \u2022 ');
+      },
+      addRow: function () {
+        this.rows.push({ percent: 0, label: '', weeks_num: '', weeks_den: '' });
+      },
+      removeRow: function (i) {
+        this.rows.splice(i, 1);
+      },
+      save: function () {
+        var self = this;
+        if (!self.isValid) return;
+        self.busy = true;
+        self.saveLabel = 'Saving\u2026';
+        var payload = {
+          rows: self.rows.map(function (r) {
+            var out = { percent: Number(r.percent), label: String(r.label).trim() };
+            if (r.weeks_num !== '' && r.weeks_num != null) {
+              out.weeks_num = parseInt(r.weeks_num, 10);
+              out.weeks_den = parseInt(r.weeks_den, 10);
+            }
+            return out;
+          }),
+        };
+        fetch('/settings/eps-schedule', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+        }).then(function (r) {
+          if (!r.ok) return r.json().then(function (d) { throw new Error(d && d.error || ('HTTP ' + r.status)); });
+          return r.json();
+        }).then(function () {
+          self.saveLabel = 'Saved \u2713';
+          self.busy = false;
+          setTimeout(function () { self.saveLabel = 'Save EPS schedule'; }, 1500);
+        }).catch(function (err) {
+          self.busy = false;
+          self.saveLabel = 'Save EPS schedule';
+          alert('Could not save: ' + (err && err.message ? err.message : 'unknown error'));
+        });
+      },
+      resetToDefault: function () {
+        if (!confirm('Reset the EPS schedule to the built-in default (25/25/25/15/10 with ARO 1/3 and 2/3)? This does not save until you click "Save EPS schedule".')) return;
+        this.rows = [
+          { percent: 25, label: 'Due upon receipt of purchase order', weeks_num: '', weeks_den: '' },
+          { percent: 25, label: 'Due {weeks} weeks ARO', weeks_num: '1', weeks_den: '3' },
+          { percent: 25, label: 'Due {weeks} weeks ARO', weeks_num: '2', weeks_den: '3' },
+          { percent: 15, label: 'Due upon completion of FAT', weeks_num: '', weeks_den: '' },
+          { percent: 10, label: 'Due upon delivery of final documentation', weeks_num: '', weeks_den: '' },
+        ];
       },
     };
   });

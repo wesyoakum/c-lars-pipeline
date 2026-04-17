@@ -36,6 +36,7 @@ import {
 } from '../../../../lib/pricing.js';
 import { templateTypeForQuote, templateManagerHtml } from '../../../../lib/template-catalog.js';
 import { loadQuoteTermDefaultsMap, getEffectiveValidityDays } from '../../../../lib/quote-term-defaults.js';
+import { loadEpsSchedule } from '../../../../lib/eps-schedule.js';
 
 const READ_ONLY_STATUSES = new Set([
   'issued', 'revision_issued', 'accepted', 'rejected', 'expired', 'dead',
@@ -121,6 +122,12 @@ export async function onRequestGet(context) {
   // Serialized into JS below so the flatTerms / plainTerms Alpine
   // components can consult (or save) defaults without a round-trip.
   const termDefaults = await loadQuoteTermDefaultsMap(env);
+
+  // Admin-editable EPS default payment schedule (migration 0040).
+  // Serialized into JS below so the epsTerms Alpine component renders
+  // the configured rows instead of the old hardcoded 25/25/25/15/10
+  // string. Hybrid/non-EPS quotes ignore this blob.
+  const epsSchedule = await loadEpsSchedule(env);
 
   // Expiration display (Batch 6, migration 0038):
   //   * If the quote already has a valid_until, show it as-is.
@@ -928,15 +935,32 @@ export async function onRequestGet(context) {
       var _initDeliveryMatch = (${raw(JSON.stringify(quote.delivery_estimate || ''))}).match(/^(\\d+)\\s*week/);
       if (_initDeliveryMatch) _deliveryWeeks = parseInt(_initDeliveryMatch[1], 10);
 
+      // Admin-editable schedule from migration 0040. Mirrors the
+      // server-side epsScheduleToString() renderer so draft quotes
+      // stay in sync after admins change the schedule.
+      var _epsSchedule = ${raw(JSON.stringify(epsSchedule || { rows: [] }))};
+      function _fmtPct(p) {
+        var n = Number(p);
+        if (Number.isInteger(n)) return String(n);
+        return n.toFixed(2).replace(/\\.?0+$/, '');
+      }
       function epsDefaultTerms(weeks) {
-        if (!weeks || weeks <= 0) return '';
-        var w1 = Math.floor(weeks / 3);
-        var w2 = Math.floor(2 * weeks / 3);
-        return '25% Due upon receipt of purchase order' + '\\n'
-             + '25% Due ' + w1 + ' weeks ARO' + '\\n'
-             + '25% Due ' + w2 + ' weeks ARO' + '\\n'
-             + '15% Due upon completion of FAT' + '\\n'
-             + '10% Due upon delivery of final documentation';
+        var rows = (_epsSchedule && _epsSchedule.rows) || [];
+        if (rows.length === 0) return '';
+        var needsWeeks = rows.some(function (r) { return r && r.weeks_num != null && r.weeks_den != null; });
+        if (needsWeeks && (!weeks || weeks <= 0)) return '';
+        return rows.map(function (r) {
+          var label = String(r.label || '');
+          if (r.weeks_num != null && r.weeks_den != null) {
+            var n = parseInt(r.weeks_num, 10);
+            var d = parseInt(r.weeks_den, 10);
+            if (Number.isInteger(n) && Number.isInteger(d) && d > 0) {
+              var w = Math.floor((n * weeks) / d);
+              label = label.replace(/\\{weeks\\}/g, String(w));
+            }
+          }
+          return _fmtPct(r.percent) + '% ' + label;
+        }).join('\\n');
       }
 
       // Spares / Service payment terms come straight from the saved
