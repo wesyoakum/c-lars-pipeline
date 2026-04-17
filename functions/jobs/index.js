@@ -12,6 +12,7 @@ import { parseTransactionTypes } from '../lib/validators.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
 import { displayAccountName, slugifyGroup } from '../lib/account-groups.js';
+import { isActiveOnly, jobActivePredicate } from '../lib/activeness.js';
 
 /**
  * Detects a request coming from the wizard modal or any XHR-style client.
@@ -60,6 +61,11 @@ export async function onRequestGet(context) {
     group_rollup: !!(user && user.group_rollup),
   };
 
+  // Active-only filter: hide complete + cancelled jobs. handed_off
+  // stays visible (job is still tracked externally until it hits
+  // complete — see activeness.js).
+  const activeWhere = isActiveOnly(user) ? `WHERE ${jobActivePredicate('j')}` : '';
+
   const rows = await all(
     env.DB,
     `SELECT j.id, j.number, j.title, j.job_type, j.status,
@@ -71,6 +77,7 @@ export async function onRequestGet(context) {
        FROM jobs j
        LEFT JOIN opportunities o ON o.id = j.opportunity_id
        LEFT JOIN accounts a ON a.id = o.account_id
+      ${activeWhere}
       ORDER BY j.updated_at DESC
       LIMIT 500`
   );

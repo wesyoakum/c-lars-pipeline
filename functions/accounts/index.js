@@ -20,6 +20,7 @@ import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/lis
 import { ieText, ieSelect, listInlineEditScript } from '../lib/list-inline-edit.js';
 import { listBulkEditScript } from '../lib/list-bulk-edit.js';
 import { slugifyGroup, displayAccountName } from '../lib/account-groups.js';
+import { isActiveOnly, accountActivePredicate } from '../lib/activeness.js';
 
 // Keep in sync with functions/accounts/[id]/index.js::SEGMENT_OPTIONS.
 // Used by the inline-edit select in the segment column.
@@ -70,6 +71,11 @@ export async function onRequestGet(context) {
     ? `COALESCE(NULLIF(a.alias, ''), a.name)`
     : `a.name`;
 
+  // When the user's `active_only` pref is on, hide is_active=0 rows.
+  // Detail-page navigation still works — it's a list filter, not a
+  // soft-delete.
+  const activeWhere = isActiveOnly(user) ? `WHERE ${accountActivePredicate('a')}` : '';
+
   const rows = await all(
     env.DB,
     `SELECT a.id, a.name, a.alias, a.parent_group, a.segment, a.phone, a.website, a.updated_at,
@@ -77,6 +83,7 @@ export async function onRequestGet(context) {
             (SELECT COUNT(*) FROM contacts c WHERE c.account_id = a.id) AS contact_count,
             (SELECT COUNT(*) FROM opportunities o WHERE o.account_id = a.id) AS opp_count
        FROM accounts a
+      ${activeWhere}
       ORDER BY ${orderBy}
       LIMIT 500`
   );

@@ -688,6 +688,45 @@ code {
   flex-shrink: 0;
 }
 
+/* "Show inactive" override, only rendered when the global active_only
+   pref is on. Lives just above the suggestions dropdown so the user
+   sees it as an explicit escape hatch when searching doesn't find a
+   closed / dead record they need. */
+.task-wizard-show-inactive {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.task-wizard-show-inactive input[type="checkbox"] {
+  margin: 0;
+}
+
+/* Visual marker on suggestion rows that are inactive (when the user
+   flips Show inactive on, those rows appear mixed into the list). */
+.task-wizard-suggestion.inactive {
+  opacity: 0.6;
+}
+.task-wizard-suggestion.inactive:hover,
+.task-wizard-suggestion.inactive.active {
+  opacity: 0.85;
+}
+.task-wizard-suggestion-inactive-badge {
+  margin-left: auto;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #94452a;
+  background: #fef0e6;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+}
+
 /* ---------- Main content ---------- */
 
 .site-main {

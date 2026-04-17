@@ -11,6 +11,7 @@ import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
 import { listBulkEditScript } from '../lib/list-bulk-edit.js';
+import { isActiveOnly } from '../lib/activeness.js';
 
 const TYPE_LABELS = {
   task: 'Task',
@@ -33,7 +34,10 @@ export async function onRequestGet(context) {
   const flash = readFlash(url);
 
   const filter = url.searchParams.get('filter') || 'mine';
-  const showCompleted = url.searchParams.get('completed') === '1';
+  // Global active_only pref forces completed tasks out of view, even
+  // if the URL asked for them. Without the pref, the per-list
+  // ?completed=1 toggle still works.
+  const showCompleted = !isActiveOnly(user) && url.searchParams.get('completed') === '1';
   const typeFilter = url.searchParams.get('type') || '';
 
   // Build WHERE clause

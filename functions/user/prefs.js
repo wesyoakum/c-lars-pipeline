@@ -8,11 +8,13 @@
 //   {
 //     show_alias:   0 | 1 | boolean,
 //     group_rollup: 0 | 1 | boolean,
+//     active_only:  0 | 1 | boolean,
 //   }
 //
-// Both columns are NOT NULL DEFAULT 0 (migration 0034). The endpoint
-// only updates the keys present in the payload, so the popup can
-// PATCH a single toggle change without clobbering the other one.
+// All three columns are NOT NULL DEFAULT 0 (show_alias + group_rollup
+// added in 0034, active_only in 0035). The endpoint only updates the
+// keys present in the payload, so the popup can PATCH a single toggle
+// change without clobbering the others.
 //
 // Returns 204 on success — the popup reloads the page to pick up the
 // new prefs server-side, so we don't need to echo state back.
@@ -62,6 +64,13 @@ export async function onRequestPatch(context) {
     const f = toFlag(payload.group_rollup);
     if (f === null) return json({ ok: false, error: 'group_rollup must be boolean.' }, 400);
     sets.push('group_rollup = ?');
+    params.push(f);
+  }
+
+  if ('active_only' in payload) {
+    const f = toFlag(payload.active_only);
+    if (f === null) return json({ ok: false, error: 'active_only must be boolean.' }, 400);
+    sets.push('active_only = ?');
     params.push(f);
   }
 

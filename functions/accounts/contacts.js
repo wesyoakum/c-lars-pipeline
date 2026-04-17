@@ -11,6 +11,7 @@ import { readFlash } from '../lib/http.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieText, ieSelect, listInlineEditScript } from '../lib/list-inline-edit.js';
 import { listBulkEditScript } from '../lib/list-bulk-edit.js';
+import { isActiveOnly, contactActivePredicate } from '../lib/activeness.js';
 
 const PRIMARY_OPTIONS = [
   { value: '0', label: 'No' },
@@ -21,6 +22,10 @@ export async function onRequestGet(context) {
   const { env, data, request } = context;
   const user = data?.user;
   const url = new URL(request.url);
+
+  // Contacts cascade from their parent account: when the global
+  // `active_only` pref is on, hide contacts whose account is inactive.
+  const activeWhere = isActiveOnly(user) ? `WHERE ${contactActivePredicate('a')}` : '';
 
   const rows = await all(
     env.DB,
@@ -37,6 +42,7 @@ export async function onRequestGet(context) {
             a.name AS account_name
        FROM contacts c
        LEFT JOIN accounts a ON a.id = c.account_id
+      ${activeWhere}
       ORDER BY COALESCE(c.last_name, c.first_name, '') COLLATE NOCASE, c.first_name COLLATE NOCASE
       LIMIT 2000`
   );

@@ -18,6 +18,7 @@ import { loadStageCatalog } from '../lib/stages.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
 import { displayAccountForGroupMode } from '../lib/account-groups.js';
+import { isActiveOnly, opportunityActivePredicate } from '../lib/activeness.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
@@ -41,6 +42,11 @@ export async function onRequestGet(context) {
   // Pull alias + parent_group alongside name so the Account column can
   // honor the per-user `show_alias` and `group_rollup` toggles via
   // displayAccountForGroupMode().
+  // Active-only filter: opps are active if their stage is non-closed
+  // and either they have no quotes yet (grace window for fresh leads)
+  // or at least one active quote.
+  const activeWhere = isActiveOnly(user) ? `WHERE ${opportunityActivePredicate('o')}` : '';
+
   const rows = await all(
     env.DB,
     `SELECT o.id, o.number, o.title, o.transaction_type, o.stage,
@@ -53,6 +59,7 @@ export async function onRequestGet(context) {
             a.id AS account_id
        FROM opportunities o
        LEFT JOIN accounts a ON a.id = o.account_id
+      ${activeWhere}
       ORDER BY o.updated_at DESC
       LIMIT 500`
   );
@@ -261,8 +268,10 @@ export async function onRequestPost(context) {
   }
 
   // Confirm account exists — cheap sanity check so an FK error doesn't
-  // blow up mid-batch with a cryptic D1 error.
-  const acct = await one(env.DB, 'SELECT id, name FROM accounts WHERE id = ?', [value.account_id]);
+  // blow up mid-batch with a cryptic D1 error. We also pull is_active
+  // so the create handler can auto-reactivate inactive accounts when
+  // a new opportunity lands on them (migration 0035 rule).
+  const acct = await one(env.DB, 'SELECT id, name, is_active FROM accounts WHERE id = ?', [value.account_id]);
   if (!acct) {
     if (ajax) {
       return jsonResponse(
@@ -310,8 +319,34 @@ export async function onRequestPost(context) {
     ? value.probability
     : (leadStage?.default_probability ?? 0);
 
+  // Auto-reactivate the account if it was previously marked inactive.
+  // A new opp on an inactive account implies it's alive again — this
+  // mirrors the rule Wes laid out for migration 0035. Audit separately
+  // so the history tells the story instead of bundling it into the
+  // opportunity-created audit row.
+  const batchStmts = [];
+  const reactivateAccount = acct.is_active === 0;
+  if (reactivateAccount) {
+    batchStmts.push(
+      stmt(env.DB,
+        `UPDATE accounts SET is_active = 1, updated_at = ? WHERE id = ?`,
+        [ts, acct.id])
+    );
+    batchStmts.push(
+      auditStmt(env.DB, {
+        entityType: 'account',
+        entityId: acct.id,
+        eventType: 'reactivated',
+        user,
+        summary: `Reactivated "${acct.name}" because a new opportunity was created on it`,
+        changes: { is_active: { from: 0, to: 1 }, triggered_by_opportunity: id },
+      })
+    );
+  }
+
   try {
     await batch(env.DB, [
+      ...batchStmts,
       stmt(
         env.DB,
         `INSERT INTO opportunities

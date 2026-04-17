@@ -182,6 +182,9 @@
   }
 
   function buildLinkables(data) {
+    // Each entry carries an `active` flag (0|1) copied straight from
+    // picker-data. The wizard hides rows where active=0 unless the
+    // user ticked "Show inactive" on the current step.
     var list = [];
     (data.opportunities || []).forEach(function (o) {
       list.push({
@@ -190,6 +193,7 @@
         number: o.number || '',
         title: o.title || '',
         account_id: o.account_id || '',
+        active: o.active == null ? 1 : (o.active ? 1 : 0),
         searchText: (o.number || '') + ' ' + (o.title || '')
       });
     });
@@ -199,6 +203,7 @@
         id: q.id,
         number: q.number || '',
         title: q.title || '',
+        active: q.active == null ? 1 : (q.active ? 1 : 0),
         searchText: (q.number || '') + ' ' + (q.title || '')
       });
     });
@@ -208,6 +213,7 @@
         id: a.id,
         name: a.name || '',
         alias: a.alias || '',
+        active: a.active == null ? 1 : (a.active ? 1 : 0),
         searchText: (a.name || '') + ' ' + (a.alias || '')
       });
     });
@@ -347,6 +353,28 @@
       pinnedPrefix: '',
       pinnedValue: '',
 
+      // Per-step "Show inactive" override for entity-select steps.
+      // Resets to false on every modal open. Used by:
+      //   - visibleSuggestions() — when false, rows with active=0 are
+      //     filtered out (provided the global pref is on; otherwise
+      //     everything's active by construction)
+      //   - toggleShowInactive() — flips it and re-fetches picker-data
+      //     with ?include_inactive=1 the first time the user opts in,
+      //     so inactive records actually exist in the local store.
+      showInactive: false,
+      inactiveFetched: false,
+
+      // Whether the "Show inactive" checkbox should render at all on
+      // the current step. Computed in the markup, not here.
+      activeOnlyPref: function () {
+        return !!(this.prefs && this.prefs.active_only);
+      },
+      shouldOfferInactiveToggle: function () {
+        var step = this.currentStep();
+        if (!step || step.type !== 'entity-select') return false;
+        return this.activeOnlyPref();
+      },
+
       // ---- Derived helpers ----
       steps: function () {
         return (this.config && this.config.steps) || [];
@@ -450,12 +478,21 @@
           var groupRollup = !!(this.prefs && this.prefs.group_rollup);
           var accountKindAllowed = kinds.indexOf('account') >= 0;
 
+          // Active-only filter: when the global pref is on and the user
+          // hasn't ticked "Show inactive" on this step, drop rows whose
+          // `active` flag is 0. When the pref is off, every row already
+          // comes from picker-data as active=1 (the server only tags
+          // inactive rows when filtering is bypassed).
+          var activeOnly = !!(this.prefs && this.prefs.active_only) && !this.showInactive;
+
           // Drill-down stage: only this group's members.
           if (this.groupDrillDown && accountKindAllowed) {
             var memberSet = {};
             (this.groupDrillDown.member_ids || []).forEach(function (id) { memberSet[id] = 1; });
             var members = this.linkables.filter(function (l) {
-              return l.kind === 'account' && memberSet[l.id];
+              if (l.kind !== 'account' || !memberSet[l.id]) return false;
+              if (activeOnly && l.active === 0) return false;
+              return true;
             });
             return linkSuggestions(members, this.typedInput).map(function (item) {
               var mainLabel = showAlias
@@ -481,6 +518,7 @@
           for (var i = 0; i < this.linkables.length; i++) {
             var l = this.linkables[i];
             if (kinds.indexOf(l.kind) < 0) continue;
+            if (activeOnly && l.active === 0) continue;
             if (l.kind === 'account' && groupRollup) {
               var aRow = accountById[l.id];
               if (aRow && aRow.parent_group) continue; // grouped: skip; group entry below
@@ -568,6 +606,11 @@
         this.pinnedPrefix = '';
         this.pinnedValue = '';
         this.groupDrillDown = null;
+        // Reset per-wizard-session "Show inactive" state. We don't reset
+        // `inactiveFetched` — the picker-data includes/excludes inactive
+        // on a per-fetch basis. loadPickerData() decides which mode to
+        // pull based on showInactive + the active_only pref.
+        this.showInactive = false;
 
         // Seed blank answers
         this.answers = (typeof config.blankAnswers === 'function')
@@ -629,10 +672,12 @@
         }, 60);
       },
 
-      loadPickerData: function () {
+      loadPickerData: function (opts) {
         var self = this;
+        var includeInactive = !!(opts && opts.includeInactive);
         self.loading = true;
-        fetch('/activities/picker-data', {
+        var url = '/activities/picker-data' + (includeInactive ? '?include_inactive=1' : '');
+        fetch(url, {
           credentials: 'same-origin',
           headers: { 'accept': 'application/json' }
         })
@@ -645,7 +690,7 @@
             self.quotes = data.quotes || [];
             self.accounts = data.accounts || [];
             self.groups = data.groups || [];
-            self.prefs = data.prefs || { show_alias: 0, group_rollup: 0 };
+            self.prefs = data.prefs || { show_alias: 0, group_rollup: 0, active_only: 0 };
             self.linkables = buildLinkables(data);
             self.currentUserId = data.current_user_id || null;
             if (self.currentUserId) {
@@ -657,12 +702,27 @@
               }
             }
             self.pickerLoaded = true;
+            self.inactiveFetched = includeInactive;
             self.seedDefaults();
           })
           .catch(function () {
             self.loading = false;
             self.error = 'Could not load picker data.';
           });
+      },
+
+      // User flipped the "Show inactive" checkbox on the current step.
+      // When turning ON, if we haven't yet fetched with inactive
+      // records included, trigger a re-fetch so the suggestions pool
+      // actually contains them. (If the active_only pref is off, the
+      // initial fetch already included everything — no re-fetch needed.)
+      toggleShowInactive: function (next) {
+        this.showInactive = !!next;
+        this.suggestionIndex = 0;
+        var prefActive = !!(this.prefs && this.prefs.active_only);
+        if (this.showInactive && prefActive && !this.inactiveFetched) {
+          this.loadPickerData({ includeInactive: true });
+        }
       },
 
       // Seed step defaults that depend on picker data (e.g. defaulting

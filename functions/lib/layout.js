@@ -248,16 +248,27 @@ const WIZARD_MODAL_MARKUP = (
   ':placeholder="$store.wizard.currentPlaceholder()" autocomplete="off">' +
   '</template>' +
 
+  // "Show inactive" override for entity-select steps, shown only when
+  // the global active_only pref is on (otherwise everything's visible
+  // anyway and the checkbox would be a no-op). Re-fetches picker-data
+  // with ?include_inactive=1 the first time it's ticked.
+  '<label class="task-wizard-show-inactive" x-show="$store.wizard.shouldOfferInactiveToggle()">' +
+  '<input type="checkbox" :checked="$store.wizard.showInactive" ' +
+  '@change="$store.wizard.toggleShowInactive($event.target.checked)"> ' +
+  '<span>Show inactive</span>' +
+  '</label>' +
+
   // Suggestions dropdown (user-select + entity-select steps).
   '<div class="task-wizard-suggestions" x-show="$store.wizard.visibleSuggestions().length > 0">' +
   '<template x-for="(sug, idx) in $store.wizard.visibleSuggestions()" :key="sug.id">' +
   '<button type="button" class="task-wizard-suggestion" ' +
-  ':class="idx === $store.wizard.suggestionIndex ? \'active\' : \'\'" ' +
+  ':class="(idx === $store.wizard.suggestionIndex ? \'active \' : \'\') + ((sug._item && sug._item.active === 0) ? \'inactive\' : \'\')" ' +
   '@mouseenter="$store.wizard.suggestionIndex = idx" ' +
   '@click="$store.wizard.pickSuggestion(idx)">' +
   '<span class="task-wizard-suggestion-type" x-text="sug.typeLabel" x-show="sug.typeLabel"></span>' +
   '<span class="task-wizard-suggestion-main" x-text="sug.label"></span>' +
   '<span class="task-wizard-suggestion-sub" x-text="sug.sub" x-show="sug.sub"></span>' +
+  '<span class="task-wizard-suggestion-inactive-badge" x-show="sug._item && sug._item.active === 0">inactive</span>' +
   '</button>' +
   '</template>' +
   '</div>' +
@@ -682,6 +693,16 @@ const DISPLAY_PREFS_HEADER_BTN = (
           '<span class="toggle-slider"></span>' +
         '</label>' +
       '</div>' +
+      '<div class="quote-settings-row" style="margin-top:0.6rem;padding-top:0.6rem;border-top:1px solid var(--border)">' +
+        '<div class="quote-settings-label">' +
+          '<strong>Show only active</strong>' +
+          '<span>Hide closed / dead / cancelled records across every list and wizard picker. Accounts with no active opportunities, dead / rejected quotes, completed / cancelled jobs, and closed opportunities are filtered out. Detail-page links still work directly. Wizard pickers get a per-field "Show inactive" override.</span>' +
+        '</div>' +
+        '<label class="toggle-switch" :class="{ \'toggle-switch--on\': activeOnly }">' +
+          '<input type="checkbox" :checked="activeOnly" @change="save(\'active_only\', $event.target.checked)">' +
+          '<span class="toggle-slider"></span>' +
+        '</label>' +
+      '</div>' +
     '</div>' +
   '</div>'
 );
@@ -829,21 +850,29 @@ ${body}
 function displayPrefsBootScript(user) {
   const showAlias = user && user.show_alias ? 1 : 0;
   const groupRollup = user && user.group_rollup ? 1 : 0;
+  const activeOnly = user && user.active_only ? 1 : 0;
   return (
     "window.PMS = window.PMS || {};\n" +
-    "window.PMS.userPrefs = { show_alias: " + showAlias + ", group_rollup: " + groupRollup + " };\n" +
+    "window.PMS.userPrefs = { show_alias: " + showAlias +
+      ", group_rollup: " + groupRollup +
+      ", active_only: " + activeOnly + " };\n" +
     "document.addEventListener('alpine:init', function () {\n" +
     "  Alpine.data('displayPrefs', function () {\n" +
     "    return {\n" +
     "      open: false,\n" +
     "      showAlias: !!" + showAlias + ",\n" +
     "      groupRollup: !!" + groupRollup + ",\n" +
+    "      activeOnly: !!" + activeOnly + ",\n" +
     "      saving: false,\n" +
     "      save: function (key, next) {\n" +
     "        var self = this;\n" +
-    "        var prev = key === 'show_alias' ? self.showAlias : self.groupRollup;\n" +
-    "        if (key === 'show_alias') self.showAlias = !!next;\n" +
-    "        else self.groupRollup = !!next;\n" +
+    "        var prop = key === 'show_alias' ? 'showAlias'\n" +
+    "                 : key === 'group_rollup' ? 'groupRollup'\n" +
+    "                 : key === 'active_only'  ? 'activeOnly'\n" +
+    "                 : null;\n" +
+    "        if (!prop) return;\n" +
+    "        var prev = self[prop];\n" +
+    "        self[prop] = !!next;\n" +
     "        self.saving = true;\n" +
     "        var body = {};\n" +
     "        body[key] = next ? 1 : 0;\n" +
@@ -856,8 +885,7 @@ function displayPrefsBootScript(user) {
     "          if (!r.ok) throw new Error('HTTP ' + r.status);\n" +
     "          window.location.reload();\n" +
     "        }).catch(function (err) {\n" +
-    "          if (key === 'show_alias') self.showAlias = prev;\n" +
-    "          else self.groupRollup = prev;\n" +
+    "          self[prop] = prev;\n" +
     "          self.saving = false;\n" +
     "          alert('Could not save preference: ' + (err && err.message ? err.message : 'unknown error'));\n" +
     "        });\n" +

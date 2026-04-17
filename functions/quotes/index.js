@@ -14,6 +14,7 @@ import {
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
 import { displayAccountForGroupMode } from '../lib/account-groups.js';
+import { isActiveOnly, quoteActivePredicate } from '../lib/activeness.js';
 
 export async function onRequestGet(context) {
   const { env, data, request } = context;
@@ -23,6 +24,11 @@ export async function onRequestGet(context) {
     show_alias: !!(user && user.show_alias),
     group_rollup: !!(user && user.group_rollup),
   };
+
+  // Active-only filter: hide dead/rejected/completed quotes. ('completed'
+  // is the hidden status set automatically when the associated job moves
+  // to 'complete' — see activeness.js.)
+  const activeWhere = isActiveOnly(user) ? `WHERE ${quoteActivePredicate('q')}` : '';
 
   const rows = await all(
     env.DB,
@@ -36,6 +42,7 @@ export async function onRequestGet(context) {
        FROM quotes q
        LEFT JOIN opportunities o ON o.id = q.opportunity_id
        LEFT JOIN accounts a      ON a.id = o.account_id
+      ${activeWhere}
       ORDER BY q.updated_at DESC
       LIMIT 500`
   );
