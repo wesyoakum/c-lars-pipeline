@@ -18,8 +18,13 @@
 import { resolveUser } from './lib/auth.js';
 import { unauthorizedResponse } from './lib/layout.js';
 
-// Paths that bypass auth entirely (static assets served from /public).
-const PUBLIC_PREFIXES = ['/css/', '/js/', '/img/', '/favicon.ico'];
+// Paths that bypass SSO auth entirely.
+//   - Static assets served from /public (no auth needed).
+//   - /api/cron/ endpoints — the sidecar cron Worker can't authenticate
+//     via Access (no interactive login), so those endpoints enforce
+//     their own constant-time CRON_SECRET header check. See
+//     functions/api/cron/sweep.js.
+const PUBLIC_PREFIXES = ['/css/', '/js/', '/img/', '/favicon.ico', '/api/cron/'];
 
 export async function onRequest(context) {
   const { request, env, next } = context;
