@@ -163,10 +163,10 @@ export function addressEditorScript() {
         this.addresses.splice(i, 1);
       },
       setKindFlag: function(i, flag, on) {
-        // Toggle one of the two kind checkboxes (Billing / Physical).
-        // The stored `kind` is the combined state: neither checked is
-        // treated as falling back to 'billing' (a row has to be one or
-        // the other — address rows without a designated use aren't
+        // Toggle one of the two kind pills (Billing / Physical).
+        // The stored kind field is the combined state: neither active is
+        // treated as falling back to billing (a row has to be one or
+        // the other — address rows without a designated use arent
         // meaningful).
         var row = this.addresses[i];
         if (!row) return;
