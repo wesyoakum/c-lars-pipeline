@@ -257,6 +257,17 @@ export async function onRequestPost(context) {
   const input = await formBody(request);
   const ajax = isAjaxRequest(request, input);
 
+  // The wizard/modal appends source='wizard' (or 'modal') as an
+  // AJAX-detection sentinel. That field name unfortunately collides
+  // with the opportunity's `source` column (inbound/outreach/…) which
+  // the validator enforces against a fixed enum. Strip the sentinel
+  // before validating so the wizard's submit doesn't fail with
+  // "Unknown source". Headers (x-requested-with + accept) already
+  // handle AJAX detection above.
+  if (input && (input.source === 'wizard' || input.source === 'modal' || input.source === 'bulk')) {
+    input.source = '';
+  }
+
   const { ok, value, errors } = validateOpportunity(input);
   if (!ok) {
     if (ajax) {
