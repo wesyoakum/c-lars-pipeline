@@ -18,45 +18,134 @@
 // ASSIGNEE_OPTIONS          — assignee selector presets
 // LINK_OPTIONS              — link selector options
 
+// Re-used quote-scoped condition set (quote.issued / accepted / rejected /
+// expired / revised all carry the same {quote, opportunity, account}
+// payload shape via auto-tasks.js).
+const QUOTE_CONDITIONS = [
+  { path: 'quote.quote_type',             label: 'Quote type',              values: 'quote_types' },
+  { path: 'quote.status',                 label: 'Quote status' },
+  { path: 'quote.is_hybrid',              label: 'Is hybrid quote?',        values: ['1', '0'] },
+  { path: 'opportunity.stage',            label: 'Opportunity stage',       values: 'stages' },
+  { path: 'opportunity.transaction_type', label: 'Opportunity type',        values: 'transaction_types' },
+  { path: 'opportunity.owner_user_id',    label: 'Opportunity owner (user id)' },
+  { path: 'account.name',                 label: 'Account name' },
+];
+
+// Re-used job-scoped condition set (oc.issued / ntp.issued /
+// authorization.received / job.handed_off / job.completed).
+const JOB_CONDITIONS = [
+  { path: 'job.status',                   label: 'Job status' },
+  { path: 'job.oc_number',                label: 'OC number' },
+  { path: 'opportunity.stage',            label: 'Opportunity stage',       values: 'stages' },
+  { path: 'opportunity.transaction_type', label: 'Opportunity type',        values: 'transaction_types' },
+  { path: 'opportunity.owner_user_id',    label: 'Opportunity owner (user id)' },
+  { path: 'account.name',                 label: 'Account name' },
+];
+
 export const CONDITION_PATHS = {
-  'quote.issued': [
-    { path: 'quote.quote_type',             label: 'Quote type',              values: 'quote_types' },
-    { path: 'quote.status',                 label: 'Quote status',            values: ['issued', 'revision_issued'] },
-    { path: 'quote.is_hybrid',              label: 'Is hybrid quote?',        values: ['1', '0'] },
-    { path: 'opportunity.stage',            label: 'Opportunity stage',       values: 'stages' },
-    { path: 'opportunity.transaction_type', label: 'Opportunity type',        values: 'transaction_types' },
-    { path: 'opportunity.owner_user_id',    label: 'Opportunity owner (user id)' },
-    { path: 'account.name',                 label: 'Account name' },
+  // Quote lifecycle — inline triggers
+  'quote.issued':        QUOTE_CONDITIONS,
+  'quote.accepted':      QUOTE_CONDITIONS,
+  'quote.rejected':      QUOTE_CONDITIONS,
+  'quote.expired':       QUOTE_CONDITIONS,
+  'quote.revised':       QUOTE_CONDITIONS,
+
+  // Quote lifecycle — cron
+  'quote.expiring_soon': [
+    ...QUOTE_CONDITIONS,
+    { path: 'days_until_expire', label: 'Days until expiration' },
   ],
+
+  // Opportunity lifecycle
   'opportunity.stage_changed': [
     { path: 'stage_to',                     label: 'New stage',               values: 'stages' },
     { path: 'stage_from',                   label: 'Previous stage',          values: 'stages' },
     { path: 'opportunity.transaction_type', label: 'Opportunity type',        values: 'transaction_types' },
     { path: 'opportunity.owner_user_id',    label: 'Opportunity owner (user id)' },
   ],
+  'opportunity.stalled': [
+    { path: 'opportunity.stage',            label: 'Opportunity stage',       values: 'stages' },
+    { path: 'opportunity.transaction_type', label: 'Opportunity type',        values: 'transaction_types' },
+    { path: 'opportunity.owner_user_id',    label: 'Opportunity owner (user id)' },
+    { path: 'days_stalled',                 label: 'Days stalled' },
+  ],
+
+  // Job lifecycle
+  'oc.issued':              JOB_CONDITIONS,
+  'ntp.issued':             JOB_CONDITIONS,
+  'authorization.received': JOB_CONDITIONS,
+  'job.handed_off':         JOB_CONDITIONS,
+  'job.completed':          JOB_CONDITIONS,
+
+  // Price builds (cron)
+  'price_build.stale': [
+    { path: 'cost_build.status',            label: 'Price build status' },
+    { path: 'quote.quote_type',             label: 'Quote type',              values: 'quote_types' },
+    { path: 'opportunity.stage',            label: 'Opportunity stage',       values: 'stages' },
+    { path: 'days_stale',                   label: 'Days since last update' },
+  ],
+
+  // Tasks
   'task.completed': [
     { path: 'task.type',                    label: 'Task type',               values: ['task', 'note', 'call', 'email', 'meeting'] },
     { path: 'task.subject',                 label: 'Task subject (contains)' },
     { path: 'task.assigned_user_id',        label: 'Assigned user id' },
     { path: 'opportunity.stage',            label: 'Opportunity stage',       values: 'stages' },
   ],
+  'task.overdue': [
+    { path: 'task.type',                    label: 'Task type',               values: ['task', 'note', 'call', 'email', 'meeting'] },
+    { path: 'task.assigned_user_id',        label: 'Assigned user id' },
+    { path: 'days_overdue',                 label: 'Days overdue' },
+    { path: 'opportunity.stage',            label: 'Opportunity stage',       values: 'stages' },
+  ],
+
+  // System
   'system.error': [
     { path: 'error.code',                   label: 'Error code',              values: 'error_codes' },
   ],
 };
 
+// Re-used quote-scoped token set (quote.issued / accepted / rejected /
+// expired / revised).
+const QUOTE_TOKENS = [
+  { path: 'quote.number',             label: 'Quote number' },
+  { path: 'quote.revision',           label: 'Quote revision' },
+  { path: 'quote.title',              label: 'Quote title' },
+  { path: 'quote.quote_type',         label: 'Quote type' },
+  { path: 'quote.status',             label: 'Quote status' },
+  { path: 'opportunity.number',       label: 'Opportunity number' },
+  { path: 'opportunity.title',        label: 'Opportunity title' },
+  { path: 'account.name',             label: 'Account name' },
+  { path: 'account.alias',            label: 'Account alias' },
+  { path: 'trigger.user.display_name',label: 'Acting user name' },
+];
+
+// Re-used job-scoped token set (oc.issued / ntp.issued /
+// authorization.received / job.handed_off / job.completed).
+const JOB_TOKENS = [
+  { path: 'job.oc_number',            label: 'OC number' },
+  { path: 'job.status',               label: 'Job status' },
+  { path: 'opportunity.number',       label: 'Opportunity number' },
+  { path: 'opportunity.title',        label: 'Opportunity title' },
+  { path: 'account.name',             label: 'Account name' },
+  { path: 'account.alias',            label: 'Account alias' },
+  { path: 'trigger.user.display_name',label: 'Acting user name' },
+];
+
 export const TOKEN_PATHS = {
-  'quote.issued': [
-    { path: 'quote.number',             label: 'Quote number' },
-    { path: 'quote.revision',           label: 'Quote revision' },
-    { path: 'quote.title',              label: 'Quote title' },
-    { path: 'quote.quote_type',         label: 'Quote type' },
-    { path: 'opportunity.number',       label: 'Opportunity number' },
-    { path: 'opportunity.title',        label: 'Opportunity title' },
-    { path: 'account.name',             label: 'Account name' },
-    { path: 'account.alias',            label: 'Account alias' },
-    { path: 'trigger.user.display_name',label: 'Acting user name' },
+  // Quote lifecycle
+  'quote.issued':        QUOTE_TOKENS,
+  'quote.accepted':      QUOTE_TOKENS,
+  'quote.rejected':      QUOTE_TOKENS,
+  'quote.expired':       QUOTE_TOKENS,
+  'quote.revised':       QUOTE_TOKENS,
+  'quote.expiring_soon': [
+    ...QUOTE_TOKENS,
+    { path: 'days_until_expire',    label: 'Days until expiration' },
+    { path: 'quote.valid_until',    label: 'Quote valid-until date' },
   ],
+
+  // Opportunity lifecycle
   'opportunity.stage_changed': [
     { path: 'opportunity.number',       label: 'Opportunity number' },
     { path: 'opportunity.title',        label: 'Opportunity title' },
@@ -65,12 +154,49 @@ export const TOKEN_PATHS = {
     { path: 'account.name',             label: 'Account name' },
     { path: 'trigger.user.display_name',label: 'Acting user name' },
   ],
+  'opportunity.stalled': [
+    { path: 'opportunity.number',       label: 'Opportunity number' },
+    { path: 'opportunity.title',        label: 'Opportunity title' },
+    { path: 'opportunity.stage',        label: 'Opportunity stage' },
+    { path: 'days_stalled',             label: 'Days stalled' },
+    { path: 'account.name',             label: 'Account name' },
+  ],
+
+  // Job lifecycle
+  'oc.issued':              JOB_TOKENS,
+  'ntp.issued':             JOB_TOKENS,
+  'authorization.received': JOB_TOKENS,
+  'job.handed_off':         JOB_TOKENS,
+  'job.completed':          JOB_TOKENS,
+
+  // Price builds
+  'price_build.stale': [
+    { path: 'cost_build.id',            label: 'Price build id' },
+    { path: 'cost_build.status',        label: 'Price build status' },
+    { path: 'quote.number',             label: 'Quote number' },
+    { path: 'quote.title',              label: 'Quote title' },
+    { path: 'opportunity.number',       label: 'Opportunity number' },
+    { path: 'account.name',             label: 'Account name' },
+    { path: 'days_stale',               label: 'Days since last update' },
+  ],
+
+  // Tasks
   'task.completed': [
     { path: 'task.subject',             label: 'Task subject' },
     { path: 'task.type',                label: 'Task type' },
     { path: 'opportunity.number',       label: 'Opportunity number' },
     { path: 'account.name',             label: 'Account name' },
   ],
+  'task.overdue': [
+    { path: 'task.subject',             label: 'Task subject' },
+    { path: 'task.type',                label: 'Task type' },
+    { path: 'task.due_at',              label: 'Task due date' },
+    { path: 'days_overdue',             label: 'Days overdue' },
+    { path: 'opportunity.number',       label: 'Opportunity number' },
+    { path: 'account.name',             label: 'Account name' },
+  ],
+
+  // System
   'system.error': [
     { path: 'error.code',               label: 'Error code' },
     { path: 'error.summary',            label: 'Error summary' },

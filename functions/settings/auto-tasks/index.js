@@ -26,11 +26,40 @@ import { hasRole } from '../../lib/auth.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
 
 // Keep this in sync with the trigger dispatch in functions/lib/auto-tasks.js
-// and the call sites in submit.js, stage.js, activities/[id]/patch.js.
+// and the call sites across the app. Triggers are grouped loosely in
+// lifecycle order so the wizard dropdown feels familiar.
+//
+// Inline triggers — fire synchronously (via waitUntil) from a specific
+// route handler. Adding a new inline trigger means: append here, extend
+// CONDITION_PATHS / TOKEN_PATHS in ./rule-schema.js, and wire fireEvent
+// from the handler.
+//
+// Cron triggers — fire from the sidecar cron Worker sweep (see
+// functions/api/cron/sweep.js and workers/cron/). They carry the entity
+// they're sweeping plus any useful context (days_until_expire, etc.).
 export const TRIGGERS = [
+  // Quote lifecycle
   { key: 'quote.issued',               label: 'Quote issued' },
+  { key: 'quote.accepted',             label: 'Quote accepted' },
+  { key: 'quote.rejected',             label: 'Quote rejected' },
+  { key: 'quote.expired',              label: 'Quote expired' },
+  { key: 'quote.revised',              label: 'Quote revised (new revision created)' },
+  { key: 'quote.expiring_soon',        label: 'Quote expiring soon (cron)' },
+  // Opportunity lifecycle
   { key: 'opportunity.stage_changed',  label: 'Opportunity stage changed' },
+  { key: 'opportunity.stalled',        label: 'Opportunity stalled (cron)' },
+  // Job lifecycle
+  { key: 'oc.issued',                  label: 'OC issued' },
+  { key: 'ntp.issued',                 label: 'NTP issued (EPS)' },
+  { key: 'authorization.received',     label: 'Customer authorization received (EPS)' },
+  { key: 'job.handed_off',             label: 'Job handed off' },
+  { key: 'job.completed',              label: 'Job completed' },
+  // Price builds
+  { key: 'price_build.stale',          label: 'Price build stale (cron)' },
+  // Tasks
   { key: 'task.completed',             label: 'Task completed' },
+  { key: 'task.overdue',               label: 'Task overdue (cron)' },
+  // System
   { key: 'system.error',               label: 'System error' },
 ];
 
