@@ -428,12 +428,9 @@ export async function onRequestGet(context) {
         </div>
       </div>
 
-      <form method="post" action="/accounts/${escape(account.id)}/addresses" class="inline-address-form">
-        ${renderAddressEditor(addresses)}
-        <div class="form-actions" style="margin-top:0.5rem">
-          <button type="submit" class="btn primary">Save addresses</button>
-        </div>
-      </form>
+      <div class="inline-address-autosave">
+        ${renderAddressEditor(addresses, { saveUrl: `/accounts/${account.id}/addresses` })}
+      </div>
 
       <h3 style="margin-top:1rem">Notes</h3>
       ${inlineTextarea('notes', account.notes, { placeholder: 'Click to add notes…' })}

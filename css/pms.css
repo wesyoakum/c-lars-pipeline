@@ -1358,6 +1358,20 @@ fieldset.qualification-box select {
   gap: 0.3rem;
   flex-wrap: wrap;
 }
+/* Trailing blank row in auto-save mode: subtle visual demotion, still usable. */
+.address-row-blank {
+  border-left-color: var(--border);
+  opacity: 0.72;
+}
+.address-row-blank:focus-within {
+  opacity: 1;
+}
+.address-editor-status {
+  font-size: 0.85em;
+}
+.address-editor-status.ok       { color: var(--success, #2d8f4e); }
+.address-editor-status.muted    { color: var(--fg-muted); }
+.address-editor-status.error    { color: var(--danger, #c33); }
 .address-row-head {
   display: flex;
   gap: 0.5rem;

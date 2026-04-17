@@ -41,10 +41,16 @@ function matchesKind(row, kind) {
 
 /**
  * Render the Alpine-powered address editor block. `initial` is an array
- * of addresses to prefill (empty array for new accounts). Returns an
- * html tagged-template result suitable for interpolation.
+ * of addresses to prefill (empty array for new accounts).
+ *
+ * Options:
+ *   saveUrl   — when provided, the editor auto-saves on change by POSTing
+ *               JSON to this URL (debounced). A blank trailing row is
+ *               kept at the end so you can keep adding without clicking.
+ *
+ * Returns an html tagged-template result suitable for interpolation.
  */
-export function renderAddressEditor(initial = []) {
+export function renderAddressEditor(initial = [], { saveUrl = '' } = {}) {
   const initialJson = JSON.stringify(
     initial.map((a) => ({
       id: a.id ?? '',
@@ -62,20 +68,28 @@ export function renderAddressEditor(initial = []) {
   // handles &quot;/&amp; cleanly.
   return html`
     <div class="address-editor" data-initial="${escape(initialJson)}"
+         data-save-url="${escape(saveUrl)}"
          x-data="pmsAddressEditor()">
       <div class="address-editor-header">
         <strong>Addresses</strong>
         <div class="address-editor-actions">
-          <button type="button" class="btn btn-sm" @click="add()">+ Address</button>
+          <button type="button" class="btn btn-sm" @click="add()" x-show="!saveUrl">+ Address</button>
+          <span class="address-editor-status" x-show="saveUrl" x-text="statusText" :class="statusClass"></span>
         </div>
       </div>
 
-      <template x-if="addresses.length === 0">
+      <template x-if="addresses.length === 0 && !saveUrl">
         <p class="muted">No addresses yet. Use the button above to add one.</p>
       </template>
 
-      <template x-for="(a, i) in addresses" :key="i">
-        <div class="address-row" :class="'address-row-' + a.kind">
+      <template x-for="(a, i) in addresses" :key="a._key">
+        <div class="address-row"
+             :class="{
+               'address-row-billing':  a.kind === 'billing',
+               'address-row-physical': a.kind === 'physical',
+               'address-row-both':     a.kind === 'both',
+               'address-row-blank':    isBlank(a),
+             }">
           <div class="address-row-head">
             <div class="address-row-kind-pills">
               <button type="button" class="pill pill-toggle"
@@ -86,19 +100,20 @@ export function renderAddressEditor(initial = []) {
                       @click="setKindFlag(i, 'physical', !(a.kind === 'physical' || a.kind === 'both'))">Physical</button>
             </div>
             <input type="text" x-model="a.label" placeholder="Label (e.g. HQ, Main shop, Houston delivery)"
-                   class="address-row-label">
-            <label class="checkbox address-row-default">
-              <input type="checkbox" x-model="a.is_default" @change="enforceDefault(i)">
+                   class="address-row-label" @input="onEdit()">
+            <label class="checkbox address-row-default" x-show="!isBlank(a)">
+              <input type="checkbox" x-model="a.is_default" @change="enforceDefault(i); onEdit()">
               <span>Default</span>
             </label>
-            <button type="button" class="btn btn-sm danger" @click="remove(i)">Remove</button>
+            <button type="button" class="btn btn-sm danger" @click="remove(i)" x-show="!isBlank(a) || addresses.length > 1">Remove</button>
           </div>
           <textarea x-model="a.address" rows="3"
-                    placeholder="Street address" class="address-row-text"></textarea>
+                    :placeholder="isBlank(a) ? 'Type a new address here…' : 'Street address'"
+                    class="address-row-text" @input="onEdit()"></textarea>
         </div>
       </template>
 
-      <input type="hidden" name="addresses_json" :value="JSON.stringify(addresses)">
+      <input type="hidden" name="addresses_json" :value="serialize()">
     </div>
   `;
 }
@@ -116,9 +131,17 @@ export function renderAddressEditor(initial = []) {
 export function addressEditorScript() {
   return `
 (function() {
+  var _keySeq = 1;
+  function newKey() { return 'k' + (_keySeq++); }
   function pmsAddressEditor() {
     return {
       addresses: [],
+      saveUrl: '',
+      statusText: '',
+      statusClass: '',
+      _saveTimer: null,
+      _saveInFlight: false,
+      _saveQueued: false,
       init: function() {
         // Initial rows come in via data-initial on the x-data element,
         // not as a function argument — trying to pass JSON through the
@@ -128,6 +151,9 @@ export function addressEditorScript() {
           if (this.$el && this.$el.dataset && this.$el.dataset.initial) {
             raw = this.$el.dataset.initial;
           }
+          if (this.$el && this.$el.dataset) {
+            this.saveUrl = this.$el.dataset.saveUrl || '';
+          }
         } catch (e) {}
         var initial = [];
         try { initial = JSON.parse(raw) || []; } catch (e) { initial = []; }
@@ -136,6 +162,7 @@ export function addressEditorScript() {
           if (a.kind === 'physical') kind = 'physical';
           else if (a.kind === 'both') kind = 'both';
           return {
+            _key: newKey(),
             id: a.id || '',
             kind: kind,
             label: a.label || '',
@@ -143,13 +170,33 @@ export function addressEditorScript() {
             is_default: !!a.is_default,
           };
         });
+        // In auto-save mode, always keep a trailing blank row available
+        // for typing. In form-submit mode, the user clicks + Address.
+        if (this.saveUrl) this.ensureTrailingBlank();
+      },
+      isBlank: function(a) {
+        return !a || ((a.address || '').trim() === '');
+      },
+      ensureTrailingBlank: function() {
+        var last = this.addresses[this.addresses.length - 1];
+        if (!last || !this.isBlank(last)) {
+          this.addresses.push({
+            _key: newKey(),
+            id: '',
+            kind: 'billing',
+            label: '',
+            address: '',
+            is_default: false,
+          });
+        }
       },
       add: function(kind) {
         // Default new rows to 'billing' when no explicit kind is supplied
         // (the header now has a single "+ Address" button; kind is then
-        // toggled via the per-row checkboxes).
+        // toggled via the per-row pills).
         var k = kind || 'billing';
         this.addresses.push({
+          _key: newKey(),
           id: '',
           kind: k,
           label: '',
@@ -161,6 +208,10 @@ export function addressEditorScript() {
       },
       remove: function(i) {
         this.addresses.splice(i, 1);
+        if (this.saveUrl) {
+          this.ensureTrailingBlank();
+          this.onEdit();
+        }
       },
       setKindFlag: function(i, flag, on) {
         // Toggle one of the two kind pills (Billing / Physical).
@@ -177,6 +228,7 @@ export function addressEditorScript() {
         if (bill && phys) row.kind = 'both';
         else if (phys) row.kind = 'physical';
         else row.kind = 'billing'; // fallback when user unchecks everything
+        this.onEdit();
       },
       hasDefaultForAnySlot: function(kind) {
         // Does any existing row already claim the default flag for one
@@ -206,6 +258,94 @@ export function addressEditorScript() {
                      : [a.kind];
           var overlap = aSlots.some(function(s) { return slotsClaimed.indexOf(s) !== -1; });
           if (overlap) a.is_default = false;
+        });
+      },
+      serialize: function() {
+        // Strip client-only fields and blank rows before shipping to server.
+        var rows = this.addresses
+          .filter(function(a) { return (a.address || '').trim() !== ''; })
+          .map(function(a) {
+            return {
+              id: a.id || '',
+              kind: a.kind,
+              label: a.label || '',
+              address: a.address,
+              is_default: !!a.is_default,
+            };
+          });
+        return JSON.stringify(rows);
+      },
+      onEdit: function() {
+        if (!this.saveUrl) return;
+        if (this._saveTimer) clearTimeout(this._saveTimer);
+        this.statusText = 'Editing…';
+        this.statusClass = 'muted';
+        var self = this;
+        this._saveTimer = setTimeout(function() { self.save(); }, 700);
+        this.ensureTrailingBlank();
+      },
+      save: function() {
+        var self = this;
+        if (this._saveInFlight) { this._saveQueued = true; return; }
+        this._saveInFlight = true;
+        this.statusText = 'Saving…';
+        this.statusClass = 'muted';
+        var body = new URLSearchParams();
+        body.set('addresses_json', this.serialize());
+        fetch(this.saveUrl, {
+          method: 'POST',
+          headers: { 'accept': 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
+          body: body.toString(),
+          credentials: 'same-origin',
+        })
+        .then(function(r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json();
+        })
+        .then(function(j) {
+          // Merge server-assigned ids back onto client rows. For rows
+          // that already have an id we match by id; for freshly-inserted
+          // rows we fall back to matching by address text. Also pull
+          // is_default back because the server auto-promotes a default
+          // per slot when none is set.
+          if (j && Array.isArray(j.addresses)) {
+            var saved = j.addresses.slice();
+            self.addresses.forEach(function(row) {
+              if (row.id) {
+                var byId = saved.find(function(s) { return s.id === row.id && !s._claimed; });
+                if (byId) {
+                  row.is_default = !!byId.is_default;
+                  byId._claimed = true;
+                }
+                return;
+              }
+              var txt = (row.address || '').trim();
+              if (!txt) return;
+              var match = saved.findIndex(function(s) {
+                return (s.address || '').trim() === txt && !s._claimed;
+              });
+              if (match >= 0) {
+                row.id = saved[match].id;
+                row.is_default = !!saved[match].is_default;
+                saved[match]._claimed = true;
+              }
+            });
+          }
+          self.statusText = 'Saved';
+          self.statusClass = 'ok';
+          self.ensureTrailingBlank();
+        })
+        .catch(function(err) {
+          self.statusText = 'Save failed';
+          self.statusClass = 'error';
+          try { console.error('address save failed', err); } catch(e) {}
+        })
+        .then(function() {
+          self._saveInFlight = false;
+          if (self._saveQueued) {
+            self._saveQueued = false;
+            self.save();
+          }
         });
       },
     };
