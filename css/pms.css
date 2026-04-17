@@ -3438,8 +3438,6 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 .board-zone-notes {
   position: relative;
   min-height: 150px;
-  /* Drop the post-it stack 10px below the task checkboxes above. */
-  margin-top: 10px;
 }
 .board-notes-stack {
   position: relative;
@@ -3489,7 +3487,7 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
      reserves extra height for hover-lift + shadow bleed, but once the
      user scrolls the page they want the saved notes closer to the
      post-its than the safe padding would give. */
-  margin-top: -55px;
+  margin-top: -45px;
 }
 /* Cap each post-it page to a square silhouette. The card width is set
    by the sidebar (~240px), so max-height ≈ width keeps a single page
