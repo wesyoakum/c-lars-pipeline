@@ -619,7 +619,6 @@ function buildActivityChartsScript(payloadJson) {
       return {
         range: '12m',
         quoteType: '',
-        chart: null,
         total: 0,
         init: function () {
           // Chart.js is loaded via <script defer>, same as Alpine —
@@ -662,13 +661,21 @@ function buildActivityChartsScript(payloadJson) {
             'rgba(191,135,0,0.75)',    // expired — amber
             'rgba(130,80,223,0.75)',   // cancelled — purple
           ];
-          if (this.chart) {
-            this.chart.data.labels = labels;
-            this.chart.data.datasets[0].data = values;
-            this.chart.update();
+          // IMPORTANT: do NOT store the Chart.js instance on \`this\`.
+          // Alpine wraps component state in a reactive Proxy, and when
+          // Chart.js's legend plugin tries to set \`options.fullSize\`
+          // during update(), the proxy interception throws
+          // "Cannot set properties of undefined". We use Chart's own
+          // registry (Chart.getChart) to look up the existing instance
+          // on re-render instead.
+          var existing = Chart.getChart(canvas);
+          if (existing) {
+            existing.data.labels = labels;
+            existing.data.datasets[0].data = values;
+            existing.update();
             return;
           }
-          this.chart = new Chart(canvas, {
+          new Chart(canvas, {
             type: 'doughnut',
             data: {
               labels: labels,
