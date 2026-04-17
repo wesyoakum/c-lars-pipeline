@@ -27,6 +27,7 @@ import { auditStmt } from '../../lib/audit.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../lib/http.js';
 import { checkInactivateBlockers, summarizeBlockers } from '../../lib/inactivate-blocker.js';
+import { fireEvent } from '../../lib/auto-tasks.js';
 
 function isAjaxRequest(request, input) {
   if (input?.source === 'wizard' || input?.source === 'modal') return true;
@@ -124,6 +125,37 @@ export async function onRequestPost(context) {
   });
 
   await batch(env.DB, statements);
+
+  // Fire job.completed so auto-task rules (e.g. "close out opportunity")
+  // can react. Non-blocking.
+  context.waitUntil(
+    (async () => {
+      try {
+        const [freshJob, opportunity, account] = await Promise.all([
+          one(env.DB, 'SELECT * FROM jobs WHERE id = ?', [jobId]),
+          job.opportunity_id
+            ? one(env.DB, 'SELECT * FROM opportunities WHERE id = ?', [job.opportunity_id])
+            : null,
+          job.opportunity_id
+            ? one(env.DB,
+                `SELECT a.* FROM accounts a
+                   JOIN opportunities o ON o.account_id = a.id
+                  WHERE o.id = ?`,
+                [job.opportunity_id])
+            : null,
+        ]);
+        await fireEvent(env, 'job.completed', {
+          trigger: { user, at: ts },
+          job: freshJob,
+          opportunity,
+          account,
+          cascaded_quote_ids: acceptedQuotes.map((q) => q.id),
+        }, user);
+      } catch (err) {
+        console.error('fireEvent(job.completed) failed:', err?.message || err);
+      }
+    })()
+  );
 
   if (ajax) {
     return jsonResponse({

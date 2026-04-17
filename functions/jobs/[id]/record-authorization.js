@@ -8,6 +8,7 @@ import { one, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../lib/http.js';
+import { fireEvent } from '../../lib/auto-tasks.js';
 
 export async function onRequestPost(context) {
   const { env, data, request, params } = context;
@@ -58,6 +59,36 @@ export async function onRequestPost(context) {
   ];
 
   await batch(env.DB, stmts);
+
+  // Fire authorization.received so auto-task rules (e.g. "draft NTP
+  // for <job>") can react. Non-blocking.
+  context.waitUntil(
+    (async () => {
+      try {
+        const [freshJob, opportunity, account] = await Promise.all([
+          one(env.DB, 'SELECT * FROM jobs WHERE id = ?', [jobId]),
+          job.opportunity_id
+            ? one(env.DB, 'SELECT * FROM opportunities WHERE id = ?', [job.opportunity_id])
+            : null,
+          job.opportunity_id
+            ? one(env.DB,
+                `SELECT a.* FROM accounts a
+                   JOIN opportunities o ON o.account_id = a.id
+                  WHERE o.id = ?`,
+                [job.opportunity_id])
+            : null,
+        ]);
+        await fireEvent(env, 'authorization.received', {
+          trigger: { user, at: ts },
+          job: freshJob,
+          opportunity,
+          account,
+        }, user);
+      } catch (err) {
+        console.error('fireEvent(authorization.received) failed:', err?.message || err);
+      }
+    })()
+  );
 
   return redirectWithFlash(`/jobs/${jobId}`, 'Authorization recorded — awaiting NTP issuance.');
 }

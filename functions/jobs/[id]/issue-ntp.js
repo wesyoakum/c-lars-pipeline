@@ -7,6 +7,7 @@ import { one, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../lib/http.js';
+import { fireEvent } from '../../lib/auto-tasks.js';
 
 export async function onRequestPost(context) {
   const { env, data, request, params } = context;
@@ -48,6 +49,38 @@ export async function onRequestPost(context) {
       },
     }),
   ]);
+
+  // EPS-only handoff. Fire ntp.issued and job.handed_off so auto-task
+  // rules can react. Non-blocking.
+  context.waitUntil(
+    (async () => {
+      try {
+        const [freshJob, opportunity, account] = await Promise.all([
+          one(env.DB, 'SELECT * FROM jobs WHERE id = ?', [jobId]),
+          job.opportunity_id
+            ? one(env.DB, 'SELECT * FROM opportunities WHERE id = ?', [job.opportunity_id])
+            : null,
+          job.opportunity_id
+            ? one(env.DB,
+                `SELECT a.* FROM accounts a
+                   JOIN opportunities o ON o.account_id = a.id
+                  WHERE o.id = ?`,
+                [job.opportunity_id])
+            : null,
+        ]);
+        const payload = {
+          trigger: { user, at: ts },
+          job: freshJob,
+          opportunity,
+          account,
+        };
+        await fireEvent(env, 'ntp.issued', payload, user);
+        await fireEvent(env, 'job.handed_off', payload, user);
+      } catch (err) {
+        console.error('fireEvent(ntp.issued) failed:', err?.message || err);
+      }
+    })()
+  );
 
   return redirectWithFlash(`/jobs/${jobId}`, `NTP${ntpNumber ? ` ${ntpNumber}` : ''} issued — job handed off.`);
 }
