@@ -1,14 +1,17 @@
 // POST /opportunities/:id/quotes/:quoteId/submit
 //
 // Issue a quote to customer: draft → issued.
-// Snapshots governance document revisions, stamps submitted_at/by,
-// and auto-creates a task to submit the quote to the customer.
+// Snapshots governance document revisions and stamps submitted_at/by.
+// The "submit quote to customer" task is now created by the seeded
+// auto-task rule `rule-seed-submit-quote-to-customer` (migration 0037)
+// via fireEvent('quote.issued') below — the old hard-coded
+// createIssueTask helper was removed with that migration.
 
 import { one, stmt, batch } from '../../../../lib/db.js';
 import { auditStmt } from '../../../../lib/audit.js';
 import { now } from '../../../../lib/ids.js';
 import { redirectWithFlash } from '../../../../lib/http.js';
-import { snapshotGoverningDocs, createIssueTask } from '../../../../lib/quote-transitions.js';
+import { snapshotGoverningDocs } from '../../../../lib/quote-transitions.js';
 import { getQuoteDocData, fillTemplate, convertToPdf, resolveQuoteTemplateKey } from '../../../../lib/doc-generate.js';
 import { storeGeneratedDoc } from '../../../../lib/doc-storage.js';
 import { templateTypeForQuote } from '../../../../lib/template-catalog.js';
@@ -67,10 +70,6 @@ export async function onRequestPost(context) {
       },
     }),
   ];
-
-  // Auto-create task to submit quote to customer
-  const taskStmts = await createIssueTask(env.DB, quote, user);
-  statements.push(...taskStmts);
 
   await batch(env.DB, statements);
 

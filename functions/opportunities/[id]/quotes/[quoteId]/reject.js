@@ -9,5 +9,6 @@ export async function onRequestPost(context) {
     to: 'rejected',
     eventType: 'rejected',
     summaryFn: (q) => `${q.number} Rev ${q.revision} rejected by customer`,
+    fireEventName: 'quote.rejected',
   });
 }

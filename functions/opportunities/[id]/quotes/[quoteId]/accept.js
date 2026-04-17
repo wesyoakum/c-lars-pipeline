@@ -9,5 +9,6 @@ export async function onRequestPost(context) {
     to: 'accepted',
     eventType: 'accepted',
     summaryFn: (q) => `${q.number} Rev ${q.revision} accepted by customer`,
+    fireEventName: 'quote.accepted',
   });
 }

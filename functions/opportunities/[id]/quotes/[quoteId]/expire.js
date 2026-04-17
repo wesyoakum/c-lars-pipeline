@@ -9,5 +9,6 @@ export async function onRequestPost(context) {
     to: 'expired',
     eventType: 'expired',
     summaryFn: (q) => `${q.number} Rev ${q.revision} marked expired`,
+    fireEventName: 'quote.expired',
   });
 }

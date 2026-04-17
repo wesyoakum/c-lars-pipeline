@@ -18,6 +18,7 @@ import { auditStmt } from '../../../../lib/audit.js';
 import { uuid, now } from '../../../../lib/ids.js';
 import { redirectWithFlash } from '../../../../lib/http.js';
 import { quoteTotalsRecomputeStmt } from '../../../../lib/pricing.js';
+import { fireEvent } from '../../../../lib/auto-tasks.js';
 
 const CUSTOMER_FACING = new Set(['issued', 'revision_issued', 'accepted', 'rejected', 'expired']);
 
@@ -216,6 +217,46 @@ export async function onRequestPost(context) {
   );
 
   await batch(env.DB, statements);
+
+  // Fire quote.revised so auto-task rules (e.g. "remind me to resubmit
+  // the new revision") can react. Non-blocking.
+  context.waitUntil(
+    (async () => {
+      try {
+        const [freshQuote, opportunity, account] = await Promise.all([
+          one(env.DB, 'SELECT * FROM quotes WHERE id = ?', [newId]),
+          one(env.DB, 'SELECT * FROM opportunities WHERE id = ?', [oppId]),
+          one(
+            env.DB,
+            `SELECT a.* FROM accounts a
+               JOIN opportunities o ON o.account_id = a.id
+              WHERE o.id = ?`,
+            [oppId]
+          ),
+        ]);
+        await fireEvent(
+          env,
+          'quote.revised',
+          {
+            trigger: { user, at: ts },
+            quote: freshQuote,
+            opportunity,
+            account,
+            // Expose the superseded quote so rules can condition on or
+            // template with the prior revision when useful.
+            supersedes: {
+              id: source.id,
+              number: source.number,
+              revision: source.revision,
+            },
+          },
+          user
+        );
+      } catch (err) {
+        console.error('fireEvent(quote.revised) failed:', err?.message || err);
+      }
+    })()
+  );
 
   return redirectWithFlash(
     `/opportunities/${oppId}/quotes/${newId}`,
