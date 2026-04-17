@@ -197,13 +197,26 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     };
     columns.forEach(function(c) { state.visible[c.key] = c.default !== false; });
 
-    // Populated from localStorage inside the merge block below; applied
-    // to filterState once it's declared further down.
+    // Populated from localStorage (or the site-wide fallback) inside the
+    // merge block below; applied to filterState once it's declared
+    // further down.
     var savedFilters = null;
 
-    // Merge saved state.
+    // Merge saved state. Prefer localStorage, but fall back to the
+    // admin-blessed site defaults injected into window.PMS by the
+    // layout boot script (see layout.js displayPrefsBootScript +
+    // migration 0039). Site defaults are keyed by storageKey so each
+    // list page can have its own admin-snapshotted starting state.
     try {
       var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+      if (!saved) {
+        try {
+          var siteDefaults = window.PMS && window.PMS.listTableSiteDefaults;
+          if (siteDefaults && siteDefaults[STORAGE_KEY]) {
+            saved = siteDefaults[STORAGE_KEY];
+          }
+        } catch (_) {}
+      }
       if (saved) {
         if (Array.isArray(saved.order)) {
           var known = {};

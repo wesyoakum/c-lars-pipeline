@@ -1021,6 +1021,7 @@ export function layout(title, body, opts = {}) {
   ${BOARD_LEFT_MARKUP}
   ${BOARD_RIGHT_MARKUP}` : ''}
   ${flash ? `<div class="flash flash-${escape(flash.kind ?? 'info')}">${escape(flash.message)}</div>` : ''}
+  ${user ? `<script>${displayPrefsBootScript(user)}</script>` : ''}
   <main class="site-main">
 ${breadcrumbHtml}
 ${body}
@@ -1030,7 +1031,6 @@ ${body}
   </footer>
   ${versionTag ? `<div class="version-badge">${versionTag}</div>` : ''}
   ${user ? `<script>${NOTIFICATION_STORE_SCRIPT}</script>` : ''}
-  ${user ? `<script>${displayPrefsBootScript(user)}</script>` : ''}
   ${user ? `<script>${BLOCKER_MODAL_STORE_SCRIPT}</script>` : ''}
 </body>
 </html>`;
@@ -1050,11 +1050,26 @@ function displayPrefsBootScript(user) {
   const showAlias = user && user.show_alias ? 1 : 0;
   const groupRollup = user && user.group_rollup ? 1 : 0;
   const activeOnly = user && user.active_only ? 1 : 0;
+  // list_table_prefs is a JSON blob keyed by list-table storageKey.
+  // When present, listScript() uses it as a first-load seed for pages
+  // where localStorage has no entry yet. See migration 0039.
+  let listPrefsJson = 'null';
+  if (user && user.list_table_prefs) {
+    try {
+      // Validate + normalize: parse then re-stringify so we never
+      // inject raw user content into the script tag unchecked.
+      const parsed = JSON.parse(user.list_table_prefs);
+      listPrefsJson = JSON.stringify(parsed).replace(/</g, '\\u003c');
+    } catch (_) {
+      listPrefsJson = 'null';
+    }
+  }
   return (
     "window.PMS = window.PMS || {};\n" +
     "window.PMS.userPrefs = { show_alias: " + showAlias +
       ", group_rollup: " + groupRollup +
-      ", active_only: " + activeOnly + " };\n"
+      ", active_only: " + activeOnly + " };\n" +
+    "window.PMS.listTableSiteDefaults = " + listPrefsJson + ";\n"
   );
 }
 

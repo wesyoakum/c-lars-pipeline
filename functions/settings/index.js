@@ -119,9 +119,11 @@ export async function onRequestGet(context) {
       </div>
       ${isAdmin ? html`
         <p class="muted" style="margin-top:0.5rem">
-          "Save as defaults" captures your current three toggles as the
-          starting point for every new user who logs in. Existing users
-          keep their own prefs until they click "Reset to defaults".
+          "Save as defaults" captures your current three toggles <em>and</em>
+          your per-table filter / sort / column-visibility choices
+          (from every list page you've visited) as the starting point
+          for every new user who logs in. Existing users keep their
+          own prefs until they click "Reset to defaults".
         </p>
       ` : ''}
     </section>
@@ -216,7 +218,7 @@ document.addEventListener('alpine:init', function () {
         });
       },
       resetToDefaults: function () {
-        if (!confirm('Reset your display preferences to the site-wide defaults?')) return;
+        if (!confirm('Reset your display preferences AND per-table filter / sort / column choices to the site-wide defaults?')) return;
         var self = this;
         self.busy = true;
         fetch('/user/prefs-reset', {
@@ -224,6 +226,26 @@ document.addEventListener('alpine:init', function () {
           credentials: 'same-origin',
         }).then(function (r) {
           if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.json().catch(function () { return {}; });
+        }).then(function (body) {
+          // Blow away every list-table's localStorage entry, then
+          // re-seed from the site defaults the server just handed
+          // back. Prefixed scan so we only touch pms.* keys (not
+          // window.PMS other app state).
+          try {
+            var toRemove = [];
+            for (var i = 0; i < localStorage.length; i++) {
+              var k = localStorage.key(i);
+              if (k && k.indexOf('pms.') === 0) toRemove.push(k);
+            }
+            toRemove.forEach(function (k) { localStorage.removeItem(k); });
+            var defaults = body && body.list_table_defaults;
+            if (defaults && typeof defaults === 'object') {
+              Object.keys(defaults).forEach(function (k) {
+                try { localStorage.setItem(k, JSON.stringify(defaults[k])); } catch (_) {}
+              });
+            }
+          } catch (_) {}
           window.location.reload();
         }).catch(function (err) {
           self.busy = false;
@@ -231,16 +253,37 @@ document.addEventListener('alpine:init', function () {
         });
       },
       saveAsDefaults: function () {
-        if (!confirm('Save your current preferences as the site-wide defaults for all new users?')) return;
+        if (!confirm('Save your current preferences AND per-table filter / sort / column choices as the site-wide defaults for all new users?')) return;
         var self = this;
         self.busy = true;
+        // Collect every list-table payload from localStorage (any key
+        // that starts with "pms." and parses as an object). The
+        // server validates the shape; we send whatever's there.
+        var listDefaults = {};
+        try {
+          for (var i = 0; i < localStorage.length; i++) {
+            var k = localStorage.key(i);
+            if (!k || k.indexOf('pms.') !== 0) continue;
+            var raw = localStorage.getItem(k);
+            if (!raw) continue;
+            try {
+              var parsed = JSON.parse(raw);
+              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                listDefaults[k] = parsed;
+              }
+            } catch (_) {}
+          }
+        } catch (_) {}
         fetch('/settings/save-defaults', {
           method: 'POST',
           credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ list_table_defaults: listDefaults }),
         }).then(function (r) {
           if (!r.ok) throw new Error('HTTP ' + r.status);
           self.busy = false;
-          alert('Saved as site-wide defaults.');
+          var n = Object.keys(listDefaults).length;
+          alert('Saved as site-wide defaults (' + n + ' list table' + (n === 1 ? '' : 's') + ').');
         }).catch(function (err) {
           self.busy = false;
           alert('Could not save: ' + (err && err.message ? err.message : 'unknown error'));

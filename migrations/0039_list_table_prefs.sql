@@ -1,0 +1,40 @@
+-- Migration 0039 — List-table prefs: per-user + site-wide defaults
+--
+-- Extends the site_prefs / users site-wide-defaults flow (migration
+-- 0036) to also cover per-column filter state, sort direction, column
+-- visibility, column order, and column widths for every list-table in
+-- the app.
+--
+-- Shape of both new columns: a JSON object keyed by list-table
+-- storageKey (e.g. "pms.quotes.v1", "pms.usersList.v1", …). Each
+-- value is the localStorage payload written by listScript()'s save():
+--
+--   {
+--     "order":   ["col1","col2",…],
+--     "visible": { "col1": true, … },
+--     "widths":  { "col1": 140, … },
+--     "sort":    { "key": "when", "dir": "desc" },
+--     "filters": { "status": { "values": ["Active"] }, … }
+--   }
+--
+-- Flow mirrors the existing three-toggle defaults:
+--
+--   * /settings/save-defaults (admin) — admin's client collects all
+--     `pms.*` localStorage blobs and POSTs them; server writes the
+--     merged JSON to site_prefs.list_table_defaults.
+--
+--   * /user/prefs-reset (any user) — server copies
+--     site_prefs.list_table_defaults to the caller's
+--     users.list_table_prefs, and returns the blob so the client can
+--     replace localStorage in one swoop before reloading.
+--
+--   * auth.upsertUser() on first login — seeds new user's
+--     list_table_prefs from site_prefs.list_table_defaults, which is
+--     then injected into every page's layout script as
+--     window.PMS.listTableSiteDefaults. listScript merges it as a
+--     fallback when the user has no localStorage entry for that key.
+--
+-- Both columns are nullable TEXT; NULL means "no defaults configured".
+
+ALTER TABLE users ADD COLUMN list_table_prefs TEXT;
+ALTER TABLE site_prefs ADD COLUMN list_table_defaults TEXT;

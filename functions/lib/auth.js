@@ -81,12 +81,14 @@ export async function upsertUser(db, email, displayName) {
   const inferred = displayName ?? emailToName(email);
 
   // Seed new users with the admin-blessed defaults from site_prefs
-  // (migration 0036). If the row isn't there yet (fresh DB, unmigrated
-  // environment) fall back to the per-column DEFAULT 0 behavior.
+  // (migrations 0036 + 0039). If the row isn't there yet (fresh DB,
+  // unmigrated environment) fall back to the per-column DEFAULT 0
+  // behavior. list_table_defaults is a JSON blob keyed by list-table
+  // storageKey; see migration 0039.
   const defaults = (await one(
     db,
-    'SELECT show_alias, group_rollup, active_only FROM site_prefs WHERE id = 1'
-  )) || { show_alias: 0, group_rollup: 0, active_only: 0 };
+    'SELECT show_alias, group_rollup, active_only, list_table_defaults FROM site_prefs WHERE id = 1'
+  )) || { show_alias: 0, group_rollup: 0, active_only: 0, list_table_defaults: null };
 
   const id = uuid();
   const ts = now();
@@ -94,15 +96,16 @@ export async function upsertUser(db, email, displayName) {
     db,
     `INSERT INTO users (
        id, email, display_name, role, active,
-       show_alias, group_rollup, active_only,
+       show_alias, group_rollup, active_only, list_table_prefs,
        created_at, updated_at
      )
-     VALUES (?, ?, ?, 'sales', 1, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, 'sales', 1, ?, ?, ?, ?, ?, ?)`,
     [
       id, email, inferred,
       defaults.show_alias ? 1 : 0,
       defaults.group_rollup ? 1 : 0,
       defaults.active_only ? 1 : 0,
+      defaults.list_table_defaults ?? null,
       ts, ts,
     ]
   );
@@ -116,6 +119,7 @@ export async function upsertUser(db, email, displayName) {
     show_alias: defaults.show_alias ? 1 : 0,
     group_rollup: defaults.group_rollup ? 1 : 0,
     active_only: defaults.active_only ? 1 : 0,
+    list_table_prefs: defaults.list_table_defaults ?? null,
     created_at: ts,
     updated_at: ts,
   };
