@@ -159,10 +159,11 @@ export function rowDataAttrs(columns, row) {
  *                                   text   -> { text: 'foo' }
  *                                   select -> { values: ['Draft','Issued'] }
  *                                   range  -> { min: '10', max: '99' }
- *                                 Filter state is NOT persisted to localStorage,
- *                                 so these defaults re-apply on every page load
- *                                 (user can clear per-column to widen the view
- *                                 within a session).
+ *                                 Used only if the user has no saved filter
+ *                                 state for this storageKey; once the user
+ *                                 touches any filter, the full filterState
+ *                                 persists to localStorage alongside sort /
+ *                                 column visibility / order / widths.
  */
 export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDir = 'desc', defaultFilters = {}) {
   return `
@@ -196,6 +197,10 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     };
     columns.forEach(function(c) { state.visible[c.key] = c.default !== false; });
 
+    // Populated from localStorage inside the merge block below; applied
+    // to filterState once it's declared further down.
+    var savedFilters = null;
+
     // Merge saved state.
     try {
       var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
@@ -220,11 +225,23 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
           });
         }
         if (saved.sort && saved.sort.key) state.sort = saved.sort;
+        if (saved.filters && typeof saved.filters === 'object') {
+          savedFilters = saved.filters;
+        }
       }
     } catch (e) {}
 
     function save() {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+      try {
+        var payload = {
+          order: state.order,
+          visible: state.visible,
+          widths: state.widths,
+          sort: state.sort,
+          filters: filterState,
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      } catch (e) {}
     }
 
     function columnMeta(key) {
@@ -496,11 +513,16 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     //   select-> { values: ['a','b'] }   (empty array = no filter)
     //   range -> { min: '5', max: '100' } (strings from <input type=number>)
     //
-    // Seeded from defaultFilters passed at listScript() construction time;
-    // not persisted to localStorage, so these defaults re-apply on every
-    // page load. Users can still clear/change them within a session via
-    // the per-column popover.
+    // Seeded from defaultFilters passed at listScript() construction time,
+    // then overlaid with whatever the user last saved to localStorage for
+    // this storageKey (see savedFilters up top). Any filter mutation via
+    // the popover persists the full filterState back via save().
     var filterState = ${JSON.stringify(defaultFilters)};
+    if (savedFilters) {
+      Object.keys(savedFilters).forEach(function(k) {
+        filterState[k] = savedFilters[k];
+      });
+    }
 
     function isFilterActive(key) {
       var fs = filterState[key];
@@ -746,6 +768,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
           textInput.addEventListener('input', function() {
             filterState[key] = { text: textInput.value };
             applyFilters();
+            save();
           });
         }
       } else if (col.filter === 'select') {
@@ -757,6 +780,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
           checkboxes.forEach(function(cb) { if (cb.checked) arr.push(cb.value); });
           filterState[key] = { values: arr };
           applyFilters();
+          save();
         }
         checkboxes.forEach(function(cb) { cb.addEventListener('change', readSelected); });
         var allBtn = popContent.querySelector('[data-action="all"]');
@@ -797,6 +821,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
             max: maxInput ? maxInput.value : '',
           };
           applyFilters();
+          save();
         }
         if (minInput) minInput.addEventListener('input', readRange);
         if (maxInput) maxInput.addEventListener('input', readRange);
