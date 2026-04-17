@@ -4447,15 +4447,15 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
    inline scroll listener in layout.js runs. */
 .back-to-top {
   position: fixed;
-  right: 1.25rem;
-  bottom: 1.25rem;
-  width: 2.5rem;
-  height: 2.5rem;
+  top: calc(var(--site-header-h, 53px) + 14px);
+  left: 50%;
+  width: 2rem;
+  height: 2rem;
   border-radius: 50%;
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--fg);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -4465,12 +4465,12 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   transition: opacity 0.15s ease, transform 0.15s ease;
   opacity: 0;
   pointer-events: none;
-  transform: translateY(6px);
+  transform: translate(-50%, -6px);
 }
 .back-to-top[data-visible="1"] {
   opacity: 1;
   pointer-events: auto;
-  transform: translateY(0);
+  transform: translate(-50%, 0);
 }
 .back-to-top:hover {
   background: var(--bg-alt);

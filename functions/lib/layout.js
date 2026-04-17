@@ -131,16 +131,22 @@ const BACK_TO_TOP_SCRIPT = (
   "    var headerH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--site-header-h'), 10) || 53;\n" +
   "    var threshold = headerH + 14;\n" +
   "    var lists = document.querySelectorAll('.opp-list');\n" +
-  "    var headerPinned = false;\n" +
+  "    var pinnedRect = null;\n" +
   "    for (var i = 0; i < lists.length; i++) {\n" +
   "      var r = lists[i].getBoundingClientRect();\n" +
   "      // Thead is pinned when the list has scrolled past the sticky\n" +
   "      // threshold AND the table bottom is still below it.\n" +
-  "      if (r.top < threshold && r.bottom > threshold + 40) { headerPinned = true; break; }\n" +
+  "      if (r.top < threshold && r.bottom > threshold + 40) { pinnedRect = r; break; }\n" +
   "    }\n" +
   "    var y = window.scrollY || document.documentElement.scrollTop || 0;\n" +
-  "    var show = headerPinned || (lists.length === 0 && y > SHOW_AT);\n" +
+  "    var show = !!pinnedRect || (lists.length === 0 && y > SHOW_AT);\n" +
   "    btn.dataset.visible = show ? '1' : '0';\n" +
+  "    if (pinnedRect) {\n" +
+  "      // Center over the table that's currently sticky-pinned.\n" +
+  "      btn.style.left = (pinnedRect.left + pinnedRect.width / 2) + 'px';\n" +
+  "    } else {\n" +
+  "      btn.style.left = '';\n" +
+  "    }\n" +
   "  }\n" +
   "  btn.addEventListener('click', function () {\n" +
   "    window.scrollTo({ top: 0, behavior: 'smooth' });\n" +
