@@ -172,17 +172,18 @@ VALUES (
   strftime('%Y-%m-%dT%H:%M:%fZ','now')
 );
 
--- Rule B: Opportunity moved to customer_awarded → kickoff checklist
+-- Rule B: Opportunity closed as won → kickoff checklist
 --   Trigger: opportunity.stage_changed
---   Condition: new stage IS customer_awarded (stage_key from migration 0003)
+--   Condition: new stage IS closed_won (stage_key shared across all
+--   transaction types per migration 0002/0003 seed rows).
 INSERT INTO task_rules (id, name, description, trigger, conditions_json, task_json, tz, active, created_at, updated_at)
 VALUES (
   'rule-seed-customer-awarded-kickoff',
-  'Create kickoff task when opportunity is awarded',
-  'When an opportunity moves to "customer awarded", create a kickoff-checklist task for the owner due the next business day.',
+  'Create kickoff task when opportunity closes as won',
+  'When an opportunity closes as won, create a kickoff-checklist task for the owner due the next business day.',
   'opportunity.stage_changed',
-  '{"opportunity.stage":"customer_awarded"}',
-  '{"title":"Kickoff checklist for {opportunity.number} {opportunity.title}","body":"Opportunity {opportunity.number} was awarded. Confirm PO received, kick off job tracking, and notify shop.","assignee":"opportunity.owner","due_at":"+1d@09:00","reminders":["-2h"],"link":"opportunity"}',
+  '{"opportunity.stage":"closed_won"}',
+  '{"title":"Kickoff checklist for {opportunity.number} {opportunity.title}","body":"Opportunity {opportunity.number} was won. Confirm PO received, kick off job tracking, and notify shop.","assignee":"opportunity.owner","due_at":"+1d@09:00","reminders":["-2h"],"link":"opportunity"}',
   'America/Chicago',
   1,
   strftime('%Y-%m-%dT%H:%M:%fZ','now'),
