@@ -20,6 +20,7 @@ import { readFlash } from '../lib/http.js';
 import { hasRole } from '../lib/auth.js';
 import { VALIDITY_DAYS_TYPES, getQuoteValidityDays } from '../lib/quote-term-defaults.js';
 import { QUOTE_TYPE_LABELS } from '../lib/validators.js';
+import { settingsSubNav } from '../lib/settings-subnav.js';
 
 export async function onRequestGet(context) {
   const { env, data, request } = context;
@@ -45,17 +46,9 @@ export async function onRequestGet(context) {
     [user.id]
   )) || { show_alias: 0, group_rollup: 0, active_only: 0 };
 
-  // Admin counts for the Auto-Task Rules card.
-  let ruleCount = null;
-  let activeCount = null;
-  let userCount = null;
-  let activeUserCount = null;
+  // Admin-only: per-quote-type validity days for the editor below.
   let validityDays = null;
   if (isAdmin) {
-    ruleCount = await one(env.DB, 'SELECT COUNT(*) AS n FROM task_rules');
-    activeCount = await one(env.DB, 'SELECT COUNT(*) AS n FROM task_rules WHERE active = 1');
-    userCount = await one(env.DB, 'SELECT COUNT(*) AS n FROM users');
-    activeUserCount = await one(env.DB, 'SELECT COUNT(*) AS n FROM users WHERE active = 1');
     // Current per-quote-type validity days — used by the Settings editor
     // below. getQuoteValidityDays falls back to 14 when no row exists.
     validityDays = {};
@@ -69,9 +62,11 @@ export async function onRequestGet(context) {
   const ao = prefs.active_only ? 1 : 0;
 
   const body = html`
+    ${settingsSubNav('preferences', isAdmin)}
+
     <section class="card" x-data="settingsPrefs(${sa}, ${gr}, ${ao}, ${isAdmin ? 'true' : 'false'})">
       <div class="card-header">
-        <h1>Settings</h1>
+        <h1>Preferences</h1>
       </div>
 
       <h2 style="margin-top:1rem">Display preferences</h2>
@@ -164,32 +159,6 @@ export async function onRequestGet(context) {
         </p>
       </section>
 
-      <section class="card">
-        <h2>Admin tools</h2>
-        <p class="muted">Configuration that affects every user.</p>
-        <div class="library-grid">
-          <a class="library-card" href="/settings/auto-tasks">
-            <h3>Auto-Task Rules</h3>
-            <p class="muted">Rules that automatically create tasks in response to events (quote issued, opportunity stage changed, PDF errors, ...).</p>
-            <p class="library-count">
-              <strong>${activeCount?.n ?? 0}</strong> active
-              ${ruleCount?.n !== activeCount?.n
-                ? html` / ${ruleCount?.n ?? 0} total`
-                : ''}
-            </p>
-          </a>
-          <a class="library-card" href="/settings/users">
-            <h3>Users</h3>
-            <p class="muted">Everyone who has signed in. Adjust role or mark inactive.</p>
-            <p class="library-count">
-              <strong>${activeUserCount?.n ?? 0}</strong> active
-              ${userCount?.n !== activeUserCount?.n
-                ? html` / ${userCount?.n ?? 0} total`
-                : ''}
-            </p>
-          </a>
-        </div>
-      </section>
     ` : ''}
 
     <script>${raw(SETTINGS_PREFS_SCRIPT)}</script>

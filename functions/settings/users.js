@@ -14,6 +14,7 @@ import { readFlash } from '../lib/http.js';
 import { hasRole } from '../lib/auth.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieSelect, listInlineEditScript } from '../lib/list-inline-edit.js';
+import { settingsSubNav } from '../lib/settings-subnav.js';
 
 // String-valued options for the inline-edit select so the patch
 // handler can accept them verbatim. `active`/`inactive` round-trip to
@@ -75,13 +76,12 @@ export async function onRequestGet(context) {
   }));
 
   const body = html`
+    ${settingsSubNav('users', true)}
+
     <section class="card">
       <div class="card-header">
         <h1>Users</h1>
-        <div style="display:flex;align-items:center;gap:0.5rem">
-          ${listToolbar({ id: 'users', count: rows.length, columns })}
-          <a class="btn" href="/settings">\u2190 Settings</a>
-        </div>
+        ${listToolbar({ id: 'users', count: rows.length, columns })}
       </div>
 
       <p class="muted">

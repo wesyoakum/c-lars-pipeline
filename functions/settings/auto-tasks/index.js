@@ -24,6 +24,7 @@ import { uuid, now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 import { hasRole } from '../../lib/auth.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
+import { settingsSubNav } from '../../lib/settings-subnav.js';
 
 // Keep this in sync with the trigger dispatch in functions/lib/auto-tasks.js
 // and the call sites across the app. Triggers are grouped loosely in
@@ -136,13 +137,12 @@ async function renderList(context, { values = {}, errors = {} }) {
   const errText = (k) => (errors[k] ? html`<small class="error">${errors[k]}</small>` : '');
 
   const body = html`
+    ${settingsSubNav('auto-tasks', true)}
+
     <section class="card">
       <div class="card-header">
         <h1>Auto-Task Rules</h1>
-        <div style="display:flex;align-items:center;gap:0.5rem">
-          ${listToolbar({ id: 'auto-tasks', count: rows.length, columns })}
-          <a class="btn" href="/settings">\u2190 Settings</a>
-        </div>
+        ${listToolbar({ id: 'auto-tasks', count: rows.length, columns })}
       </div>
 
       <p class="muted">
