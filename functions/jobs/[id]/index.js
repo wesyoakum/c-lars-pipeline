@@ -104,7 +104,12 @@ export async function onRequestGet(context) {
   const canRecordAuth = isEps && job.status === 'awaiting_authorization';
   const canIssueNtp = isEps && job.status === 'awaiting_ntp';
   const canAmendOc = isRefurb && job.status === 'handed_off';
-  const canClose = job.status !== 'handed_off' && job.status !== 'cancelled';
+  const canClose = job.status !== 'handed_off' && job.status !== 'cancelled' && job.status !== 'complete';
+  // `handed_off` is the gateway to `complete` — the new terminal
+  // status introduced alongside the active-only rules (migration 0035).
+  // Complete cascades accepted quotes on the parent opp to the hidden
+  // `completed` status; see functions/jobs/[id]/complete.js.
+  const canComplete = job.status === 'handed_off';
   const isActive = job.status !== 'handed_off' && job.status !== 'cancelled';
   const defaultOcNumber = job.latest_quote_number ? `OC-${job.latest_quote_number}` : '';
   const defaultNtpNumber = job.latest_quote_number ? `NTP-${job.latest_quote_number}` : '';
@@ -234,9 +239,24 @@ export async function onRequestGet(context) {
             </fieldset>
           </form>` : ''}
 
+        ${canComplete ? html`
+          <form method="post" action="/jobs/${escape(job.id)}/complete"
+                onsubmit="return (confirm('Mark this job complete? Any accepted quotes on the opportunity will be marked as completed too.') ? (window.PMS.submitFormWithBlockerCheck(this, 'Mark this job complete'), false) : false);"
+                class="action-form">
+            <fieldset>
+              <legend>Mark Complete</legend>
+              <p class="muted" style="margin:0 0 0.5rem;font-size:0.85em">
+                The job was handed off to the external PM system. When the work is done
+                and accepted, mark it complete to close out the pipeline record.
+              </p>
+              <button class="btn primary" type="submit" style="margin-top:0.25rem">Mark Complete</button>
+            </fieldset>
+          </form>` : ''}
+
         ${canClose ? html`
           <form method="post" action="/jobs/${escape(job.id)}/close"
-                onsubmit="return confirm('Close this job?')" class="action-form">
+                onsubmit="return (confirm('Close this job?') ? (window.PMS.submitFormWithBlockerCheck(this, 'Cancel this job'), false) : false);"
+                class="action-form">
             <fieldset>
               <legend>Close Job</legend>
               <div><label class="field-label">Reason</label><input type="text" name="reason" placeholder="Reason for closing"></div>

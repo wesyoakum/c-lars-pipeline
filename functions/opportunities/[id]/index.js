@@ -430,10 +430,14 @@ export async function onRequestGet(context) {
         </div>
       </div>
 
-      <!-- Stage carousel -->
+      <!-- Stage carousel. onsubmit runs the blocker-check path: for
+           terminal stages the server returns 409 with a list of open
+           tasks / active quotes, and the shared modal lets the user
+           clear them inline before retrying. -->
       <form method="post" action="/opportunities/${escape(opp.id)}/stage"
             x-data="stageCarousel(${effectiveIdx}, ${carouselStages.length})"
             x-ref="stageForm"
+            onsubmit="window.PMS.submitFormWithBlockerCheck(this, 'Move to this stage'); return false;"
             class="stage-carousel" style="margin:0.5rem 0">
         <input type="hidden" name="to_stage" x-ref="toStage" value="">
         <div class="stage-carousel-row">

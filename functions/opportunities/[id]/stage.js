@@ -16,6 +16,24 @@ import { uuid, now, nextNumber, currentYear } from '../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../lib/http.js';
 import { stageDef, stagesFor, evaluateGate, loadGateContext, GATE_MODE } from '../../lib/stages.js';
 import { notifyStmt } from '../../lib/notify.js';
+import { checkInactivateBlockers, summarizeBlockers } from '../../lib/inactivate-blocker.js';
+
+function isAjaxRequest(request, input) {
+  if (input?.source === 'wizard' || input?.source === 'modal') return true;
+  const xrw = request.headers.get('x-requested-with');
+  if (xrw && xrw.toLowerCase() === 'xmlhttprequest') return true;
+  const accept = request.headers.get('accept') || '';
+  return accept.includes('application/json') && !accept.includes('text/html');
+}
+function jsonResponse(payload, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
+}
 
 export async function onRequestPost(context) {
   const { env, data, request, params } = context;
@@ -32,9 +50,11 @@ export async function onRequestPost(context) {
   }
 
   const input = await formBody(request);
+  const ajax = isAjaxRequest(request, input);
   const { ok, value, errors } = validateStageTransition(input);
   if (!ok) {
     const firstError = Object.values(errors)[0] || 'Bad stage transition';
+    if (ajax) return jsonResponse({ ok: false, error: firstError }, 400);
     return redirectWithFlash(`/opportunities/${oppId}`, firstError, 'error');
   }
 
@@ -85,6 +105,21 @@ export async function onRequestPost(context) {
       `Blocked: ${hardMessages.join('; ')}. Provide an override reason to proceed.`,
       'error'
     );
+  }
+
+  // ---- Blocker gate: can't move to a terminal stage while the opp
+  //      has pending tasks or active quotes (migration 0035 rule).
+  //      The existing close-reason + gate-violation checks above are
+  //      orthogonal — they enforce domain rules. This check enforces
+  //      the simpler "don't orphan work in flight" rule.
+  if (targetDef.is_terminal) {
+    const blockers = await checkInactivateBlockers(env.DB, 'opportunity', oppId);
+    if (blockers.length > 0) {
+      const summary = summarizeBlockers(blockers);
+      const msg = `Cannot close this opportunity \u2014 ${summary}.`;
+      if (ajax) return jsonResponse({ ok: false, error: msg, blockers }, 409);
+      return redirectWithFlash(`/opportunities/${oppId}`, msg, 'error');
+    }
   }
 
   // ---- Perform the transition -----------------------------------------

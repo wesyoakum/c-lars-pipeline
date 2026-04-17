@@ -8,6 +8,7 @@
 import { one, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
 import { now } from '../../lib/ids.js';
+import { checkInactivateBlockers, summarizeBlockers } from '../../lib/inactivate-blocker.js';
 
 const PATCHABLE = new Set([
   'name', 'alias', 'segment', 'phone', 'website', 'notes', 'owner_user_id',
@@ -58,6 +59,23 @@ export async function onRequestPost(context) {
   if (!before) return json({ ok: false, error: 'Not found' }, 404);
 
   let newValue = coerce(field, rawValue);
+
+  // Blocker gate: flipping is_active 1 → 0 is the account-level
+  // inactivation action. Refuse when pending tasks or active opps
+  // would be orphaned. The inline-edit client is already AJAX, so
+  // it receives the 409 and surfaces the blocker list via the
+  // shared modal.
+  if (field === 'is_active' && before.is_active === 1 && newValue === 0) {
+    const blockers = await checkInactivateBlockers(env.DB, 'account', accountId);
+    if (blockers.length > 0) {
+      return json({
+        ok: false,
+        error: `Cannot mark inactive \u2014 ${summarizeBlockers(blockers)}.`,
+        blockers,
+      }, 409);
+    }
+  }
+
   // Alias must never be empty — the per-user "Show aliases" toggle relies
   // on every account having a non-empty alias (see migration 0034). If
   // the user clears the alias inline, fall back to the legal name rather

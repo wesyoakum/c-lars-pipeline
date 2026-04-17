@@ -183,7 +183,9 @@ export async function onRequestGet(context) {
               <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/accept" class="inline-form">
                 <button class="btn primary" type="submit">Accept</button>
               </form>
-              <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/reject" class="inline-form">
+              <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/reject"
+                    onsubmit="window.PMS.submitFormWithBlockerCheck(this, 'Reject this quote'); return false;"
+                    class="inline-form">
                 <button class="btn" type="submit">Reject</button>
               </form>
               <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/expire" class="inline-form">

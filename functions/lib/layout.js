@@ -299,6 +299,242 @@ const WIZARD_MODAL_MARKUP = (
   '</div>'   // /.task-modal-overlay
 );
 
+// Blocker modal — surfaces when a status-change that would inactivate
+// an entity is refused by the server because the entity has pending
+// tasks or active downstream objects (migration 0035 rule).
+//
+// Populated by window.PMS.showBlockerModal({
+//   actionLabel: "Cancel this job",
+//   error: "optional server-provided summary",
+//   blockers: [{ kind, id, label, due_at?, resolveUrl, completeUrl? }],
+//   retry: () => Promise — optional, called when the user clicks "Retry"
+// });
+//
+// For each task blocker the modal offers inline "Mark complete" (hits
+// completeUrl, removes the row on success). For downstream objects
+// the user gets a link to resolve the blocker manually. When the list
+// empties out, a big Retry button appears.
+const BLOCKER_MODAL_MARKUP = (
+  '<div class="task-modal-overlay blocker-modal-overlay" x-data ' +
+  'x-show="$store.blockerModal.open" x-cloak ' +
+  '@keydown.escape.window="$store.blockerModal.close()" ' +
+  '@click.self="$store.blockerModal.close()" style="display:none">' +
+  '<div class="task-modal blocker-modal" @click.stop>' +
+  '<div class="task-modal-header">' +
+  '<h3>Can\u2019t do that yet</h3>' +
+  '<button type="button" class="task-modal-close" @click="$store.blockerModal.close()" aria-label="Close">&times;</button>' +
+  '</div>' +
+  '<div class="task-modal-body">' +
+  '<p class="blocker-modal-intro">' +
+  '<span x-text="$store.blockerModal.actionLabel || \'That change\'"></span> ' +
+  'will leave these open. Resolve them first:' +
+  '</p>' +
+
+  // No blockers left → retry affordance.
+  '<div class="blocker-modal-cleared" x-show="$store.blockerModal.blockers.length === 0">' +
+  '<p>All clear.</p>' +
+  '<button type="button" class="btn primary" @click="$store.blockerModal.retry()" ' +
+  ':disabled="$store.blockerModal.retrying">' +
+  '<span x-show="!$store.blockerModal.retrying">Retry</span>' +
+  '<span x-show="$store.blockerModal.retrying">Retrying\u2026</span>' +
+  '</button>' +
+  '</div>' +
+
+  // Blocker list.
+  '<ul class="blocker-list" x-show="$store.blockerModal.blockers.length > 0">' +
+  '<template x-for="b in $store.blockerModal.blockers" :key="b.kind + \':\' + b.id">' +
+  '<li class="blocker-item" :class="\'blocker-kind-\' + b.kind">' +
+  '<span class="blocker-kind-label" x-text="b.kind"></span>' +
+  '<a class="blocker-label" :href="b.resolveUrl" x-text="b.label"></a>' +
+  '<span class="blocker-due" x-show="b.due_at" x-text="\'due \' + b.due_at"></span>' +
+  '<span class="blocker-actions">' +
+  // Tasks get an inline Complete button.
+  '<button type="button" class="btn btn-xs primary" ' +
+  'x-show="b.completeUrl" ' +
+  '@click="$store.blockerModal.completeTask(b)" ' +
+  ':disabled="$store.blockerModal.resolving[b.kind + \':\' + b.id]">' +
+  '<span x-show="!$store.blockerModal.resolving[b.kind + \':\' + b.id]">Complete</span>' +
+  '<span x-show="$store.blockerModal.resolving[b.kind + \':\' + b.id]">\u2026</span>' +
+  '</button>' +
+  // Non-task blockers get an "Open" link instead of an action.
+  '<a class="btn btn-xs" :href="b.resolveUrl" x-show="!b.completeUrl">Open</a>' +
+  '</span>' +
+  '</li>' +
+  '</template>' +
+  '</ul>' +
+
+  '<div class="task-wizard-actionbar">' +
+  '<span class="task-wizard-help" x-show="$store.blockerModal.lastError" x-text="$store.blockerModal.lastError"></span>' +
+  '<button type="button" class="btn btn-sm" @click="$store.blockerModal.close()">Close</button>' +
+  '</div>' +
+
+  '</div>' +
+  '</div>' +
+  '</div>'
+);
+
+// Blocker modal Alpine store + global helper.
+//
+// window.PMS.showBlockerModal({ actionLabel, error, blockers, retry })
+//   - actionLabel: the short verb-phrase being blocked ("Close this
+//     opportunity", "Cancel this job"). Renders before the list.
+//   - error: optional server-provided one-liner to show at the bottom.
+//   - blockers: array of { kind, id, label, due_at?, resolveUrl, completeUrl? }
+//   - retry: optional fn returning a Promise. Called when the user hits
+//     Retry after clearing the list (and called automatically when the
+//     list empties to length 0). If it resolves to { ok: false, blockers }
+//     we repopulate the list (same flow as the original call).
+//
+// window.PMS.submitFormWithBlockerCheck(form, actionLabel)
+//   - Intercepts a form submit, does a fetch with x-requested-with set,
+//     and on 409 opens the blocker modal wired to retry the same POST.
+//   - For <200 success, follows res.url (redirect target) or the form's
+//     action.
+//
+// Also patches the inline-edit pipeline (in list-inline-edit.js) to
+// surface blocker responses via this modal — that one stays there.
+const BLOCKER_MODAL_STORE_SCRIPT = (
+  "(function () {\n" +
+  "  window.PMS = window.PMS || {};\n" +
+  "  document.addEventListener('alpine:init', function () {\n" +
+  "    Alpine.store('blockerModal', {\n" +
+  "      open: false,\n" +
+  "      blockers: [],\n" +
+  "      actionLabel: '',\n" +
+  "      lastError: '',\n" +
+  "      _retry: null,\n" +
+  "      retrying: false,\n" +
+  "      resolving: {},\n" +
+  "      openWith: function (opts) {\n" +
+  "        opts = opts || {};\n" +
+  "        this.blockers = (opts.blockers || []).slice();\n" +
+  "        this.actionLabel = opts.actionLabel || '';\n" +
+  "        this.lastError = opts.error || '';\n" +
+  "        this._retry = typeof opts.retry === 'function' ? opts.retry : null;\n" +
+  "        this.retrying = false;\n" +
+  "        this.resolving = {};\n" +
+  "        this.open = true;\n" +
+  "      },\n" +
+  "      close: function () {\n" +
+  "        this.open = false;\n" +
+  "        this.blockers = [];\n" +
+  "        this.lastError = '';\n" +
+  "        this._retry = null;\n" +
+  "        this.resolving = {};\n" +
+  "      },\n" +
+  "      completeTask: function (b) {\n" +
+  "        if (!b || !b.completeUrl) return;\n" +
+  "        var self = this;\n" +
+  "        var key = b.kind + ':' + b.id;\n" +
+  "        self.resolving[key] = true;\n" +
+  "        var fd = new FormData();\n" +
+  "        fd.append('source', 'blocker-modal');\n" +
+  "        fetch(b.completeUrl, {\n" +
+  "          method: 'POST',\n" +
+  "          credentials: 'same-origin',\n" +
+  "          body: fd,\n" +
+  "          headers: { 'x-requested-with': 'XMLHttpRequest', 'accept': 'application/json' }\n" +
+  "        }).then(function (res) {\n" +
+  "          // Task-complete endpoint doesn't always return JSON — any\n" +
+  "          // 2xx means the task's gone from the pending list.\n" +
+  "          if (!res.ok) throw new Error('HTTP ' + res.status);\n" +
+  "          self.blockers = self.blockers.filter(function (x) {\n" +
+  "            return !(x.kind === b.kind && x.id === b.id);\n" +
+  "          });\n" +
+  "          delete self.resolving[key];\n" +
+  "          // Auto-retry once the list is empty.\n" +
+  "          if (self.blockers.length === 0 && self._retry) {\n" +
+  "            self.retry();\n" +
+  "          }\n" +
+  "        }).catch(function (err) {\n" +
+  "          self.lastError = 'Could not complete task: ' + (err.message || err);\n" +
+  "          delete self.resolving[key];\n" +
+  "        });\n" +
+  "      },\n" +
+  "      retry: function () {\n" +
+  "        if (!this._retry || this.retrying) return;\n" +
+  "        var self = this;\n" +
+  "        self.retrying = true;\n" +
+  "        Promise.resolve()\n" +
+  "          .then(function () { return self._retry(); })\n" +
+  "          .then(function (result) {\n" +
+  "            self.retrying = false;\n" +
+  "            if (result && result.ok === false && Array.isArray(result.blockers)) {\n" +
+  "              // Still blocked — refresh the list and stay open.\n" +
+  "              self.blockers = result.blockers;\n" +
+  "              self.lastError = result.error || '';\n" +
+  "              return;\n" +
+  "            }\n" +
+  "            // Success — the retry function is responsible for its\n" +
+  "            // own success behavior (redirect, reload, etc.). We just\n" +
+  "            // close the modal.\n" +
+  "            self.close();\n" +
+  "          })\n" +
+  "          .catch(function (err) {\n" +
+  "            self.retrying = false;\n" +
+  "            self.lastError = 'Retry failed: ' + (err.message || err);\n" +
+  "          });\n" +
+  "      }\n" +
+  "    });\n" +
+  "  });\n" +
+  "\n" +
+  "  // Shortcut consumers use everywhere.\n" +
+  "  window.PMS.showBlockerModal = function (opts) {\n" +
+  "    var store = (typeof Alpine !== 'undefined' && Alpine.store)\n" +
+  "      ? Alpine.store('blockerModal') : null;\n" +
+  "    if (!store) { console.error('blockerModal store not ready'); return; }\n" +
+  "    store.openWith(opts || {});\n" +
+  "  };\n" +
+  "\n" +
+  "  // Wrap a <form> submit: POST as AJAX, show modal on 409, navigate\n" +
+  "  // on success. `actionLabel` is the user-facing verb phrase\n" +
+  "  // (\"Close this opportunity\").\n" +
+  "  window.PMS.submitFormWithBlockerCheck = function (form, actionLabel) {\n" +
+  "    if (!form) return;\n" +
+  "    var method = (form.method || 'POST').toUpperCase();\n" +
+  "    var action = form.getAttribute('action') || window.location.pathname;\n" +
+  "    var fd = new FormData(form);\n" +
+  "    fd.append('source', 'blocker-check');\n" +
+  "    function doSubmit() {\n" +
+  "      return fetch(action, {\n" +
+  "        method: method,\n" +
+  "        credentials: 'same-origin',\n" +
+  "        body: fd,\n" +
+  "        redirect: 'follow',\n" +
+  "        headers: { 'x-requested-with': 'XMLHttpRequest', 'accept': 'application/json' }\n" +
+  "      }).then(function (res) {\n" +
+  "        if (res.status === 409) {\n" +
+  "          return res.json().then(function (data) {\n" +
+  "            return { ok: false, blockers: data.blockers || [], error: data.error || '' };\n" +
+  "          });\n" +
+  "        }\n" +
+  "        if (!res.ok) {\n" +
+  "          return res.text().then(function () {\n" +
+  "            throw new Error('HTTP ' + res.status);\n" +
+  "          });\n" +
+  "        }\n" +
+  "        // Successful — follow redirect if the response took us somewhere.\n" +
+  "        var target = res.url || action;\n" +
+  "        window.location.href = target;\n" +
+  "        return { ok: true };\n" +
+  "      });\n" +
+  "    }\n" +
+  "    doSubmit().then(function (result) {\n" +
+  "      if (result && result.ok === false) {\n" +
+  "        window.PMS.showBlockerModal({\n" +
+  "          actionLabel: actionLabel,\n" +
+  "          error: result.error,\n" +
+  "          blockers: result.blockers,\n" +
+  "          retry: doSubmit\n" +
+  "        });\n" +
+  "      }\n" +
+  "    }).catch(function (err) {\n" +
+  "      alert('Could not submit: ' + (err.message || err));\n" +
+  "    });\n" +
+  "  };\n" +
+  "})();\n"
+);
+
 // Board sidebars — split into two fixed-positioned panels that sit in
 // the free space to the left and right of the centered .site-main
 // content (max-width 1100px). Both share the same Alpine $store.board.
@@ -826,6 +1062,7 @@ export function layout(title, body, opts = {}) {
     </template>
   </div>
   ${WIZARD_MODAL_MARKUP}
+  ${BLOCKER_MODAL_MARKUP}
   ${BOARD_LEFT_MARKUP}
   ${BOARD_RIGHT_MARKUP}` : ''}
   ${flash ? `<div class="flash flash-${escape(flash.kind ?? 'info')}">${escape(flash.message)}</div>` : ''}
@@ -839,6 +1076,7 @@ ${body}
   ${versionTag ? `<div class="version-badge">${versionTag}</div>` : ''}
   ${user ? `<script>${NOTIFICATION_STORE_SCRIPT}</script>` : ''}
   ${user ? `<script>${displayPrefsBootScript(user)}</script>` : ''}
+  ${user ? `<script>${BLOCKER_MODAL_STORE_SCRIPT}</script>` : ''}
 </body>
 </html>`;
 }

@@ -255,6 +255,37 @@ export function listInlineEditScript(patchUrlTemplate, opts = {}) {
         });
         var data = await res.json();
         if (!data.ok) {
+          // 409 with blockers payload → show the shared blocker modal
+          // and let the user resolve inline (task complete / navigate
+          // to open records). Retry reruns this same save.
+          if (res.status === 409 && Array.isArray(data.blockers)
+              && window.PMS && typeof window.PMS.showBlockerModal === 'function') {
+            window.PMS.showBlockerModal({
+              actionLabel: 'This change',
+              error: data.error,
+              blockers: data.blockers,
+              retry: function () {
+                return fetch(url, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ field: field, value: value }),
+                }).then(function (r) {
+                  return r.json().then(function (d) {
+                    if (r.status === 409 && Array.isArray(d.blockers)) {
+                      return { ok: false, blockers: d.blockers, error: d.error || '' };
+                    }
+                    if (!r.ok || !d.ok) {
+                      throw new Error(d && d.error ? d.error : ('HTTP ' + r.status));
+                    }
+                    applySavedValue(el, tr, field, d.value !== undefined ? d.value : value);
+                    return { ok: true };
+                  });
+                });
+              }
+            });
+            el.classList.remove('ie-saving');
+            return;
+          }
           el.classList.add('ie-error');
           el.title = data.error || 'Save failed';
           setTimeout(function() {

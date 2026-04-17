@@ -12,6 +12,26 @@ import { one, all, stmt, batch } from './db.js';
 import { auditStmt } from './audit.js';
 import { uuid, now } from './ids.js';
 import { redirectWithFlash } from './http.js';
+import { INACTIVE_QUOTE_STATUSES } from './activeness.js';
+import { checkInactivateBlockers, summarizeBlockers } from './inactivate-blocker.js';
+
+function isAjaxRequest(request, input) {
+  if (input && (input.source === 'wizard' || input.source === 'modal')) return true;
+  const xrw = request.headers.get('x-requested-with');
+  if (xrw && xrw.toLowerCase() === 'xmlhttprequest') return true;
+  const accept = request.headers.get('accept') || '';
+  return accept.includes('application/json') && !accept.includes('text/html');
+}
+
+function jsonResponse(payload, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
+}
 
 /**
  * Apply a simple status transition to a quote, with optional guard on
@@ -28,7 +48,7 @@ import { redirectWithFlash } from './http.js';
  *   flashMessage:     (quote) => string — optional; defaults to a generic one
  */
 export async function transitionQuote(context, opts) {
-  const { env, data, params } = context;
+  const { env, data, params, request } = context;
   const user = data?.user;
   const oppId = params.id;
   const quoteId = params.quoteId;
@@ -58,6 +78,25 @@ export async function transitionQuote(context, opts) {
       `Cannot transition from ${quote.status} to ${to}.`,
       'error'
     );
+  }
+
+  // Blocker gate: when the target status is one of the inactive ones
+  // (rejected / dead / completed) we refuse if this quote has a pending
+  // task or an active downstream job. Active targets (accepted, issued,
+  // expired, ...) pass through unchanged.
+  if (INACTIVE_QUOTE_STATUSES.indexOf(to) >= 0) {
+    const blockers = await checkInactivateBlockers(env.DB, 'quote', quoteId);
+    if (blockers.length > 0) {
+      const ajax = request && isAjaxRequest(request, null);
+      const summary = summarizeBlockers(blockers);
+      const msg = `Cannot mark quote ${to} \u2014 ${summary}.`;
+      if (ajax) return jsonResponse({ ok: false, error: msg, blockers }, 409);
+      return redirectWithFlash(
+        `/opportunities/${oppId}/quotes/${quoteId}`,
+        msg,
+        'error'
+      );
+    }
   }
 
   const ts = now();
