@@ -10,6 +10,8 @@ import { auditStmt, diff } from '../../lib/audit.js';
 import { layout, htmlResponse, html, escape, raw } from '../../lib/layout.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
+import { fireEvent } from '../../lib/auto-tasks.js';
+import { advanceStageOnTaskComplete } from '../../lib/stage-transitions.js';
 
 const TYPE_LABELS = {
   task: 'Task',
@@ -282,6 +284,39 @@ export async function onRequestPost(context) {
       changes,
     }),
   ]);
+
+  // Edge transition into completed on a task → advance opportunity
+  // stage if applicable (e.g. submit-quote task) and fan out the
+  // task.completed event for the rules engine.
+  if (
+    after.status === 'completed' &&
+    before.status !== 'completed' &&
+    (after.type === 'task' || before.type === 'task')
+  ) {
+    try {
+      await advanceStageOnTaskComplete(context, before);
+    } catch (err) {
+      console.error('advanceStageOnTaskComplete failed:', err?.message || err);
+    }
+    try {
+      const opp = before.opportunity_id
+        ? await one(env.DB, 'SELECT * FROM opportunities WHERE id = ?', [before.opportunity_id])
+        : null;
+      const account = opp?.account_id
+        ? await one(env.DB, 'SELECT * FROM accounts WHERE id = ?', [opp.account_id])
+        : null;
+      fireEvent(env, 'task.completed', {
+        trigger: { user, at: ts },
+        task: { ...before, ...after, completed_at: completedAt },
+        opportunity: opp,
+        account,
+      }, user).catch((err) =>
+        console.error('fireEvent(task.completed) failed:', err?.message || err)
+      );
+    } catch (err) {
+      console.error('task.completed payload build failed:', err?.message || err);
+    }
+  }
 
   return redirectWithFlash(`/activities/${actId}`, 'Saved.');
 }

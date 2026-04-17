@@ -20,12 +20,13 @@ Running backlog of enhancements queued for later work. New items at the top.
   Proper fix needs a two-table split — head `<table>` outside the
   horizontal-scroll wrapper, body `<table>` inside it, with synced
   colgroup widths and scrollLeft.
-- **Quote → opp status coupling.** When a quote draft is saved, opp
-  status → `quote_drafted`. When quote is issued, create auto-task
-  prompting submission; when that task completes, opp →
-  `quote_submitted`. Revision flow: revising → `quote_under_revision`;
-  issued revision creates submission task; task complete →
-  `revised_quote_submitted`. Accepted → `won`. Rejected → `lost`.
+- ~~**Quote → opp status coupling.**~~ DONE. New draft → `quote_drafted`.
+  Issue fires `quote.issued` → seeded auto-task rule creates "Submit
+  quote" task. Task complete → opp advances to `quote_submitted` (or
+  `revised_quote_submitted` if quote was a revision). Revision start
+  → `quote_under_revision`. Accepted → `closed_won`. Rejected →
+  `closed_lost`. Transitions use `onlyForward` to avoid regressing
+  already-advanced opps. See `functions/lib/stage-transitions.js`.
 
 ---
 

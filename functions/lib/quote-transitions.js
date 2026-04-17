@@ -52,6 +52,10 @@ function jsonResponse(payload, status = 200) {
  *                     Payload is assembled as {trigger, quote, opportunity,
  *                     account} using fresh row reads so seeded rules see the
  *                     post-transition state.
+ *   afterCommit:      async (context, quote) => void — optional; awaited after
+ *                     the status UPDATE commits. Used to chain in-request side
+ *                     effects like opportunity-stage transitions. Errors are
+ *                     logged but do not roll back the main status change.
  */
 export async function transitionQuote(context, opts) {
   const { env, data, params, request } = context;
@@ -68,6 +72,7 @@ export async function transitionQuote(context, opts) {
     extraAuditChanges,
     flashMessage,
     fireEventName,
+    afterCommit,
   } = opts;
 
   const quote = await one(
@@ -136,6 +141,21 @@ export async function transitionQuote(context, opts) {
       changes,
     }),
   ]);
+
+  // Chained in-request side effects (e.g. opportunity stage transition).
+  // Awaited so the caller's Response reflects the post-side-effect state,
+  // but errors are logged and swallowed to match the fire-and-forget
+  // semantics of fireEventName.
+  if (afterCommit) {
+    try {
+      await afterCommit(context, quote);
+    } catch (err) {
+      console.error(
+        `transitionQuote afterCommit (${eventType}) failed:`,
+        err?.message || err
+      );
+    }
+  }
 
   // Auto-tasks fan-out. Kept off the critical path via waitUntil so a
   // rule-engine glitch never rolls back a successful status transition.

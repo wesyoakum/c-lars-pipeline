@@ -19,6 +19,7 @@ import { uuid, now } from '../../../../lib/ids.js';
 import { redirectWithFlash } from '../../../../lib/http.js';
 import { quoteTotalsRecomputeStmt } from '../../../../lib/pricing.js';
 import { fireEvent } from '../../../../lib/auto-tasks.js';
+import { changeOppStage } from '../../../../lib/stage-transitions.js';
 
 const CUSTOMER_FACING = new Set(['issued', 'revision_issued', 'accepted', 'rejected', 'expired']);
 
@@ -219,6 +220,14 @@ export async function onRequestPost(context) {
   );
 
   await batch(env.DB, statements);
+
+  // Sync opportunity stage — creating a revision means we're actively
+  // reworking the quote for the customer. onlyForward keeps this from
+  // regressing opps that have already moved to won/lost/OC.
+  await changeOppStage(context, oppId, 'quote_under_revision', {
+    reason: `Revision ${nextRev} started`,
+    onlyForward: true,
+  });
 
   // Fire quote.revised so auto-task rules (e.g. "remind me to resubmit
   // the new revision") can react. Non-blocking.

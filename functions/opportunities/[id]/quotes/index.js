@@ -20,6 +20,7 @@ import {
 } from '../../../lib/validators.js';
 import { getQuoteTermDefault } from '../../../lib/quote-term-defaults.js';
 import { formBody } from '../../../lib/http.js';
+import { changeOppStage } from '../../../lib/stage-transitions.js';
 
 export async function onRequestGet(context) {
   const oppId = context.params.id;
@@ -196,6 +197,15 @@ export async function onRequestPost(context) {
       },
     }),
   ]);
+
+  // Sync opportunity stage: first-time quote draft means we're actively
+  // drafting a quote for this opp. onlyForward guards against regressing
+  // won/lost/revision stages back to quote_drafted when a user creates
+  // another sibling quote on an already-advanced opportunity.
+  await changeOppStage(context, oppId, 'quote_drafted', {
+    reason: `New quote draft ${number}`,
+    onlyForward: true,
+  });
 
   return redirectWithFlash(
     `/opportunities/${oppId}/quotes/${id}`,

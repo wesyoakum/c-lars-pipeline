@@ -9,6 +9,7 @@ import { one, stmt, batch } from '../../lib/db.js';
 import { auditStmt, diff } from '../../lib/audit.js';
 import { now } from '../../lib/ids.js';
 import { fireEvent } from '../../lib/auto-tasks.js';
+import { advanceStageOnTaskComplete } from '../../lib/stage-transitions.js';
 
 // Fields that may be patched inline, with optional coercion.
 const PATCHABLE = new Set([
@@ -105,6 +106,11 @@ export async function onRequestPost(context) {
       const account = opp?.account_id
         ? await one(env.DB, 'SELECT * FROM accounts WHERE id = ?', [opp.account_id])
         : null;
+
+      // Completing a "Submit quote to customer" task advances the
+      // parent opportunity stage. Mapping lives in stage-transitions.js.
+      await advanceStageOnTaskComplete(context, before);
+
       // Fire without awaiting — auto-task side effects must never block
       // the inline-edit response. Failures are logged in the engine.
       fireEvent(env, 'task.completed', {
