@@ -131,6 +131,28 @@ export function listBulkEditScript({ patchUrl, deleteUrl } = {}) {
       bar.style.display = on ? '' : 'none';
       toggle.classList.toggle('active', on);
       toggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+
+      // Grow/shrink the bulk column so it doesn't permanently steal
+      // 32px from the other columns. listScript locked the table
+      // width at init from the original column sum; we bump that lock
+      // by 32 on each toggle so the bulk checkbox has actual space to
+      // render, and undo it on toggle-off. Without this the existing
+      // columns get squeezed whenever bulk mode is on, and when it's
+      // off the table is 32px too narrow (or too wide, depending on
+      // timing of the sync).
+      var bulkCol = host.querySelector('.opp-list-table col[data-col="__bulk__"]');
+      var table = host.querySelector('.opp-list-table');
+      if (bulkCol && table) {
+        var targetColW = on ? 32 : 0;
+        var prevColW = parseInt(bulkCol.style.width, 10) || 0;
+        bulkCol.style.width = targetColW + 'px';
+        // Only adjust locked table width if listScript actually set one.
+        if (table.style.width) {
+          var tableW = parseInt(table.style.width, 10) || 0;
+          table.style.width = (tableW + (targetColW - prevColW)) + 'px';
+        }
+      }
+
       if (!on) {
         // Clear all selections when turning off so the next on-click
         // starts with a clean slate.
@@ -242,12 +264,17 @@ export function listBulkEditScript({ patchUrl, deleteUrl } = {}) {
         tr.insertBefore(td, tr.firstChild);
       });
       // Also inject a <col> at the front of any colgroup so
-      // table-layout:fixed doesn't squish the checkbox.
+      // table-layout:fixed doesn't squish the checkbox when bulk mode
+      // is on. Width stays at 0 while bulk is OFF — otherwise the
+      // extra 32px would steal space from the existing columns
+      // (listScript.syncTableWidth locked the table width before
+      // bulk-edit ran, so anything we reserve here just shrinks the
+      // real columns). setBulkMode handles the 0 \u2194 32 swap.
       var colgroup = host.querySelector('.opp-list-table colgroup');
       if (colgroup) {
         var col = document.createElement('col');
         col.dataset.col = '__bulk__';
-        col.style.width = '32px';
+        col.style.width = '0';
         colgroup.insertBefore(col, colgroup.firstChild);
       }
       // Bump any tfoot colspan attributes by 1 so summary rows still
