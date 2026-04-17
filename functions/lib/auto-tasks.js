@@ -434,7 +434,19 @@ async function createTaskFromRule({ env, rule, template, payload, user, eventKey
   const fireId = uuid();
   const ts = now();
 
+  // Circular FK between activities.source_fire_id and task_rule_fires.task_id
+  // means we can't satisfy both in a single INSERT-order. D1 checks FKs
+  // immediately per-statement, so we:
+  //   1) insert task_rule_fires with task_id = NULL
+  //   2) insert activities with source_fire_id = fireId (now valid)
+  //   3) update task_rule_fires to set task_id = taskId
   const statements = [
+    stmt(
+      env.DB,
+      `INSERT OR IGNORE INTO task_rule_fires (id, rule_id, event_key, fired_at, task_id)
+       VALUES (?, ?, ?, ?, NULL)`,
+      [fireId, rule.id, eventKey, ts]
+    ),
     stmt(
       env.DB,
       `INSERT INTO activities (
@@ -452,9 +464,8 @@ async function createTaskFromRule({ env, rule, template, payload, user, eventKey
     ),
     stmt(
       env.DB,
-      `INSERT OR IGNORE INTO task_rule_fires (id, rule_id, event_key, fired_at, task_id)
-       VALUES (?, ?, ?, ?, ?)`,
-      [fireId, rule.id, eventKey, ts, taskId]
+      `UPDATE task_rule_fires SET task_id = ? WHERE id = ?`,
+      [taskId, fireId]
     ),
     auditStmt(env.DB, {
       entityType: 'activity',
