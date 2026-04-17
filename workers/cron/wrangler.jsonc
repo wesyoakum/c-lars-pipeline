@@ -1,0 +1,38 @@
+{
+  // C-LARS PMS sidecar cron Worker.
+  //
+  // Cloudflare Pages Functions can't be cron-triggered directly — only
+  // Workers can. This tiny Worker exists just to call the Pages site's
+  // /api/cron/sweep endpoint on a schedule, forwarding the shared
+  // secret so the endpoint trusts the call.
+  //
+  // Deploy:
+  //   cd workers/cron
+  //   npx wrangler deploy
+  //
+  // Secrets (run once, then again whenever CRON_SECRET rotates):
+  //   npx wrangler secret put CRON_SECRET
+  //   # Paste the same value into the Pages project:
+  //   npx wrangler pages secret put CRON_SECRET
+  //
+  // Manual smoke test (no schedule wait):
+  //   curl -X POST https://c-lars-pms-cron.<account>.workers.dev/__run \
+  //     -H "x-cron-secret: $CRON_SECRET"
+  //
+  // Schedule: once per day at 14:00 UTC = 09:00 America/Chicago (CST).
+  // One daily tick is plenty — each sweep's window bucket is a UTC day,
+  // so running more often just hits the dedup gate. If we ever want
+  // sub-daily cadence (e.g. hourly expiring-soon scans for a last-day
+  // quote), change the bucket key too.
+  "name": "c-lars-pms-cron",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-17",
+  "triggers": {
+    "crons": ["0 14 * * *"]
+  },
+  "vars": {
+    // The public URL of the Pages deployment. The Worker POSTs to
+    // `${PMS_URL}/api/cron/sweep`.
+    "PMS_URL": "https://pms.c-lars.com"
+  }
+}
