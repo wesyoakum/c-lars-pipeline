@@ -3438,6 +3438,8 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 .board-zone-notes {
   position: relative;
   min-height: 150px;
+  /* Drop the post-it stack 10px below the task checkboxes above. */
+  margin-top: 10px;
 }
 .board-notes-stack {
   position: relative;
