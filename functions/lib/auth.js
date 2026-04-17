@@ -80,13 +80,31 @@ export async function upsertUser(db, email, displayName) {
   // Infer a display name from the email local-part if none given.
   const inferred = displayName ?? emailToName(email);
 
+  // Seed new users with the admin-blessed defaults from site_prefs
+  // (migration 0036). If the row isn't there yet (fresh DB, unmigrated
+  // environment) fall back to the per-column DEFAULT 0 behavior.
+  const defaults = (await one(
+    db,
+    'SELECT show_alias, group_rollup, active_only FROM site_prefs WHERE id = 1'
+  )) || { show_alias: 0, group_rollup: 0, active_only: 0 };
+
   const id = uuid();
   const ts = now();
   await run(
     db,
-    `INSERT INTO users (id, email, display_name, role, active, created_at, updated_at)
-     VALUES (?, ?, ?, 'sales', 1, ?, ?)`,
-    [id, email, inferred, ts, ts]
+    `INSERT INTO users (
+       id, email, display_name, role, active,
+       show_alias, group_rollup, active_only,
+       created_at, updated_at
+     )
+     VALUES (?, ?, ?, 'sales', 1, ?, ?, ?, ?, ?)`,
+    [
+      id, email, inferred,
+      defaults.show_alias ? 1 : 0,
+      defaults.group_rollup ? 1 : 0,
+      defaults.active_only ? 1 : 0,
+      ts, ts,
+    ]
   );
 
   return {
@@ -95,6 +113,9 @@ export async function upsertUser(db, email, displayName) {
     display_name: inferred,
     role: 'sales',
     active: 1,
+    show_alias: defaults.show_alias ? 1 : 0,
+    group_rollup: defaults.group_rollup ? 1 : 0,
+    active_only: defaults.active_only ? 1 : 0,
     created_at: ts,
     updated_at: ts,
   };

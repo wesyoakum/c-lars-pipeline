@@ -892,56 +892,11 @@ const BOARD_LEFT_MARKUP = (
   '</div>'
 );
 
-// Display-prefs gear button + popup — sits in .header-right, just
-// left of the notification bell. Two per-user toggles (migration
-// 0034): "Show aliases" and "Group accounts". Each toggle PATCHes
-// /user/prefs and reloads the page so server-rendered lists pick up
-// the new values immediately.
-//
-// We reuse the .quote-settings CSS classes (originally built for the
-// quote-page gear icon) since the visual is identical.
-const DISPLAY_PREFS_HEADER_BTN = (
-  '<div class="quote-settings" x-data="displayPrefs()" @click.outside="open = false">' +
-    '<button type="button" class="quote-settings-btn" @click="open = !open" ' +
-      'aria-label="Display settings" title="Display settings">' +
-      '<svg class="quote-settings-icon" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">' +
-        '<path d="M19.14 12.94c.04-.31.06-.62.06-.94 0-.32-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.5.5 0 0 0-.58-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 0 0-.58.22L2.74 8.87a.49.49 0 0 0 .12.61l2.03 1.58c-.04.31-.06.62-.06.94 0 .32.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.39.31.6.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.25.41.49.41h3.84c.24 0 .45-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.23.09.5 0 .6-.22l1.92-3.32c.12-.22.07-.49-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 0 1 8.4 12 3.6 3.6 0 0 1 12 8.4a3.6 3.6 0 0 1 3.6 3.6 3.6 3.6 0 0 1-3.6 3.6z"/>' +
-      '</svg>' +
-    '</button>' +
-    '<div class="quote-settings-panel" x-show="open" x-cloak @click.stop>' +
-      '<div class="quote-settings-row">' +
-        '<div class="quote-settings-label">' +
-          '<strong>Show aliases</strong>' +
-          '<span>Display the conversational alias instead of the legal account name everywhere — lists, columns, dropdowns, mentions.</span>' +
-        '</div>' +
-        '<label class="toggle-switch" :class="{ \'toggle-switch--on\': showAlias }">' +
-          '<input type="checkbox" :checked="showAlias" @change="save(\'show_alias\', $event.target.checked)">' +
-          '<span class="toggle-slider"></span>' +
-        '</label>' +
-      '</div>' +
-      '<div class="quote-settings-row" style="margin-top:0.6rem;padding-top:0.6rem;border-top:1px solid var(--border)">' +
-        '<div class="quote-settings-label">' +
-          '<strong>Group accounts</strong>' +
-          '<span>Roll grouped accounts into one row on the Accounts list, and show the group label on opportunity / quote / task lists. Creating a new entity prompts you to pick which member account it\'s for.</span>' +
-        '</div>' +
-        '<label class="toggle-switch" :class="{ \'toggle-switch--on\': groupRollup }">' +
-          '<input type="checkbox" :checked="groupRollup" @change="save(\'group_rollup\', $event.target.checked)">' +
-          '<span class="toggle-slider"></span>' +
-        '</label>' +
-      '</div>' +
-      '<div class="quote-settings-row" style="margin-top:0.6rem;padding-top:0.6rem;border-top:1px solid var(--border)">' +
-        '<div class="quote-settings-label">' +
-          '<strong>Show only active</strong>' +
-          '<span>Hide closed / dead / cancelled records across every list and wizard picker. Accounts with no active opportunities, dead / rejected quotes, completed / cancelled jobs, and closed opportunities are filtered out. Detail-page links still work directly. Wizard pickers get a per-field "Show inactive" override.</span>' +
-        '</div>' +
-        '<label class="toggle-switch" :class="{ \'toggle-switch--on\': activeOnly }">' +
-          '<input type="checkbox" :checked="activeOnly" @change="save(\'active_only\', $event.target.checked)">' +
-          '<span class="toggle-slider"></span>' +
-        '</label>' +
-      '</div>' +
-    '</div>' +
-  '</div>'
-);
+// (The display-preferences gear popup previously lived here. The three
+// toggles were moved to the /settings page so there's a single obvious
+// place for all user preferences. window.PMS.userPrefs is still
+// populated via displayPrefsBootScript further down so client code can
+// branch on the current user's prefs without a server round-trip.)
 
 // Header restore button \u2014 sits in .header-right, just left of the
 // notification bell. Only visible when the board has been hidden via
@@ -1040,7 +995,6 @@ export function layout(title, body, opts = {}) {
     </nav>
     <div class="header-right">
       ${user ? BOARD_RESTORE_HEADER_BTN : ''}
-      ${user ? DISPLAY_PREFS_HEADER_BTN : ''}
       ${user ? `<a href="/notifications" class="notification-bell" aria-label="Notifications" x-data>
         <svg class="notification-bell-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
           <path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6V11a6 6 0 0 0-4.5-5.81V5a1.5 1.5 0 0 0-3 0v.19A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z"/>
@@ -1087,6 +1041,12 @@ ${body}
 // code (account-picker.js, wizards) via window.PMS.userPrefs so they
 // can branch on show_alias / group_rollup without a server round-trip.
 function displayPrefsBootScript(user) {
+  // Exposes the current user's display preferences on
+  // window.PMS.userPrefs so client code (account-picker.js, wizards,
+  // list helpers) can branch on them without a server round-trip.
+  //
+  // The toggles themselves live on the /settings page; this boot
+  // script just populates the globals at page load.
   const showAlias = user && user.show_alias ? 1 : 0;
   const groupRollup = user && user.group_rollup ? 1 : 0;
   const activeOnly = user && user.active_only ? 1 : 0;
@@ -1094,44 +1054,7 @@ function displayPrefsBootScript(user) {
     "window.PMS = window.PMS || {};\n" +
     "window.PMS.userPrefs = { show_alias: " + showAlias +
       ", group_rollup: " + groupRollup +
-      ", active_only: " + activeOnly + " };\n" +
-    "document.addEventListener('alpine:init', function () {\n" +
-    "  Alpine.data('displayPrefs', function () {\n" +
-    "    return {\n" +
-    "      open: false,\n" +
-    "      showAlias: !!" + showAlias + ",\n" +
-    "      groupRollup: !!" + groupRollup + ",\n" +
-    "      activeOnly: !!" + activeOnly + ",\n" +
-    "      saving: false,\n" +
-    "      save: function (key, next) {\n" +
-    "        var self = this;\n" +
-    "        var prop = key === 'show_alias' ? 'showAlias'\n" +
-    "                 : key === 'group_rollup' ? 'groupRollup'\n" +
-    "                 : key === 'active_only'  ? 'activeOnly'\n" +
-    "                 : null;\n" +
-    "        if (!prop) return;\n" +
-    "        var prev = self[prop];\n" +
-    "        self[prop] = !!next;\n" +
-    "        self.saving = true;\n" +
-    "        var body = {};\n" +
-    "        body[key] = next ? 1 : 0;\n" +
-    "        fetch('/user/prefs', {\n" +
-    "          method: 'PATCH',\n" +
-    "          credentials: 'same-origin',\n" +
-    "          headers: { 'content-type': 'application/json' },\n" +
-    "          body: JSON.stringify(body)\n" +
-    "        }).then(function (r) {\n" +
-    "          if (!r.ok) throw new Error('HTTP ' + r.status);\n" +
-    "          window.location.reload();\n" +
-    "        }).catch(function (err) {\n" +
-    "          self[prop] = prev;\n" +
-    "          self.saving = false;\n" +
-    "          alert('Could not save preference: ' + (err && err.message ? err.message : 'unknown error'));\n" +
-    "        });\n" +
-    "      }\n" +
-    "    };\n" +
-    "  });\n" +
-    "});\n"
+      ", active_only: " + activeOnly + " };\n"
   );
 }
 
