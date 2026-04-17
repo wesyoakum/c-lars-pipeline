@@ -446,8 +446,12 @@ const BOARD_RIGHT_MARKUP = (
         '</div>' +
       '</div>' +
 
-      // Saved notes (private + shared + public-mentions) — below the stack
-      '<div class="board-notes-list">' +
+      // Saved notes (private + shared + public-mentions) — below the
+      // stack. The .is-pulled modifier applies a negative margin-top
+      // so the list snugs up under the color-swatch stack; when the
+      // composer is open instead of the stack, we drop the pull so
+      // the composer card doesn\u2019t collide with the first saved note.
+      '<div :class="\'board-notes-list\' + ($store.board.composer.open ? \'\' : \' is-pulled\')">' +
         '<template x-for="card in $store.board.allNotes" :key="card.id">' +
           // Wrapper holds the primary card + any "extra pages" when
           // a long body has been split. Classes drive the collapsed

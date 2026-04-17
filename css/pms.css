@@ -3490,10 +3490,14 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
      visually onto the first saved card. */
   position: relative;
   z-index: 0;
-  /* Pull the list up under the stack's bottom padding. The stack
-     reserves extra height for hover-lift + shadow bleed, but once the
-     user scrolls the page they want the saved notes closer to the
-     post-its than the safe padding would give. */
+}
+/* Pull the list up under the stack's bottom padding. The stack
+   reserves extra height for hover-lift + shadow bleed; pulling the
+   list up keeps the saved notes visually attached to the swatch row.
+   Only applied when the composer is closed — when it's open, the
+   composer card replaces the stack and a negative margin would let
+   the first saved post-it overlap the composer. */
+.board-notes-list.is-pulled {
   margin-top: -45px;
 }
 /* Cap each post-it page to a square silhouette. The card width is set
