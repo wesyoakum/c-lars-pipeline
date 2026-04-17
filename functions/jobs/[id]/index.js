@@ -67,10 +67,20 @@ export async function onRequestGet(context) {
             ntp_user.display_name AS ntp_issued_by_name,
             ho_user.display_name AS handed_off_by_name,
             creator.display_name AS created_by_name,
-            (SELECT q.number FROM quotes q
-              WHERE q.opportunity_id = j.opportunity_id
-                AND q.status NOT IN ('superseded','expired','rejected')
-              ORDER BY q.created_at DESC LIMIT 1) AS latest_quote_number
+            -- Prefer the ACCEPTED quote for OC/NTP number defaults
+            -- (that's the quote the customer actually signed off on).
+            -- Fall back to the newest live quote if none are accepted yet
+            -- so manually-created jobs still get a sensible suggestion.
+            COALESCE(
+              (SELECT q.number FROM quotes q
+                WHERE q.opportunity_id = j.opportunity_id
+                  AND q.status = 'accepted'
+                ORDER BY q.created_at DESC LIMIT 1),
+              (SELECT q.number FROM quotes q
+                WHERE q.opportunity_id = j.opportunity_id
+                  AND q.status NOT IN ('superseded','expired','rejected')
+                ORDER BY q.created_at DESC LIMIT 1)
+            ) AS latest_quote_number
        FROM jobs j
        LEFT JOIN opportunities o ON o.id = j.opportunity_id
        LEFT JOIN accounts a ON a.id = o.account_id
