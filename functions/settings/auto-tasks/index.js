@@ -23,6 +23,7 @@ import { layout, htmlResponse, html, escape, raw } from '../../lib/layout.js';
 import { uuid, now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 import { hasRole } from '../../lib/auth.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
 
 // Keep this in sync with the trigger dispatch in functions/lib/auto-tasks.js
 // and the call sites in submit.js, stage.js, activities/[id]/patch.js.
@@ -79,6 +80,30 @@ async function renderList(context, { values = {}, errors = {} }) {
       ORDER BY r.active DESC, r.name`
   );
 
+  const columns = [
+    { key: 'name',        label: 'Name',        sort: 'text',   filter: 'text',   default: true  },
+    { key: 'description', label: 'Description', sort: 'text',   filter: 'text',   default: true  },
+    { key: 'trigger',     label: 'Trigger',     sort: 'text',   filter: 'select', default: true  },
+    { key: 'status',      label: 'Status',      sort: 'text',   filter: 'select', default: true  },
+    { key: 'fires',       label: 'Fires',       sort: 'number', filter: 'range',  default: true  },
+    { key: 'last_fired',  label: 'Last fired',  sort: 'text',   filter: 'text',   default: true  },
+    { key: 'updated',     label: 'Updated',     sort: 'text',   filter: 'text',   default: false },
+  ];
+
+  const rowData = rows.map((r) => ({
+    id: r.id,
+    name: r.name ?? '',
+    description: r.description ?? '',
+    trigger: triggerLabel(r.trigger),
+    trigger_key: r.trigger,
+    status: r.active ? 'Active' : 'Paused',
+    active: r.active,
+    fires: r.fire_count ?? 0,
+    last_fired: r.last_fired ? formatRelative(r.last_fired) : '',
+    last_fired_iso: r.last_fired ?? '',
+    updated: (r.updated_at ?? '').slice(0, 10),
+  }));
+
   const errText = (k) => (errors[k] ? html`<small class="error">${errors[k]}</small>` : '');
 
   const body = html`
@@ -86,6 +111,7 @@ async function renderList(context, { values = {}, errors = {} }) {
       <div class="card-header">
         <h1>Auto-Task Rules</h1>
         <div style="display:flex;align-items:center;gap:0.5rem">
+          ${listToolbar({ id: 'auto-tasks', count: rows.length, columns })}
           <a class="btn" href="/settings">\u2190 Settings</a>
         </div>
       </div>
@@ -99,40 +125,43 @@ async function renderList(context, { values = {}, errors = {} }) {
       ${rows.length === 0
         ? html`<p class="muted">No rules yet.</p>`
         : html`
-          <table class="data opp-list-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Trigger</th>
-                <th>Active</th>
-                <th class="num">Fires</th>
-                <th>Last fired</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows.map((r) => html`
-                <tr ${!r.active ? raw('class="inactive"') : ''}>
-                  <td>
-                    <a href="/settings/auto-tasks/${escape(r.id)}">${escape(r.name)}</a>
-                    ${r.description
-                      ? html`<br><small class="muted">${escape(r.description)}</small>`
-                      : ''}
-                  </td>
-                  <td><code>${escape(r.trigger)}</code><br><small class="muted">${escape(triggerLabel(r.trigger))}</small></td>
-                  <td>
-                    ${r.active
-                      ? html`<span class="pill pill-success">Active</span>`
-                      : html`<span class="pill pill-locked">Paused</span>`}
-                  </td>
-                  <td class="num">${r.fire_count ?? 0}</td>
-                  <td>${r.last_fired ? escape(formatRelative(r.last_fired)) : html`<span class="muted">—</span>`}</td>
-                </tr>
-              `)}
-            </tbody>
-            <tfoot>
-              <tr><th colspan="5">${rows.length} rule${rows.length === 1 ? '' : 's'}</th></tr>
-            </tfoot>
-          </table>
+          <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
+            <table class="data opp-list-table">
+              ${listTableHead(columns, rowData)}
+              <tbody data-role="rows">
+                ${rowData.map((r) => html`
+                  <tr data-row-id="${escape(r.id)}"
+                      ${raw(rowDataAttrs(columns, r))}
+                      ${!r.active ? raw('class="inactive"') : ''}>
+                    <td class="col-name" data-col="name">
+                      <a href="/settings/auto-tasks/${escape(r.id)}">${escape(r.name)}</a>
+                    </td>
+                    <td class="col-description" data-col="description">${escape(r.description)}</td>
+                    <td class="col-trigger" data-col="trigger">
+                      ${escape(r.trigger)}
+                      <br><small class="muted"><code>${escape(r.trigger_key)}</code></small>
+                    </td>
+                    <td class="col-status" data-col="status">
+                      ${r.active
+                        ? html`<span class="pill pill-success">Active</span>`
+                        : html`<span class="pill pill-locked">Paused</span>`}
+                    </td>
+                    <td class="col-fires num" data-col="fires">${r.fires}</td>
+                    <td class="col-last_fired" data-col="last_fired">
+                      ${r.last_fired
+                        ? html`<span title="${escape(r.last_fired_iso)}">${escape(r.last_fired)}</span>`
+                        : html`<span class="muted">—</span>`}
+                    </td>
+                    <td class="col-updated" data-col="updated">${escape(r.updated)}</td>
+                  </tr>
+                `)}
+              </tbody>
+              <tfoot>
+                <tr><th colspan="${columns.length}">${rows.length} rule${rows.length === 1 ? '' : 's'}</th></tr>
+              </tfoot>
+            </table>
+          </div>
+          <script>${raw(listScript('pms.autoTasks.v1', 'name', 'asc'))}</script>
         `}
 
       <h2 class="section-h">Add rule</h2>
