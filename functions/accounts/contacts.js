@@ -84,13 +84,12 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Contacts</h1>
-        ${listToolbar({ id: 'contacts', count: rows.length, columns, bulk: true })}
+        ${listToolbar({ id: 'contacts', count: rows.length, columns, bulk: true, newOnClick: "window.PMS.openWizard('contact', {})", newLabel: 'New contact' })}
       </div>
 
       ${rows.length === 0
         ? html`<p class="muted">
-            No contacts yet. Open an account from the
-            <a href="/accounts">Accounts</a> tab to add one.
+            No contacts yet. Click the <strong>+</strong> button above to create one.
           </p>`
         : html`
           <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">

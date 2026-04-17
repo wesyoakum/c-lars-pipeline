@@ -754,6 +754,7 @@ export function layout(title, body, opts = {}) {
   <script defer src="/js/wizard-modal.js"></script>
   <script defer src="/js/wizards/task.js"></script>
   <script defer src="/js/wizards/account.js"></script>
+  <script defer src="/js/wizards/contact.js"></script>
   <script defer src="/js/wizards/opportunity.js"></script>
   <script defer src="/js/wizards/quote.js"></script>
   ${user ? '<script defer src="/js/board-sidebar.js"></script>' : ''}
