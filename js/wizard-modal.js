@@ -334,6 +334,15 @@
       // = drilled into a specific group's member list.
       groupDrillDown: null,
 
+      // Nested wizard support: when an entity-select step has a
+      // `createAction` and the user picks "+ New <thing>", we snapshot
+      // the parent state, open the child wizard, and on the child's
+      // success restore the parent and feed it the new entity.
+      // Each frame: { wizardKey, config, stepIndex, answers, typedInput,
+      //               suggestionIndex, pinnedPrefix, pinnedValue,
+      //               groupDrillDown, onSuccess }
+      parentStack: [],
+
       // Pinned "Linked to:" row (or similar) — set by config.applyPrefill
       pinnedPrefix: '',
       pinnedValue: '',
@@ -493,7 +502,7 @@
             });
           }
 
-          return linkSuggestions(pool, this.typedInput).map(function (item) {
+          var out = linkSuggestions(pool, this.typedInput).map(function (item) {
             var mainLabel, sub = '', typeLabel = item.kind.charAt(0).toUpperCase() + item.kind.slice(1);
             if (item.kind === 'opportunity') { mainLabel = item.number; sub = item.title || ''; }
             else if (item.kind === 'quote') { mainLabel = item.number; sub = item.title || ''; }
@@ -517,6 +526,25 @@
               _item: item
             };
           });
+          // Append a synthetic "+ New <thing>" entry when the step
+          // wants to offer creation of a fresh record. Always shown
+          // last so it doesn't shove existing matches off the bottom.
+          if (step.createAction) {
+            var ca = step.createAction;
+            var createSub = ca.subFromTyped && this.typedInput
+              ? '"' + String(this.typedInput).trim() + '"'
+              : (ca.sub || '');
+            out.push({
+              id: '__create__',
+              kind: 'create',
+              refId: null,
+              label: ca.label || '+ New record',
+              sub: createSub,
+              typeLabel: ca.typeLabel || 'New',
+              _create: ca
+            });
+          }
+          return out;
         }
         return [];
       },
@@ -582,6 +610,11 @@
       },
 
       closeModal: function () {
+        // Closing the current modal cancels any nested-wizard chain.
+        // (We don't auto-restore the parent on close — that'd be
+        // surprising when the user clicked outside expecting a hard
+        // dismissal.)
+        this.parentStack = [];
         this.open = false;
         this.error = null;
       },
@@ -744,6 +777,30 @@
           }
           var picked = sugs[Math.max(0, Math.min(this.suggestionIndex, sugs.length - 1))];
 
+          // "+ New <thing>" picked: open the configured child wizard
+          // with the typed text as a prefill. parseStep returns a
+          // special signal so advance() doesn't move forward.
+          if (picked.kind === 'create') {
+            var ca = picked._create || {};
+            var childPrefill = {};
+            if (ca.prefillFromTyped) {
+              childPrefill[ca.prefillFromTyped] = (this.typedInput || '').trim();
+            }
+            var stepKey = step.key;
+            this.openAsChild(ca.wizardKey, childPrefill, function (result, childAnswers) {
+              // Restore-then-fill the parent step's answer.
+              if (typeof ca.setAnswer === 'function') {
+                try { this.answers[stepKey] = ca.setAnswer(result, childAnswers); }
+                catch (e) { /* ignore */ }
+              }
+              this.typedInput = this.currentTypedForStep();
+              this.error = null;
+              // Advance past the now-filled step.
+              this.advance();
+            });
+            return '__child__';
+          }
+
           // Account-group picked at the top level: drill down (multi)
           // or auto-pick the sole member (single).
           if (picked.kind === 'account-group') {
@@ -825,6 +882,10 @@
         // Special signal from the entity-select step: user picked a
         // multi-member group — stay on the step in drill-down mode.
         if (parsed === '__drill__') { this.focusInput(); return; }
+        // The user picked "+ New <thing>" — openAsChild already swapped
+        // us into the child wizard and focused its input. Don't touch
+        // the parent step here.
+        if (parsed === '__child__') { return; }
         var idx = this.stepIndex + 1;
         var steps = this.steps();
         while (idx < steps.length && this.shouldSkipStep(steps[idx])) idx++;
@@ -867,6 +928,51 @@
         this.suggestionIndex = (this.suggestionIndex + delta + sugs.length) % sugs.length;
       },
 
+      // ---- Nested wizards ----
+      // Snapshot the current wizard, open `childKey` with `childPrefill`,
+      // and remember `onSuccess(result, childAnswers)` to be called
+      // (with the parent's `this`) once the child completes successfully.
+      openAsChild: function (childKey, childPrefill, onSuccess) {
+        if (!WIZARDS[childKey]) {
+          this.error = 'No wizard registered for ' + childKey + '.';
+          return;
+        }
+        this.parentStack.push({
+          wizardKey: this.wizardKey,
+          config: this.config,
+          stepIndex: this.stepIndex,
+          answers: this.answers,
+          typedInput: this.typedInput,
+          suggestionIndex: this.suggestionIndex,
+          pinnedPrefix: this.pinnedPrefix,
+          pinnedValue: this.pinnedValue,
+          groupDrillDown: this.groupDrillDown,
+          onSuccess: onSuccess || null
+        });
+        // openModal resets per-wizard state but does NOT clear
+        // parentStack, so the frame survives across the swap.
+        this.openModal(childKey, childPrefill || {});
+      },
+
+      // Restore the most recent parent frame (used after child success
+      // and on close-of-child).
+      restoreParent: function () {
+        if (this.parentStack.length === 0) return null;
+        var snap = this.parentStack.pop();
+        this.wizardKey = snap.wizardKey;
+        this.config = snap.config;
+        this.stepIndex = snap.stepIndex;
+        this.answers = snap.answers;
+        this.typedInput = snap.typedInput;
+        this.suggestionIndex = snap.suggestionIndex;
+        this.pinnedPrefix = snap.pinnedPrefix;
+        this.pinnedValue = snap.pinnedValue;
+        this.groupDrillDown = snap.groupDrillDown;
+        this.error = null;
+        this.open = true;
+        return snap;
+      },
+
       // ---- Submit ----
       submit: function () {
         if (!this.parseStep()) return;
@@ -899,6 +1005,18 @@
             self.submitting = false;
             if (!result || !result.ok) {
               self.error = (result && result.error) || 'Could not save.';
+              return;
+            }
+            // Nested case: pop back to the parent wizard and feed it
+            // the new entity instead of redirecting/reloading.
+            if (self.parentStack.length > 0) {
+              var childAnswers = self.answers;
+              var snap = self.restoreParent();
+              if (snap && typeof snap.onSuccess === 'function') {
+                try { snap.onSuccess.call(self, result, childAnswers); }
+                catch (e) { /* ignore */ }
+              }
+              self.focusInput();
               return;
             }
             self.closeModal();

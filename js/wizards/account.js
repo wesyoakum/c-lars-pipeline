@@ -6,22 +6,20 @@
 // Steps:
 //   1. alias    — "Short name for lists?"      (text, optional — defaults to derived alias on submit)
 //   2. name     — "Full legal name?"           (text, required)
-//   3. segment  — "What segment?"              (select, optional)
-//   4. phone    — "Main phone number?"         (text, optional)
-//   5. website  — "Website URL?"               (text, optional)
-//   6. owner    — "Who owns this account?"     (user-select, defaults to current user)
-//   7. notes    — "Any notes?"                 (textarea, optional)
+//   3. owner    — "Who owns this account?"     (user-select, defaults to current user)
+//   4. notes    — "Any notes?"                 (textarea, optional)
 //
-// After the required "name" step, everything else is optional — Tab
-// skips them. If the user leaves alias blank, the server derives one
-// by stripping the corporate suffix from name (", LLC" / ", Inc." /
-// etc.). Name-only is a valid account; the user can enrich later
-// via the account detail page (inline edit everywhere).
+// Segment / phone / website were dropped from the wizard — they're rarely
+// known at create time and the inline-edit columns on the accounts list
+// make adding them later trivial. Keep this wizard short.
 //
 // Prefill (from openWizard('account', ...)):
 //   { name, reload_on_success }
 //
 // On success the engine navigates the browser to /accounts/<new id>.
+// When opened as a child of another wizard (e.g. the quote wizard's
+// "+ New account" suggestion), the engine restores the parent instead
+// of redirecting.
 
 (function () {
   'use strict';
@@ -54,34 +52,6 @@
         requiredError: 'Account name is required.'
       },
       {
-        key: 'segment',
-        type: 'select',
-        prompt: 'What segment?',
-        hint: 'Pick a segment or leave blank. Tab to continue.',
-        options: [
-          { value: '',           label: '\u2014 None \u2014' },
-          { value: 'WROV',       label: 'WROV' },
-          { value: 'Research',   label: 'Research' },
-          { value: 'Defense',    label: 'Defense' },
-          { value: 'Commercial', label: 'Commercial' },
-          { value: 'Other',      label: 'Other' }
-        ]
-      },
-      {
-        key: 'phone',
-        type: 'text',
-        prompt: 'Main phone number?',
-        hint: 'Optional. Tab to skip.',
-        placeholder: '(555) 555-1234'
-      },
-      {
-        key: 'website',
-        type: 'text',
-        prompt: 'Website URL?',
-        hint: 'Optional. Tab to skip.',
-        placeholder: 'https://example.com'
-      },
-      {
         key: 'owner',
         type: 'user-select',
         prompt: 'Who owns this account?',
@@ -101,19 +71,18 @@
       return {
         alias: '',
         name: '',
-        segment: null,    // { value, label } or null
-        phone: '',
-        website: '',
         owner: null,      // { id, label, email } or null
         notes: ''
       };
     },
 
     // Optional: pre-fill the name step (e.g. "New account" button on an
-    // unrecognized account-picker search).
+    // unrecognized account-picker search, or the quote wizard's "+ New
+    // account" option).
     applyPrefill: function (answers, prefill /*, ctx */) {
       if (!prefill) return null;
       if (prefill.name) answers.name = String(prefill.name);
+      if (prefill.alias) answers.alias = String(prefill.alias);
       return null;
     },
 
@@ -121,9 +90,6 @@
       var fd = new FormData();
       fd.append('name', (answers.name || '').trim());
       if (answers.alias) fd.append('alias', String(answers.alias).trim());
-      if (answers.segment && answers.segment.value) fd.append('segment', answers.segment.value);
-      if (answers.phone) fd.append('phone', String(answers.phone).trim());
-      if (answers.website) fd.append('website', String(answers.website).trim());
       if (answers.owner && answers.owner.id) fd.append('owner_user_id', answers.owner.id);
       if (answers.notes) fd.append('notes', String(answers.notes));
       fd.append('source', 'wizard');
@@ -150,6 +116,7 @@
           return {
             ok: true,
             id: result.data.id,
+            name: result.data.name || (answers.name || '').trim(),
             redirectUrl: result.data.redirectUrl || ('/accounts/' + encodeURIComponent(result.data.id))
           };
         })

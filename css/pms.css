@@ -653,6 +653,7 @@ code {
   font-size: 0.9rem;
   color: var(--fg);
   width: 100%;
+  min-width: 0;     /* allow flex children to shrink + ellipsize */
 }
 .task-wizard-suggestion:hover,
 .task-wizard-suggestion.active {
@@ -671,7 +672,11 @@ code {
 }
 .task-wizard-suggestion-main {
   font-weight: 500;
-  flex-shrink: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
 }
 .task-wizard-suggestion-sub {
   color: var(--fg-muted);
@@ -679,6 +684,8 @@ code {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .task-wizard-actionbar {

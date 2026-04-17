@@ -55,10 +55,27 @@
         key: 'account',
         type: 'entity-select',
         prompt: 'Which account is this for?',
-        hint: 'Start typing an account name. Tab to continue.',
+        hint: 'Start typing an account name. Tab to continue. Pick "+ New account" if it doesn\'t exist yet.',
         entityKinds: ['account'],
         required: true,
         requiredError: 'Pick an account before continuing.',
+        // Synthetic suggestion at the bottom of the list — picking it
+        // opens the account wizard inline. After the new account is
+        // created, the engine restores this wizard with that account
+        // pre-selected.
+        createAction: {
+          label: '+ New account',
+          typeLabel: 'New',
+          subFromTyped: true,           // show typed text as the new name
+          wizardKey: 'account',
+          prefillFromTyped: 'name',
+          setAnswer: function (result, childAnswers) {
+            var name = (childAnswers && childAnswers.name ? String(childAnswers.name) : (result && result.name) || '').trim();
+            var alias = childAnswers && childAnswers.alias ? String(childAnswers.alias).trim() : '';
+            var label = alias ? name + ' (' + alias + ')' : name;
+            return { kind: 'account', id: result.id, label: label };
+          }
+        },
       },
       {
         key: 'opportunity',
