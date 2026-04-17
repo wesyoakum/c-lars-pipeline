@@ -13,6 +13,29 @@ import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/lis
 import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
 import { displayAccountName, slugifyGroup } from '../lib/account-groups.js';
 
+/**
+ * Detects a request coming from the wizard modal or any XHR-style client.
+ * Same three signals used in POST /accounts, /opportunities, /contacts:
+ * form source=wizard, an x-requested-with header, or a JSON-only accept.
+ */
+function isAjaxRequest(request, input) {
+  if (input?.source === 'wizard' || input?.source === 'modal') return true;
+  const xrw = request.headers.get('x-requested-with');
+  if (xrw && xrw.toLowerCase() === 'xmlhttprequest') return true;
+  const accept = request.headers.get('accept') || '';
+  return accept.includes('application/json') && !accept.includes('text/html');
+}
+
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
+}
+
 const TYPE_LABELS = {
   spares: 'Spares',
   eps: 'Engineered Product (EPS)',
@@ -94,11 +117,11 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Jobs</h1>
-        ${listToolbar({ id: 'jobs', count: rows.length, columns })}
+        ${listToolbar({ id: 'jobs', count: rows.length, columns, newOnClick: "window.PMS.openWizard('job', {})", newLabel: 'New job' })}
       </div>
 
       ${rows.length === 0
-        ? html`<p class="muted">No jobs yet. Jobs are created when an opportunity reaches Closed Won.</p>`
+        ? html`<p class="muted">No jobs yet. Jobs are usually auto-created when an opportunity reaches Closed Won \u2014 click the <strong>+</strong> button above to start one earlier (e.g. on NTP for an EPS build).</p>`
         : html`
           <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
             <table class="data opp-list-table">
@@ -138,4 +161,105 @@ export async function onRequestGet(context) {
       breadcrumbs: [{ label: 'Jobs' }],
     })
   );
+}
+
+/**
+ * POST /jobs — create a job manually (typically via the wizard).
+ *
+ * Normal path is auto-creation when an opportunity moves to closed_won
+ * (see functions/opportunities/[id]/stage.js). This endpoint exists for
+ * cases where a user wants to start a job before the opportunity closes
+ * (common for EPS: the customer issues NTP while the opp is still in
+ * `ntp_issued` stage and work begins) or to retry an auto-create that
+ * somehow didn't fire.
+ *
+ * Required input: opportunity_id. Everything else (job_type, title,
+ * customer_po_number, ntp_required) is either inherited from the
+ * opportunity or computed from it.
+ *
+ * Optional wizard-supplied overrides: title, customer_po_number.
+ *
+ * Rejects if the opportunity already has a non-cancelled job — callers
+ * who want to reopen a cancelled job should do it via the job detail
+ * page, not by creating a duplicate.
+ *
+ * AJAX response: { ok, id, number, title, redirectUrl } /
+ * { ok: false, error, errors }.
+ */
+export async function onRequestPost(context) {
+  const { env, data, request } = context;
+  const user = data?.user;
+  const input = await formBody(request);
+  const ajax = isAjaxRequest(request, input);
+
+  const opportunityId = (input.opportunity_id || '').trim();
+  if (!opportunityId) {
+    const msg = 'Please pick an opportunity.';
+    if (ajax) return jsonResponse({ ok: false, error: msg, errors: { opportunity_id: msg } }, 400);
+    return redirectWithFlash('/jobs', msg, 'error');
+  }
+
+  // Confirm the opportunity exists and pull everything we need to seed
+  // the job from it (type, default title, default PO).
+  const opp = await one(env.DB,
+    `SELECT id, number, title, transaction_type, customer_po_number
+       FROM opportunities
+      WHERE id = ?`,
+    [opportunityId]);
+  if (!opp) {
+    const msg = 'Opportunity not found.';
+    if (ajax) return jsonResponse({ ok: false, error: msg, errors: { opportunity_id: msg } }, 404);
+    return redirectWithFlash('/jobs', msg, 'error');
+  }
+
+  // Reject duplicate job creations — the auto-create path uses the same
+  // check when the opp moves to closed_won, so this mirrors that rule.
+  const existing = await one(env.DB,
+    `SELECT id, number FROM jobs WHERE opportunity_id = ? AND status != ?`,
+    [opportunityId, 'cancelled']);
+  if (existing) {
+    const msg = `A job (${existing.number}) already exists for this opportunity.`;
+    if (ajax) return jsonResponse({ ok: false, error: msg, errors: { opportunity_id: msg } }, 409);
+    return redirectWithFlash('/jobs', msg, 'error');
+  }
+
+  const id = uuid();
+  const number = await nextNumber(env.DB, `JOB-${currentYear()}`);
+  const ts = now();
+
+  const title = (input.title || '').trim() || opp.title;
+  const customerPo = (input.customer_po_number || '').trim() || opp.customer_po_number || null;
+
+  const oppTypes = parseTransactionTypes(opp.transaction_type);
+  const isEps = oppTypes.includes('eps');
+
+  await batch(env.DB, [
+    stmt(env.DB,
+      `INSERT INTO jobs
+         (id, number, opportunity_id, job_type, status, title,
+          customer_po_number, ntp_required, created_at, updated_at,
+          created_by_user_id)
+       VALUES (?, ?, ?, ?, 'created', ?, ?, ?, ?, ?, ?)`,
+      [id, number, opportunityId, opp.transaction_type, title,
+       customerPo, isEps ? 1 : 0, ts, ts, user?.id ?? null]),
+    auditStmt(env.DB, {
+      entityType: 'job',
+      entityId: id,
+      eventType: 'created',
+      user,
+      summary: `Job ${number} created manually from opportunity ${opp.number} (${opp.transaction_type})`,
+    }),
+  ]);
+
+  if (ajax) {
+    return jsonResponse({
+      ok: true,
+      id,
+      number,
+      title,
+      redirectUrl: `/jobs/${id}`,
+    });
+  }
+
+  return redirectWithFlash(`/jobs/${id}`, `Job ${number} created.`);
 }

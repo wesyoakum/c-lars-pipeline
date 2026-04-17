@@ -757,6 +757,7 @@ export function layout(title, body, opts = {}) {
   <script defer src="/js/wizards/contact.js"></script>
   <script defer src="/js/wizards/opportunity.js"></script>
   <script defer src="/js/wizards/quote.js"></script>
+  <script defer src="/js/wizards/job.js"></script>
   ${user ? '<script defer src="/js/board-sidebar.js"></script>' : ''}
   <script defer src="/js/alpine.min.js"></script>
   <script defer src="/js/live-calc.js"></script>
