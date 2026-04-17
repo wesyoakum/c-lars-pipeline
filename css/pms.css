@@ -1526,23 +1526,32 @@ fieldset.qualification-box select {
    bottom of a long table. listScript injects this div and syncs
    scrollLeft in both directions. Hidden when the table fits.
    Sticky to the top of the viewport — parks just under the sticky
-   .site-header, with the sticky thead parking just below it. */
+   .site-header. Thin + light styling matches the board sidebar. */
 .opp-list-hscroll {
   position: sticky;
   top: var(--site-header-h, 53px);
   z-index: 5;
-  background: var(--bg);
+  background: transparent;
   overflow-x: auto;
   overflow-y: hidden;
   margin-bottom: 0;
   /* Some browsers hide the scrollbar when the container is 0-height;
      make sure there's room for the native scrollbar. */
-  height: 14px;
+  height: 8px;
 }
 .opp-list-hscroll-inner {
   height: 1px;
 }
 .opp-list-hscroll[hidden] { display: none; }
+.opp-list-hscroll::-webkit-scrollbar { height: 6px; }
+.opp-list-hscroll::-webkit-scrollbar-track { background: transparent; }
+.opp-list-hscroll::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 3px;
+}
+.opp-list-hscroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.2);
+}
 .opp-list-toolbar {
   display: flex;
   justify-content: space-between;
@@ -1614,19 +1623,16 @@ fieldset.qualification-box select {
   font-size: 0.75em;
 }
 
-/* Sticky thead — because .opp-list uses overflow-y: clip (not auto),
-   position:sticky here latches to the body scroll context, keeping
-   column headers visible as the user scrolls a long page. top
-   offsets by --site-header-h so the sticky thead parks just under
-   the sticky .site-header (see :root declaration in this file).
-   z-index sits above the col-resize-grip (3) and below the column
-   filter popover (1000). */
+/* Sticky thead is disabled for now — .opp-list has overflow-x: auto
+   (needed for horizontal scrolling of wide tables), which coerces it
+   into a Y scroll container too. That makes position:sticky scope to
+   .opp-list, not the viewport, so `top:` pushes thead inside the
+   container instead of parking it at the top of the screen. Proper
+   body-scroll-sticky thead would need a two-table split (head table
+   outside the horizontal-scroll wrapper, body table inside it) —
+   deferred as a follow-up. */
 .opp-list-table thead th {
   padding: 0;
-  position: sticky;
-  top: calc(var(--site-header-h, 53px) + 14px);
-  z-index: 4;
-  background: var(--bg-alt);
 }
 
 /* Draggable column resize grip. Straddles the column boundary so the
