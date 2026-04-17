@@ -77,7 +77,7 @@ export function listToolbar({ id, count, columns = null, newHref, newOnClick, ne
       ${showMenu ? html`
         <details class="opp-list-columns" data-role="columns-menu" style="display:inline-block">
           <summary class="icon-btn" title="Columns">
-            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="4" x2="17" y2="4"/><line x1="3" y1="10" x2="17" y2="10"/><line x1="3" y1="16" x2="17" y2="16"/></svg>
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="3" x2="4" y2="17"/><line x1="10" y1="3" x2="10" y2="17"/><line x1="16" y1="3" x2="16" y2="17"/></svg>
           </summary>
           <div class="opp-list-columns-menu" data-role="columns-list">
             ${columns.map((c, idx) => html`
