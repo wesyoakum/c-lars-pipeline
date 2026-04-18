@@ -16,6 +16,7 @@ import {
   TEMPLATE_CATALOG,
   templateTypeForQuote,
   fallbackTemplateTypeForQuote,
+  templateTypeForOC,
 } from './template-catalog.js';
 import {
   parseQuoteTypes,
@@ -58,6 +59,18 @@ export async function resolveQuoteTemplateKey(env, quoteType) {
   const fallbackKey = TEMPLATE_CATALOG[fallbackCatKey]?.r2Key
     || 'templates/quote-spares.docx';
   return { key: fallbackKey, usedFallback: true, primaryKey };
+}
+
+/**
+ * Resolve the R2 key for an Order Confirmation template, keyed by
+ * job type. Mirrors resolveQuoteTemplateKey but without the hybrid-
+ * fallback complication — every job type has its own OC template.
+ */
+export async function resolveOcTemplateKey(env, jobType) {
+  const catKey = templateTypeForOC(jobType);
+  const r2Key =
+    TEMPLATE_CATALOG[catKey]?.r2Key || 'templates/oc-spares.docx';
+  return { key: r2Key, catalogKey: catKey };
 }
 
 // ── Load quote data ─────────────────────────────────────────────────
@@ -558,6 +571,74 @@ export async function getQuoteDocData(env, quoteId) {
     _number: quote.number,
     _revision: quote.revision,
     _quoteType: quote.quote_type,
+  };
+}
+
+// ── Load OC data ────────────────────────────────────────────────────
+
+/**
+ * Load all the data needed to populate an Order Confirmation template.
+ * The OC is a confirmation of an accepted quote, so we reuse the
+ * quote's getQuoteDocData output and layer OC-specific fields on top
+ * (oc_number, customer_po_number, oc_date, job number).
+ *
+ * Picks the most recently updated 'accepted' quote on the job's
+ * parent opportunity; falls back to the most recent issued/revision_
+ * issued if nothing is formally accepted yet (defensive — issue-oc
+ * normally runs after accept).
+ */
+export async function getOcDocData(env, jobId) {
+  const job = await one(
+    env.DB,
+    `SELECT j.*, o.number AS opp_number, o.title AS opp_title,
+            o.account_id, o.customer_po_number AS opp_customer_po,
+            a.name AS account_name, a.alias AS account_alias
+       FROM jobs j
+       JOIN opportunities o ON o.id = j.opportunity_id
+       JOIN accounts a ON a.id = o.account_id
+      WHERE j.id = ?`,
+    [jobId]
+  );
+  if (!job) return null;
+
+  let quote = await one(
+    env.DB,
+    `SELECT id FROM quotes
+      WHERE opportunity_id = ? AND status = 'accepted'
+      ORDER BY updated_at DESC LIMIT 1`,
+    [job.opportunity_id]
+  );
+  if (!quote) {
+    quote = await one(
+      env.DB,
+      `SELECT id FROM quotes
+        WHERE opportunity_id = ? AND status IN ('issued', 'revision_issued')
+        ORDER BY updated_at DESC LIMIT 1`,
+      [job.opportunity_id]
+    );
+  }
+  if (!quote) return null;
+
+  const quoteData = await getQuoteDocData(env, quote.id);
+  if (!quoteData) return null;
+
+  const ocDate = (job.oc_issued_at || '').slice(0, 10);
+  const customerPo = job.customer_po_number || job.opp_customer_po || '';
+
+  return {
+    ...quoteData,
+    // OC-specific fields (camelCase for new templates)
+    ocNumber: job.oc_number || '',
+    ocDate,
+    customerPoNumber: customerPo,
+    jobNumber: job.number,
+    jobType: job.job_type,
+    _jobId: job.id,
+    // PascalCase aliases (matches WFM convention used in quote templates)
+    OcNumber: job.oc_number || '',
+    OcDate: ocDate,
+    CustomerPoNumber: customerPo,
+    JobNumber: job.number,
   };
 }
 

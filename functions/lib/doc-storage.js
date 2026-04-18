@@ -15,17 +15,19 @@ import { buildR2Key } from './r2.js';
  * @param {object} env  - Worker env bindings (DB, DOCS)
  * @param {object} opts
  * @param {string} opts.opportunityId
- * @param {string} opts.quoteId
+ * @param {string} [opts.quoteId]
+ * @param {string} [opts.jobId]       - Link to a job (e.g. OC PDF)
  * @param {ArrayBuffer} opts.buffer   - The file content
  * @param {string} opts.filename      - e.g. "Q25004-1.pdf" or "Q25004-1-v2.pdf"
  * @param {string} opts.mimeType      - e.g. "application/pdf"
- * @param {string} opts.kind          - e.g. "quote_pdf" or "quote_docx"
+ * @param {string} opts.kind          - e.g. "quote_pdf", "oc_pdf"
  * @param {object} opts.user          - Current user ({ id, email })
  * @returns {string} The new document ID
  */
 export async function storeGeneratedDoc(env, {
   opportunityId,
   quoteId,
+  jobId,
   buffer,
   filename,
   mimeType,
@@ -55,8 +57,8 @@ export async function storeGeneratedDoc(env, {
          (id, opportunity_id, quote_id, job_id, account_id, cost_build_id,
           kind, title, original_filename, r2_key, mime_type, size_bytes,
           notes, uploaded_at, uploaded_by_user_id)
-       VALUES (?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
-      [docId, opportunityId, quoteId,
+       VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+      [docId, opportunityId, quoteId ?? null, jobId ?? null,
        kind, displayTitle, filename, r2Key, mimeType,
        buffer.byteLength, ts, user?.id ?? null]),
     auditStmt(env.DB, {

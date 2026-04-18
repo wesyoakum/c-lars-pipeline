@@ -15,7 +15,19 @@ import { one, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../lib/http.js';
-import { fireEvent } from '../../lib/auto-tasks.js';
+import { fireEvent, reportError } from '../../lib/auto-tasks.js';
+import {
+  getOcDocData,
+  resolveOcTemplateKey,
+  fillTemplate,
+  convertToPdf,
+} from '../../lib/doc-generate.js';
+import { storeGeneratedDoc } from '../../lib/doc-storage.js';
+import {
+  getFilenameTemplate,
+  renderFilenameTemplate,
+} from '../../lib/filename-templates.js';
+import { templateTypeForOC } from '../../lib/template-catalog.js';
 
 export async function onRequestPost(context) {
   const { env, data, request, params } = context;
@@ -152,9 +164,62 @@ export async function onRequestPost(context) {
     })()
   );
 
+  // Auto-generate the OC PDF synchronously so the browser downloads
+  // it as part of this redirect. Failures are logged (and reported to
+  // the auto-task error pipeline) but never roll back the OC issuance.
+  let downloadDocId = null;
+  try {
+    const docData = await getOcDocData(env, jobId);
+    if (docData) {
+      const jobType = (job.job_type || '').split(',')[0].trim();
+      const { key: templateKey } = await resolveOcTemplateKey(env, jobType);
+      const docxBuffer = await fillTemplate(env, templateKey, docData);
+
+      const filenameKey = templateTypeForOC(jobType);
+      const fnTpl = await getFilenameTemplate(
+        env,
+        filenameKey,
+        'C-LARS OC {ocNumber}'
+      );
+      const fnCtx = {
+        ocNumber,
+        jobNumber: job.number,
+        opportunityNumber: docData.opportunityNumber || docData._number || '',
+        accountName: docData.clientName || '',
+        accountAlias: docData.clientAlias || '',
+      };
+      const pdfFilename =
+        (renderFilenameTemplate(fnTpl, fnCtx) || `OC-${ocNumber}`) + '.pdf';
+
+      const pdfBuffer = await convertToPdf(env, docxBuffer);
+      downloadDocId = await storeGeneratedDoc(env, {
+        opportunityId: job.opportunity_id,
+        jobId,
+        buffer: pdfBuffer,
+        filename: pdfFilename,
+        mimeType: 'application/pdf',
+        kind: 'oc_pdf',
+        user,
+      });
+    }
+  } catch (err) {
+    console.error('Auto OC PDF generation failed:', err);
+    context.waitUntil(
+      reportError(env, 'oc_pdf_generation_failed', {
+        summary: `Auto OC PDF failed for job ${job.number} (OC ${ocNumber})`,
+        detail: err?.message || String(err),
+        context: { jobId, job_type: job.job_type, oc_number: ocNumber },
+        user,
+      }).catch(() => {})
+    );
+  }
+
   const msg = newStatus === 'handed_off'
     ? `OC ${ocNumber} issued — job handed off.`
     : `OC ${ocNumber} issued — awaiting customer authorization.`;
 
-  return redirectWithFlash(`/jobs/${jobId}`, msg);
+  const redirectUrl = downloadDocId
+    ? `/jobs/${jobId}?download=${encodeURIComponent(downloadDocId)}`
+    : `/jobs/${jobId}`;
+  return redirectWithFlash(redirectUrl, msg);
 }

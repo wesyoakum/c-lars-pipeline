@@ -116,66 +116,64 @@ export async function onRequestPost(context) {
     })()
   );
 
-  // Auto-generate PDF in the background (non-blocking)
-  context.waitUntil(
-    (async () => {
-      try {
-        const docData = await getQuoteDocData(env, quoteId);
-        if (!docData) return;
-        // Hybrid quotes try the shared quote-hybrid.docx first and
-        // fall back to the primary type's template so auto-issue
-        // keeps working before the hybrid template is uploaded.
-        const { key: templateKey } =
-          await resolveQuoteTemplateKey(env, quote.quote_type);
-        const docxBuffer = await fillTemplate(env, templateKey, docData);
+  // Auto-generate the PDF synchronously so we can deliver it as an
+  // immediate download on the redirect. Failures are logged (and
+  // reported to the auto-task error pipeline) but never block the
+  // successful issue — worst case the user lands on the quote detail
+  // page without a download and can click "Generate PDF" manually.
+  let downloadDocId = null;
+  try {
+    const docData = await getQuoteDocData(env, quoteId);
+    if (docData) {
+      const { key: templateKey } =
+        await resolveQuoteTemplateKey(env, quote.quote_type);
+      const docxBuffer = await fillTemplate(env, templateKey, docData);
 
-        // Build the download filename from the admin-configurable
-        // template so the auto-issued PDF matches manually-generated
-        // ones. Keyed by template catalog key (quote-spares, quote-
-        // hybrid, …) with `.pdf` appended at the end.
-        const fnCtx = buildQuoteFilenameContext({
-          quote,
-          accountName:       docData.clientName,
-          accountAlias:      docData.clientAlias,
-          opportunityNumber: docData.opportunityNumber,
-          opportunityTitle:  docData.opportunityTitle,
-        });
-        const filenameKey = templateTypeForQuote(quote.quote_type);
-        const fnTpl = await getFilenameTemplate(
-          env,
-          filenameKey,
-          'C-LARS Quote {quoteNumber}{revisionSuffix}'
-        );
-        const pdfFilename =
-          (renderFilenameTemplate(fnTpl, fnCtx) ||
-            `${quote.number}${fnCtx.revisionSuffix}`) + '.pdf';
+      const fnCtx = buildQuoteFilenameContext({
+        quote,
+        accountName:       docData.clientName,
+        accountAlias:      docData.clientAlias,
+        opportunityNumber: docData.opportunityNumber,
+        opportunityTitle:  docData.opportunityTitle,
+      });
+      const filenameKey = templateTypeForQuote(quote.quote_type);
+      const fnTpl = await getFilenameTemplate(
+        env,
+        filenameKey,
+        'C-LARS Quote {quoteNumber}{revisionSuffix}'
+      );
+      const pdfFilename =
+        (renderFilenameTemplate(fnTpl, fnCtx) ||
+          `${quote.number}${fnCtx.revisionSuffix}`) + '.pdf';
 
-        const pdfBuffer = await convertToPdf(env, docxBuffer);
-        await storeGeneratedDoc(env, {
-          opportunityId: oppId, quoteId,
-          buffer: pdfBuffer,
-          filename: pdfFilename,
-          mimeType: 'application/pdf',
-          kind: 'quote_pdf', user,
-        });
-      } catch (err) {
-        console.error('Auto PDF generation failed:', err);
-        // Fire system.error so auto-task rules (e.g. "investigate PDF
-        // failures") can react. Safe to call inside this catch — it
-        // swallows its own errors.
-        await reportError(env, 'pdf_generation_failed', {
-          summary: `Auto PDF failed for ${quote.number} rev ${quote.revision}`,
-          detail: err?.message || String(err),
-          context: { oppId, quoteId, quote_type: quote.quote_type },
-          user,
-          quote,
-        });
-      }
-    })()
-  );
+      const pdfBuffer = await convertToPdf(env, docxBuffer);
+      downloadDocId = await storeGeneratedDoc(env, {
+        opportunityId: oppId, quoteId,
+        buffer: pdfBuffer,
+        filename: pdfFilename,
+        mimeType: 'application/pdf',
+        kind: 'quote_pdf', user,
+      });
+    }
+  } catch (err) {
+    console.error('Auto PDF generation failed:', err);
+    context.waitUntil(
+      reportError(env, 'pdf_generation_failed', {
+        summary: `Auto PDF failed for ${quote.number} rev ${quote.revision}`,
+        detail: err?.message || String(err),
+        context: { oppId, quoteId, quote_type: quote.quote_type },
+        user,
+        quote,
+      }).catch(() => {})
+    );
+  }
 
+  const returnTo = `/opportunities/${oppId}/quotes/${quoteId}`;
+  const redirectUrl = downloadDocId
+    ? `${returnTo}?download=${encodeURIComponent(downloadDocId)}`
+    : returnTo;
   return redirectWithFlash(
-    `/opportunities/${oppId}/quotes/${quoteId}`,
+    redirectUrl,
     `Issued ${quote.number} Rev ${quote.revision}.`
   );
 }
