@@ -8,6 +8,7 @@ import { auditStmt } from '../../lib/audit.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../lib/http.js';
 import { fireEvent } from '../../lib/auto-tasks.js';
+import { changeOppStage } from '../../lib/stage-transitions.js';
 
 export async function onRequestPost(context) {
   const { env, data, request, params } = context;
@@ -49,6 +50,17 @@ export async function onRequestPost(context) {
       },
     }),
   ]);
+
+  // Advance parent opp to `ntp_drafted` — intermediate stage during
+  // which the "Submit NTP to customer" task is pending. Task completion
+  // advances to `ntp_submitted` via advanceStageOnTaskComplete.
+  // onlyForward guards against regressing already-advanced opps.
+  if (job.opportunity_id) {
+    await changeOppStage(context, job.opportunity_id, 'ntp_drafted', {
+      reason: `NTP ${ntpNumber || ''} issued`,
+      onlyForward: true,
+    });
+  }
 
   // EPS-only handoff. Fire ntp.issued and job.handed_off so auto-task
   // rules can react. Non-blocking.

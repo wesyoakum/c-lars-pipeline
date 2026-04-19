@@ -16,6 +16,7 @@ import { auditStmt } from '../../lib/audit.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../lib/http.js';
 import { fireEvent, reportError } from '../../lib/auto-tasks.js';
+import { changeOppStage } from '../../lib/stage-transitions.js';
 import {
   getOcDocData,
   resolveOcTemplateKey,
@@ -59,18 +60,14 @@ export async function onRequestPost(context) {
     newStatus = 'handed_off';
   }
 
-  // Check whether the parent opp needs a stage advance. OC issued implies
-  // the opp is in the oc_issued stage — nudge it there if it hasn't been
-  // moved manually first. Skip for already-closed opps (respect closure).
+  // Load parent opp for downstream event payloads. Stage advance is
+  // handled below via changeOppStage — we never write the dead
+  // `oc_issued` key directly anymore (see migration 0041).
   const opp = job.opportunity_id
     ? await one(env.DB, 'SELECT * FROM opportunities WHERE id = ?', [job.opportunity_id])
     : null;
-  const CLOSED = new Set(['closed_won', 'closed_lost', 'closed_died', 'closed_abandoned']);
-  const shouldAdvanceStage =
-    opp && opp.stage !== 'oc_issued' && !CLOSED.has(opp.stage);
-  const fromStage = opp?.stage ?? null;
 
-  const stmts = [
+  await batch(env.DB, [
     stmt(env.DB,
       `UPDATE jobs
           SET oc_number = ?, oc_issued_at = ?, oc_issued_by_user_id = ?,
@@ -95,25 +92,19 @@ export async function onRequestPost(context) {
         status: { from: job.status, to: newStatus },
       },
     }),
-  ];
+  ]);
 
-  if (shouldAdvanceStage) {
-    stmts.push(
-      stmt(env.DB,
-        `UPDATE opportunities SET stage = 'oc_issued', updated_at = ? WHERE id = ?`,
-        [ts, opp.id]),
-      auditStmt(env.DB, {
-        entityType: 'opportunity',
-        entityId: opp.id,
-        eventType: 'stage_changed',
-        user,
-        summary: `Opportunity ${opp.number} stage advanced to oc_issued (OC ${ocNumber} issued)`,
-        changes: { stage: { from: fromStage, to: 'oc_issued' } },
-      })
-    );
+  // Advance the opp to `oc_drafted` (intermediate — OC is out in the
+  // world, task pending to formally submit it to the customer). The
+  // helper's onlyForward guard skips regression for opps already past
+  // this point (e.g. revisited OCs). Task completion then advances
+  // to `oc_submitted` via advanceStageOnTaskComplete.
+  if (opp) {
+    await changeOppStage(context, opp.id, 'oc_drafted', {
+      reason: `OC ${ocNumber} issued`,
+      onlyForward: true,
+    });
   }
-
-  await batch(env.DB, stmts);
 
   // Auto-task fan-out. Non-blocking so a rule-engine failure never
   // rolls back a successful OC issuance.
@@ -149,15 +140,8 @@ export async function onRequestPost(context) {
           await fireEvent(env, 'job.handed_off', payloadBase, user);
         }
 
-        if (shouldAdvanceStage && freshOpp) {
-          await fireEvent(env, 'opportunity.stage_changed', {
-            trigger: { user, at: ts },
-            opportunity: freshOpp,
-            account,
-            stage_from: fromStage,
-            stage_to: 'oc_issued',
-          }, user);
-        }
+        // opportunity.stage_changed is fired inside changeOppStage
+        // (above), so we don't re-fire it here.
       } catch (err) {
         console.error('fireEvent(oc.issued) failed:', err?.message || err);
       }

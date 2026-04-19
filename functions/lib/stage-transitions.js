@@ -16,11 +16,35 @@ import { now } from './ids.js';
 import { stageDef } from './stages.js';
 import { fireEvent } from './auto-tasks.js';
 
-// Auto-task rule IDs whose completion advances the opp stage. Kept
-// here (not in each completion handler) so every path that flips
-// activities.status to 'completed' gets the same behavior via
-// advanceStageOnTaskComplete().
+// Auto-task rule IDs whose completion advances the opp stage, and the
+// stage each one maps to. Centralized here so every path that flips
+// activities.status to 'completed' (patch.js, complete.js, index.js PUT)
+// gets the same behavior via advanceStageOnTaskComplete().
+//
+// Value is either a static stage_key OR a resolver async (task, env) =>
+// stage_key | null that can inspect the linked quote/job before picking
+// the target. The submit-quote rule uses a resolver because the quote
+// status determines whether we move to quote_submitted or
+// revised_quote_submitted.
 const SUBMIT_QUOTE_RULE_ID = 'rule-seed-submit-quote-to-customer';
+const SUBMIT_OC_RULE_ID    = 'rule-seed-submit-oc-to-customer';
+const SUBMIT_NTP_RULE_ID   = 'rule-seed-submit-ntp-to-customer';
+
+const TASK_RULE_STAGE_MAP = {
+  [SUBMIT_QUOTE_RULE_ID]: async (task, env) => {
+    if (!task.quote_id) return null;
+    const quote = await one(
+      env.DB,
+      'SELECT status FROM quotes WHERE id = ?',
+      [task.quote_id]
+    );
+    if (quote?.status === 'issued') return 'quote_submitted';
+    if (quote?.status === 'revision_issued') return 'revised_quote_submitted';
+    return null;
+  },
+  [SUBMIT_OC_RULE_ID]:  () => 'oc_submitted',
+  [SUBMIT_NTP_RULE_ID]: () => 'ntp_submitted',
+};
 
 /**
  * Transition an opportunity's stage programmatically.
@@ -189,51 +213,39 @@ export async function changeOppStage(context, oppId, toStage, opts = {}) {
 
 /**
  * Inspect a just-completed activity and, if it was an auto-created
- * task linked to a known rule (currently: "Submit quote to customer"),
- * advance the parent opportunity to the appropriate stage.
+ * task bound to a known rule in TASK_RULE_STAGE_MAP, advance the
+ * parent opportunity to the corresponding stage.
  *
  * Called from every path that flips `activities.status` to 'completed'
  * (patch.js, complete.js, index.js PUT) so the mapping lives in one
- * place. Safe to call even when the task is unrelated — returns
- * unchanged in that case.
+ * place. Safe to call on unrelated tasks — returns null in that case.
  *
  * @param {object} context  request context ({ env, data: { user }, waitUntil? })
- * @param {object} task     the activities row BEFORE the status flip
- *                          (must include id, type, source_rule_id, quote_id,
- *                          opportunity_id)
- * @returns {Promise<object|null>}  changeOppStage result, or null when no
- *                                  advance applies.
+ * @param {object} task     the activities row (pre- or post-flip — the
+ *                          resolver only reads source_rule_id, quote_id,
+ *                          and opportunity_id)
+ * @returns {Promise<object|null>}  changeOppStage result, or null.
  */
 export async function advanceStageOnTaskComplete(context, task) {
-  if (!task) return null;
-  if (task.type !== 'task') return null;
-  if (!task.source_rule_id || !task.quote_id || !task.opportunity_id) {
+  if (!task || task.type !== 'task') return null;
+  if (!task.source_rule_id || !task.opportunity_id) return null;
+
+  const entry = TASK_RULE_STAGE_MAP[task.source_rule_id];
+  if (!entry) return null;
+
+  try {
+    const toStage =
+      typeof entry === 'function' ? await entry(task, context.env) : entry;
+    if (!toStage) return null;
+    return await changeOppStage(context, task.opportunity_id, toStage, {
+      reason: `Task ${task.source_rule_id} completed`,
+      onlyForward: true,
+    });
+  } catch (err) {
+    console.error(
+      `advanceStageOnTaskComplete(${task.source_rule_id}) failed:`,
+      err?.message || err
+    );
     return null;
   }
-
-  if (task.source_rule_id === SUBMIT_QUOTE_RULE_ID) {
-    try {
-      const quote = await one(
-        context.env.DB,
-        'SELECT id, status FROM quotes WHERE id = ?',
-        [task.quote_id]
-      );
-      let toStage = null;
-      if (quote?.status === 'issued') toStage = 'quote_submitted';
-      else if (quote?.status === 'revision_issued') toStage = 'revised_quote_submitted';
-      if (!toStage) return null;
-      return await changeOppStage(context, task.opportunity_id, toStage, {
-        reason: 'Submit-quote task completed',
-        onlyForward: true,
-      });
-    } catch (err) {
-      console.error(
-        'advanceStageOnTaskComplete(submit-quote) failed:',
-        err?.message || err
-      );
-      return null;
-    }
-  }
-
-  return null;
 }
