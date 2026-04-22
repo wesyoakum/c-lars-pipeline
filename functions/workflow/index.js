@@ -33,60 +33,95 @@ export async function onRequestGet(context) {
       <div class="workflow-chart" style="padding:1rem; overflow-x:auto;">
         <div class="mermaid">
 flowchart TD
-    START(["New Opp"]) --> LEAD["Lead"]
-    LEAD --> RFQ["RFQ received"]
-    RFQ --> AWAIT["Awaiting client feedback"]
-    AWAIT --> DRAFT["Quote drafted"]
+    S1["Lead"] --> S2["RFQ received"]
+    S2 --> S3["Quote drafted"]
+    S3 --> T1[["Task: Submit quote to customer"]]
+    T1 --> S4["Quote submitted"]
 
-    DRAFT -->|"User issues quote"| SUB["Quote submitted"]
+    S4 --> G1{"Customer response?"}
+    G1 --> O1a[/"Accepts"/]
+    G1 --> O1b[/"Requests changes"/]
+    G1 --> O1c[/"Rejects"/]
+    G1 --> O1d[/"Cancels"/]
 
-    SUB --> Q1{"Customer response?"}
-    Q1 -->|"Requests changes"| REV["Quote under revision"]
-    REV --> RSUB["Revised quote submitted"]
-    RSUB --> Q1
-    Q1 -->|"Accepts PO received"| WON["Won closed_won"]
-    Q1 -->|"Rejects"| LOST["Closed — Lost"]
-    Q1 -->|"Goes cold"| DIED["Closed — Died"]
+    O1b --> S5["Quote under revision"]
+    S5 --> T2[["Task: Submit revised quote"]]
+    T2 --> S6["Revised quote submitted"]
+    S6 --> G1
 
-    WON --> OCD["OC drafted"]
-    OCD -->|"Issue OC; submit task complete"| OCS["OC submitted"]
+    O1a --> S7["OC drafted"]
+    O1c --> TL(["Closed — Lost"])
+    O1d --> TC(["Cancelled"])
 
-    OCS --> Q2{"Transaction type?"}
-    Q2 -->|"Spares or Service"| DONE(["Completed"])
-    Q2 -->|"EPS"| NTD["NTP drafted"]
-    Q2 -->|"Refurb (always)"| IRD["Inspection Report drafted"]
+    S7 --> T3[["Task: Submit OC to customer"]]
+    T3 --> S8["OC submitted"]
 
-    NTD -->|"Issue NTP; submit task complete"| NTS["NTP submitted"]
-    NTS --> DONE
+    S8 --> G2{"Transaction type?"}
+    G2 --> O2a[/"Spares or Service"/]
+    G2 --> O2b[/"EPS"/]
+    G2 --> O2c[/"Refurb"/]
 
-    IRD -->|"Issue inspection report"| INSP["Inspection Report submitted"]
-    INSP --> Q3{"Supplemental required?"}
+    O2a --> TD(["Completed"])
 
-    Q3 -->|"No — scope matches baseline"| APPROVE["Task: send Inspection Report<br/>to customer for approval"]
-    APPROVE -->|"Customer approves"| DONE
+    O2b --> S9["NTP drafted"]
+    S9 --> T4[["Task: Submit NTP to customer"]]
+    T4 --> S10["NTP submitted"]
+    S10 --> TD
 
-    Q3 -->|"Yes — teardown found extra scope"| SQD["Supplemental quote drafted"]
-    SQD -->|"Issue supplemental<br/>(task: send supplement + report)"| SQS["Supplemental quote submitted"]
+    O2c --> S11["Inspection Report drafted"]
+    S11 --> T5[["Task: Send Inspection Report"]]
+    T5 --> S12["Inspection Report submitted"]
 
-    SQS --> Q4{"Customer response on supplemental?"}
-    Q4 -->|"Requests changes"| SQR["Supplemental under revision"]
-    SQR --> SQRS["Revised supplemental submitted"]
-    SQRS --> Q4
-    Q4 -->|"Accepts"| SW["Supplemental won"]
-    Q4 -->|"Rejects — revert"| INSP
-    Q4 -->|"Goes cold"| LOST
+    S12 --> G3{"Supplemental required?"}
+    G3 --> O3a[/"No"/]
+    G3 --> O3b[/"Yes"/]
 
-    SW --> AOCD["Amended OC drafted"]
-    AOCD -->|"Issue; submit task complete"| AOCS["Amended OC submitted"]
-    AOCS --> DONE
+    O3a --> T6[["Task: Send Inspection Report<br/>for customer approval"]]
+    T6 --> TD
+
+    O3b --> S13["Supplemental quote drafted"]
+    S13 --> T7[["Task: Send supplemental quote<br/>+ Inspection Report"]]
+    T7 --> S14["Supplemental quote submitted"]
+
+    S14 --> G4{"Customer response?"}
+    G4 --> O4a[/"Accepts"/]
+    G4 --> O4b[/"Requests changes"/]
+    G4 --> O4c[/"Rejects"/]
+    G4 --> O4d[/"Cancels"/]
+
+    O4b --> S15["Supplemental under revision"]
+    S15 --> T8[["Task: Submit revised supplemental"]]
+    T8 --> S16["Revised supplemental submitted"]
+    S16 --> G4
+
+    O4a --> S17["Amended OC drafted"]
+    O4c --> S12
+    O4d --> TC
+
+    S17 --> T9[["Task: Submit Amended OC"]]
+    T9 --> S18["Amended OC submitted"]
+    S18 --> TD
 
     classDef terminal fill:#dafbe1,stroke:#1a7f37,color:#1a7f37
     classDef loss fill:#ffebe9,stroke:#cf222e,color:#cf222e
-    classDef decision fill:#fff8c5,stroke:#bf8700
-    class DONE terminal
-    class LOST,DIED loss
-    class Q1,Q2,Q3,Q4 decision
+    classDef gate fill:#fff8c5,stroke:#bf8700,color:#6a4b00
+    classDef option fill:#eef4ff,stroke:#3e63dd,color:#1e40af
+    classDef task fill:#f6f3ff,stroke:#7c3aed,color:#4c1d95
+    class TD terminal
+    class TL,TC loss
+    class G1,G2,G3,G4 gate
+    class O1a,O1b,O1c,O1d,O2a,O2b,O2c,O3a,O3b,O4a,O4b,O4c,O4d option
+    class T1,T2,T3,T4,T5,T6,T7,T8,T9 task
         </div>
+      </div>
+
+      <div class="workflow-legend" style="margin-top:0.5rem; padding:0.6rem 0.9rem; background:var(--bg-alt); border-radius:var(--radius); display:flex; flex-wrap:wrap; gap:1.2rem; font-size:0.8em;">
+        <span><strong>Shape key:</strong></span>
+        <span>▭ Status — stage the opp is in</span>
+        <span>⟦⟧ Task — auto-created to-do</span>
+        <span>◇ Option gate — decision point</span>
+        <span>⎸⎹ Option — choice at a gate</span>
+        <span>▢ Terminal — end state (won or lost/cancelled)</span>
       </div>
     </section>
 
@@ -96,10 +131,10 @@ flowchart TD
         <dt>① After quote submission — <em>Customer response?</em></dt>
         <dd>
           <ul>
-            <li><strong>Accepts</strong> (PO received) → <code>closed_won</code>. OC flow begins.</li>
+            <li><strong>Accepts</strong> (PO received) → <code>oc_drafted</code>. OC flow begins — there's no intermediate "Won" state; acceptance just moves straight into OC work.</li>
             <li><strong>Requests changes</strong> → <code>quote_under_revision</code> → revised quote → back to the same question. Any number of revisions is allowed.</li>
             <li><strong>Rejects</strong> → <code>closed_lost</code> (terminal).</li>
-            <li><strong>Goes cold / no response</strong> → <code>closed_died</code> (terminal, distinct from reject so reporting can separate "they said no" from "they stopped responding").</li>
+            <li><strong>Cancels</strong> → <strong>Cancelled</strong> (terminal). Covers every flavour of "opp no longer active" — customer went quiet, project scrapped, budget pulled, changed vendor, etc. Kept separate from Rejects so reporting can tell "no" apart from "went away."</li>
           </ul>
         </dd>
 
@@ -125,9 +160,10 @@ flowchart TD
         <dd>
           Mirrors decision ① but with a softer rejection path:
           <ul>
-            <li><strong>Rejects</strong> → revert to <code>inspection_report_submitted</code>. The baseline OC still stands; the user can draft a different supplemental or close the opp manually. Rejecting a supplemental does <strong>not</strong> close the opp as lost.</li>
-            <li><strong>Goes cold</strong> → <code>closed_lost</code>. No revert path for cold supplementals.</li>
-            <li><strong>Accepts</strong> → <code>supplemental_won</code> → amended OC → <code>completed</code>.</li>
+            <li><strong>Accepts</strong> → <code>amended_oc_drafted</code> → amended OC → <code>completed</code>.</li>
+            <li><strong>Requests changes</strong> → <code>supplemental_quote_under_revision</code> → revised supplemental → back to the same question.</li>
+            <li><strong>Rejects</strong> → revert to <code>inspection_report_submitted</code>. The baseline OC still stands; the user can draft a different supplemental or close the opp manually. Rejecting a supplemental does <strong>not</strong> close the opp.</li>
+            <li><strong>Cancels</strong> → <strong>Cancelled</strong> (terminal).</li>
           </ul>
         </dd>
       </dl>
