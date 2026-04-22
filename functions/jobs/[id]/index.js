@@ -113,6 +113,11 @@ export async function onRequestGet(context) {
   const canIssueOc = job.status === 'created';
   const canRecordAuth = isEps && job.status === 'awaiting_authorization';
   const canIssueNtp = isEps && job.status === 'awaiting_ntp';
+  // Refurb post-handoff actions (Batch C):
+  //   - Issue Inspection Report (once) after teardown
+  //   - Issue Amended OC after a supplemental is accepted
+  const canIssueInspectionReport =
+    isRefurb && job.status === 'handed_off' && !job.inspection_report_issued_at;
   const canAmendOc = isRefurb && job.status === 'handed_off';
   const canClose = job.status !== 'handed_off' && job.status !== 'cancelled' && job.status !== 'complete';
   // `handed_off` is the gateway to `complete` — the new terminal
@@ -120,9 +125,16 @@ export async function onRequestGet(context) {
   // Complete cascades accepted quotes on the parent opp to the hidden
   // `completed` status; see functions/jobs/[id]/complete.js.
   const canComplete = job.status === 'handed_off';
-  const isActive = job.status !== 'handed_off' && job.status !== 'cancelled';
+  // Actions block is visible unless the job is fully closed out. Refurb
+  // supplemental loop needs it open while handed_off (so the
+  // inspection-report + amend-OC forms render).
+  const isActive = job.status !== 'cancelled' && job.status !== 'complete';
   const defaultOcNumber = job.latest_quote_number ? `OC-${job.latest_quote_number}` : '';
   const defaultNtpNumber = job.latest_quote_number ? `NTP-${job.latest_quote_number}` : '';
+  const defaultAmendedOcNumber =
+    job.latest_quote_number
+      ? `OC-${job.latest_quote_number}-A${(job.amended_oc_revision || 1)}`
+      : '';
 
   const body = html`
     <section class="card" x-data="jobInline('${escape(job.id)}')">
@@ -239,13 +251,30 @@ export async function onRequestGet(context) {
             </fieldset>
           </form>` : ''}
 
+        ${canIssueInspectionReport ? html`
+          <form method="post" action="/jobs/${escape(job.id)}/issue-inspection-report" class="action-form">
+            <fieldset>
+              <legend>Issue Inspection Report</legend>
+              <p class="muted" style="margin:0 0 0.5rem;font-size:0.85em">
+                Issue the inspection report to the customer. A task will be
+                created on the opportunity owner to send it; once that task
+                is complete, the opp advances to "Inspection Report submitted."
+              </p>
+              <button class="btn primary" type="submit" style="margin-top:0.25rem">Issue Inspection Report</button>
+            </fieldset>
+          </form>` : ''}
+
         ${canAmendOc ? html`
           <form method="post" action="/jobs/${escape(job.id)}/amend-oc" class="action-form">
             <fieldset>
-              <legend>Amend OC (Rev ${escape(String(job.oc_revision + 1))})</legend>
-              <div><label class="field-label">New OC Number</label><input type="text" name="oc_number" value="${escape(job.oc_number || '')}" required></div>
+              <legend>Issue Amended OC (Rev ${escape(String(job.amended_oc_revision || 1))})</legend>
+              <p class="muted" style="margin:0 0 0.5rem;font-size:0.85em">
+                After a supplemental quote has been accepted, issue the
+                amended OC to authorize work on the modified scope.
+              </p>
+              <div><label class="field-label">Amended OC Number *</label><input type="text" name="amended_oc_number" value="${escape(defaultAmendedOcNumber)}" required></div>
               <div><label class="field-label">Notes</label><input type="text" name="notes" placeholder="Reason for amendment"></div>
-              <button class="btn primary" type="submit" style="margin-top:0.5rem">Amend OC</button>
+              <button class="btn primary" type="submit" style="margin-top:0.5rem">Issue Amended OC</button>
             </fieldset>
           </form>` : ''}
 

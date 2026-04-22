@@ -351,8 +351,25 @@ export async function onRequestGet(context) {
   const salespersonLabel = opp.sp_name ?? opp.sp_email ?? '—';
 
   // ---- Stage carousel data -----------------------------------------------
-  // All stages go in the carousel, including loss stages.
-  const carouselStages = typeStages;
+  // All stages go in the carousel, including loss stages. For refurb
+  // opps where the user has indicated no supplemental is needed
+  // (supplemental_quote = 0), collapse stages 11–18 out of the picker
+  // so the next stage after `oc_submitted` is `completed`.
+  const SUPPLEMENTAL_LOOP_STAGES = new Set([
+    'inspection_report_submitted',
+    'supplemental_quote_drafted',
+    'supplemental_quote_submitted',
+    'supplemental_quote_under_revision',
+    'revised_supplemental_quote_submitted',
+    'supplemental_won',
+    'amended_oc_drafted',
+    'amended_oc_submitted',
+  ]);
+  const hideSupplementalStages =
+    primaryType === 'refurb' && opp.supplemental_quote === 0;
+  const carouselStages = hideSupplementalStages
+    ? typeStages.filter((s) => !SUPPLEMENTAL_LOOP_STAGES.has(s.stage_key))
+    : typeStages;
   const carouselIdx = carouselStages.findIndex(s => s.stage_key === opp.stage);
   const effectiveIdx = carouselIdx >= 0 ? carouselIdx : 0;
 
