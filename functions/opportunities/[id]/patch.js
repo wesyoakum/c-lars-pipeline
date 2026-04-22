@@ -20,6 +20,11 @@ const PATCHABLE = new Set([
   'bant_budget', 'bant_authority', 'bant_need', 'bant_timeline',
   'bant_authority_contact_id',
   'customer_po_number',
+  // Refurb-only tri-state flag (NULL = undecided, 1 = supplemental quote
+  // expected, 0 = no supplemental needed). Ignored by the UI for
+  // non-refurb opps. Drives stage-picker filtering (hides stages 11-18
+  // on refurb when set to 0).
+  'supplemental_quote',
 ]);
 
 function coerce(field, raw) {
@@ -32,6 +37,12 @@ function coerce(field, raw) {
   if (field === 'probability') {
     const n = parseInt(v, 10);
     return isNaN(n) ? null : Math.max(0, Math.min(100, n));
+  }
+  if (field === 'supplemental_quote') {
+    // Tri-state: null (undecided), 1 (expected), 0 (not needed).
+    if (v === '1' || v === 1 || v === true) return 1;
+    if (v === '0' || v === 0 || v === false) return 0;
+    return null;
   }
   return v;
 }

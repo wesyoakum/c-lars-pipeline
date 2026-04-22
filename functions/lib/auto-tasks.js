@@ -385,6 +385,17 @@ function buildEventKey(triggerName, payload) {
       return `oc.issued:${payload?.job?.id}:${payload?.job?.oc_number ?? ''}`;
     case 'ntp.issued':
       return `ntp.issued:${payload?.job?.id}:${payload?.job?.ntp_number ?? ''}`;
+
+    // Refurb supplemental loop.
+    case 'inspection_report.issued':
+      return `inspection_report.issued:${payload?.job?.id}:${payload?.job?.inspection_report_issued_at ?? ''}`;
+    case 'supplemental_quote.issued':
+      // Keyed on id + revision so each rev fires its own task.
+      return `supplemental_quote.issued:${payload?.quote?.id}:${payload?.quote?.revision ?? ''}`;
+    case 'amended_oc.issued':
+      // Keyed on amended_oc_number + revision so successive amendments
+      // each create their own submit task.
+      return `amended_oc.issued:${payload?.job?.id}:${payload?.job?.amended_oc_number ?? ''}:${payload?.job?.amended_oc_revision ?? ''}`;
     case 'authorization.received':
       return `authorization.received:${payload?.job?.id}:${payload?.job?.authorization_received_at ?? ''}`;
     case 'job.handed_off':

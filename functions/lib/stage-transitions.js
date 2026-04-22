@@ -26,9 +26,12 @@ import { fireEvent } from './auto-tasks.js';
 // the target. The submit-quote rule uses a resolver because the quote
 // status determines whether we move to quote_submitted or
 // revised_quote_submitted.
-const SUBMIT_QUOTE_RULE_ID = 'rule-seed-submit-quote-to-customer';
-const SUBMIT_OC_RULE_ID    = 'rule-seed-submit-oc-to-customer';
-const SUBMIT_NTP_RULE_ID   = 'rule-seed-submit-ntp-to-customer';
+const SUBMIT_QUOTE_RULE_ID              = 'rule-seed-submit-quote-to-customer';
+const SUBMIT_OC_RULE_ID                  = 'rule-seed-submit-oc-to-customer';
+const SUBMIT_NTP_RULE_ID                 = 'rule-seed-submit-ntp-to-customer';
+const SUBMIT_INSPECTION_REPORT_RULE_ID   = 'rule-seed-submit-inspection-report-to-customer';
+const SUBMIT_SUPPLEMENTAL_QUOTE_RULE_ID  = 'rule-seed-submit-supplemental-quote-to-customer';
+const SUBMIT_AMENDED_OC_RULE_ID          = 'rule-seed-submit-amended-oc-to-customer';
 
 const TASK_RULE_STAGE_MAP = {
   [SUBMIT_QUOTE_RULE_ID]: async (task, env) => {
@@ -42,8 +45,25 @@ const TASK_RULE_STAGE_MAP = {
     if (quote?.status === 'revision_issued') return 'revised_quote_submitted';
     return null;
   },
-  [SUBMIT_OC_RULE_ID]:  () => 'oc_submitted',
-  [SUBMIT_NTP_RULE_ID]: () => 'ntp_submitted',
+  [SUBMIT_OC_RULE_ID]:                () => 'oc_submitted',
+  [SUBMIT_NTP_RULE_ID]:               () => 'ntp_submitted',
+  [SUBMIT_INSPECTION_REPORT_RULE_ID]: () => 'inspection_report_submitted',
+  // Supplemental quote: mirrors baseline-quote behavior. The submit
+  // task is created after issuing a supplemental; completing it
+  // advances the opp based on whether the supplemental is a first
+  // issue or a revision.
+  [SUBMIT_SUPPLEMENTAL_QUOTE_RULE_ID]: async (task, env) => {
+    if (!task.quote_id) return null;
+    const quote = await one(
+      env.DB,
+      'SELECT status FROM quotes WHERE id = ?',
+      [task.quote_id]
+    );
+    if (quote?.status === 'issued') return 'supplemental_quote_submitted';
+    if (quote?.status === 'revision_issued') return 'revised_supplemental_quote_submitted';
+    return null;
+  },
+  [SUBMIT_AMENDED_OC_RULE_ID]:        () => 'amended_oc_submitted',
 };
 
 /**

@@ -574,6 +574,17 @@ export async function onRequestGet(context) {
               <span class="detail-label">Expected close</span>
               <span class="detail-value">${inlineDate('expected_close_date', opp.expected_close_date)}</span>
             </div>` : ''}
+            ${(opp.transaction_type || '').includes('refurb') ? html`
+            <div class="detail-pair">
+              <span class="detail-label">Supplemental quote</span>
+              <span class="detail-value">${inlineSelect('supplemental_quote',
+                opp.supplemental_quote == null ? '' : String(opp.supplemental_quote),
+                [
+                  { value: '',  label: 'Not yet decided' },
+                  { value: '1', label: 'Expected' },
+                  { value: '0', label: 'Not needed' },
+                ])}</span>
+            </div>` : ''}
           </div>
 
           <!-- BANT -->
