@@ -5,8 +5,11 @@
 //
 // Authorization:
 //   * Private cards: only the author.
-//   * Direct cards:  the author (and admin) — target can archive their
-//                    copy by snooze or dismiss; editing is author-only.
+//   * Direct cards:  the author, the direct-message recipient (target
+//                    user), and admins. When the recipient edits the
+//                    card, last_edited_by_user_id is stamped so the
+//                    client can render their edits in blue (migration
+//                    0044).
 //   * Public cards:  author or admin.
 //
 // PATCH payload (all fields optional):
@@ -35,7 +38,10 @@ function json(data, status = 200) {
 function canEdit(card, user) {
   if (!card || !user) return false;
   if (user.role === 'admin') return true;
-  return card.author_user_id === user.id;
+  if (card.author_user_id === user.id) return true;
+  // Direct-message cards can be edited by the recipient.
+  if (card.scope === 'direct' && card.target_user_id === user.id) return true;
+  return false;
 }
 
 export async function onRequestPatch(context) {
@@ -117,6 +123,20 @@ export async function onRequestPatch(context) {
   const ts = now();
   updates.push('updated_at = ?');
   values.push(ts);
+  // Track who last edited so non-author edits can render in blue.
+  // Sort_order changes alone don't count as an "edit" — those are
+  // drag-to-reorder by anyone viewing the board. Body/color/flag
+  // /scope /pinned changes do.
+  const isContentEdit =
+    bodyChanged ||
+    payload.color !== undefined ||
+    'flag' in payload ||
+    typeof payload.scope === 'string' ||
+    'pinned' in payload;
+  if (isContentEdit) {
+    updates.push('last_edited_by_user_id = ?');
+    values.push(user.id);
+  }
   values.push(id);
 
   await run(

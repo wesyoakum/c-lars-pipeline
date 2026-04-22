@@ -35,6 +35,7 @@ function json(data, status = 200) {
 const CARD_SELECT_COLS = `
   c.id, c.author_user_id, c.scope, c.target_user_id, c.body,
   c.color, c.flag, c.pinned, c.sort_order, c.snooze_until,
+  c.last_edited_by_user_id,
   c.created_at, c.updated_at,
   u.display_name AS author_display_name, u.email AS author_email`;
 

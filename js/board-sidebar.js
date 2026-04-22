@@ -308,6 +308,18 @@
         var cls = 'board-card board-card-color-' + (card.color || 'yellow');
         if (card.flag) cls += ' board-card-flag-' + card.flag;
         if (card.pinned) cls += ' board-card-pinned';
+        // Render body in blue when the last editor isn't the card's
+        // author — i.e. a direct-message recipient (or admin) has
+        // changed something. Gives the original author a visual cue
+        // about what a collaborator modified. Migration 0044 added
+        // last_edited_by_user_id.
+        if (
+          card.last_edited_by_user_id &&
+          card.author_user_id &&
+          card.last_edited_by_user_id !== card.author_user_id
+        ) {
+          cls += ' board-card-recipient-edited';
+        }
         var h = 0;
         for (var i = 0; i < (card.id || '').length; i++) h = (h * 31 + card.id.charCodeAt(i)) & 0xffff;
         cls += ' board-card-tilt-' + (h % 3);
@@ -657,13 +669,23 @@
           });
       },
 
-      // Only the author can edit a card. Mentioned recipients see the
-      // card in their Mentions module but can't modify it.
+      // Card edit permissions (mirror functions/board/cards/[id]/index.js):
+      //   - Author can always edit.
+      //   - Direct-message recipient can edit (edits render in blue so
+      //     the author sees what the recipient changed; migration 0044).
+      //   - Mentioned recipients see the card in Mentions but cannot
+      //     modify it.
       canEditCard: function (card) {
         if (!card) return false;
-        if (this.userId && card.author_user_id) return card.author_user_id === this.userId;
-        // If userId hasn't loaded yet, fall back to scope-based:
-        // my_notes are always scope='private' authored by me.
+        if (this.userId && card.author_user_id === this.userId) return true;
+        if (
+          this.userId &&
+          card.scope === 'direct' &&
+          card.target_user_id === this.userId
+        ) return true;
+        if (this.userId) return false;
+        // userId hasn't loaded yet: fall back to scope-based. my_notes
+        // are always scope='private' authored by me.
         return card.scope === 'private';
       },
 

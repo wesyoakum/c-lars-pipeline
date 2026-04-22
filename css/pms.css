@@ -3989,6 +3989,14 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
 .board-card-color-orange { background: var(--board-note-orange); }
 .board-card-color-white  { background: var(--board-note-white); }
 
+/* Shared-post-it recipient edits — when the last editor wasn't the
+   original author, the body text renders in blue so the author can
+   see at a glance which notes their collaborator touched. (Migration
+   0044 adds last_edited_by_user_id on board_cards.) */
+.board-card.board-card-recipient-edited .board-card-body {
+  color: #1d4ed8;
+}
+
 .board-card.board-card-flag-red::before,
 .board-card.board-card-flag-yellow::before,
 .board-card.board-card-flag-green::before {

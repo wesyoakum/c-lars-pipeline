@@ -228,7 +228,10 @@ export async function onRequestGet(context) {
             ${isDraft ? html`
               <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/delete"
                     class="inline-form"
-                    onsubmit="return confirm('Delete this quote? This cannot be undone.');">
+                    data-quote-number="${escape(quote.number)}"
+                    data-quote-revision="${escape(quote.revision)}"
+                    data-line-count="${escape(String(lines?.length ?? 0))}"
+                    onsubmit="return window.confirmDeleteQuote(this);">
                 <button class="btn danger" type="submit">Delete</button>
               </form>
             ` : ''}
@@ -796,6 +799,24 @@ export async function onRequestGet(context) {
 
   // ── Scripts ────────────────────────────────────────────────────────
   const scripts = html`
+    <script>
+    // Two-step confirm for deleting a quote. Reads line count and
+    // identity off the form's data-* attributes (computed server-side).
+    window.confirmDeleteQuote = function (form) {
+      var num = form.dataset.quoteNumber || 'this quote';
+      var rev = form.dataset.quoteRevision || '';
+      var lineCount = parseInt(form.dataset.lineCount || '0', 10);
+      var lineBit = lineCount > 0
+        ? lineCount + ' line item' + (lineCount === 1 ? '' : 's')
+        : 'no line items';
+      var msg = 'Permanently delete ' + num + (rev ? ' ' + rev : '') + '?\\n\\n' +
+                'This will also delete: ' + lineBit + '.\\n' +
+                'Audit history is preserved.\\n\\n' +
+                'This cannot be undone.';
+      if (!confirm(msg)) return false;
+      return confirm('Are you sure? Last chance.');
+    };
+    </script>
     <script>
     // Global patch helper — auto-saves quote fields via fetch.
     // Accepts either a single (field, value) pair or an object of many

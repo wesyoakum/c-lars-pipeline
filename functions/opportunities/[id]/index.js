@@ -170,6 +170,20 @@ export async function onRequestGet(context) {
   );
   if (!opp) return notFound(context);
 
+  // Cascade-counts used by the Delete button to spell out what will
+  // be wiped. Jobs aren't cascaded (they block the delete instead) so
+  // we surface them separately in the confirm message.
+  const deleteCounts = await one(
+    env.DB,
+    `SELECT
+       (SELECT COUNT(*) FROM quotes       WHERE opportunity_id = ?) AS quotes,
+       (SELECT COUNT(*) FROM cost_builds  WHERE opportunity_id = ?) AS cost_builds,
+       (SELECT COUNT(*) FROM activities   WHERE opportunity_id = ?) AS activities,
+       (SELECT COUNT(*) FROM documents    WHERE opportunity_id = ?) AS documents,
+       (SELECT COUNT(*) FROM jobs         WHERE opportunity_id = ?) AS jobs`,
+    [oppId, oppId, oppId, oppId, oppId]
+  );
+
   const catalog = await loadStageCatalog(env.DB);
   const primaryType = parseTransactionTypes(opp.transaction_type)[0] ?? 'spares';
   const typeStages = catalog.get(primaryType) ?? [];
@@ -436,14 +450,26 @@ export async function onRequestGet(context) {
           </p>
         </div>
         <div style="display:flex;gap:0.4rem">
-          <button class="icon-btn primary" type="button" title="New job"
-                  onclick="window.PMS && window.PMS.openWizard('job', ${escape(oppWizardPrefill)})">
-            <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7h14M3 7v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7M7 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
-          </button>
+          <!-- "New job" button paused per feedback 2026-04-17; jobs are
+               now created automatically when an OC is issued. Keep the
+               wizard prefill in case we restore this later. -->
           <button class="icon-btn primary" type="button" title="New quote"
                   onclick="window.PMS && window.PMS.openWizard('quote', ${escape(oppWizardPrefill)})">
             <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="10" y1="4" x2="10" y2="16"/><line x1="4" y1="10" x2="16" y2="10"/></svg>
           </button>
+          <form method="post" action="/opportunities/${escape(opp.id)}/delete"
+                style="display:inline"
+                data-opp-number="${escape(opp.number)}"
+                data-quote-count="${escape(String(deleteCounts?.quotes ?? 0))}"
+                data-cost-build-count="${escape(String(deleteCounts?.cost_builds ?? 0))}"
+                data-activity-count="${escape(String(deleteCounts?.activities ?? 0))}"
+                data-doc-count="${escape(String(deleteCounts?.documents ?? 0))}"
+                data-job-count="${escape(String(deleteCounts?.jobs ?? 0))}"
+                onsubmit="return window.confirmDeleteOpp(this);">
+            <button class="icon-btn danger" type="submit" title="Delete opportunity">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 17 6"/><path d="M8 6V4a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v2"/><path d="M5 6l1 11a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2l1-11"/><line x1="9" y1="10" x2="9" y2="15"/><line x1="11" y1="10" x2="11" y2="15"/></svg>
+            </button>
+          </form>
         </div>
       </div>
 
@@ -1116,7 +1142,9 @@ export async function onRequestGet(context) {
   }`;
 
   // Inline-edit + carousel scripts
-  const scripts = (tab === 'overview' || tab === 'docs') ? html`<script>${raw(inlineEditScript())}</script>` : '';
+  const scripts = (tab === 'overview' || tab === 'docs')
+    ? html`<script>${raw(inlineEditScript())}</script><script>${raw(confirmDeleteOppScript())}</script>`
+    : html`<script>${raw(confirmDeleteOppScript())}</script>`;
 
   return htmlResponse(
     layout(`${opp.number} — ${opp.title}`, html`${body}${scripts}`, {
@@ -1269,6 +1297,41 @@ function notFound(context) {
 }
 
 // ---- Client-side scripts -------------------------------------------------
+
+// Two-step confirm for deleting an opportunity. Reads the cascade
+// counts off the form's data-* attributes (computed server-side) and
+// surfaces them so the user knows exactly what's about to be wiped.
+function confirmDeleteOppScript() {
+  return `
+window.confirmDeleteOpp = function (form) {
+  var number = form.dataset.oppNumber || 'this opportunity';
+  var jobCount = parseInt(form.dataset.jobCount || '0', 10);
+  if (jobCount > 0) {
+    alert('Cannot delete ' + number + ' — ' + jobCount + ' job(s) still attached.\\n\\nCancel or delete the job(s) first.');
+    return false;
+  }
+  var bits = [];
+  var parts = [
+    ['quote', form.dataset.quoteCount],
+    ['price build', form.dataset.costBuildCount],
+    ['activity', form.dataset.activityCount],
+    ['document', form.dataset.docCount],
+  ];
+  parts.forEach(function (p) {
+    var n = parseInt(p[1] || '0', 10);
+    if (n > 0) bits.push(n + ' ' + p[0] + (n === 1 ? '' : 's'));
+  });
+  var cascade = bits.length > 0 ? bits.join(', ') : 'no attached records';
+  var msg = 'Permanently delete ' + number + '?\\n\\n' +
+            'This will also delete: ' + cascade + '.\\n' +
+            'Audit history is preserved.\\n\\n' +
+            'This cannot be undone.';
+  if (!confirm(msg)) return false;
+  // Second confirm — two clicks for hard deletes feels right.
+  return confirm('Are you sure? Last chance.');
+};
+`;
+}
 
 function inlineEditScript() {
   return `
