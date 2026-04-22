@@ -12,7 +12,7 @@ import { auditStmt } from '../../../../lib/audit.js';
 import { now } from '../../../../lib/ids.js';
 import { redirectWithFlash } from '../../../../lib/http.js';
 import { snapshotGoverningDocs } from '../../../../lib/quote-transitions.js';
-import { getQuoteDocData, fillTemplate, convertToPdf, resolveQuoteTemplateKey } from '../../../../lib/doc-generate.js';
+import { getQuoteDocData, renderPdfOrPlaceholder, resolveQuoteTemplateKey } from '../../../../lib/doc-generate.js';
 import { storeGeneratedDoc } from '../../../../lib/doc-storage.js';
 import { templateTypeForQuote } from '../../../../lib/template-catalog.js';
 import {
@@ -123,17 +123,15 @@ export async function onRequestPost(context) {
   );
 
   // Auto-generate the PDF synchronously so we can deliver it as an
-  // immediate download on the redirect. Failures are logged (and
-  // reported to the auto-task error pipeline) but never block the
-  // successful issue — worst case the user lands on the quote detail
-  // page without a download and can click "Generate PDF" manually.
+  // immediate download on the redirect. When the .docx template is
+  // missing from R2 we emit a placeholder PDF instead of failing, so
+  // the download flow always delivers something.
   let downloadDocId = null;
   try {
     const docData = await getQuoteDocData(env, quoteId);
     if (docData) {
       const { key: templateKey } =
         await resolveQuoteTemplateKey(env, quote.quote_type);
-      const docxBuffer = await fillTemplate(env, templateKey, docData);
 
       const fnCtx = buildQuoteFilenameContext({
         quote,
@@ -152,11 +150,14 @@ export async function onRequestPost(context) {
         (renderFilenameTemplate(fnTpl, fnCtx) ||
           `${quote.number}${fnCtx.revisionSuffix}`) + '.pdf';
 
-      const pdfBuffer = await convertToPdf(env, docxBuffer);
+      const { buffer: pdfBuffer, isPlaceholder } =
+        await renderPdfOrPlaceholder(env, templateKey, docData, filenameKey);
       downloadDocId = await storeGeneratedDoc(env, {
         opportunityId: oppId, quoteId,
         buffer: pdfBuffer,
-        filename: pdfFilename,
+        filename: isPlaceholder
+          ? pdfFilename.replace(/\.pdf$/, ' (placeholder).pdf')
+          : pdfFilename,
         mimeType: 'application/pdf',
         kind: 'quote_pdf', user,
       });

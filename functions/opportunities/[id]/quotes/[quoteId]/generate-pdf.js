@@ -7,8 +7,7 @@ import { one } from '../../../../lib/db.js';
 import { redirect, redirectWithFlash } from '../../../../lib/http.js';
 import {
   getQuoteDocData,
-  fillTemplate,
-  convertToPdf,
+  renderPdfOrPlaceholder,
   resolveQuoteTemplateKey,
 } from '../../../../lib/doc-generate.js';
 import { storeGeneratedDoc } from '../../../../lib/doc-storage.js';
@@ -39,20 +38,11 @@ export async function onRequestPost(context) {
       return redirectWithFlash(returnTo, 'Could not load quote data.', 'error');
     }
 
-    // 2. Fill the Word template. Hybrid quotes try the dedicated
-    //    quote-hybrid.docx first, falling back to the primary type's
-    //    template if the hybrid one hasn't been uploaded yet.
+    // 2. Resolve template key (hybrid fallback to primary type still applies).
     const { key: templateKey, usedFallback } =
       await resolveQuoteTemplateKey(env, quote.quote_type);
-    const docxBuffer = await fillTemplate(env, templateKey, docData);
 
-    // 3. Build the download filename from the admin-configurable
-    //    template. Each template catalog entry has its own filename
-    //    convention in the filename_templates table — we look up by
-    //    the "ideal" key (e.g. quote-hybrid) even when the R2 template
-    //    fall back kicks in, so the filename reflects user intent.
-    //    The stored template doesn't include `.pdf` — we append it
-    //    here so one convention covers both PDF and DOCX downloads.
+    // 3. Build the download filename from the admin-configurable template.
     const fnCtx = buildQuoteFilenameContext({
       quote,
       accountName:       docData.clientName,
@@ -70,15 +60,18 @@ export async function onRequestPost(context) {
       (renderFilenameTemplate(fnTpl, fnCtx) ||
         `${quote.number}${fnCtx.revisionSuffix}`) + '.pdf';
 
-    // 4. Convert to PDF and store (no .docx saved)
-
-    const pdfBuffer = await convertToPdf(env, docxBuffer);
+    // 4. Render PDF with placeholder fallback when the .docx template
+    //    hasn't been uploaded yet.
+    const { buffer: pdfBuffer, isPlaceholder } =
+      await renderPdfOrPlaceholder(env, templateKey, docData, filenameKey);
 
     const docId = await storeGeneratedDoc(env, {
       opportunityId: oppId,
       quoteId,
       buffer: pdfBuffer,
-      filename: pdfFilename,
+      filename: isPlaceholder
+        ? pdfFilename.replace(/\.pdf$/, ' (placeholder).pdf')
+        : pdfFilename,
       mimeType: 'application/pdf',
       kind: 'quote_pdf',
       user,

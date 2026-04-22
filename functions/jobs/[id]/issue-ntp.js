@@ -7,8 +7,14 @@ import { one, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../lib/http.js';
-import { fireEvent } from '../../lib/auto-tasks.js';
+import { fireEvent, reportError } from '../../lib/auto-tasks.js';
 import { changeOppStage } from '../../lib/stage-transitions.js';
+import { getOcDocData, renderPdfOrPlaceholder } from '../../lib/doc-generate.js';
+import { storeGeneratedDoc } from '../../lib/doc-storage.js';
+import {
+  getFilenameTemplate,
+  renderFilenameTemplate,
+} from '../../lib/filename-templates.js';
 
 export async function onRequestPost(context) {
   const { env, data, request, params } = context;
@@ -94,5 +100,68 @@ export async function onRequestPost(context) {
     })()
   );
 
-  return redirectWithFlash(`/jobs/${jobId}`, `NTP${ntpNumber ? ` ${ntpNumber}` : ''} issued — job handed off.`);
+  // Auto-generate the NTP PDF. The `ntp` template probably isn't
+  // uploaded yet — placeholder fallback keeps the download flow
+  // working end-to-end.
+  let downloadDocId = null;
+  try {
+    const docData = await getOcDocData(env, jobId);
+    const payload = {
+      ...(docData || {}),
+      ntpNumber: ntpNumber || '',
+      NtpNumber: ntpNumber || '',
+      ntpDate: ts.slice(0, 10),
+      NtpDate: ts.slice(0, 10),
+      jobNumber: job.number,
+    };
+    const templateKey = 'templates/ntp.docx';
+    const filenameKey = 'ntp';
+    const fnTpl = await getFilenameTemplate(
+      env,
+      filenameKey,
+      'C-LARS NTP {ntpNumber}'
+    );
+    const fnCtx = {
+      ntpNumber: ntpNumber || job.number,
+      jobNumber: job.number,
+      opportunityNumber: payload.opportunityNumber || '',
+      accountName: payload.clientName || '',
+      accountAlias: payload.clientAlias || '',
+    };
+    const pdfFilename =
+      (renderFilenameTemplate(fnTpl, fnCtx) ||
+        `NTP-${ntpNumber || job.number}`) + '.pdf';
+
+    const { buffer: pdfBuffer, isPlaceholder } =
+      await renderPdfOrPlaceholder(env, templateKey, payload, filenameKey);
+    downloadDocId = await storeGeneratedDoc(env, {
+      opportunityId: job.opportunity_id,
+      jobId,
+      buffer: pdfBuffer,
+      filename: isPlaceholder
+        ? pdfFilename.replace(/\.pdf$/, ' (placeholder).pdf')
+        : pdfFilename,
+      mimeType: 'application/pdf',
+      kind: 'ntp_pdf',
+      user,
+    });
+  } catch (err) {
+    console.error('NTP PDF generation failed:', err);
+    context.waitUntil(
+      reportError(env, 'ntp_pdf_generation_failed', {
+        summary: `NTP PDF failed for job ${job.number}`,
+        detail: err?.message || String(err),
+        context: { jobId, ntp_number: ntpNumber },
+        user,
+      }).catch(() => {})
+    );
+  }
+
+  const redirectUrl = downloadDocId
+    ? `/jobs/${jobId}?download=${encodeURIComponent(downloadDocId)}`
+    : `/jobs/${jobId}`;
+  return redirectWithFlash(
+    redirectUrl,
+    `NTP${ntpNumber ? ` ${ntpNumber}` : ''} issued — job handed off.`
+  );
 }

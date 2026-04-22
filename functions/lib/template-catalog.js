@@ -64,6 +64,20 @@ export const TEMPLATE_CATALOG = {
     filename: 'oc-refurb.docx',
     label: 'Order Confirmation — Refurb',
   },
+  // Amended OC — issued after a supplemental quote is accepted on a
+  // refurb job. Same data shape as OC plus amended_oc_* fields.
+  'oc-refurb-amended': {
+    r2Key: 'templates/oc-refurb-amended.docx',
+    filename: 'oc-refurb-amended.docx',
+    label: 'Order Confirmation — Refurb Amended',
+  },
+  // Inspection Report — issued after refurb teardown to communicate
+  // findings + any scope adjustments.
+  'inspection-report-refurb': {
+    r2Key: 'templates/inspection-report-refurb.docx',
+    filename: 'inspection-report-refurb.docx',
+    label: 'Inspection Report — Refurb',
+  },
   'ntp': {
     r2Key: 'templates/ntp.docx',
     filename: 'ntp.docx',

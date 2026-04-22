@@ -18,8 +18,14 @@ import { one, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../lib/http.js';
-import { fireEvent } from '../../lib/auto-tasks.js';
+import { fireEvent, reportError } from '../../lib/auto-tasks.js';
 import { changeOppStage } from '../../lib/stage-transitions.js';
+import { getOcDocData, renderPdfOrPlaceholder } from '../../lib/doc-generate.js';
+import { storeGeneratedDoc } from '../../lib/doc-storage.js';
+import {
+  getFilenameTemplate,
+  renderFilenameTemplate,
+} from '../../lib/filename-templates.js';
 
 export async function onRequestPost(context) {
   const { env, data, request, params } = context;
@@ -121,8 +127,74 @@ export async function onRequestPost(context) {
     })()
   );
 
+  // Auto-generate the amended OC PDF. Template key
+  // `oc-refurb-amended` isn't typically uploaded yet; the placeholder
+  // path in renderPdfOrPlaceholder covers it so the user still gets a
+  // download with "oc-refurb-amended Placeholder" centered on the page.
+  let downloadDocId = null;
+  try {
+    const docData = await getOcDocData(env, jobId);
+    if (docData) {
+      // Overlay the amended-OC-specific fields so the template (when
+      // uploaded) sees amendedOcNumber etc.
+      const amendedData = {
+        ...docData,
+        amendedOcNumber,
+        AmendedOcNumber: amendedOcNumber,
+        amendedOcDate: ts.slice(0, 10),
+        AmendedOcDate: ts.slice(0, 10),
+        amendedOcRevision: newRev,
+        AmendedOcRevision: newRev,
+      };
+      const templateKey = 'templates/oc-refurb-amended.docx';
+      const filenameKey = 'oc-refurb-amended';
+      const fnTpl = await getFilenameTemplate(
+        env,
+        filenameKey,
+        'C-LARS Amended OC {amendedOcNumber}'
+      );
+      const fnCtx = {
+        amendedOcNumber,
+        jobNumber: job.number,
+        opportunityNumber: amendedData.opportunityNumber || '',
+        accountName: amendedData.clientName || '',
+        accountAlias: amendedData.clientAlias || '',
+      };
+      const pdfFilename =
+        (renderFilenameTemplate(fnTpl, fnCtx) ||
+          `Amended-OC-${amendedOcNumber}`) + '.pdf';
+
+      const { buffer: pdfBuffer, isPlaceholder } =
+        await renderPdfOrPlaceholder(env, templateKey, amendedData, filenameKey);
+      downloadDocId = await storeGeneratedDoc(env, {
+        opportunityId: job.opportunity_id,
+        jobId,
+        buffer: pdfBuffer,
+        filename: isPlaceholder
+          ? pdfFilename.replace(/\.pdf$/, ' (placeholder).pdf')
+          : pdfFilename,
+        mimeType: 'application/pdf',
+        kind: 'oc_pdf',
+        user,
+      });
+    }
+  } catch (err) {
+    console.error('Amended OC PDF generation failed:', err);
+    context.waitUntil(
+      reportError(env, 'amended_oc_pdf_generation_failed', {
+        summary: `Amended OC PDF failed for job ${job.number}`,
+        detail: err?.message || String(err),
+        context: { jobId, amended_oc_number: amendedOcNumber },
+        user,
+      }).catch(() => {})
+    );
+  }
+
+  const redirectUrl = downloadDocId
+    ? `/jobs/${jobId}?download=${encodeURIComponent(downloadDocId)}`
+    : `/jobs/${jobId}`;
   return redirectWithFlash(
-    `/jobs/${jobId}`,
+    redirectUrl,
     `Amended OC ${amendedOcNumber} issued — task created to submit to customer.`
   );
 }

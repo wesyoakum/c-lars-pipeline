@@ -642,6 +642,89 @@ export async function getOcDocData(env, jobId) {
   };
 }
 
+// ── Placeholder PDF ────────────────────────────────────────────────
+
+/**
+ * Generate a minimal, self-contained PDF with a single line of large
+ * centered text. Used as a fallback when the requested .docx template
+ * hasn't been uploaded to R2 yet so the download flow keeps working
+ * end-to-end. Pure JS — no template dependency, no external API.
+ *
+ * The output is intentionally tiny (~600 bytes): one page, one font,
+ * no metadata. It's a placeholder, not a polished document.
+ */
+export function makePlaceholderPdf(label) {
+  // PDF strings must escape \ ( ) — they're the string delimiters.
+  const safe = String(label)
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)');
+
+  const fontSize = 28;
+  const pageW = 612;   // US Letter @ 72 dpi
+  const pageH = 792;
+  // Helvetica-Bold advance width ≈ 556/1000 em at this font size.
+  const textWidth = safe.length * fontSize * 0.556;
+  const x = Math.max(36, (pageW - textWidth) / 2);
+  const y = pageH / 2 + fontSize / 3;
+
+  const content = `BT /F1 ${fontSize} Tf 1 0 0 1 ${x.toFixed(2)} ${y.toFixed(2)} Tm (${safe}) Tj ET`;
+
+  // Accumulate the PDF body, tracking object byte offsets for the xref.
+  const offsets = [];
+  const parts = [];
+  parts.push('%PDF-1.4\n');
+
+  const add = (obj) => {
+    // Byte offset of the start of this object = current length of the
+    // joined output. We concatenate with single-byte characters only
+    // so .length === byte count.
+    offsets.push(parts.join('').length);
+    parts.push(obj);
+  };
+
+  add('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+  add('2 0 obj\n<< /Type /Pages /Count 1 /Kids [3 0 R] >>\nendobj\n');
+  add(`3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n`);
+  add('4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n');
+  add(`5 0 obj\n<< /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj\n`);
+
+  const body = parts.join('');
+  const xrefStart = body.length;
+  let xref = 'xref\n0 6\n0000000000 65535 f \n';
+  for (const off of offsets) {
+    xref += `${String(off).padStart(10, '0')} 00000 n \n`;
+  }
+  xref += `trailer << /Size 6 /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF\n`;
+
+  const full = body + xref;
+  const bytes = new Uint8Array(full.length);
+  for (let i = 0; i < full.length; i++) bytes[i] = full.charCodeAt(i) & 0xff;
+  return bytes.buffer;
+}
+
+/**
+ * Produce a rendered PDF for (templateKey, data) with graceful fallback:
+ *   - If the .docx template exists in R2, fill it and convert to PDF.
+ *   - If it's missing, return a placeholder PDF with "<templateKey>
+ *     Placeholder" centered on the page. The download flow never errors
+ *     just because an admin hasn't uploaded the template yet.
+ *
+ * Returns { buffer, isPlaceholder }.
+ */
+export async function renderPdfOrPlaceholder(env, templateKey, data, label) {
+  const obj = await env.DOCS.get(templateKey);
+  if (!obj) {
+    return {
+      buffer: makePlaceholderPdf(`${label || templateKey} Placeholder`),
+      isPlaceholder: true,
+    };
+  }
+  const docxBuffer = await fillTemplate(env, templateKey, data);
+  const pdfBuffer = await convertToPdf(env, docxBuffer);
+  return { buffer: pdfBuffer, isPlaceholder: false };
+}
+
 // ── Fill template ───────────────────────────────────────────────────
 
 /**

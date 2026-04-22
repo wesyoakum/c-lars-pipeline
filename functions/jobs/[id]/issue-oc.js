@@ -20,8 +20,7 @@ import { changeOppStage } from '../../lib/stage-transitions.js';
 import {
   getOcDocData,
   resolveOcTemplateKey,
-  fillTemplate,
-  convertToPdf,
+  renderPdfOrPlaceholder,
 } from '../../lib/doc-generate.js';
 import { storeGeneratedDoc } from '../../lib/doc-storage.js';
 import {
@@ -157,7 +156,6 @@ export async function onRequestPost(context) {
     if (docData) {
       const jobType = (job.job_type || '').split(',')[0].trim();
       const { key: templateKey } = await resolveOcTemplateKey(env, jobType);
-      const docxBuffer = await fillTemplate(env, templateKey, docData);
 
       const filenameKey = templateTypeForOC(jobType);
       const fnTpl = await getFilenameTemplate(
@@ -175,12 +173,15 @@ export async function onRequestPost(context) {
       const pdfFilename =
         (renderFilenameTemplate(fnTpl, fnCtx) || `OC-${ocNumber}`) + '.pdf';
 
-      const pdfBuffer = await convertToPdf(env, docxBuffer);
+      const { buffer: pdfBuffer, isPlaceholder } =
+        await renderPdfOrPlaceholder(env, templateKey, docData, filenameKey);
       downloadDocId = await storeGeneratedDoc(env, {
         opportunityId: job.opportunity_id,
         jobId,
         buffer: pdfBuffer,
-        filename: pdfFilename,
+        filename: isPlaceholder
+          ? pdfFilename.replace(/\.pdf$/, ' (placeholder).pdf')
+          : pdfFilename,
         mimeType: 'application/pdf',
         kind: 'oc_pdf',
         user,
