@@ -473,50 +473,47 @@ export async function onRequestGet(context) {
         </div>
       </div>
 
-      <!-- Stage carousel. onsubmit runs the blocker-check path: for
-           terminal stages the server returns 409 with a list of open
-           tasks / active quotes, and the shared modal lets the user
-           clear them inline before retrying. -->
+      <!-- Stage dropdown. Replaces the prev/next carousel UX.
+           onsubmit runs the blocker-check path: for terminal stages
+           the server returns 409 with a list of open tasks / active
+           quotes, and the shared modal lets the user clear them
+           inline before retrying. Selecting a loss stage (closed_lost
+           / closed_died) opens an inline close-reason input before
+           the submit actually fires. -->
       <form method="post" action="/opportunities/${escape(opp.id)}/stage"
-            x-data="stageCarousel(${effectiveIdx}, ${carouselStages.length})"
+            x-data="stageSelect('${escape(opp.stage)}')"
             x-ref="stageForm"
             onsubmit="window.PMS.submitFormWithBlockerCheck(this, 'Move to this stage'); return false;"
-            class="stage-carousel" style="margin:0.5rem 0">
+            class="stage-select" style="margin:0.5rem 0">
         <input type="hidden" name="to_stage" x-ref="toStage" value="">
-        <div class="stage-carousel-row">
-          <button type="button" class="stage-arrow" @click="prev()" :disabled="idx <= 0">&lsaquo;</button>
-          <div class="stage-carousel-window">
-            ${carouselStages.map((s, i) => {
+        <div class="stage-select-row">
+          <span class="stage-pill stage-pill-current" title="Current stage">${escape(currentStage?.label ?? opp.stage)}</span>
+          <label for="opp-stage-select" class="stage-select-label">Move to:</label>
+          <select id="opp-stage-select"
+                  class="stage-select-dropdown"
+                  x-model="selected"
+                  @change="onChange()">
+            <option value="">\u2014 Select stage \u2014</option>
+            ${carouselStages.map(s => {
               const isCurrent = s.stage_key === opp.stage;
               const isLoss = s.stage_key === 'closed_lost' || s.stage_key === 'closed_died';
-              let cls = 'stage-pill';
-              if (isCurrent) cls += ' stage-pill-current';
-              else if (isLoss) cls += ' stage-pill-loss';
-              else if (s.sort_order < (currentStage?.sort_order ?? 0)) cls += ' stage-pill-past';
-              return html`
-                <button type="button"
-                        class="${cls}" data-idx="${i}"
-                        x-show="Math.abs(${i} - idx) <= 1"
-                        ${isCurrent ? 'disabled' : ''}
-                        @click="${isLoss && !isCurrent
-                          ? `showCloseReason('${s.stage_key}')`
-                          : `$refs.toStage.value='${s.stage_key}'; $refs.stageForm.submit()`}">
-                  ${s.label}
-                </button>`;
+              const disabled = isCurrent ? 'disabled' : '';
+              const suffix = isCurrent ? ' (current)' : (isLoss ? ' (close)' : '');
+              return html`<option value="${escape(s.stage_key)}" ${raw(disabled)}>${s.label}${suffix}</option>`;
             })}
-          </div>
-          <button type="button" class="stage-arrow" @click="next()" :disabled="idx >= max - 1">&rsaquo;</button>
+          </select>
         </div>
 
-        <!-- Close reason (shown when clicking a loss stage) -->
+        <!-- Close reason (shown when a loss stage is chosen) -->
         <template x-if="closingStage">
-          <div class="stage-close-reason">
+          <div class="stage-close-reason" style="margin-top:0.4rem; display:flex; gap:0.4rem; flex-wrap:wrap; align-items:center;">
             <input type="text" name="override_reason" x-ref="closeReasonInput"
                    placeholder="Close reason (required)" required
                    style="font-size:0.85em; flex:1; min-width:200px; max-width:400px;">
             <button type="button" class="btn btn-sm danger"
-                    @click="$refs.toStage.value = closingStage; $refs.stageForm.submit()">Confirm</button>
-            <button type="button" class="btn btn-sm" @click="closingStage = ''">Cancel</button>
+                    @click="$refs.toStage.value = closingStage; $refs.stageForm.submit()">Confirm close</button>
+            <button type="button" class="btn btn-sm"
+                    @click="closingStage = ''; selected = ''">Cancel</button>
           </div>
         </template>
       </form>
@@ -1335,17 +1332,26 @@ window.confirmDeleteOpp = function (form) {
 
 function inlineEditScript() {
   return `
-// Stage carousel component — shows prev/current/next via x-show
-function stageCarousel(startIdx, count) {
+// Stage dropdown component. Selecting a non-loss stage submits the
+// form immediately (blocker-check middleware handles terminals).
+// Selecting a loss stage (closed_lost / closed_died) opens an
+// inline close-reason input first; submit fires on Confirm.
+function stageSelect(currentStageKey) {
+  const LOSS = ['closed_lost', 'closed_died'];
   return {
-    idx: startIdx,
-    max: count,
+    selected: '',
     closingStage: '',
-    prev() { if (this.idx > 0) this.idx--; },
-    next() { if (this.idx < this.max - 1) this.idx++; },
-    showCloseReason(stage) {
-      this.closingStage = stage;
-      this.$nextTick(() => this.$refs.closeReasonInput?.focus());
+    onChange() {
+      const val = this.selected;
+      if (!val || val === currentStageKey) return;
+      if (LOSS.includes(val)) {
+        this.closingStage = val;
+        this.$nextTick(() => this.$refs.closeReasonInput?.focus());
+        return;
+      }
+      this.closingStage = '';
+      this.$refs.toStage.value = val;
+      this.$refs.stageForm.submit();
     },
   };
 }

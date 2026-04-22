@@ -2680,36 +2680,39 @@ table.data.compact td input.num-input {
 
 /* ---------- Stage carousel ---------- */
 
-.stage-carousel { margin: 0.5rem 0; }
+/* Stage picker — dropdown form on the opp detail page. Replaces the
+   older prev/next carousel. Keeps the same stage-pill + close-reason
+   patterns for the "current" chip and the loss-stage inline input. */
+.stage-select { margin: 0.5rem 0; }
 
-.stage-carousel-row {
+.stage-select-row {
   display: flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
-.stage-arrow {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.8rem;
-  height: 1.8rem;
+.stage-select-label {
+  font-size: 0.85em;
+  color: var(--fg-muted);
+  margin: 0;
+}
+
+.stage-select-dropdown {
+  padding: 0.25rem 0.5rem;
+  font: inherit;
+  font-size: 0.9em;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--bg);
   color: var(--fg);
-  font-size: 1.2em;
   cursor: pointer;
-  flex-shrink: 0;
-  line-height: 1;
-  padding: 0;
+  min-width: 220px;
+  max-width: 320px;
 }
-.stage-arrow:hover:not([disabled]) { background: var(--bg-alt); }
-.stage-arrow[disabled] { opacity: 0.3; cursor: default; }
-
-.stage-carousel-window {
-  display: flex;
-  gap: 0.2rem;
+.stage-select-dropdown:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .stage-pill {
@@ -2747,10 +2750,6 @@ table.data.compact td input.num-input {
   display: flex;
   gap: 0.3rem;
   margin-top: 0.3rem;
-}
-
-.stage-carousel-row .stage-pill-terminal:first-of-type {
-  margin-left: auto;
 }
 
 .stage-pill-terminal {

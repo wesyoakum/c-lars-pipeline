@@ -22,8 +22,6 @@ Completed items get struck through and then pruned in later cleanup passes.
 
 ### Reports / wizards / settings
 
-- **Reports: "Outcome of Issued Quotes" fix** — legend + month pills
-  + type selector not wired. See `functions/reports/index.js`.
 - **Quote wizard: title/description fields + new-opp inline create**
   — after choosing type + account, capture title/description; allow
   creating a new opp inline from the account step.
@@ -53,6 +51,8 @@ Completed items get struck through and then pruned in later cleanup passes.
 
 ## Done (recent)
 
+- ✅ **Reports: "Outcome of Issued Quotes" fix** — legend + month pills
+  + type selector now wired.
 - ✅ **Remove "New Job" button** (v0.272) — button hidden on opp detail;
   jobs now auto-create when an OC is issued.
 - ✅ **Shared post-it edits in blue** (v0.272) — direct-message
