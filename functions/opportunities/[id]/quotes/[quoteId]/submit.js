@@ -104,7 +104,13 @@ export async function onRequestPost(context) {
               WHERE o.id = ?`,
             [oppId]),
         ]);
-        await fireEvent(env, 'quote.issued', {
+        // Supplemental quotes fire their own event so the
+        // supplemental submit-task rule picks them up instead of the
+        // baseline one.
+        const eventName = freshQuote?.quote_kind === 'supplemental'
+          ? 'supplemental_quote.issued'
+          : 'quote.issued';
+        await fireEvent(env, eventName, {
           trigger: { user, at: ts },
           quote: freshQuote,
           opportunity: opp,

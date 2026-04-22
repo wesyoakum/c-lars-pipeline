@@ -141,11 +141,29 @@ export async function onRequestPost(context) {
   const number = `Q${opp.number}-${quoteSeq}`;
   const title = value.title || '';
 
+  // Detect supplemental quote context: on a refurb opp that's already
+  // past the inspection-report stage (the baseline OC + teardown are
+  // done), any new quote is a supplemental. Baseline quotes on fresh
+  // opps keep kind='baseline' (default).
+  const isRefurb = (opp.transaction_type || '').includes('refurb');
+  const SUPPLEMENTAL_STAGES = new Set([
+    'inspection_report_submitted',
+    'supplemental_quote_drafted',
+    'supplemental_quote_submitted',
+    'supplemental_quote_under_revision',
+    'revised_supplemental_quote_submitted',
+    'supplemental_won',
+    'amended_oc_drafted',
+    'amended_oc_submitted',
+  ]);
+  const isSupplemental = isRefurb && SUPPLEMENTAL_STAGES.has(opp.stage);
+  const quoteKind = isSupplemental ? 'supplemental' : 'baseline';
+
   await batch(env.DB, [
     stmt(
       env.DB,
       `INSERT INTO quotes
-         (id, number, opportunity_id, revision, quote_seq, quote_type, status,
+         (id, number, opportunity_id, revision, quote_seq, quote_type, quote_kind, status,
           title, description, valid_until, currency,
           subtotal_price, tax_amount, total_price,
           incoterms, payment_terms, delivery_terms, delivery_estimate,
@@ -153,7 +171,7 @@ export async function onRequestPost(context) {
           notes_internal, notes_customer,
           show_discounts,
           created_at, updated_at, created_by_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, 'draft',
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'draft',
                ?, ?, ?, 'USD',
                0, ?, 0,
                ?, ?, ?, ?,
@@ -168,6 +186,7 @@ export async function onRequestPost(context) {
         revision,
         quoteSeq,
         value.quote_type,
+        quoteKind,
         title,
         value.description,
         value.valid_until,
@@ -189,21 +208,23 @@ export async function onRequestPost(context) {
       entityId: id,
       eventType: 'created',
       user,
-      summary: `Created quote ${number} Rev ${revision} on ${opp.number}`,
+      summary: `Created ${quoteKind} quote ${number} Rev ${revision} on ${opp.number}`,
       changes: {
         opportunity_id: oppId,
         quote_type: value.quote_type,
+        quote_kind: quoteKind,
         revision,
       },
     }),
   ]);
 
-  // Sync opportunity stage: first-time quote draft means we're actively
-  // drafting a quote for this opp. onlyForward guards against regressing
-  // won/lost/revision stages back to quote_drafted when a user creates
-  // another sibling quote on an already-advanced opportunity.
-  await changeOppStage(context, oppId, 'quote_drafted', {
-    reason: `New quote draft ${number}`,
+  // Sync opportunity stage. For supplementals that means
+  // supplemental_quote_drafted; for baselines (or first-time refurb
+  // quotes) it's quote_drafted. onlyForward guards against regressing
+  // already-advanced opps.
+  const draftedStage = isSupplemental ? 'supplemental_quote_drafted' : 'quote_drafted';
+  await changeOppStage(context, oppId, draftedStage, {
+    reason: `New ${quoteKind} quote draft ${number}`,
     onlyForward: true,
   });
 

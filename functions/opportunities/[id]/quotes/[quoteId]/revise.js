@@ -86,7 +86,7 @@ export async function onRequestPost(context) {
     stmt(
       env.DB,
       `INSERT INTO quotes
-         (id, number, opportunity_id, revision, quote_seq, quote_type, status,
+         (id, number, opportunity_id, revision, quote_seq, quote_type, quote_kind, status,
           title, description, valid_until, currency,
           subtotal_price, tax_amount, total_price,
           incoterms, payment_terms, delivery_terms, delivery_estimate,
@@ -95,7 +95,7 @@ export async function onRequestPost(context) {
           discount_amount, discount_pct, discount_description, discount_is_phantom,
           show_discounts,
           created_at, updated_at, created_by_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, 'revision_draft',
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'revision_draft',
                ?, ?, ?, ?,
                ?, ?, ?,
                ?, ?, ?, ?,
@@ -111,6 +111,9 @@ export async function onRequestPost(context) {
         nextRev,
         quoteSeq,
         source.quote_type,
+        // Revisions inherit the source quote's kind so a supplemental
+        // stays supplemental through all its revisions.
+        source.quote_kind || 'baseline',
         source.title,
         source.description,
         // Revision drafts start with NULL valid_until so the detail page
@@ -221,10 +224,14 @@ export async function onRequestPost(context) {
 
   await batch(env.DB, statements);
 
-  // Sync opportunity stage — creating a revision means we're actively
-  // reworking the quote for the customer. onlyForward keeps this from
-  // regressing opps that have already moved to won/lost/OC.
-  await changeOppStage(context, oppId, 'quote_under_revision', {
+  // Sync opportunity stage. Supplemental revisions advance to
+  // supplemental_quote_under_revision; baseline revisions go to
+  // quote_under_revision. onlyForward keeps this from regressing opps
+  // that have already moved further along.
+  const underRevisionStage = (source.quote_kind === 'supplemental')
+    ? 'supplemental_quote_under_revision'
+    : 'quote_under_revision';
+  await changeOppStage(context, oppId, underRevisionStage, {
     reason: `Revision ${nextRev} started`,
     onlyForward: true,
   });
