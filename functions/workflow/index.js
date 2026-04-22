@@ -54,16 +54,19 @@ flowchart TD
     OCS --> Q2{"Transaction type?"}
     Q2 -->|"Spares or Service"| DONE(["Completed"])
     Q2 -->|"EPS"| NTD["NTP drafted"]
-    Q2 -->|"Refurb"| Q3{"Supplemental expected?"}
+    Q2 -->|"Refurb (always)"| IRD["Inspection Report drafted"]
 
     NTD -->|"Issue NTP; submit task complete"| NTS["NTP submitted"]
     NTS --> DONE
 
-    Q3 -->|"No — supplemental_quote = 0"| DONE
-    Q3 -->|"Yes — teardown finds extra scope"| INSP["Inspection Report submitted"]
+    IRD -->|"Issue inspection report"| INSP["Inspection Report submitted"]
+    INSP --> Q3{"Supplemental required?"}
 
-    INSP --> SQD["Supplemental quote drafted"]
-    SQD -->|"Issue"| SQS["Supplemental quote submitted"]
+    Q3 -->|"No — scope matches baseline"| APPROVE["Task: send Inspection Report<br/>to customer for approval"]
+    APPROVE -->|"Customer approves"| DONE
+
+    Q3 -->|"Yes — teardown found extra scope"| SQD["Supplemental quote drafted"]
+    SQD -->|"Issue supplemental<br/>(task: send supplement + report)"| SQS["Supplemental quote submitted"]
 
     SQS --> Q4{"Customer response on supplemental?"}
     Q4 -->|"Requests changes"| SQR["Supplemental under revision"]
@@ -105,24 +108,24 @@ flowchart TD
           <ul>
             <li><strong>Spares / Service</strong> → <code>completed</code>. OC is the work-commence trigger.</li>
             <li><strong>EPS</strong> → <code>ntp_drafted</code> → <code>ntp_submitted</code> → <code>completed</code>. Per governance §4.2, EPS work cannot commence on OC alone — customer must provide Authorization to Proceed, then C-LARS issues the NTP.</li>
-            <li><strong>Refurb</strong> → decision ③.</li>
+            <li><strong>Refurb</strong> → <strong>always</strong> goes through an Inspection Report (a controlled document). Decision ③ is made <em>after</em> the inspection, based on what teardown revealed.</li>
           </ul>
         </dd>
 
-        <dt>③ Refurb only — <em>Supplemental expected?</em></dt>
+        <dt>③ After Inspection Report submitted — <em>Supplemental required?</em></dt>
         <dd>
-          Set on the opp via the <code>supplemental_quote</code> flag (NULL / 0 / 1).
           <ul>
-            <li><strong>No</strong> (<code>= 0</code>) → skip the supplemental loop, straight to <code>completed</code>. Used when teardown confirms scope matches the baseline.</li>
-            <li><strong>Yes</strong> (NULL or <code>= 1</code>) → enter the inspection + supplemental loop. Stage picker expands to show all 8 supplemental stages.</li>
+            <li><strong>No</strong> — teardown confirmed scope matches the baseline. A task is created to send the Inspection Report to the customer for approval. Once the customer approves, the opp advances to <code>completed</code>. The baseline OC remains the work authorization.</li>
+            <li><strong>Yes</strong> — teardown found extra scope. A supplemental quote is drafted, then issued. A single task is created to send <strong>both</strong> the supplemental quote and the inspection report to the customer. Decision ④ covers the customer's response to that supplemental.</li>
           </ul>
+          The <code>supplemental_quote</code> flag on the opp (0 or 1) records this decision; the stage picker hides the supplemental-loop stages when <code>= 0</code>.
         </dd>
 
         <dt>④ Customer response on supplemental quote</dt>
         <dd>
           Mirrors decision ① but with a softer rejection path:
           <ul>
-            <li><strong>Rejects</strong> → revert to <code>inspection_report_submitted</code>. The baseline OC still stands; the user can draft a different supplemental or close the opp manually. Rejecting a supplemental does <strong>not</strong> close the opp as lost (unlike a baseline reject).</li>
+            <li><strong>Rejects</strong> → revert to <code>inspection_report_submitted</code>. The baseline OC still stands; the user can draft a different supplemental or close the opp manually. Rejecting a supplemental does <strong>not</strong> close the opp as lost.</li>
             <li><strong>Goes cold</strong> → <code>closed_lost</code>. No revert path for cold supplementals.</li>
             <li><strong>Accepts</strong> → <code>supplemental_won</code> → amended OC → <code>completed</code>.</li>
           </ul>
