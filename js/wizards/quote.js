@@ -46,7 +46,6 @@
     { value: 'service',              label: 'Service' },
     { value: 'refurb_baseline',      label: 'Refurb \u2014 Baseline' },
     { value: 'refurb_modified',      label: 'Refurb \u2014 Modified' },
-    { value: 'refurb_supplemental',  label: 'Refurb \u2014 Supplemental' },
   ];
 
   window.PMS.registerWizard('quote', {

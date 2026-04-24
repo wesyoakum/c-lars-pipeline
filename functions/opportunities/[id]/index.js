@@ -365,24 +365,23 @@ export async function onRequestGet(context) {
   const salespersonLabel = opp.sp_name ?? opp.sp_email ?? '—';
 
   // ---- Stage carousel data -----------------------------------------------
-  // All stages go in the carousel, including loss stages. For refurb
-  // opps where the user has indicated no supplemental is needed
-  // (supplemental_quote = 0), collapse stages 11–18 out of the picker
-  // so the next stage after `oc_submitted` is `completed`.
-  const SUPPLEMENTAL_LOOP_STAGES = new Set([
-    'inspection_report_submitted',
-    'supplemental_quote_drafted',
-    'supplemental_quote_submitted',
-    'supplemental_quote_under_revision',
-    'revised_supplemental_quote_submitted',
-    'supplemental_won',
+  // All stages go in the carousel, including loss stages. When the
+  // user has not indicated a change order is active
+  // (opportunities.change_order != 1), collapse the CO-loop stages out
+  // of the picker so the next stage after job_in_progress is just
+  // `completed`.
+  const CHANGE_ORDER_LOOP_STAGES = new Set([
+    'change_order_drafted',
+    'change_order_submitted',
+    'change_order_under_revision',
+    'revised_change_order_submitted',
+    'change_order_won',
     'amended_oc_drafted',
     'amended_oc_submitted',
   ]);
-  const hideSupplementalStages =
-    primaryType === 'refurb' && opp.supplemental_quote === 0;
-  const carouselStages = hideSupplementalStages
-    ? typeStages.filter((s) => !SUPPLEMENTAL_LOOP_STAGES.has(s.stage_key))
+  const hideChangeOrderStages = opp.change_order !== 1;
+  const carouselStages = hideChangeOrderStages
+    ? typeStages.filter((s) => !CHANGE_ORDER_LOOP_STAGES.has(s.stage_key))
     : typeStages;
   const carouselIdx = carouselStages.findIndex(s => s.stage_key === opp.stage);
   const effectiveIdx = carouselIdx >= 0 ? carouselIdx : 0;
@@ -614,17 +613,16 @@ export async function onRequestGet(context) {
               <span class="detail-label">Expected close</span>
               <span class="detail-value">${inlineDate('expected_close_date', opp.expected_close_date)}</span>
             </div>` : ''}
-            ${(opp.transaction_type || '').includes('refurb') ? html`
             <div class="detail-pair">
-              <span class="detail-label">Supplemental quote</span>
-              <span class="detail-value">${inlineSelect('supplemental_quote',
-                opp.supplemental_quote == null ? '' : String(opp.supplemental_quote),
+              <span class="detail-label">Change order</span>
+              <span class="detail-value">${inlineSelect('change_order',
+                opp.change_order == null ? '' : String(opp.change_order),
                 [
                   { value: '',  label: 'Not yet decided' },
-                  { value: '1', label: 'Expected' },
-                  { value: '0', label: 'Not needed' },
+                  { value: '1', label: 'Active' },
+                  { value: '0', label: 'None' },
                 ])}</span>
-            </div>` : ''}
+            </div>
           </div>
 
           <!-- BANT -->

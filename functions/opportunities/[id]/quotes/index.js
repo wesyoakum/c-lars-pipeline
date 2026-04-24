@@ -141,29 +141,32 @@ export async function onRequestPost(context) {
   const number = `Q${opp.number}-${quoteSeq}`;
   const title = value.title || '';
 
-  // Detect supplemental quote context: on a refurb opp that's already
-  // past the inspection-report stage (the baseline OC + teardown are
-  // done), any new quote is a supplemental. Baseline quotes on fresh
-  // opps keep kind='baseline' (default).
-  const isRefurb = (opp.transaction_type || '').includes('refurb');
-  const SUPPLEMENTAL_STAGES = new Set([
-    'inspection_report_submitted',
-    'supplemental_quote_drafted',
-    'supplemental_quote_submitted',
-    'supplemental_quote_under_revision',
-    'revised_supplemental_quote_submitted',
-    'supplemental_won',
-    'amended_oc_drafted',
-    'amended_oc_submitted',
-  ]);
-  const isSupplemental = isRefurb && SUPPLEMENTAL_STAGES.has(opp.stage);
-  const quoteKind = isSupplemental ? 'supplemental' : 'baseline';
+  // Change-order context: when the caller passes change_order_id, the
+  // new quote is bound to that CO and flows through the CO stages
+  // instead of the baseline quote stages.
+  const changeOrderId = (input.change_order_id || '').trim() || null;
+  let changeOrder = null;
+  if (changeOrderId) {
+    changeOrder = await one(
+      env.DB,
+      'SELECT id, number, opportunity_id, job_id FROM change_orders WHERE id = ?',
+      [changeOrderId]
+    );
+    if (!changeOrder || changeOrder.opportunity_id !== oppId) {
+      return redirectWithFlash(
+        `/opportunities/${oppId}?tab=quotes`,
+        'Change order not found on this opportunity.',
+        'error'
+      );
+    }
+  }
+  const isCO = !!changeOrder;
 
   await batch(env.DB, [
     stmt(
       env.DB,
       `INSERT INTO quotes
-         (id, number, opportunity_id, revision, quote_seq, quote_type, quote_kind, status,
+         (id, number, opportunity_id, revision, quote_seq, quote_type, change_order_id, status,
           title, description, valid_until, currency,
           subtotal_price, tax_amount, total_price,
           incoterms, payment_terms, delivery_terms, delivery_estimate,
@@ -186,7 +189,7 @@ export async function onRequestPost(context) {
         revision,
         quoteSeq,
         value.quote_type,
-        quoteKind,
+        changeOrderId,
         title,
         value.description,
         value.valid_until,
@@ -208,23 +211,26 @@ export async function onRequestPost(context) {
       entityId: id,
       eventType: 'created',
       user,
-      summary: `Created ${quoteKind} quote ${number} Rev ${revision} on ${opp.number}`,
+      summary: isCO
+        ? `Created change-order quote ${number} Rev ${revision} on ${opp.number} (CO ${changeOrder.number})`
+        : `Created quote ${number} Rev ${revision} on ${opp.number}`,
       changes: {
         opportunity_id: oppId,
         quote_type: value.quote_type,
-        quote_kind: quoteKind,
+        change_order_id: changeOrderId,
         revision,
       },
     }),
   ]);
 
-  // Sync opportunity stage. For supplementals that means
-  // supplemental_quote_drafted; for baselines (or first-time refurb
-  // quotes) it's quote_drafted. onlyForward guards against regressing
-  // already-advanced opps.
-  const draftedStage = isSupplemental ? 'supplemental_quote_drafted' : 'quote_drafted';
+  // Sync opportunity stage. CO quotes advance to change_order_drafted;
+  // baseline quotes go to quote_drafted. onlyForward guards against
+  // regressing already-advanced opps.
+  const draftedStage = isCO ? 'change_order_drafted' : 'quote_drafted';
   await changeOppStage(context, oppId, draftedStage, {
-    reason: `New ${quoteKind} quote draft ${number}`,
+    reason: isCO
+      ? `New change-order quote draft ${number}`
+      : `New quote draft ${number}`,
     onlyForward: true,
   });
 

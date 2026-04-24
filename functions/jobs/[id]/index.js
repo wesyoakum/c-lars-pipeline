@@ -109,32 +109,35 @@ export async function onRequestGet(context) {
 
   const jobTypes = parseTransactionTypes(job.job_type);
   const isEps = jobTypes.includes('eps');
-  const isRefurb = jobTypes.includes('refurb');
   const canIssueOc = job.status === 'created';
   const canRecordAuth = isEps && job.status === 'awaiting_authorization';
   const canIssueNtp = isEps && job.status === 'awaiting_ntp';
-  // Refurb post-handoff actions (Batch C):
-  //   - Issue Inspection Report (once) after teardown
-  //   - Issue Amended OC after a supplemental is accepted
-  const canIssueInspectionReport =
-    isRefurb && job.status === 'handed_off' && !job.inspection_report_issued_at;
-  const canAmendOc = isRefurb && job.status === 'handed_off';
+  // Change orders are available on any active job. The user opens a CO
+  // when scope changes mid-project; each CO runs its own quote cycle →
+  // amended OC via /jobs/:id/change-orders/*.
+  const canCreateCO = job.status !== 'cancelled' && job.status !== 'complete';
   const canClose = job.status !== 'handed_off' && job.status !== 'cancelled' && job.status !== 'complete';
   // `handed_off` is the gateway to `complete` — the new terminal
   // status introduced alongside the active-only rules (migration 0035).
   // Complete cascades accepted quotes on the parent opp to the hidden
   // `completed` status; see functions/jobs/[id]/complete.js.
   const canComplete = job.status === 'handed_off';
-  // Actions block is visible unless the job is fully closed out. Refurb
-  // supplemental loop needs it open while handed_off (so the
-  // inspection-report + amend-OC forms render).
   const isActive = job.status !== 'cancelled' && job.status !== 'complete';
   const defaultOcNumber = job.latest_quote_number ? `OC-${job.latest_quote_number}` : '';
   const defaultNtpNumber = job.latest_quote_number ? `NTP-${job.latest_quote_number}` : '';
-  const defaultAmendedOcNumber =
-    job.latest_quote_number
-      ? `OC-${job.latest_quote_number}-A${(job.amended_oc_revision || 1)}`
-      : '';
+
+  // Load all change orders on this job so we can render a summary
+  // table in the Change Orders section.
+  const changeOrders = await all(
+    env.DB,
+    `SELECT id, number, sequence, status, description,
+            amended_oc_number, amended_oc_issued_at,
+            created_at, updated_at
+       FROM change_orders
+      WHERE job_id = ?
+      ORDER BY sequence ASC`,
+    [jobId]
+  );
 
   const body = html`
     <section class="card" x-data="jobInline('${escape(job.id)}')">
@@ -251,30 +254,16 @@ export async function onRequestGet(context) {
             </fieldset>
           </form>` : ''}
 
-        ${canIssueInspectionReport ? html`
-          <form method="post" action="/jobs/${escape(job.id)}/issue-inspection-report" class="action-form">
+        ${canCreateCO ? html`
+          <form method="post" action="/jobs/${escape(job.id)}/change-orders" class="action-form">
             <fieldset>
-              <legend>Issue Inspection Report</legend>
+              <legend>Create Change Order</legend>
               <p class="muted" style="margin:0 0 0.5rem;font-size:0.85em">
-                Issue the inspection report to the customer. A task will be
-                created on the opportunity owner to send it; once that task
-                is complete, the opp advances to "Inspection Report submitted."
+                Scope changed? Create a change order and run it through its own
+                quote + amended-OC cycle. The job stays in progress during the CO.
               </p>
-              <button class="btn primary" type="submit" style="margin-top:0.25rem">Issue Inspection Report</button>
-            </fieldset>
-          </form>` : ''}
-
-        ${canAmendOc ? html`
-          <form method="post" action="/jobs/${escape(job.id)}/amend-oc" class="action-form">
-            <fieldset>
-              <legend>Issue Amended OC (Rev ${escape(String(job.amended_oc_revision || 1))})</legend>
-              <p class="muted" style="margin:0 0 0.5rem;font-size:0.85em">
-                After a supplemental quote has been accepted, issue the
-                amended OC to authorize work on the modified scope.
-              </p>
-              <div><label class="field-label">Amended OC Number *</label><input type="text" name="amended_oc_number" value="${escape(defaultAmendedOcNumber)}" required></div>
-              <div><label class="field-label">Notes</label><input type="text" name="notes" placeholder="Reason for amendment"></div>
-              <button class="btn primary" type="submit" style="margin-top:0.5rem">Issue Amended OC</button>
+              <div><label class="field-label">Description</label><input type="text" name="description" placeholder="Short scope-change summary"></div>
+              <button class="btn primary" type="submit" style="margin-top:0.5rem">Create Change Order</button>
             </fieldset>
           </form>` : ''}
 
@@ -305,6 +294,33 @@ export async function onRequestGet(context) {
 
       </div>
     </section>` : ''}
+
+    <!-- Change Orders -->
+    <section class="card">
+      <h2>Change Orders</h2>
+      ${changeOrders.length === 0
+        ? html`<p class="muted">No change orders on this job yet.</p>`
+        : html`
+          <table class="list">
+            <thead>
+              <tr>
+                <th>#</th><th>Number</th><th>Status</th><th>Description</th>
+                <th>Amended OC</th><th>Updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${changeOrders.map(co => html`
+                <tr>
+                  <td>${escape(String(co.sequence))}</td>
+                  <td><a href="/jobs/${escape(job.id)}/change-orders/${escape(co.id)}">${escape(co.number)}</a></td>
+                  <td><span class="pill">${escape(co.status)}</span></td>
+                  <td>${escape(co.description || '—')}</td>
+                  <td>${escape(co.amended_oc_number || '—')}</td>
+                  <td class="muted">${escape((co.updated_at || co.created_at || '').slice(0, 10))}</td>
+                </tr>`)}
+            </tbody>
+          </table>`}
+    </section>
 
     <!-- Document Templates -->
     <section class="card">

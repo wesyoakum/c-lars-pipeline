@@ -518,14 +518,16 @@ export function validateWorkcenterEntries(hoursMap, rateMap, workcenters) {
 // ---------------------------------------------------------------------
 
 // Allowed quote_type values per opportunity transaction_type. A plain
-// Spares/EPS/Service deal has a single matching type; Refurb is the
-// polymorphic one — the governance doc allows baseline, modified, and
-// supplemental quotes on the same opportunity.
+// Spares/EPS/Service deal has a single matching type; Refurb allows
+// baseline and modified. Supplemental quotes were removed in
+// migration 0045 — any mid-job scope change now happens via a Change
+// Order (see `change_orders` table), whose quotes reuse these same
+// types plus a change_order_id FK.
 const QUOTE_TYPES_BY_TRANSACTION = {
   spares:  ['spares'],
   eps:     ['eps'],
   service: ['service'],
-  refurb:  ['refurb_baseline', 'refurb_modified', 'refurb_supplemental'],
+  refurb:  ['refurb_baseline', 'refurb_modified'],
 };
 const ALL_QUOTE_TYPES = new Set(
   Object.values(QUOTE_TYPES_BY_TRANSACTION).flat()
@@ -570,7 +572,6 @@ export const QUOTE_TYPE_LABELS = {
   eps:                  'EPS',
   refurb_baseline:      'Refurb – Base',
   refurb_modified:      'Refurb – Mod',
-  refurb_supplemental:  'Refurb – Supp',
   service:              'Service',
 };
 

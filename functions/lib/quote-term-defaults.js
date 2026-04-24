@@ -34,7 +34,6 @@ export const VALIDITY_DAYS_TYPES = [
   'eps',
   'refurb_baseline',
   'refurb_modified',
-  'refurb_supplemental',
 ];
 
 /**

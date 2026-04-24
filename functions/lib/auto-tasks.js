@@ -386,16 +386,14 @@ function buildEventKey(triggerName, payload) {
     case 'ntp.issued':
       return `ntp.issued:${payload?.job?.id}:${payload?.job?.ntp_number ?? ''}`;
 
-    // Refurb supplemental loop.
-    case 'inspection_report.issued':
-      return `inspection_report.issued:${payload?.job?.id}:${payload?.job?.inspection_report_issued_at ?? ''}`;
-    case 'supplemental_quote.issued':
-      // Keyed on id + revision so each rev fires its own task.
-      return `supplemental_quote.issued:${payload?.quote?.id}:${payload?.quote?.revision ?? ''}`;
-    case 'amended_oc.issued':
-      // Keyed on amended_oc_number + revision so successive amendments
-      // each create their own submit task.
-      return `amended_oc.issued:${payload?.job?.id}:${payload?.job?.amended_oc_number ?? ''}:${payload?.job?.amended_oc_revision ?? ''}`;
+    // Change orders (universal; replaces the refurb supplemental loop).
+    case 'change_order.issued':
+      // Keyed on quote id + status so each rev fires its own submit task.
+      return `change_order.issued:${payload?.quote?.id}:${payload?.quote?.status ?? ''}:${payload?.quote?.submitted_at ?? ''}`;
+    case 'change_order.amended_oc_issued':
+      // Keyed on change_order id + revision so successive amended-OC
+      // re-issues each create their own submit task.
+      return `change_order.amended_oc_issued:${payload?.change_order?.id}:${payload?.change_order?.amended_oc_number ?? ''}:${payload?.change_order?.amended_oc_revision ?? ''}`;
     case 'authorization.received':
       return `authorization.received:${payload?.job?.id}:${payload?.job?.authorization_received_at ?? ''}`;
     case 'job.handed_off':

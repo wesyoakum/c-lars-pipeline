@@ -29,10 +29,10 @@ export const TEMPLATE_CATALOG = {
     filename: 'quote-refurb-modified.docx',
     label: 'Quote — Refurb Modified',
   },
-  'quote-refurb-supplemental': {
-    r2Key: 'templates/quote-refurb-supplemental.docx',
-    filename: 'quote-refurb-supplemental.docx',
-    label: 'Quote — Refurb Supplemental',
+  'quote-change-order': {
+    r2Key: 'templates/quote-change-order.docx',
+    filename: 'quote-change-order.docx',
+    label: 'Quote — Change Order',
   },
   'quote-hybrid': {
     r2Key: 'templates/quote-hybrid.docx',
@@ -64,19 +64,13 @@ export const TEMPLATE_CATALOG = {
     filename: 'oc-refurb.docx',
     label: 'Order Confirmation — Refurb',
   },
-  // Amended OC — issued after a supplemental quote is accepted on a
-  // refurb job. Same data shape as OC plus amended_oc_* fields.
-  'oc-refurb-amended': {
-    r2Key: 'templates/oc-refurb-amended.docx',
-    filename: 'oc-refurb-amended.docx',
-    label: 'Order Confirmation — Refurb Amended',
-  },
-  // Inspection Report — issued after refurb teardown to communicate
-  // findings + any scope adjustments.
-  'inspection-report-refurb': {
-    r2Key: 'templates/inspection-report-refurb.docx',
-    filename: 'inspection-report-refurb.docx',
-    label: 'Inspection Report — Refurb',
+  // Amended OC — issued after a change order is accepted. Universal
+  // (any transaction type). Same data shape as OC plus amended_oc_*
+  // fields from the change_orders row.
+  'oc-amended': {
+    r2Key: 'templates/oc-amended.docx',
+    filename: 'oc-amended.docx',
+    label: 'Order Confirmation — Amended',
   },
   'ntp': {
     r2Key: 'templates/ntp.docx',
@@ -87,12 +81,11 @@ export const TEMPLATE_CATALOG = {
 
 // Map quote_type values → template catalog key
 const QUOTE_TYPE_TO_TEMPLATE = {
-  service:             'quote-service',
-  spares:              'quote-spares',
-  eps:                 'quote-eps',
-  refurb_baseline:     'quote-refurb-baseline',
-  refurb_modified:     'quote-refurb-modified',
-  refurb_supplemental: 'quote-refurb-supplemental',
+  service:         'quote-service',
+  spares:          'quote-spares',
+  eps:             'quote-eps',
+  refurb_baseline: 'quote-refurb-baseline',
+  refurb_modified: 'quote-refurb-modified',
 };
 
 // Map job type → OC template catalog key
@@ -112,7 +105,8 @@ const JOB_TYPE_TO_OC_TEMPLATE = {
  * template key. Until the hybrid .docx template is uploaded, the
  * document generator falls back to the primary type's template.
  */
-export function templateTypeForQuote(quoteType) {
+export function templateTypeForQuote(quoteType, { isChangeOrder = false } = {}) {
+  if (isChangeOrder) return 'quote-change-order';
   if (quoteType && String(quoteType).includes(',')) {
     return 'quote-hybrid';
   }

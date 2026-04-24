@@ -26,8 +26,8 @@ import {
 
 // ── Template key mapping ────────────────────────────────────────────
 
-export function templateKeyForQuote(quoteType) {
-  const catKey = templateTypeForQuote(quoteType);
+export function templateKeyForQuote(quoteType, opts = {}) {
+  const catKey = templateTypeForQuote(quoteType, opts);
   return TEMPLATE_CATALOG[catKey]?.r2Key || 'templates/quote-spares.docx';
 }
 
@@ -41,8 +41,13 @@ export function templateKeyForQuote(quoteType) {
  *
  * Returns an object: { key, usedFallback: boolean, primaryKey }.
  */
-export async function resolveQuoteTemplateKey(env, quoteType) {
-  const primaryKey = templateKeyForQuote(quoteType);
+export async function resolveQuoteTemplateKey(env, quoteType, opts = {}) {
+  const primaryKey = templateKeyForQuote(quoteType, opts);
+  // Change-order quotes always use the single `quote-change-order`
+  // template regardless of quote_type — no hybrid fallback needed.
+  if (opts.isChangeOrder) {
+    return { key: primaryKey, usedFallback: false, primaryKey };
+  }
   if (!isHybridQuote(quoteType)) {
     return { key: primaryKey, usedFallback: false, primaryKey };
   }

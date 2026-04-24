@@ -104,11 +104,10 @@ export async function onRequestPost(context) {
               WHERE o.id = ?`,
             [oppId]),
         ]);
-        // Supplemental quotes fire their own event so the
-        // supplemental submit-task rule picks them up instead of the
-        // baseline one.
-        const eventName = freshQuote?.quote_kind === 'supplemental'
-          ? 'supplemental_quote.issued'
+        // Change-order quotes fire their own event so the CO submit-task
+        // rule picks them up instead of the baseline one.
+        const eventName = freshQuote?.change_order_id
+          ? 'change_order.issued'
           : 'quote.issued';
         await fireEvent(env, eventName, {
           trigger: { user, at: ts },
@@ -130,8 +129,9 @@ export async function onRequestPost(context) {
   try {
     const docData = await getQuoteDocData(env, quoteId);
     if (docData) {
+      const isCO = !!quote.change_order_id;
       const { key: templateKey } =
-        await resolveQuoteTemplateKey(env, quote.quote_type);
+        await resolveQuoteTemplateKey(env, quote.quote_type, { isChangeOrder: isCO });
 
       const fnCtx = buildQuoteFilenameContext({
         quote,
@@ -140,7 +140,7 @@ export async function onRequestPost(context) {
         opportunityNumber: docData.opportunityNumber,
         opportunityTitle:  docData.opportunityTitle,
       });
-      const filenameKey = templateTypeForQuote(quote.quote_type);
+      const filenameKey = templateTypeForQuote(quote.quote_type, { isChangeOrder: isCO });
       const fnTpl = await getFilenameTemplate(
         env,
         filenameKey,

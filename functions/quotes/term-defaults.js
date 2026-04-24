@@ -20,7 +20,6 @@ const ALL_QUOTE_TYPES = new Set([
   'service',
   'refurb_baseline',
   'refurb_modified',
-  'refurb_supplemental',
 ]);
 
 export async function onRequestPost(context) {

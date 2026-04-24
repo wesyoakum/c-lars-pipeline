@@ -86,7 +86,7 @@ export async function onRequestPost(context) {
     stmt(
       env.DB,
       `INSERT INTO quotes
-         (id, number, opportunity_id, revision, quote_seq, quote_type, quote_kind, status,
+         (id, number, opportunity_id, revision, quote_seq, quote_type, change_order_id, status,
           title, description, valid_until, currency,
           subtotal_price, tax_amount, total_price,
           incoterms, payment_terms, delivery_terms, delivery_estimate,
@@ -111,9 +111,9 @@ export async function onRequestPost(context) {
         nextRev,
         quoteSeq,
         source.quote_type,
-        // Revisions inherit the source quote's kind so a supplemental
-        // stays supplemental through all its revisions.
-        source.quote_kind || 'baseline',
+        // Revisions inherit the source quote's CO binding so a CO quote
+        // stays a CO quote through all its revisions.
+        source.change_order_id ?? null,
         source.title,
         source.description,
         // Revision drafts start with NULL valid_until so the detail page
@@ -224,12 +224,12 @@ export async function onRequestPost(context) {
 
   await batch(env.DB, statements);
 
-  // Sync opportunity stage. Supplemental revisions advance to
-  // supplemental_quote_under_revision; baseline revisions go to
+  // Sync opportunity stage. CO revisions advance to
+  // change_order_under_revision; baseline revisions go to
   // quote_under_revision. onlyForward keeps this from regressing opps
   // that have already moved further along.
-  const underRevisionStage = (source.quote_kind === 'supplemental')
-    ? 'supplemental_quote_under_revision'
+  const underRevisionStage = source.change_order_id
+    ? 'change_order_under_revision'
     : 'quote_under_revision';
   await changeOppStage(context, oppId, underRevisionStage, {
     reason: `Revision ${nextRev} started`,

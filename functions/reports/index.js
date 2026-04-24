@@ -530,7 +530,6 @@ export async function onRequestGet(context) {
             <option value="service">Service</option>
             <option value="refurb_baseline">Refurb \u2014 Baseline</option>
             <option value="refurb_modified">Refurb \u2014 Modified</option>
-            <option value="refurb_supplemental">Refurb \u2014 Supplemental</option>
           </select>
         </div>
       </div>

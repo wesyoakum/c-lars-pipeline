@@ -3,12 +3,10 @@
 // GET /workflow — Visual road map of the opportunity lifecycle.
 //
 // Embeds a Mermaid flowchart rendered client-side via the Mermaid
-// CDN build. The diagram mirrors the stage catalog (migration 0041)
-// and the branching logic implemented across accept.js, reject.js,
-// submit.js, issue-oc.js, issue-ntp.js, amend-oc.js, and issue-
-// inspection-report.js. Not a settings page — it's a reference /
-// reasoning aid; may be removed or replaced once the team has the
-// flow memorized.
+// CDN build. The diagram mirrors the stage catalog (migration 0045 —
+// universal Change Order model) and the branching logic implemented
+// across accept.js, reject.js, submit.js, issue-oc.js, issue-ntp.js,
+// jobs/[id]/change-orders/[coId]/issue-amended-oc.js.
 
 import { layout, htmlResponse, html, raw } from '../lib/layout.js';
 
@@ -25,7 +23,7 @@ export async function onRequestGet(context) {
             Road map of the opportunity lifecycle. Diamonds mark decision
             points; the label on each outgoing arrow explains why the
             path branches that way. Stage keys match the stage catalog
-            from migration 0041.
+            from migration 0045.
           </p>
         </div>
       </div>
@@ -57,50 +55,45 @@ flowchart TD
     T3 --> S8["OC submitted"]
 
     S8 --> G2{"Transaction type?"}
-    G2 --> O2a[/"Spares or Service"/]
+    G2 --> O2a[/"Spares / Service / Refurb"/]
     G2 --> O2b[/"EPS"/]
-    G2 --> O2c[/"Refurb"/]
-
-    O2a --> TD(["Completed"])
 
     O2b --> S9["NTP drafted"]
     S9 --> T4[["Task: Submit NTP to customer"]]
     T4 --> S10["NTP submitted"]
-    S10 --> TD
 
-    O2c --> S11["Inspection Report drafted"]
-    S11 --> T5[["Task: Send Inspection Report"]]
-    T5 --> S12["Inspection Report submitted"]
+    O2a --> S11["Job in progress"]
+    S10 --> S11
 
-    S12 --> G3{"Supplemental required?"}
+    S11 --> G3{"Scope change?"}
     G3 --> O3a[/"No"/]
-    G3 --> O3b[/"Yes"/]
+    G3 --> O3b[/"Yes — open Change Order"/]
 
-    O3a --> T6[["Task: Send Inspection Report<br/>for customer approval"]]
-    T6 --> TD
+    O3a --> TD(["Completed"])
 
-    O3b --> S13["Supplemental quote drafted"]
-    S13 --> T7[["Task: Send supplemental quote<br/>+ Inspection Report"]]
-    T7 --> S14["Supplemental quote submitted"]
+    O3b --> S12["Change order drafted"]
+    S12 --> T5[["Task: Submit change order to customer"]]
+    T5 --> S13["Change order submitted"]
 
-    S14 --> G4{"Customer response?"}
+    S13 --> G4{"Customer response?"}
     G4 --> O4a[/"Accepts"/]
     G4 --> O4b[/"Requests changes"/]
     G4 --> O4c[/"Rejects"/]
     G4 --> O4d[/"Cancels"/]
 
-    O4b --> S15["Supplemental under revision"]
-    S15 --> T8[["Task: Submit revised supplemental"]]
-    T8 --> S16["Revised supplemental submitted"]
-    S16 --> G4
+    O4b --> S14["Change order under revision"]
+    S14 --> T6[["Task: Submit revised CO"]]
+    T6 --> S15["Revised change order submitted"]
+    S15 --> G4
 
-    O4a --> S17["Amended OC drafted"]
-    O4c --> S12
-    O4d --> TC
+    O4a --> S16["Change order won"]
+    O4c --> S11
+    O4d --> S11
 
-    S17 --> T9[["Task: Submit Amended OC"]]
-    T9 --> S18["Amended OC submitted"]
-    S18 --> TD
+    S16 --> S17["Amended OC drafted"]
+    S17 --> T7[["Task: Submit amended OC"]]
+    T7 --> S18["Amended OC submitted"]
+    S18 --> S11
 
     classDef terminal fill:#dafbe1,stroke:#1a7f37,color:#1a7f37
     classDef loss fill:#ffebe9,stroke:#cf222e,color:#cf222e
@@ -110,8 +103,8 @@ flowchart TD
     class TD terminal
     class TL,TC loss
     class G1,G2,G3,G4 gate
-    class O1a,O1b,O1c,O1d,O2a,O2b,O2c,O3a,O3b,O4a,O4b,O4c,O4d option
-    class T1,T2,T3,T4,T5,T6,T7,T8,T9 task
+    class O1a,O1b,O1c,O1d,O2a,O2b,O3a,O3b,O4a,O4b,O4c,O4d option
+    class T1,T2,T3,T4,T5,T6,T7 task
         </div>
       </div>
 
@@ -141,29 +134,27 @@ flowchart TD
         <dt>② After OC submitted — <em>Transaction type?</em></dt>
         <dd>
           <ul>
-            <li><strong>Spares / Service</strong> → <code>completed</code>. OC is the work-commence trigger.</li>
-            <li><strong>EPS</strong> → <code>ntp_drafted</code> → <code>ntp_submitted</code> → <code>completed</code>. Per governance §4.2, EPS work cannot commence on OC alone — customer must provide Authorization to Proceed, then C-LARS issues the NTP.</li>
-            <li><strong>Refurb</strong> → <strong>always</strong> goes through an Inspection Report (a controlled document). Decision ③ is made <em>after</em> the inspection, based on what teardown revealed.</li>
+            <li><strong>Spares / Service / Refurb</strong> → <code>job_in_progress</code>. OC is the work-commence trigger; from here the job runs in the external PM system (refurb teardown + inspection happen inside that PM system, not here).</li>
+            <li><strong>EPS</strong> → <code>ntp_drafted</code> → <code>ntp_submitted</code> → <code>job_in_progress</code>. Per governance §4.2, EPS work cannot commence on OC alone — customer must provide Authorization to Proceed, then C-LARS issues the NTP.</li>
           </ul>
         </dd>
 
-        <dt>③ After Inspection Report submitted — <em>Supplemental required?</em></dt>
+        <dt>③ During <code>job_in_progress</code> — <em>Scope change?</em></dt>
         <dd>
           <ul>
-            <li><strong>No</strong> — teardown confirmed scope matches the baseline. A task is created to send the Inspection Report to the customer for approval. Once the customer approves, the opp advances to <code>completed</code>. The baseline OC remains the work authorization.</li>
-            <li><strong>Yes</strong> — teardown found extra scope. A supplemental quote is drafted, then issued. A single task is created to send <strong>both</strong> the supplemental quote and the inspection report to the customer. Decision ④ covers the customer's response to that supplemental.</li>
+            <li><strong>No</strong> — the baseline OC remains the work authorization. When the job is done, advance the opp to <code>completed</code>.</li>
+            <li><strong>Yes</strong> — open a <strong>Change Order</strong> from the job page. The CO gets its own number (CO-YYYY-NNNN), has its own draft/issue/submit quote cycle, and ends with an Amended OC that authorizes the modified scope. Multiple COs per job are supported — open a new CO each time scope shifts.</li>
           </ul>
-          The <code>supplemental_quote</code> flag on the opp (0 or 1) records this decision; the stage picker hides the supplemental-loop stages when <code>= 0</code>.
+          The <code>change_order</code> flag on the opp (0 or 1) gates visibility of the CO-loop stages in the picker.
         </dd>
 
-        <dt>④ Customer response on supplemental quote</dt>
+        <dt>④ Customer response on a change-order quote</dt>
         <dd>
           Mirrors decision ① but with a softer rejection path:
           <ul>
-            <li><strong>Accepts</strong> → <code>amended_oc_drafted</code> → amended OC → <code>completed</code>.</li>
-            <li><strong>Requests changes</strong> → <code>supplemental_quote_under_revision</code> → revised supplemental → back to the same question.</li>
-            <li><strong>Rejects</strong> → revert to <code>inspection_report_submitted</code>. The baseline OC still stands; the user can draft a different supplemental or close the opp manually. Rejecting a supplemental does <strong>not</strong> close the opp.</li>
-            <li><strong>Cancels</strong> → <strong>Cancelled</strong> (terminal).</li>
+            <li><strong>Accepts</strong> → <code>change_order_won</code> → <code>amended_oc_drafted</code> → amended OC → <code>amended_oc_submitted</code> → back to <code>job_in_progress</code> (or <code>completed</code> if the job's done).</li>
+            <li><strong>Requests changes</strong> → <code>change_order_under_revision</code> → revised CO → back to the same question.</li>
+            <li><strong>Rejects</strong> or <strong>Cancels</strong> → revert to <code>job_in_progress</code>. The baseline OC still stands; user can open a fresh CO if scope changes again.</li>
           </ul>
         </dd>
       </dl>
@@ -173,7 +164,8 @@ flowchart TD
       <h2>Implementation notes</h2>
       <ul class="muted" style="font-size:0.9em">
         <li>Stage transitions go through <code>functions/lib/stage-transitions.js</code> (<code>changeOppStage</code>) so the gate / audit / event-fire side effects are consistent.</li>
-        <li>Each "Issue" action fires an event (<code>quote.issued</code>, <code>oc.issued</code>, etc.) that triggers a seeded auto-task rule creating a "Submit to customer" task. When that task is marked complete, <code>advanceStageOnTaskComplete</code> in stage-transitions.js walks the opp to the matching <code>*_submitted</code> stage.</li>
+        <li>Each "Issue" action fires an event (<code>quote.issued</code>, <code>oc.issued</code>, <code>change_order.issued</code>, <code>change_order.amended_oc_issued</code>) that triggers a seeded auto-task rule creating a "Submit to customer" task. Completing that task walks the opp to the matching <code>*_submitted</code> stage via <code>advanceStageOnTaskComplete</code>.</li>
+        <li>Change orders live in their own table (<code>change_orders</code>); CO quotes are regular <code>quotes</code> rows with <code>change_order_id</code> set. A job can have many COs in sequence.</li>
         <li>All intermediate stages after <code>closed_won</code> have <code>is_won = 1</code>. The single terminal <code>completed</code> is won + terminal; <code>closed_lost</code> and <code>closed_died</code> are terminal but not won.</li>
         <li>The stage graph is enforced in <em>warn</em> mode — gate violations surface as toast warnings but don't block transitions. The picker UI suggests the next stage; the user can always jump.</li>
       </ul>
