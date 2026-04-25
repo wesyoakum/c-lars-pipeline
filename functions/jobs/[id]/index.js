@@ -220,16 +220,21 @@ export async function onRequestGet(context) {
       <div style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:start;">
 
         ${canIssueOc ? html`
-          <form method="post" action="/jobs/${escape(job.id)}/issue-oc" class="action-form">
-            <fieldset>
-              <legend>Issue Order Confirmation</legend>
-              <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem;">
-                <div><label class="field-label">OC Number *</label><input type="text" name="oc_number" value="${escape(defaultOcNumber)}" required></div>
-                <div><label class="field-label">Customer PO #</label><input type="text" name="customer_po_number" value="${escape(job.customer_po_number || job.opp_po_number || '')}"></div>
-              </div>
-              <button class="btn primary" type="submit" style="margin-top:0.5rem">Issue OC</button>
-            </fieldset>
-          </form>` : ''}
+          <fieldset class="action-form">
+            <legend>Order Confirmation</legend>
+            <p class="muted" style="margin:0 0 0.5rem;font-size:0.85em">
+              Open the OC page to review the document layout, set the OC number and
+              customer PO, and issue.
+            </p>
+            <a class="btn primary" href="/jobs/${escape(job.id)}/oc">Prepare OC \u2192</a>
+          </fieldset>` : ''}
+
+        ${!canIssueOc && job.oc_issued_at ? html`
+          <fieldset class="action-form">
+            <legend>Order Confirmation</legend>
+            <p class="muted" style="margin:0 0 0.5rem;font-size:0.85em">OC ${escape(job.oc_number || '')} issued ${escape((job.oc_issued_at || '').slice(0, 10))}.</p>
+            <a class="btn" href="/jobs/${escape(job.id)}/oc">View OC \u2192</a>
+          </fieldset>` : ''}
 
         ${canRecordAuth ? html`
           <form method="post" action="/jobs/${escape(job.id)}/record-authorization" class="action-form">
@@ -245,14 +250,21 @@ export async function onRequestGet(context) {
           </form>` : ''}
 
         ${canIssueNtp ? html`
-          <form method="post" action="/jobs/${escape(job.id)}/issue-ntp" class="action-form">
-            <fieldset>
-              <legend>Issue Notice to Proceed</legend>
-              <div><label class="field-label">NTP Number</label><input type="text" name="ntp_number" value="${escape(defaultNtpNumber)}"></div>
-              <p class="muted" style="margin:0.4rem 0; font-size:0.85em">This will mark the job as handed off.</p>
-              <button class="btn primary" type="submit" style="margin-top:0.5rem">Issue NTP</button>
-            </fieldset>
-          </form>` : ''}
+          <fieldset class="action-form">
+            <legend>Notice to Proceed</legend>
+            <p class="muted" style="margin:0 0 0.5rem;font-size:0.85em">
+              Open the NTP page to review the document layout and issue the NTP. This
+              will mark the job as handed off.
+            </p>
+            <a class="btn primary" href="/jobs/${escape(job.id)}/ntp">Prepare NTP \u2192</a>
+          </fieldset>` : ''}
+
+        ${!canIssueNtp && isEps && job.ntp_issued_at ? html`
+          <fieldset class="action-form">
+            <legend>Notice to Proceed</legend>
+            <p class="muted" style="margin:0 0 0.5rem;font-size:0.85em">NTP ${escape(job.ntp_number || '')} issued ${escape((job.ntp_issued_at || '').slice(0, 10))}.</p>
+            <a class="btn" href="/jobs/${escape(job.id)}/ntp">View NTP \u2192</a>
+          </fieldset>` : ''}
 
         ${canCreateCO ? html`
           <form method="post" action="/jobs/${escape(job.id)}/change-orders" class="action-form">

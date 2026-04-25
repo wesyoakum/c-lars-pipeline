@@ -164,17 +164,20 @@ export async function onRequestGet(context) {
 
     ${canIssueAmended ? html`
     <section class="card">
-      <h2>Issue Amended OC</h2>
-      <form method="post" action="/jobs/${escape(jobId)}/change-orders/${escape(coId)}/issue-amended-oc" class="action-form">
-        <fieldset>
-          <p class="muted" style="margin:0 0 0.5rem;font-size:0.85em">
-            The change order is accepted. Issue the amended OC to authorize work on the modified scope.
-          </p>
-          <div><label class="field-label">Amended OC Number *</label><input type="text" name="amended_oc_number" value="${escape(defaultAmendedOcNumber)}" required></div>
-          <div><label class="field-label">Notes</label><input type="text" name="notes" placeholder="Reason for amendment"></div>
-          <button class="btn primary" type="submit" style="margin-top:0.5rem">Issue Amended OC</button>
-        </fieldset>
-      </form>
+      <h2>Amended OC</h2>
+      <p class="muted" style="margin:0 0 0.5rem;font-size:0.85em">
+        The change order is accepted. Open the Amended OC page to review the document layout and issue.
+      </p>
+      <a class="btn primary" href="/jobs/${escape(jobId)}/change-orders/${escape(coId)}/amended-oc">Prepare Amended OC \u2192</a>
+    </section>` : ''}
+
+    ${co.amended_oc_issued_at ? html`
+    <section class="card">
+      <h2>Amended OC</h2>
+      <p class="muted" style="margin:0 0 0.5rem;font-size:0.85em">
+        Amended OC ${escape(co.amended_oc_number || '')} issued ${escape((co.amended_oc_issued_at || '').slice(0, 10))}.
+      </p>
+      <a class="btn" href="/jobs/${escape(jobId)}/change-orders/${escape(coId)}/amended-oc">View Amended OC \u2192</a>
     </section>` : ''}
 
     ${canCancel ? html`
