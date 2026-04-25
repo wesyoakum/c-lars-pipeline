@@ -25,25 +25,37 @@ export async function onRequestPost(context) {
   if (!job) return redirectWithFlash('/jobs', 'Job not found.', 'error');
 
   if (!(job.job_type || '').split(',').includes('eps')) {
-    return redirectWithFlash(`/jobs/${jobId}`, 'NTP is only applicable to EPS jobs.', 'error');
+    return redirectWithFlash(`/jobs/${jobId}/ntp`, 'NTP is only applicable to EPS jobs.', 'error');
   }
-  if (job.status !== 'awaiting_ntp') {
-    return redirectWithFlash(`/jobs/${jobId}`, 'Job is not awaiting NTP.', 'error');
+  if (job.ntp_issued_at) {
+    return redirectWithFlash(
+      `/jobs/${jobId}/ntp`,
+      'NTP has already been issued. Revise to bump the revision before re-issuing.',
+      'error'
+    );
   }
 
   const input = await formBody(request);
   const ts = now();
   const ntpNumber = (input.ntp_number || '').trim() || null;
+  // Re-issuance after a Revise leaves status=handed_off; first-time
+  // issuance comes in at status=awaiting_ntp. Either way the NTP being
+  // out the door bumps status to handed_off (no-op when already there).
+  const stampHandoff = job.status !== 'handed_off';
 
   await batch(env.DB, [
     stmt(env.DB,
       `UPDATE jobs
           SET ntp_number = ?, ntp_issued_at = ?, ntp_issued_by_user_id = ?,
               status = 'handed_off',
-              handed_off_at = ?, handed_off_by_user_id = ?,
+              ${stampHandoff ? 'handed_off_at = ?, handed_off_by_user_id = ?,' : ''}
               updated_at = ?
         WHERE id = ?`,
-      [ntpNumber, ts, user?.id, ts, user?.id, ts, jobId]),
+      [
+        ntpNumber, ts, user?.id,
+        ...(stampHandoff ? [ts, user?.id] : []),
+        ts, jobId,
+      ]),
     auditStmt(env.DB, {
       entityType: 'job',
       entityId: jobId,
@@ -158,8 +170,8 @@ export async function onRequestPost(context) {
   }
 
   const redirectUrl = downloadDocId
-    ? `/jobs/${jobId}?download=${encodeURIComponent(downloadDocId)}`
-    : `/jobs/${jobId}`;
+    ? `/jobs/${jobId}/ntp?highlight=${encodeURIComponent(downloadDocId)}`
+    : `/jobs/${jobId}/ntp`;
   return redirectWithFlash(
     redirectUrl,
     `NTP${ntpNumber ? ` ${ntpNumber}` : ''} issued — job handed off.`

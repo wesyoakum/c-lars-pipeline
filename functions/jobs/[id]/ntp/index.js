@@ -41,6 +41,13 @@ function fmtTimestamp(iso) {
   return iso.slice(0, 16).replace('T', ' ');
 }
 
+function formatSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export async function onRequestGet(context) {
   const { env, data, request, params } = context;
   const user = data?.user;
@@ -77,14 +84,18 @@ export async function onRequestGet(context) {
     env.DB,
     `SELECT id, original_filename, size_bytes, kind, uploaded_at
        FROM documents
-      WHERE job_id = ? AND kind = 'ntp_pdf'
+      WHERE job_id = ? AND kind IN ('ntp_pdf', 'ntp_docx')
       ORDER BY uploaded_at DESC`,
     [jobId]
   );
-  const highlightDocId = url.searchParams.get('download') || '';
+  const highlightDocId = url.searchParams.get('highlight') || '';
 
   const isIssued = !!job.ntp_issued_at;
-  const canIssue = !isIssued && job.status === 'awaiting_ntp';
+  // Allow issuance whenever the NTP isn't currently stamped — covers
+  // first-time (status=awaiting_ntp) and re-issue after a Revise
+  // (status stays handed_off, ntp_issued_at cleared).
+  const canIssue = !isIssued;
+  const canGenerate = !!docData;
   const defaultNtpNumber = job.ntp_number || `NTP-${job.number}`;
 
   // ── 1. Header card ────────────────────────────────────────────────
@@ -103,10 +114,25 @@ export async function onRequestGet(context) {
         </div>
         <div class="header-actions-stack">
           <a class="back-link" href="/jobs/${escape(jobId)}">\u2190 Job</a>
-          ${canIssue ? html`
-            <div class="header-actions">
+          <div class="header-actions">
+            ${canIssue ? html`
               <button class="btn primary" type="submit" form="ntp-issue-form">Issue NTP</button>
-            </div>` : ''}
+            ` : ''}
+            ${isIssued ? html`
+              <form method="post" action="/jobs/${escape(jobId)}/revise-ntp" class="inline-form"
+                    onsubmit="return confirm('Bump NTP to revision ${escape(String((job.ntp_revision || 1) + 1))} for re-issue?');">
+                <button class="btn" type="submit">Revise</button>
+              </form>
+            ` : ''}
+            ${canGenerate ? html`
+              <form method="post" action="/jobs/${escape(jobId)}/generate-ntp-pdf" class="inline-form">
+                <button class="btn" type="submit">Generate PDF</button>
+              </form>
+              <form method="post" action="/jobs/${escape(jobId)}/generate-ntp-docx" class="inline-form">
+                <button class="btn" type="submit">Download Word</button>
+              </form>
+            ` : ''}
+          </div>
         </div>
       </div>
 
@@ -129,8 +155,13 @@ export async function onRequestGet(context) {
             ${generatedDocs.map(d => html`
               <span class="gen-doc-row ${d.id === highlightDocId ? 'gen-doc-highlight' : ''}">
                 <a href="/documents/${escape(d.id)}/download" class="gen-doc-link" target="_blank">
-                  \uD83D\uDCC4 ${escape(d.original_filename)}
+                  ${d.kind === 'ntp_pdf' ? '\uD83D\uDCC4' : '\uD83D\uDCDD'} ${escape(d.original_filename)}
+                  <span class="muted">(${formatSize(d.size_bytes)})</span>
                 </a>
+                <form method="post" action="/documents/${escape(d.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this document?')">
+                  <input type="hidden" name="return_to" value="/jobs/${escape(jobId)}/ntp">
+                  <button type="submit" class="gen-doc-delete" title="Delete">\u00d7</button>
+                </form>
               </span>
             `)}
           </div>` : ''}
