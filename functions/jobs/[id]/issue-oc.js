@@ -37,8 +37,12 @@ export async function onRequestPost(context) {
   const job = await one(env.DB, 'SELECT * FROM jobs WHERE id = ?', [jobId]);
   if (!job) return redirectWithFlash('/jobs', 'Job not found.', 'error');
 
-  if (job.status !== 'created') {
-    return redirectWithFlash(`/jobs/${jobId}`, 'OC can only be issued when job is in Created status.', 'error');
+  if (job.oc_issued_at) {
+    return redirectWithFlash(
+      `/jobs/${jobId}/oc`,
+      'OC has already been issued. Revise to bump the revision before re-issuing.',
+      'error'
+    );
   }
 
   const input = await formBody(request);
@@ -204,7 +208,7 @@ export async function onRequestPost(context) {
     : `OC ${ocNumber} issued — awaiting customer authorization.`;
 
   const redirectUrl = downloadDocId
-    ? `/jobs/${jobId}?download=${encodeURIComponent(downloadDocId)}`
-    : `/jobs/${jobId}`;
+    ? `/jobs/${jobId}/oc?highlight=${encodeURIComponent(downloadDocId)}`
+    : `/jobs/${jobId}/oc`;
   return redirectWithFlash(redirectUrl, msg);
 }
