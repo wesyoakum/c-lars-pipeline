@@ -126,6 +126,10 @@ export async function onRequestGet(context) {
         </div>
         <div class="header-actions-stack">
           <a class="back-link" href="/jobs/${escape(jobId)}">\u2190 Job</a>
+          ${canIssue ? html`
+            <div class="header-actions">
+              <button class="btn primary" type="submit" form="oc-issue-form">Issue OC</button>
+            </div>` : ''}
         </div>
       </div>
 
@@ -202,7 +206,7 @@ export async function onRequestGet(context) {
         </div>
         <div class="quote-meta-right">
           ${canIssue ? html`
-            <form method="post" action="/jobs/${escape(jobId)}/issue-oc" class="oc-issue-form">
+            <form method="post" action="/jobs/${escape(jobId)}/issue-oc" id="oc-issue-form">
               <table class="quote-meta-table">
                 <tr>
                   <td class="meta-label">OC No:</td>
@@ -221,9 +225,6 @@ export async function onRequestGet(context) {
                   <td>${sourceQuote ? html`<a href="/opportunities/${escape(job.opp_id)}/quotes/${escape(sourceQuote.id)}">${escape(sourceQuote.number)} ${escape(sourceQuote.revision || '')}</a>` : html`<span class="muted">\u2014</span>`}</td>
                 </tr>
               </table>
-              <div style="margin-top:0.75rem;display:flex;justify-content:flex-end">
-                <button class="btn primary" type="submit">Issue OC</button>
-              </div>
             </form>
           ` : html`
             <table class="quote-meta-table">

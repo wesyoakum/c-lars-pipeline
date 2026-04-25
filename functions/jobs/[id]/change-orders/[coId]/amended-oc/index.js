@@ -121,6 +121,10 @@ export async function onRequestGet(context) {
         </div>
         <div class="header-actions-stack">
           <a class="back-link" href="/jobs/${escape(jobId)}/change-orders/${escape(coId)}">\u2190 Change Order</a>
+          ${canIssue ? html`
+            <div class="header-actions">
+              <button class="btn primary" type="submit" form="amended-oc-issue-form">Issue Amended OC</button>
+            </div>` : ''}
         </div>
       </div>
 
@@ -198,7 +202,7 @@ export async function onRequestGet(context) {
         </div>
         <div class="quote-meta-right">
           ${canIssue ? html`
-            <form method="post" action="/jobs/${escape(jobId)}/change-orders/${escape(coId)}/issue-amended-oc" class="amended-oc-issue-form">
+            <form method="post" action="/jobs/${escape(jobId)}/change-orders/${escape(coId)}/issue-amended-oc" id="amended-oc-issue-form">
               <table class="quote-meta-table">
                 <tr>
                   <td class="meta-label">Amended OC No:</td>
@@ -225,9 +229,6 @@ export async function onRequestGet(context) {
                 Notes
                 <input type="text" name="notes" placeholder="Reason for amendment (optional)" class="meta-input" style="width:100%">
               </label>
-              <div style="margin-top:0.75rem;display:flex;justify-content:flex-end">
-                <button class="btn primary" type="submit">Issue Amended OC</button>
-              </div>
             </form>
           ` : html`
             <table class="quote-meta-table">

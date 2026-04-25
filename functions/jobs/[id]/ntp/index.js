@@ -103,6 +103,10 @@ export async function onRequestGet(context) {
         </div>
         <div class="header-actions-stack">
           <a class="back-link" href="/jobs/${escape(jobId)}">\u2190 Job</a>
+          ${canIssue ? html`
+            <div class="header-actions">
+              <button class="btn primary" type="submit" form="ntp-issue-form">Issue NTP</button>
+            </div>` : ''}
         </div>
       </div>
 
@@ -168,7 +172,7 @@ export async function onRequestGet(context) {
         </div>
         <div class="quote-meta-right">
           ${canIssue ? html`
-            <form method="post" action="/jobs/${escape(jobId)}/issue-ntp" class="ntp-issue-form">
+            <form method="post" action="/jobs/${escape(jobId)}/issue-ntp" id="ntp-issue-form">
               <table class="quote-meta-table">
                 <tr>
                   <td class="meta-label">NTP No:</td>
@@ -188,9 +192,6 @@ export async function onRequestGet(context) {
                 </tr>
               </table>
               <p class="muted" style="margin:0.5rem 0 0;font-size:0.8em">Issuing the NTP marks the job as handed off.</p>
-              <div style="margin-top:0.5rem;display:flex;justify-content:flex-end">
-                <button class="btn primary" type="submit">Issue NTP</button>
-              </div>
             </form>
           ` : html`
             <table class="quote-meta-table">
