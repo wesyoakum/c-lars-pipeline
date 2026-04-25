@@ -7,11 +7,13 @@
 // button that POSTs here. This route:
 //
 //   1. Guards that the quote is actually accepted.
-//   2. Looks up the active (non-cancelled) job on the parent opportunity.
-//      - If one already exists, redirects to /jobs/:jobId/oc — the OC
-//        document-layout preview where the OC number / customer PO are
-//        entered and the OC is issued.
-//      - If not, creates a new job (mirroring POST /jobs) and redirects
+//   2. Looks up an existing job sourced from THIS specific quote
+//      (jobs.quote_id = quoteId). An opportunity can have multiple
+//      accepted quotes, each producing its own job — a job from quote A
+//      must not be reused for quote B because the OC fields live on
+//      the job row and would overwrite each other.
+//      - If one already exists, redirects to /jobs/:jobId/oc.
+//      - If not, creates a new job (with quote_id set) and redirects
 //        straight into /jobs/:jobId/oc.
 //
 // /jobs/:jobId/oc submits to /jobs/:jobId/issue-oc which fires the
@@ -54,14 +56,14 @@ export async function onRequestPost(context) {
     );
   }
 
-  // Existing active job on this opp? If so, go straight there — the
-  // user almost certainly just wants to hit the Issue OC form on the
-  // job detail page.
+  // Existing job sourced from THIS quote? Per-quote check, not per-opp:
+  // a single opportunity can produce multiple jobs (one per accepted
+  // quote), so we must not redirect to a sibling quote's job.
   const existing = await one(
     env.DB,
     `SELECT id, number, status FROM jobs
-      WHERE opportunity_id = ? AND status != 'cancelled'`,
-    [oppId]
+      WHERE quote_id = ? AND status != 'cancelled'`,
+    [quoteId]
   );
   if (existing) {
     return redirectWithFlash(
@@ -96,12 +98,12 @@ export async function onRequestPost(context) {
     stmt(
       env.DB,
       `INSERT INTO jobs
-         (id, number, opportunity_id, job_type, status, title,
+         (id, number, opportunity_id, quote_id, job_type, status, title,
           customer_po_number, ntp_required, created_at, updated_at,
           created_by_user_id)
-       VALUES (?, ?, ?, ?, 'created', ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, 'created', ?, ?, ?, ?, ?, ?)`,
       [
-        id, number, oppId, opp.transaction_type, title,
+        id, number, oppId, quoteId, opp.transaction_type, title,
         customerPo, isEps ? 1 : 0, ts, ts, user?.id ?? null,
       ]
     ),
@@ -113,8 +115,8 @@ export async function onRequestPost(context) {
       summary: `Job ${number} created from accepted quote ${quote.number} Rev ${quote.revision}`,
       changes: {
         opportunity_id: oppId,
+        quote_id: quoteId,
         job_type: opp.transaction_type,
-        source_quote_id: quoteId,
       },
     }),
   ]);

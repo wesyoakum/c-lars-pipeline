@@ -80,18 +80,27 @@ export async function onRequestGet(context) {
   const docData = await getOcDocData(env, jobId);
 
   // Pull the accepting quote separately so we can show its number and
-  // link to it from the OC page.
-  const sourceQuote = job.opportunity_id
+  // link to it from the OC page. Prefer the job's linked source quote
+  // (jobs.quote_id) when present — multiple jobs can come from the
+  // same opp, so we can't just take "most recent on opp."
+  let sourceQuote = job.quote_id
     ? await one(
         env.DB,
-        `SELECT id, number, revision, status FROM quotes
-          WHERE opportunity_id = ?
-            AND status IN ('accepted', 'issued', 'revision_issued')
-          ORDER BY (status = 'accepted') DESC, updated_at DESC
-          LIMIT 1`,
-        [job.opportunity_id]
+        `SELECT id, number, revision, status FROM quotes WHERE id = ?`,
+        [job.quote_id]
       )
     : null;
+  if (!sourceQuote && job.opportunity_id) {
+    sourceQuote = await one(
+      env.DB,
+      `SELECT id, number, revision, status FROM quotes
+        WHERE opportunity_id = ?
+          AND status IN ('accepted', 'issued', 'revision_issued')
+        ORDER BY (status = 'accepted') DESC, updated_at DESC
+        LIMIT 1`,
+      [job.opportunity_id]
+    );
+  }
 
   // Generated OC PDFs for the documents strip.
   const generatedDocs = await all(

@@ -254,6 +254,20 @@ export async function onRequestGet(context) {
     quoteRows = rows;
   }
 
+  // Jobs — an opportunity can produce multiple jobs (one per accepted
+  // quote). Listed on the overview so the user can navigate to each.
+  const jobRows = await all(
+    env.DB,
+    `SELECT j.id, j.number, j.status, j.job_type, j.oc_number,
+            j.oc_issued_at, j.handed_off_at, j.created_at, j.quote_id,
+            q.number AS source_quote_number, q.revision AS source_quote_revision
+       FROM jobs j
+       LEFT JOIN quotes q ON q.id = j.quote_id
+      WHERE j.opportunity_id = ?
+      ORDER BY j.created_at DESC`,
+    [oppId]
+  );
+
   // Tasks
   let taskRows = [];
   let taskBadgeCount = 0;
@@ -777,6 +791,30 @@ export async function onRequestGet(context) {
                   <td class="row-actions" style="white-space:nowrap"><a class="btn small" href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">Open</a></td>
                 </tr>`;
               })}
+            </tbody>
+          </table>
+        </section>`
+      : ''}
+
+    ${jobRows.length > 0
+      ? html`
+        <section class="card">
+          <div class="card-header">
+            <h2>Jobs</h2>
+          </div>
+          <table class="data compact">
+            <thead><tr><th>Number</th><th>Type</th><th>From quote</th><th>OC</th><th>Status</th><th>Created</th><th></th></tr></thead>
+            <tbody>
+              ${jobRows.map(j => html`
+                <tr>
+                  <td style="white-space:nowrap"><code>${escape(j.number)}</code></td>
+                  <td style="white-space:nowrap">${escape((j.job_type || '').split(',').map(t => t.trim()).join(', '))}</td>
+                  <td style="white-space:nowrap">${j.quote_id ? html`<a href="/opportunities/${escape(opp.id)}/quotes/${escape(j.quote_id)}">${escape(j.source_quote_number || '')} ${escape(j.source_quote_revision || '')}</a>` : html`<span class="muted">—</span>`}</td>
+                  <td style="white-space:nowrap">${j.oc_number ? html`<code>${escape(j.oc_number)}</code>` : html`<span class="muted">—</span>`}</td>
+                  <td style="white-space:nowrap"><span class="pill">${escape(j.status)}</span></td>
+                  <td class="muted" style="white-space:nowrap">${escape((j.created_at || '').slice(0, 10))}</td>
+                  <td class="row-actions" style="white-space:nowrap"><a class="btn small" href="/jobs/${escape(j.id)}">Open</a></td>
+                </tr>`)}
             </tbody>
           </table>
         </section>`

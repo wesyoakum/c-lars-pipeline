@@ -606,13 +606,24 @@ export async function getOcDocData(env, jobId) {
   );
   if (!job) return null;
 
-  let quote = await one(
-    env.DB,
-    `SELECT id FROM quotes
-      WHERE opportunity_id = ? AND status = 'accepted'
-      ORDER BY updated_at DESC LIMIT 1`,
-    [job.opportunity_id]
-  );
+  // Prefer the job's source quote (jobs.quote_id) — an opportunity
+  // can have multiple accepted quotes feeding multiple jobs, so we
+  // can't just pick "the most recent accepted on the opp" without
+  // risk of pulling the wrong quote's data. Fall back to the most-
+  // recent accepted/issued for legacy jobs created before quote_id
+  // was wired on the INSERT.
+  let quote = job.quote_id
+    ? await one(env.DB, 'SELECT id FROM quotes WHERE id = ?', [job.quote_id])
+    : null;
+  if (!quote) {
+    quote = await one(
+      env.DB,
+      `SELECT id FROM quotes
+        WHERE opportunity_id = ? AND status = 'accepted'
+        ORDER BY updated_at DESC LIMIT 1`,
+      [job.opportunity_id]
+    );
+  }
   if (!quote) {
     quote = await one(
       env.DB,
