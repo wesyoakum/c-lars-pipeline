@@ -75,6 +75,25 @@ export async function onRequestPost(context) {
   }
 
   const input = await formBody(request);
+
+  // If the user submits an empty unit_price AND a price build exists
+  // for this line with a quote_price_user, fall back to the build
+  // price. This lets a user "delete the typed price" to revert to the
+  // build's calculated price — matches the behavior described on the
+  // quote line-items UI (typed → overrides; cleared → restores build).
+  const rawUnit = input.unit_price;
+  const unitBlank = rawUnit === undefined || String(rawUnit).trim() === '';
+  if (unitBlank) {
+    const build = await one(
+      env.DB,
+      'SELECT quote_price_user FROM cost_builds WHERE quote_line_id = ?',
+      [lineId]
+    );
+    if (build?.quote_price_user != null) {
+      input.unit_price = String(build.quote_price_user);
+    }
+  }
+
   const { ok, value, errors } = validateQuoteLine(input);
   if (!ok) {
     const firstErr = Object.values(errors)[0] ?? 'Invalid line item.';

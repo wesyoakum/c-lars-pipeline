@@ -603,7 +603,12 @@ export async function onRequestGet(context) {
               <td class="col-build">
                 ${l.price_build_label
                   ? html`<a href="${pbUrl(l.id)}" class="pill ${l.price_build_status === 'locked' ? 'pill-locked' : ''}" style="font-size:0.8rem">${escape(l.build_number || l.price_build_label)}</a>`
-                  : (!readOnly ? html`<a href="${pbUrl(l.id)}" class="btn small">+</a>` : html`<span class="muted">\u2014</span>`)}
+                  : (!readOnly ? html`
+                      <form method="post" action="${pbUrl(l.id)}" class="inline-form" style="display:inline">
+                        <input type="hidden" name="_action" value="create">
+                        <input type="hidden" name="label" value="${escape(l.description || l.title || 'Price build')}">
+                        <button class="btn small" type="submit" title="Create price build for this line">+</button>
+                      </form>` : html`<span class="muted">\u2014</span>`)}
                 ${!readOnly ? html`
                   <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}/delete" class="inline-form" style="display:inline">
                     <button class="btn small danger" type="submit" title="Delete line">\u00d7</button>
