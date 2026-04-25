@@ -394,8 +394,6 @@ function buildEventKey(triggerName, payload) {
       // Keyed on change_order id + revision so successive amended-OC
       // re-issues each create their own submit task.
       return `change_order.amended_oc_issued:${payload?.change_order?.id}:${payload?.change_order?.amended_oc_number ?? ''}:${payload?.change_order?.amended_oc_revision ?? ''}`;
-    case 'authorization.received':
-      return `authorization.received:${payload?.job?.id}:${payload?.job?.authorization_received_at ?? ''}`;
     case 'job.handed_off':
       return `job.handed_off:${payload?.job?.id}:${payload?.job?.handed_off_at ?? ''}`;
     case 'job.completed':

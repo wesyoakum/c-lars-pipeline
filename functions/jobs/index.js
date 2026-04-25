@@ -46,7 +46,6 @@ const TYPE_LABELS = {
 
 const STATUS_LABELS = {
   created: 'Created',
-  awaiting_authorization: 'Awaiting Authorization',
   awaiting_ntp: 'Awaiting NTP',
   handed_off: 'Handed Off',
   cancelled: 'Cancelled',

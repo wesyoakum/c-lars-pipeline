@@ -20,7 +20,6 @@ const TYPE_LABELS = {
 
 const STATUS_LABELS = {
   created: 'Created',
-  awaiting_authorization: 'Awaiting Authorization',
   awaiting_ntp: 'Awaiting NTP',
   handed_off: 'Handed Off',
   cancelled: 'Cancelled',
@@ -29,7 +28,7 @@ const STATUS_LABELS = {
 function statusClass(status) {
   if (status === 'handed_off') return 'pill-green';
   if (status === 'cancelled') return 'pill-red';
-  if (status === 'awaiting_authorization' || status === 'awaiting_ntp') return 'pill-yellow';
+  if (status === 'awaiting_ntp') return 'pill-yellow';
   return '';
 }
 
@@ -111,7 +110,6 @@ export async function onRequestGet(context) {
   const jobTypes = parseTransactionTypes(job.job_type);
   const isEps = jobTypes.includes('eps');
   const canIssueOc = job.status === 'created';
-  const canRecordAuth = isEps && job.status === 'awaiting_authorization';
   const canIssueNtp = isEps && job.status === 'awaiting_ntp';
   // Change orders are available on any active job. The user opens a CO
   // when scope changes mid-project; each CO runs its own quote cycle →
@@ -175,25 +173,12 @@ export async function onRequestGet(context) {
         </div>
         ${isEps ? html`
           <div class="detail-pair">
-            <span class="detail-label">Authorization</span>
-            <span class="detail-value">${job.authorization_received_at ? escape(job.authorization_received_at.slice(0, 10)) : '—'}</span>
-          </div>
-          <div class="detail-pair">
             <span class="detail-label">NTP Number</span>
             <span class="detail-value">${escape(job.ntp_number || '—')}</span>
           </div>
           <div class="detail-pair">
             <span class="detail-label">NTP Issued</span>
             <span class="detail-value">${job.ntp_issued_at ? html`${escape(job.ntp_issued_at.slice(0, 10))} by ${escape(job.ntp_issued_by_name || '—')}` : '—'}</span>
-          </div>` : ''}
-        ${(job.ceo_concurrence_at || job.cfo_concurrence_at) ? html`
-          <div class="detail-pair">
-            <span class="detail-label">CEO Concurrence</span>
-            <span class="detail-value">${job.ceo_concurrence_at ? html`${escape(job.ceo_concurrence_at.slice(0, 10))} — ${escape(job.ceo_concurrence_by || '—')}` : '—'}</span>
-          </div>
-          <div class="detail-pair">
-            <span class="detail-label">CFO Concurrence</span>
-            <span class="detail-value">${job.cfo_concurrence_at ? html`${escape(job.cfo_concurrence_at.slice(0, 10))} — ${escape(job.cfo_concurrence_by || '—')}` : '—'}</span>
           </div>` : ''}
         <div class="detail-pair">
           <span class="detail-label">External PM System</span>
@@ -237,19 +222,6 @@ export async function onRequestGet(context) {
             <p class="muted" style="margin:0 0 0.5rem;font-size:0.85em">OC ${escape(job.oc_number || '')} issued ${escape((job.oc_issued_at || '').slice(0, 10))}.</p>
             <a class="btn" href="/jobs/${escape(job.id)}/oc">View OC \u2192</a>
           </fieldset>` : ''}
-
-        ${canRecordAuth ? html`
-          <form method="post" action="/jobs/${escape(job.id)}/record-authorization" class="action-form">
-            <fieldset>
-              <legend>Record Customer Authorization</legend>
-              <div><label class="field-label">Notes</label><input type="text" name="authorization_notes" placeholder="Optional notes"></div>
-              <div style="margin-top:0.4rem; display:grid; grid-template-columns:1fr 1fr; gap:0.5rem;">
-                <div><label class="field-label">CEO Concurrence</label><input type="text" name="ceo_concurrence_by" placeholder="Name (optional)"></div>
-                <div><label class="field-label">CFO Concurrence</label><input type="text" name="cfo_concurrence_by" placeholder="Name (optional)"></div>
-              </div>
-              <button class="btn primary" type="submit" style="margin-top:0.5rem">Record Authorization</button>
-            </fieldset>
-          </form>` : ''}
 
         ${canIssueNtp ? html`
           <fieldset class="action-form">

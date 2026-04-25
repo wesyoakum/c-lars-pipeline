@@ -3,7 +3,7 @@
 // POST /jobs/:id/issue-oc — Capture OC number and issue the Order Confirmation.
 //
 // For spares/service: status → handed_off (OC is the final step).
-// For eps: status → awaiting_authorization (need customer auth before NTP).
+// For eps: status → awaiting_ntp (NTP is the next step).
 // For refurb: status → handed_off (baseline OC).
 //
 // Also advances the parent opportunity's stage to 'oc_issued' (if it
@@ -54,14 +54,13 @@ export async function onRequestPost(context) {
   const ts = now();
   const customerPo = (input.customer_po_number || '').trim() || job.customer_po_number;
 
-  // Determine next status based on job type
-  let newStatus;
-  if ((job.job_type || '').split(',').includes('eps')) {
-    newStatus = 'awaiting_authorization';
-  } else {
-    // spares, refurb, service — OC means handed off
-    newStatus = 'handed_off';
-  }
+  // Determine next status based on job type. EPS gates work commencement
+  // on the NTP, not the OC, so OC issuance leaves the job awaiting NTP;
+  // spares/refurb/service treat the OC itself as the work-commence
+  // trigger.
+  const newStatus = (job.job_type || '').split(',').includes('eps')
+    ? 'awaiting_ntp'
+    : 'handed_off';
 
   // Load parent opp for downstream event payloads. Stage advance is
   // handled below via changeOppStage — we never write the dead
@@ -137,8 +136,8 @@ export async function onRequestPost(context) {
         await fireEvent(env, 'oc.issued', payloadBase, user);
 
         // Spares / refurb / service: the job also handed off at this
-        // moment. EPS stays in awaiting_authorization and will fire
-        // handed_off later from issue-ntp.js.
+        // moment. EPS stays in awaiting_ntp and fires handed_off
+        // later from issue-ntp.js.
         if (newStatus === 'handed_off') {
           await fireEvent(env, 'job.handed_off', payloadBase, user);
         }
@@ -205,7 +204,7 @@ export async function onRequestPost(context) {
 
   const msg = newStatus === 'handed_off'
     ? `OC ${ocNumber} issued — job handed off.`
-    : `OC ${ocNumber} issued — awaiting customer authorization.`;
+    : `OC ${ocNumber} issued — awaiting NTP.`;
 
   const redirectUrl = downloadDocId
     ? `/jobs/${jobId}/oc?highlight=${encodeURIComponent(downloadDocId)}`

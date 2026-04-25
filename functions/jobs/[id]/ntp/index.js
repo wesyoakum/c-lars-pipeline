@@ -23,7 +23,6 @@ import { renderJobTabs } from '../../../lib/job-tabs.js';
 
 const STATUS_LABELS = {
   created: 'Created',
-  awaiting_authorization: 'Awaiting Authorization',
   awaiting_ntp: 'Awaiting NTP',
   handed_off: 'Handed Off',
   cancelled: 'Cancelled',
@@ -33,7 +32,7 @@ const STATUS_LABELS = {
 function statusPillClass(s) {
   if (s === 'handed_off' || s === 'complete') return 'pill-green';
   if (s === 'cancelled') return 'pill-red';
-  if (s === 'awaiting_authorization' || s === 'awaiting_ntp') return 'pill-yellow';
+  if (s === 'awaiting_ntp') return 'pill-yellow';
   return '';
 }
 
@@ -145,7 +144,6 @@ export async function onRequestGet(context) {
               by ${escape(job.ntp_issued_by_name || 'unknown')}
               · NTP ${escape(job.ntp_number || '\u2014')}
               · OC ${escape(job.oc_number || '\u2014')}
-              ${job.authorization_received_at ? html` · Customer auth ${escape(job.authorization_received_at.slice(0, 10))}` : ''}
             </p>
           </div>` : ''}
 
@@ -215,10 +213,6 @@ export async function onRequestGet(context) {
                   <td><span class="muted">Stamped at issuance</span></td>
                 </tr>
                 <tr>
-                  <td class="meta-label">Authorization:</td>
-                  <td>${escape(job.authorization_received_at ? job.authorization_received_at.slice(0, 10) : '\u2014')}</td>
-                </tr>
-                <tr>
                   <td class="meta-label">References OC:</td>
                   <td><strong>${escape(job.oc_number || '\u2014')}</strong></td>
                 </tr>
@@ -234,10 +228,6 @@ export async function onRequestGet(context) {
               <tr>
                 <td class="meta-label">Date:</td>
                 <td>${escape((job.ntp_issued_at || '').slice(0, 10) || '\u2014')}</td>
-              </tr>
-              <tr>
-                <td class="meta-label">Authorization:</td>
-                <td>${escape(job.authorization_received_at ? job.authorization_received_at.slice(0, 10) : '\u2014')}</td>
               </tr>
               <tr>
                 <td class="meta-label">References OC:</td>

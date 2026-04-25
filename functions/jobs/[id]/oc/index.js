@@ -26,7 +26,6 @@ import { renderJobTabs } from '../../../lib/job-tabs.js';
 
 const STATUS_LABELS = {
   created: 'Created',
-  awaiting_authorization: 'Awaiting Authorization',
   awaiting_ntp: 'Awaiting NTP',
   handed_off: 'Handed Off',
   cancelled: 'Cancelled',
@@ -36,7 +35,7 @@ const STATUS_LABELS = {
 function statusPillClass(s) {
   if (s === 'handed_off' || s === 'complete') return 'pill-green';
   if (s === 'cancelled') return 'pill-red';
-  if (s === 'awaiting_authorization' || s === 'awaiting_ntp') return 'pill-yellow';
+  if (s === 'awaiting_ntp') return 'pill-yellow';
   return '';
 }
 
