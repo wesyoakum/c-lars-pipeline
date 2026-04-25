@@ -1389,6 +1389,18 @@ export async function onRequestGet(context) {
           if (row) {
             var extCell = row.querySelector('[data-line-extended]');
             if (extCell) extCell.textContent = fmtDollar(data.extended_price);
+            // Sync the unit_price input to the server's authoritative
+            // value. Lets the build-price fallback show up immediately
+            // when the user clears the input (server resolved it to
+            // the linked price build's quote_price_user). Skip when
+            // the input is focused so we don't blow away in-progress
+            // typing.
+            if (typeof data.unit_price === 'number') {
+              var priceInput = row.querySelector('[name="unit_price"]');
+              if (priceInput && document.activeElement !== priceInput) {
+                priceInput.value = String(data.unit_price);
+              }
+            }
           }
         }
         // Update subtotal and total in the table footer

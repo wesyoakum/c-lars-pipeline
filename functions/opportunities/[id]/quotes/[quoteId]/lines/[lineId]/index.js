@@ -188,6 +188,11 @@ export async function onRequestPost(context) {
     return new Response(JSON.stringify({
       ok: true,
       lineId,
+      // Echo the resolved unit_price (post-fallback) so the client can
+      // sync the input — when the user clears the field the build's
+      // quote_price_user gets substituted server-side and the input
+      // should reflect that immediately, not only after refresh.
+      unit_price: value.unit_price,
       extended_price: extended,
       subtotal_price: sub,
       total_price: tot,
