@@ -19,6 +19,7 @@ import { layout, htmlResponse, html, raw, escape } from '../../../lib/layout.js'
 import { redirectWithFlash, readFlash } from '../../../lib/http.js';
 import { templateManagerHtml } from '../../../lib/template-catalog.js';
 import { getOcDocData } from '../../../lib/doc-generate.js';
+import { renderJobTabs } from '../../../lib/job-tabs.js';
 
 const STATUS_LABELS = {
   created: 'Created',
@@ -321,7 +322,8 @@ export async function onRequestGet(context) {
     </section>
   `;
 
-  const body = headerSection + bannerCard + detailsSection + scopeSection + footerSection + templatesSection;
+  const tabs = renderJobTabs(jobId, job.job_type, 'ntp');
+  const body = tabs + headerSection + bannerCard + detailsSection + scopeSection + footerSection + templatesSection;
 
   return htmlResponse(
     layout(`NTP ${job.ntp_number || job.number}`, body, {

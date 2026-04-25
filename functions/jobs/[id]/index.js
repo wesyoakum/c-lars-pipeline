@@ -9,6 +9,7 @@ import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
 import { redirectWithFlash, readFlash } from '../../lib/http.js';
 import { parseTransactionTypes } from '../../lib/validators.js';
 import { templateTypeForOC, templateManagerHtml } from '../../lib/template-catalog.js';
+import { renderJobTabs } from '../../lib/job-tabs.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
@@ -140,6 +141,7 @@ export async function onRequestGet(context) {
   );
 
   const body = html`
+    ${renderJobTabs(job.id, job.job_type, 'overview')}
     <section class="card" x-data="jobInline('${escape(job.id)}')">
       <div class="card-header">
         <h1 class="page-title">

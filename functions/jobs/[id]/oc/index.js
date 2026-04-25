@@ -22,6 +22,7 @@ import { layout, htmlResponse, html, raw, escape } from '../../../lib/layout.js'
 import { redirectWithFlash, readFlash } from '../../../lib/http.js';
 import { templateManagerHtml, templateTypeForOC } from '../../../lib/template-catalog.js';
 import { getOcDocData } from '../../../lib/doc-generate.js';
+import { renderJobTabs } from '../../../lib/job-tabs.js';
 
 const STATUS_LABELS = {
   created: 'Created',
@@ -393,7 +394,8 @@ export async function onRequestGet(context) {
     </section>
   `;
 
-  const body = headerSection + bannerCard + detailsSection + linesSection + footerSection + templatesSection;
+  const tabs = renderJobTabs(jobId, job.job_type, 'oc');
+  const body = tabs + headerSection + bannerCard + detailsSection + linesSection + footerSection + templatesSection;
 
   return htmlResponse(
     layout(`OC ${job.oc_number || job.number}`, body, {
