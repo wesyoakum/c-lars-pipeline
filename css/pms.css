@@ -2534,6 +2534,17 @@ table.data.compact td {
   display: block;
   margin: 0;
 }
+/* Inputs in qty/unit/price cells must fit inside their fixed-width
+   columns. Without this they inherit the .num-input default of 6rem
+   (~96px) which overflows the 70px qty/unit cells and visually sits on
+   top of the next column. Specificity has to match table.data.compact
+   td input.num-input (0,3,3) so the per-column width wins. */
+table.data.compact.quote-lines-table .col-qty input.num-input,
+table.data.compact.quote-lines-table .col-unit input,
+table.data.compact.quote-lines-table .col-price input.num-input {
+  width: 100%;
+  box-sizing: border-box;
+}
 .line-item-fields {
   display: flex;
   gap: 0.5rem;
