@@ -8,15 +8,15 @@
 //
 //   1. Guards that the quote is actually accepted.
 //   2. Looks up the active (non-cancelled) job on the parent opportunity.
-//      - If one already exists, redirects to /jobs/:jobId so the user
-//        can use the existing "Issue Order Confirmation" form there.
+//      - If one already exists, redirects to /jobs/:jobId/oc — the OC
+//        document-layout preview where the OC number / customer PO are
+//        entered and the OC is issued.
 //      - If not, creates a new job (mirroring POST /jobs) and redirects
-//        to the freshly-created /jobs/:jobId page.
+//        straight into /jobs/:jobId/oc.
 //
-// The OC number itself (and any customer PO) is entered on the job
-// detail page via the existing issue-oc form — that route fires the
-// oc.issued auto-task event which drives the seeded "Notify Finance to
-// send initial invoice" rule (migration 0037).
+// /jobs/:jobId/oc submits to /jobs/:jobId/issue-oc which fires the
+// oc.issued auto-task event (drives the seeded "Notify Finance to send
+// initial invoice" rule, migration 0037).
 //
 // Why a separate route rather than reusing POST /jobs directly:
 //   - POST /jobs expects form fields (`opportunity_id`, etc.). We want
@@ -65,8 +65,8 @@ export async function onRequestPost(context) {
   );
   if (existing) {
     return redirectWithFlash(
-      `/jobs/${existing.id}`,
-      `Using existing job ${existing.number}. Enter the OC number below to issue it.`
+      `/jobs/${existing.id}/oc`,
+      `Using existing job ${existing.number}. Review the OC and issue.`
     );
   }
 
@@ -120,7 +120,7 @@ export async function onRequestPost(context) {
   ]);
 
   return redirectWithFlash(
-    `/jobs/${id}`,
-    `Job ${number} created from ${quote.number} Rev ${quote.revision}. Enter the OC number below to issue it.`
+    `/jobs/${id}/oc`,
+    `Job ${number} created from ${quote.number} Rev ${quote.revision}. Review the OC and issue.`
   );
 }
