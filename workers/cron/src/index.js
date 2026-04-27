@@ -39,7 +39,7 @@ export default {
     if (request.method === 'GET' && url.pathname === '/') {
       return jsonResponse({
         ok: true,
-        name: 'c-lars-pipeline-cron',
+        name: 'c-lars-pms-cron',
         message: 'Sidecar cron Worker. POST /__run with x-cron-secret to fire a sweep.',
       });
     }
@@ -79,7 +79,7 @@ async function runSweep(env) {
       method: 'POST',
       headers: {
         'x-cron-secret': env.CRON_SECRET,
-        'user-agent': 'c-lars-pipeline-cron/1.0',
+        'user-agent': 'c-lars-pms-cron/1.0',
       },
     });
   } catch (err) {
@@ -100,7 +100,7 @@ async function runSweep(env) {
   // Log a compact summary to `wrangler tail` so it's easy to confirm
   // the sweep fired and see the per-trigger counts at a glance.
   console.log(JSON.stringify({
-    cron: 'c-lars-pipeline-cron',
+    cron: 'c-lars-pms-cron',
     startedAt,
     target,
     status: res.status,

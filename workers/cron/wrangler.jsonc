@@ -16,7 +16,7 @@
   //   npx wrangler pages secret put CRON_SECRET
   //
   // Manual smoke test (no schedule wait):
-  //   curl -X POST https://c-lars-pipeline-cron.<account>.workers.dev/__run \
+  //   curl -X POST https://c-lars-pms-cron.<account>.workers.dev/__run \
   //     -H "x-cron-secret: $CRON_SECRET"
   //
   // Schedule: once per day at 14:00 UTC = 09:00 America/Chicago (CST).
@@ -24,7 +24,7 @@
   // so running more often just hits the dedup gate. If we ever want
   // sub-daily cadence (e.g. hourly expiring-soon scans for a last-day
   // quote), change the bucket key too.
-  "name": "c-lars-pipeline-cron",
+  "name": "c-lars-pms-cron",
   "main": "src/index.js",
   "compatibility_date": "2026-04-17",
   "triggers": {
@@ -34,6 +34,6 @@
     // The public URL of the Pages deployment. The Worker POSTs to
     // `${PIPELINE_URL}/api/cron/sweep`.
     // Pointed at the raw Pages URL until the custom domain is wired up.
-    "PIPELINE_URL": "https://c-lars-pipeline.pages.dev"
+    "PIPELINE_URL": "https://c-lars-pms.pages.dev"
   }
 }
