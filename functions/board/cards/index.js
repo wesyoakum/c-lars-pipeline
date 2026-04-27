@@ -63,6 +63,14 @@ export async function onRequestPost(context) {
     return json({ ok: false, error: e.message }, 400);
   }
 
+  // Site-wide messaging kill-switch (migration 0049). The composer
+  // UI is hidden when disabled (see BOARD_LEFT_MARKUP gate in
+  // functions/lib/layout.js); this is defense-in-depth for direct
+  // API callers.
+  if (scope === 'direct' && !user._sitePrefs?.messaging_enabled) {
+    return json({ ok: false, error: 'Messaging is disabled.' }, 403);
+  }
+
   // Parse refs once — also used to infer message target below.
   const refs = parseRefs(body);
 

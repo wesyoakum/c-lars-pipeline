@@ -53,7 +53,20 @@ export async function resolveUser(request, env) {
     displayName = DEV_USER_NAME;
   }
 
-  return upsertUser(env.DB, email, displayName);
+  const user = await upsertUser(env.DB, email, displayName);
+
+  // Attach site-wide feature flags to the user object so layout()
+  // can read them without every route having to add a separate
+  // opts field. Single-row table; one cheap lookup per request.
+  const sitePrefs = await one(
+    env.DB,
+    'SELECT messaging_enabled FROM site_prefs WHERE id = 1'
+  );
+  user._sitePrefs = {
+    messaging_enabled: sitePrefs?.messaging_enabled ? 1 : 0,
+  };
+
+  return user;
 }
 
 /**

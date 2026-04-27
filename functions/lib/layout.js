@@ -1120,7 +1120,7 @@ export function layout(title, body, opts = {}) {
   </div>
   ${WIZARD_MODAL_MARKUP}
   ${BLOCKER_MODAL_MARKUP}
-  ${BOARD_LEFT_MARKUP}
+  ${user._sitePrefs?.messaging_enabled ? BOARD_LEFT_MARKUP : ''}
   ${BOARD_RIGHT_MARKUP}` : ''}
   ${flash ? `<div class="flash flash-${escape(flash.kind ?? 'info')}">${escape(flash.message)}</div>` : ''}
   ${user ? `<script>${displayPrefsBootScript(user)}</script>` : ''}

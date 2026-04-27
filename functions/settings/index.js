@@ -50,6 +50,7 @@ export async function onRequestGet(context) {
   // Admin-only: per-quote-type validity days for the editor below.
   let validityDays = null;
   let epsSchedule = null;
+  let messagingEnabled = 0;
   if (isAdmin) {
     // Current per-quote-type validity days — used by the Settings editor
     // below. getQuoteValidityDays falls back to 14 when no row exists.
@@ -59,6 +60,9 @@ export async function onRequestGet(context) {
     }
     // Current EPS default payment schedule (migration 0040).
     epsSchedule = await loadEpsSchedule(env);
+    // Site-wide messaging kill-switch (migration 0049).
+    const sp = await one(env.DB, 'SELECT messaging_enabled FROM site_prefs WHERE id = 1');
+    messagingEnabled = sp?.messaging_enabled ? 1 : 0;
   }
 
   const sa = prefs.show_alias ? 1 : 0;
@@ -133,6 +137,23 @@ export async function onRequestGet(context) {
     </section>
 
     ${isAdmin ? html`
+      <section class="card" x-data="messagingFeatureToggle(${messagingEnabled})">
+        <h2>Features</h2>
+        <p class="muted">Site-wide feature toggles. Changes apply to everyone immediately.</p>
+        <div class="settings-prefs-list">
+          <div class="settings-pref-row">
+            <div class="settings-pref-label">
+              <strong>Team messaging</strong>
+              <span class="muted">The "Message Everyone" sidebar where users send broadcast or @-mentioned messages. When off, the sidebar is hidden for all users and the send endpoint rejects new messages. Existing messages are preserved.</span>
+            </div>
+            <label class="toggle-switch" :class="{ 'toggle-switch--on': enabled }">
+              <input type="checkbox" :checked="enabled" @change="save($event.target.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+      </section>
+
       <section class="card" x-data="quoteValidityEditor(${JSON.stringify(validityDays || {})})">
         <h2>Quote expiration defaults</h2>
         <p class="muted">
@@ -356,6 +377,35 @@ document.addEventListener('alpine:init', function () {
           var n = Object.keys(listDefaults).length;
           alert('Saved as site-wide defaults (' + n + ' list table' + (n === 1 ? '' : 's') + ').');
         }).catch(function (err) {
+          self.busy = false;
+          alert('Could not save: ' + (err && err.message ? err.message : 'unknown error'));
+        });
+      },
+    };
+  });
+
+  // Messaging kill-switch toggle. POSTs to /settings/messaging-toggle
+  // which updates site_prefs.messaging_enabled. Reload on success so
+  // the layout re-renders with or without the BOARD_LEFT_MARKUP.
+  Alpine.data('messagingFeatureToggle', function (initial) {
+    return {
+      enabled: !!initial,
+      busy: false,
+      save: function (next) {
+        var self = this;
+        var prev = self.enabled;
+        self.enabled = !!next;
+        self.busy = true;
+        fetch('/settings/messaging-toggle', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ enabled: next ? 1 : 0 }),
+        }).then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          window.location.reload();
+        }).catch(function (err) {
+          self.enabled = prev;
           self.busy = false;
           alert('Could not save: ' + (err && err.message ? err.message : 'unknown error'));
         });
