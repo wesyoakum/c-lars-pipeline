@@ -3,9 +3,11 @@
   // Cloudflare Pages project wired to D1 + R2.
   // Auth is handled entirely by Cloudflare Access in front of the Pages site —
   // middleware decodes the JWT and upserts the user in the D1 users table.
-  // The D1 database (c-lars-pms-db) and R2 bucket (c-lars-pms-docs) keep their
-  // legacy names; renaming them would require a data migration.
-  "name": "c-lars-pipeline",
+  // The Pages project name (c-lars-pms), D1 database (c-lars-pms-db), and R2
+  // bucket (c-lars-pms-docs) all keep their legacy names. Cloudflare doesn't
+  // support renaming Pages projects in place; D1/R2 renames would require
+  // data migration. These are internal Cloudflare IDs, never user-visible.
+  "name": "c-lars-pms",
   "pages_build_output_dir": ".",
   "compatibility_date": "2026-04-10",
 

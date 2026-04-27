@@ -5,7 +5,7 @@
   "description": "C-LARS Pipeline — custom CRM built on Cloudflare Pages + D1 + R2 + Access",
   "scripts": {
     "dev": "wrangler pages dev . --d1=DB=c-lars-pms-db --r2=DOCS=c-lars-pms-docs --compatibility-date=2026-04-10",
-    "deploy": "wrangler pages deploy . --project-name=c-lars-pipeline",
+    "deploy": "wrangler pages deploy . --project-name=c-lars-pms",
     "migrate:local": "wrangler d1 migrations apply c-lars-pms-db --local",
     "migrate:remote": "wrangler d1 migrations apply c-lars-pms-db --remote",
     "db:console": "wrangler d1 execute c-lars-pms-db --remote --command",

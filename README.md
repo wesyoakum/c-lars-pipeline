@@ -13,17 +13,19 @@ governing document hierarchy.
 
 | Layer          | Tech                                                    |
 | -------------- | ------------------------------------------------------- |
-| Hosting        | Cloudflare Pages (project `c-lars-pipeline`)            |
+| Hosting        | Cloudflare Pages (project `c-lars-pms`, legacy name retained) |
 | Server logic   | Pages Functions (`functions/**`)                        |
 | Database       | D1 (SQLite) — `c-lars-pms-db` (legacy name retained)    |
 | File storage   | R2 — `c-lars-pms-docs` (legacy name retained)           |
 | Auth           | Cloudflare Access (Google / Microsoft SSO, `@c-lars.com`) |
 | UI             | Server-rendered HTML + HTMX + Alpine.js (no build step) |
-| Domain         | Pages `*.pages.dev` (custom domain not yet wired)       |
+| Domain         | Pages `c-lars-pms.pages.dev` (custom domain not yet wired) |
 
-> The D1 database and R2 bucket keep their legacy `c-lars-pms-*` names
-> because renaming Cloudflare D1/R2 resources requires data migration.
-> They're internal IDs not visible to users.
+> The Cloudflare Pages project, D1 database, and R2 bucket keep their
+> legacy `c-lars-pms*` names. Cloudflare doesn't support renaming Pages
+> projects in place; D1/R2 renames would require data migration. These
+> are internal Cloudflare IDs, never user-visible — once a custom
+> domain is wired up, the `*.pages.dev` URL becomes invisible too.
 
 ## Repository layout
 
@@ -74,7 +76,7 @@ npx wrangler pages dev . --remote
 ## Deploy
 
 `main` branch auto-deploys to Cloudflare Pages. Preview deploys land on
-`*.c-lars-pipeline.pages.dev` behind the same Access policy.
+`*.c-lars-pms.pages.dev` behind the same Access policy.
 
 ## Cloudflare resources
 
@@ -82,7 +84,7 @@ npx wrangler pages dev . --remote
 | ------------- | --------------------- | -------------------------------------------------- |
 | D1 database   | `c-lars-pms-db`       | `50f45535-8f4d-4428-8da1-d4ce4bd24d6e` → `DB`      |
 | R2 bucket     | `c-lars-pms-docs`     | → `DOCS`                                           |
-| Pages project | `c-lars-pipeline`     | github.com/wesyoakum/c-lars-pipeline (branch `main`) |
+| Pages project | `c-lars-pms`          | github.com/wesyoakum/c-lars-pipeline (branch `main`) |
 | Cron Worker   | `c-lars-pipeline-cron`| Daily sweep at 14:00 UTC                           |
 
 ## Governing documents (reference)
