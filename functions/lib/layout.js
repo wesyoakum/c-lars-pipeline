@@ -1093,6 +1093,7 @@ export function layout(title, body, opts = {}) {
       ${navLink('/jobs', 'Jobs', activeNav)}
       ${navLink('/workflow', 'Workflow', activeNav)}
       ${navLink('/settings', 'Settings', activeNav)}
+      ${user && user.email === 'wes.yoakum@c-lars.com' ? navLink('/ai-inbox', 'AI Inbox', activeNav) : ''}
     </nav>
     <div class="header-right">
       ${user ? BOARD_RESTORE_HEADER_BTN : ''}
