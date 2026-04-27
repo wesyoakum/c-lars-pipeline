@@ -8,9 +8,10 @@
 // from the last good step. The caller passes an item id; we read the
 // row, advance it through the steps, and persist along the way.
 
-import { one, run } from '../lib/db.js';
-import { now } from '../lib/ids.js';
+import { one, run, stmt, batch } from '../lib/db.js';
+import { uuid, now } from '../lib/ids.js';
 import { transcribe, classify, extract } from './prompts.js';
+import { resolveEntities } from '../lib/entity-resolver.js';
 
 /**
  * Process an AI Inbox item end-to-end. Reads the row, fetches the audio
@@ -96,6 +97,7 @@ export async function processItem(env, itemId, fromStep = 'transcribe') {
   }
 
   // ------------ Step 3: Extract ------------
+  let extracted = null;
   if (fromStep === 'extract') {
     if (!transcript) {
       await failItem(env.DB, itemId, 'No transcript to extract from.');
@@ -103,7 +105,7 @@ export async function processItem(env, itemId, fromStep = 'transcribe') {
     }
     await setStatus(env.DB, itemId, 'extracting');
     try {
-      const extracted = await extract(env, transcript, contextType || 'other', item.user_context);
+      extracted = await extract(env, transcript, contextType || 'other', item.user_context);
       await run(
         env.DB,
         `UPDATE ai_inbox_items
@@ -114,6 +116,41 @@ export async function processItem(env, itemId, fromStep = 'transcribe') {
     } catch (e) {
       await failItem(env.DB, itemId, `Extraction failed: ${e.message || e}`);
       throw e;
+    }
+  }
+
+  // ------------ Step 4: Entity resolution (best-effort) ------------
+  // Match extracted people/organizations against existing CRM rows so
+  // the detail page can render links instead of plain text. Failures
+  // here MUST NOT flip the item to 'error' — the user-visible AI work
+  // (transcribe/classify/extract) already succeeded.
+  if (extracted) {
+    try {
+      const candidates = await resolveEntities(env.DB, {
+        people: extracted.people || [],
+        organizations: extracted.organizations || [],
+      });
+      if (candidates.length > 0) {
+        const ts = now();
+        const stmts = [
+          // Re-runs replace non-overridden rows; user-confirmed picks survive.
+          stmt(env.DB,
+            'DELETE FROM ai_inbox_entity_matches WHERE item_id = ? AND user_overridden = 0',
+            [itemId]),
+          ...candidates.map(c => stmt(env.DB,
+            `INSERT INTO ai_inbox_entity_matches
+               (id, item_id, mention_kind, mention_text, mention_idx,
+                ref_type, ref_id, ref_label, score, rank,
+                auto_resolved, user_overridden, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+            [uuid(), itemId, c.mention_kind, c.mention_text, c.mention_idx,
+             c.ref_type, c.ref_id, c.ref_label, c.score, c.rank,
+             c.auto_resolved, ts, ts])),
+        ];
+        await batch(env.DB, stmts);
+      }
+    } catch (e) {
+      console.warn(`[ai-inbox] entity resolver failed for ${itemId}:`, e?.message || e);
     }
   }
 }

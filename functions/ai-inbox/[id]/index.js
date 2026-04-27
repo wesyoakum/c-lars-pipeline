@@ -6,8 +6,8 @@
 // Extracted fields are inline-editable via Alpine.js — click a field
 // to edit, blur or Enter to save (POST /ai-inbox/:id/edit).
 
-import { one } from '../../lib/db.js';
-import { layout, html, escape, raw, htmlResponse } from '../../lib/layout.js';
+import { one, all } from '../../lib/db.js';
+import { layout, html, escape, htmlResponse } from '../../lib/layout.js';
 import { readFlash } from '../../lib/http.js';
 
 const STATUS_LABELS = {
@@ -34,15 +34,6 @@ const CONTEXT_TYPE_LABELS = {
   trade_show: 'Trade show',
   personal_note: 'Personal note',
   other: 'Other',
-};
-
-const DESTINATION_LABELS = {
-  keep_as_note: 'Keep as note',
-  create_task: 'Create task',
-  create_reminder: 'Create reminder',
-  link_to_account: 'Link to account',
-  link_to_opportunity: 'Link to opportunity',
-  archive: 'Archive',
 };
 
 export async function onRequestGet(context) {
@@ -73,11 +64,26 @@ export async function onRequestGet(context) {
     try { extracted = JSON.parse(item.extracted_json); } catch { /* ignore */ }
   }
 
-  const body = renderDetail({ item, extracted, flash });
+  // v2: Load action history (links) and entity matches in parallel.
+  // Both are populated lazily by other endpoints; either may be empty.
+  const [links, matches] = await Promise.all([
+    all(env.DB,
+      `SELECT id, action_type, ref_type, ref_id, ref_label, created_at
+         FROM ai_inbox_links WHERE item_id = ? ORDER BY created_at DESC`,
+      [params.id]),
+    all(env.DB,
+      `SELECT id, mention_kind, mention_text, mention_idx, ref_type, ref_id,
+              ref_label, score, rank, auto_resolved, user_overridden
+         FROM ai_inbox_entity_matches WHERE item_id = ?
+        ORDER BY mention_kind, mention_idx, rank`,
+      [params.id]),
+  ]);
+
+  const body = renderDetail({ item, extracted, flash, links, matches });
   return htmlResponse(layout('AI Inbox · Item', body, { user }));
 }
 
-function renderDetail({ item, extracted, flash }) {
+function renderDetail({ item, extracted, flash, links, matches }) {
   const statusLabel = STATUS_LABELS[item.status] || item.status;
   const statusColor = STATUS_COLORS[item.status] || '#888';
   const ctxLabel = item.context_type ? (CONTEXT_TYPE_LABELS[item.context_type] || item.context_type) : null;
@@ -87,16 +93,14 @@ function renderDetail({ item, extracted, flash }) {
     ? html`<div class="flash flash-${flash.kind}">${flash.message}</div>`
     : '';
 
-  // Pre-encode extracted JSON for the Alpine x-data initializer.
-  // - <script> sequences are neutralized via a unicode escape on '<'
-  //   so a `</script>` inside a string can't break out.
-  // - The result is then HTML-attribute-escaped (escape() turns " into
-  //   &quot; etc.) so it can live inside x-data="…" without breaking
-  //   the attribute parser. Alpine reads the decoded attribute value
-  //   and evaluates it as JavaScript.
-  const extractedRaw = extracted
-    ? JSON.stringify(extracted).replace(/</g, '\\u003c')
-    : 'null';
+  // Pre-encode JSON for Alpine x-data. The replace() neutralizes any
+  // </script> attempt; escape() (applied at the call site below)
+  // handles HTML attribute boundaries.
+  const safeJson = (v) => (v == null ? 'null'
+    : JSON.stringify(v).replace(/</g, '\\u003c'));
+  const extractedRaw = safeJson(extracted);
+  const linksRaw = safeJson(links || []);
+  const matchesRaw = safeJson(matches || []);
 
   const isProcessing = ['pending', 'transcribing', 'classifying', 'extracting'].includes(item.status);
 
@@ -150,8 +154,50 @@ function renderDetail({ item, extracted, flash }) {
       .aii-actions-bar { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: 1rem; }
       .aii-btn { padding: .4rem .9rem; border: 1px solid #ccd; background: white; border-radius: 4px; cursor: pointer; font-size: .85rem; text-decoration: none; color: #333; }
       .aii-btn:hover { background: #f6f8ff; }
+      .aii-btn-primary { background: #1f6feb; color: white; border-color: #1f6feb; }
+      .aii-btn-primary:hover { background: #1858c4; }
+      .aii-btn-primary:disabled { opacity: .55; cursor: not-allowed; }
       .aii-btn-danger { color: #cf222e; border-color: #fadddd; }
       .aii-btn-danger:hover { background: #fff5f5; }
+
+      /* v2: action buttons + inline forms + typeahead + entity links */
+      .aii-suggested-actions { display: flex; flex-wrap: wrap; gap: .35rem; margin: .25rem 0 .5rem; }
+      .aii-action-btn { padding: .25rem .7rem; border: 1px solid #c8d4ff; background: #f0f4ff; color: #2451b8; border-radius: 4px; font-size: .85rem; cursor: pointer; }
+      .aii-action-btn:hover { background: #dbe5ff; }
+      .aii-action-btn-soon { opacity: .55; cursor: not-allowed; }
+      .aii-action-btn-soon:hover { background: #f0f4ff; }
+
+      .aii-action-form { margin-top: .75rem; padding: .85rem; border: 1px solid #e1e4e8; border-radius: 4px; background: #fafbfc; }
+      .aii-action-form h3 { margin: 0 0 .5rem; font-size: .9rem; color: #333; }
+      .aii-form-row { display: grid; grid-template-columns: 6rem 1fr; gap: .5rem; align-items: center; margin-bottom: .45rem; }
+      .aii-form-row > span { font-size: .8rem; color: #555; }
+      .aii-form-row input, .aii-form-row textarea { width: 100%; padding: .3rem .45rem; border: 1px solid #ccd; border-radius: 3px; font-size: .85rem; box-sizing: border-box; font-family: inherit; }
+      .aii-form-actions { display: flex; gap: .5rem; align-items: center; margin-top: .5rem; }
+      .aii-err-inline { color: #cf222e; font-size: .8rem; }
+
+      .aii-typeahead-wrap { position: relative; display: block; }
+      .aii-typeahead { position: absolute; top: 100%; left: 0; right: 0; max-height: 14rem; overflow-y: auto; margin: 2px 0 0; padding: 0; list-style: none; background: white; border: 1px solid #ccd; border-radius: 3px; z-index: 30; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+      .aii-typeahead li { padding: .35rem .55rem; cursor: pointer; display: flex; gap: .35rem; align-items: baseline; }
+      .aii-typeahead li:hover { background: #f0f4ff; }
+      .aii-typeahead li small { color: #777; font-size: .75rem; }
+
+      .aii-links { display: flex; flex-direction: column; gap: .25rem; margin-bottom: .5rem; }
+      .aii-link-row { display: flex; align-items: center; gap: .5rem; padding: .25rem .4rem; background: #eef5e6; border-radius: 3px; font-size: .85rem; }
+      .aii-link-kind { display: inline-block; padding: .1rem .45rem; background: #1a7f37; color: white; border-radius: 3px; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; }
+      .aii-link-target { color: #1f6feb; text-decoration: none; flex: 1; }
+      .aii-link-target:hover { text-decoration: underline; }
+
+      .aii-mention { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; padding: .35rem .5rem; }
+      .aii-mention + .aii-mention { border-top: 1px dashed #eef; }
+      .aii-mention-link { color: #1f6feb; text-decoration: none; font-weight: 500; }
+      .aii-mention-link:hover { text-decoration: underline; }
+      .aii-mention-orig { color: #999; font-size: .75rem; }
+      .aii-suggest-btn { padding: .15rem .55rem; border: 1px solid #c8d4ff; background: #f0f4ff; color: #2451b8; border-radius: 3px; font-size: .75rem; cursor: pointer; }
+      .aii-suggest-btn:hover { background: #dbe5ff; }
+      .aii-create-btn { padding: .15rem .55rem; border: 1px dashed #c8d4ff; background: white; color: #555; border-radius: 3px; font-size: .75rem; cursor: pointer; }
+      .aii-create-btn:hover { background: #f6f8ff; color: #1f6feb; }
+
+      [x-cloak] { display: none !important; }
 
       .flash { padding: .65rem .9rem; border-radius: 4px; margin-bottom: 1rem; }
       .flash-success { background: #d4ecdb; color: #1a3d24; }
@@ -204,7 +250,7 @@ function renderDetail({ item, extracted, flash }) {
         : ''}
 
       ${extracted
-        ? renderExtracted(item, extractedRaw)
+        ? renderExtracted(item, extractedRaw, linksRaw, matchesRaw)
         : ''}
 
       <div class="aii-actions-bar">
@@ -222,10 +268,10 @@ function renderDetail({ item, extracted, flash }) {
 
     <script>
       // Alpine x-data registration for the inline-edit panel.
-      // We use a function defined on window because the layout already
-      // initializes Alpine globally; this avoids inlining a large script
-      // tag inside x-data.
-      window.aiInboxInit = function (initial, itemId) {
+      // v2 extends the v1 component with: links (action history),
+      // matches (entity resolver output), actionForm (currently-open
+      // inline form), typeahead (entity picker state).
+      window.aiInboxInit = function (initial, itemId, links, matches) {
         return {
           fields: initial || {
             title: '', summary: '',
@@ -233,9 +279,30 @@ function renderDetail({ item, extracted, flash }) {
             action_items: [], open_questions: [], suggested_destinations: [],
             confidence: 'medium',
           },
+          links: links || [],
+          matches: matches || [],
+          // null when closed; otherwise { kind, ...form fields, busy?, error? }
+          actionForm: null,
+          // null when no field is searching; otherwise { kind:'account'|'contact', q, results, loading }
+          typeahead: null,
           tagInput: '',
           saving: '',
           itemId: itemId,
+          // Action types we have a form for; others render as-is from
+          // the suggestions but don't open anything when clicked.
+          handledActions: ['create_task', 'link_to_account'],
+          destLabels: {
+            keep_as_note: 'Keep as note',
+            create_task: 'Create task',
+            create_reminder: 'Create reminder',
+            link_to_account: 'Link to account',
+            link_to_opportunity: 'Link to opportunity',
+            archive: 'Archive',
+            create_account: 'Create account',
+            create_contact: 'Create contact',
+          },
+
+          // ----- existing edit/save behavior (v1) -----
           async saveField(name) {
             const value = this.fields[name];
             await this.postUpdate({ [name]: value });
@@ -266,16 +333,271 @@ function renderDetail({ item, extracted, flash }) {
             this.tagInput = '';
             this.saveField('tags');
           },
-          removeTag(idx) {
-            this.fields.tags.splice(idx, 1);
-            this.saveField('tags');
+          removeTag(idx) { this.fields.tags.splice(idx, 1); this.saveField('tags'); },
+          addAction() { this.fields.action_items.push({ task: '', owner: '', due: '' }); },
+          removeAction(idx) { this.fields.action_items.splice(idx, 1); this.saveField('action_items'); },
+
+          // ----- v2: actions -----
+          isHandled(kind) { return this.handledActions.indexOf(kind) >= 0; },
+
+          openAction(kind) {
+            if (!this.isHandled(kind)) return;
+            const accountId = this.preferredAccountId();
+            const accountLabel = this.preferredAccountLabel();
+            if (kind === 'create_task') {
+              const firstAction = (this.fields.action_items || [])[0];
+              const summaryFirst = ((this.fields.summary || '').split(/\\r?\\n/)[0] || '').slice(0, 80);
+              this.actionForm = {
+                kind, busy: false, error: '',
+                subject: (firstAction && firstAction.task) || summaryFirst || '',
+                body: this.fields.summary || '',
+                due_at: (firstAction && firstAction.due) || '',
+                account_id: accountId,
+                account_label: accountLabel,
+              };
+            } else if (kind === 'link_to_account') {
+              this.actionForm = {
+                kind, busy: false, error: '',
+                account_id: accountId,
+                account_label: accountLabel,
+              };
+            }
           },
-          addAction() {
-            this.fields.action_items.push({ task: '', owner: '', due: '' });
+          closeAction() { this.actionForm = null; this.typeahead = null; },
+
+          async submitAction() {
+            if (!this.actionForm) return;
+            const f = this.actionForm;
+            f.busy = true; f.error = '';
+            const path = f.kind.replace(/_/g, '-');
+            try {
+              const payload = {};
+              if (f.kind === 'create_task') {
+                payload.subject = f.subject || '';
+                payload.body = f.body || '';
+                payload.account_id = f.account_id || '';
+                payload.due_at = f.due_at || '';
+              } else if (f.kind === 'link_to_account') {
+                payload.account_id = f.account_id || '';
+                if (!payload.account_id) { f.busy = false; f.error = 'Pick an account first.'; return; }
+              }
+              const res = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId)
+                          + '/actions/' + path, {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify(payload),
+              });
+              const dataJson = await res.json();
+              if (!dataJson.ok) throw new Error(dataJson.error || 'failed');
+              this.links = [dataJson.link, ...this.links];
+              this.closeAction();
+            } catch (e) {
+              f.busy = false; f.error = String(e.message || e);
+            }
           },
-          removeAction(idx) {
-            this.fields.action_items.splice(idx, 1);
-            this.saveField('action_items');
+
+          async unlink(linkId) {
+            if (!confirm('Remove this link?')) return;
+            const res = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId)
+                        + '/actions/' + encodeURIComponent(linkId) + '/unlink',
+              { method: 'POST', credentials: 'same-origin' });
+            const dataJson = await res.json();
+            if (dataJson.ok) {
+              this.links = this.links.filter(l => l.id !== linkId);
+            }
+          },
+
+          // ----- v2: typeahead -----
+          async searchEntities(kind, q, accountId) {
+            this.typeahead = { kind, q, results: [], loading: true };
+            const params = new URLSearchParams();
+            if (q) params.set('q', q);
+            if (accountId) params.set('account_id', accountId);
+            const path = kind === 'account' ? '/ai-inbox/_search/accounts'
+                                            : '/ai-inbox/_search/contacts';
+            try {
+              const res = await fetch(path + '?' + params.toString(),
+                { credentials: 'same-origin' });
+              const dataJson = await res.json();
+              this.typeahead.results = dataJson.results || [];
+            } catch (e) {
+              this.typeahead.results = [];
+            }
+            this.typeahead.loading = false;
+          },
+          pickAccount(r) {
+            if (!this.actionForm) return;
+            this.actionForm.account_id = r.ref_id;
+            this.actionForm.account_label = r.label;
+            this.typeahead = null;
+          },
+          clearTypeahead() { this.typeahead = null; },
+
+          // ----- v2: entity matches -----
+          matchesFor(kind, idx) {
+            return this.matches.filter(m => m.mention_kind === kind && m.mention_idx === idx);
+          },
+          bestMatch(kind, idx) {
+            const m = this.matchesFor(kind, idx);
+            return m.find(x => x.user_overridden) || m.find(x => x.auto_resolved) || null;
+          },
+          candidatesFor(kind, idx) {
+            const m = this.matchesFor(kind, idx);
+            if (m.some(x => x.user_overridden)) return [];
+            return m.filter(x => !x.user_overridden).slice(0, 3);
+          },
+          entityHref(m) {
+            if (!m) return '#';
+            if (m.ref_type === 'account') return '/accounts/' + encodeURIComponent(m.ref_id);
+            if (m.ref_type === 'contact') return '/accounts/' + encodeURIComponent(m.ref_id);
+            return '#';
+          },
+          linkHref(l) {
+            if (!l) return '#';
+            if (l.ref_type === 'activity') return '/activities/' + encodeURIComponent(l.ref_id);
+            if (l.ref_type === 'account') return '/accounts/' + encodeURIComponent(l.ref_id);
+            if (l.ref_type === 'contact') return '/accounts/' + encodeURIComponent(l.ref_id);
+            if (l.ref_type === 'opportunity') return '/opportunities/' + encodeURIComponent(l.ref_id);
+            return '#';
+          },
+          async confirmMatch(kind, idx, mentionText, refType, refId) {
+            const res = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId)
+                        + '/entities/match', {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                mention_kind: kind, mention_idx: idx,
+                mention_text: mentionText, ref_type: refType, ref_id: refId,
+              }),
+            });
+            const dataJson = await res.json();
+            if (dataJson.ok) {
+              this.matches = this.matches.filter(
+                m => !(m.mention_kind === kind && m.mention_idx === idx)
+              );
+              this.matches.push(dataJson.match);
+            }
+          },
+          async unmatch(kind, idx) {
+            await fetch('/ai-inbox/' + encodeURIComponent(this.itemId)
+                        + '/entities/unmatch', {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ mention_kind: kind, mention_idx: idx }),
+            });
+            this.matches = this.matches.filter(
+              m => !(m.mention_kind === kind && m.mention_idx === idx)
+            );
+          },
+          async resolveAll() {
+            const res = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId)
+                        + '/entities/resolve',
+              { method: 'POST', credentials: 'same-origin' });
+            const dataJson = await res.json();
+            if (dataJson.ok) this.matches = dataJson.matches || [];
+          },
+
+          // ----- v2: create-account / create-contact mini-forms -----
+          openCreateAccount(idx) {
+            const mention = (this.fields.organizations || [])[idx] || '';
+            this.actionForm = {
+              kind: 'create_account', busy: false, error: '',
+              mention_idx: idx, mention_text: mention,
+              name: mention, alias: '', segment: '',
+            };
+          },
+          openCreateContact(idx) {
+            const mention = (this.fields.people || [])[idx] || '';
+            const tokens = (mention || '').trim().split(/\\s+/);
+            const first = tokens[0] || '';
+            const last = tokens.length > 1 ? tokens[tokens.length - 1] : '';
+            this.actionForm = {
+              kind: 'create_contact', busy: false, error: '',
+              mention_idx: idx, mention_text: mention,
+              first_name: first, last_name: last,
+              email: '', title: '', phone: '',
+              account_id: this.preferredAccountId(),
+              account_label: this.preferredAccountLabel(),
+            };
+          },
+
+          async submitCreateAccount() {
+            const f = this.actionForm;
+            if (!f || f.kind !== 'create_account') return;
+            if (!(f.name || '').trim()) { f.error = 'Account name required.'; return; }
+            f.busy = true; f.error = '';
+            try {
+              const res = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId)
+                          + '/entities/create-account', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                  mention_idx: f.mention_idx, mention_text: f.mention_text,
+                  name: f.name, alias: f.alias || '', segment: f.segment || '',
+                }),
+              });
+              const dataJson = await res.json();
+              if (!dataJson.ok) throw new Error(dataJson.error || 'failed');
+              this.matches = this.matches.filter(
+                m => !(m.mention_kind === 'organization' && m.mention_idx === f.mention_idx)
+              );
+              this.matches.push(dataJson.match);
+              this.links = [dataJson.link, ...this.links];
+              this.closeAction();
+            } catch (e) {
+              f.busy = false; f.error = String(e.message || e);
+            }
+          },
+
+          async submitCreateContact() {
+            const f = this.actionForm;
+            if (!f || f.kind !== 'create_contact') return;
+            if (!(f.first_name || '').trim() && !(f.last_name || '').trim()) {
+              f.error = 'First or last name required.'; return;
+            }
+            if (!(f.account_id || '').trim()) {
+              f.error = 'Pick an account for this contact.'; return;
+            }
+            f.busy = true; f.error = '';
+            try {
+              const res = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId)
+                          + '/entities/create-contact', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                  mention_idx: f.mention_idx, mention_text: f.mention_text,
+                  account_id: f.account_id,
+                  first_name: f.first_name || '', last_name: f.last_name || '',
+                  email: f.email || '', title: f.title || '', phone: f.phone || '',
+                }),
+              });
+              const dataJson = await res.json();
+              if (!dataJson.ok) throw new Error(dataJson.error || 'failed');
+              this.matches = this.matches.filter(
+                m => !(m.mention_kind === 'person' && m.mention_idx === f.mention_idx)
+              );
+              this.matches.push(dataJson.match);
+              this.links = [dataJson.link, ...this.links];
+              this.closeAction();
+            } catch (e) {
+              f.busy = false; f.error = String(e.message || e);
+            }
+          },
+
+          // ----- helpers -----
+          preferredAccountId() {
+            const m = this.matches.find(
+              x => x.mention_kind === 'organization' &&
+                   (x.user_overridden || x.auto_resolved)
+            );
+            return m ? m.ref_id : '';
+          },
+          preferredAccountLabel() {
+            const m = this.matches.find(
+              x => x.mention_kind === 'organization' &&
+                   (x.user_overridden || x.auto_resolved)
+            );
+            return m ? m.ref_label : '';
           },
         };
       };
@@ -283,15 +605,13 @@ function renderDetail({ item, extracted, flash }) {
   `.toString();
 }
 
-function renderExtracted(item, extractedRaw) {
-  // The JSON and the destination labels both ride inside HTML attribute
-  // values (x-data, x-text). We escape() each so quotes/ampersands turn
-  // into entities — the browser decodes them before Alpine evaluates the
-  // attribute as JavaScript, so what Alpine sees is plain JS again.
-  const destLabelsRaw = JSON.stringify(DESTINATION_LABELS);
+function renderExtracted(item, extractedRaw, linksRaw, matchesRaw) {
+  // JSON-into-attribute pattern. Each value was already JSON.stringify'd
+  // and had < neutralized; escape() handles the attribute boundary. The
+  // browser decodes the attribute and Alpine evaluates it as JS.
   return html`
     <section class="aii-section"
-             x-data="aiInboxInit(${escape(extractedRaw)}, '${escape(item.id)}')">
+             x-data="aiInboxInit(${escape(extractedRaw)}, '${escape(item.id)}', ${escape(linksRaw)}, ${escape(matchesRaw)})">
       <h2>Extracted <span class="aii-saving" x-text="saving"></span></h2>
 
       <div class="aii-field">
@@ -312,13 +632,30 @@ function renderExtracted(item, extractedRaw) {
 
       <div class="aii-row">
         <section class="aii-section" style="margin:0;">
-          <h2>People</h2>
+          <h2>People <button type="button" class="aii-add-btn" @click="resolveAll()" title="Re-run entity resolver">⟳</button></h2>
           <ul class="aii-list">
             <template x-for="(p, idx) in fields.people" :key="idx">
-              <li>
-                <span class="aii-editable" contenteditable="true"
-                      x-text="p"
-                      @blur="fields.people[idx] = $event.target.innerText.trim(); saveField('people')"></span>
+              <li class="aii-mention">
+                <template x-if="bestMatch('person', idx)">
+                  <span>
+                    <a class="aii-mention-link" :href="entityHref(bestMatch('person', idx))" x-text="bestMatch('person', idx).ref_label"></a>
+                    <small class="aii-mention-orig" x-show="bestMatch('person', idx).ref_label !== p" x-text="'(' + p + ')'"></small>
+                    <button type="button" class="aii-rm-btn" @click="unmatch('person', idx)" title="Unmatch">×</button>
+                  </span>
+                </template>
+                <template x-if="!bestMatch('person', idx)">
+                  <span>
+                    <span class="aii-editable" contenteditable="true"
+                          x-text="p"
+                          @blur="fields.people[idx] = $event.target.innerText.trim(); saveField('people')"></span>
+                    <template x-for="c in candidatesFor('person', idx)" :key="c.id">
+                      <button type="button" class="aii-suggest-btn"
+                              @click="confirmMatch('person', idx, p, c.ref_type, c.ref_id)"
+                              x-text="'→ ' + c.ref_label"></button>
+                    </template>
+                    <button type="button" class="aii-create-btn" @click="openCreateContact(idx)">Create contact?</button>
+                  </span>
+                </template>
               </li>
             </template>
             <template x-if="fields.people.length === 0"><li class="aii-editable empty">(none)</li></template>
@@ -329,10 +666,27 @@ function renderExtracted(item, extractedRaw) {
           <h2>Organizations</h2>
           <ul class="aii-list">
             <template x-for="(o, idx) in fields.organizations" :key="idx">
-              <li>
-                <span class="aii-editable" contenteditable="true"
-                      x-text="o"
-                      @blur="fields.organizations[idx] = $event.target.innerText.trim(); saveField('organizations')"></span>
+              <li class="aii-mention">
+                <template x-if="bestMatch('organization', idx)">
+                  <span>
+                    <a class="aii-mention-link" :href="entityHref(bestMatch('organization', idx))" x-text="bestMatch('organization', idx).ref_label"></a>
+                    <small class="aii-mention-orig" x-show="bestMatch('organization', idx).ref_label !== o" x-text="'(' + o + ')'"></small>
+                    <button type="button" class="aii-rm-btn" @click="unmatch('organization', idx)" title="Unmatch">×</button>
+                  </span>
+                </template>
+                <template x-if="!bestMatch('organization', idx)">
+                  <span>
+                    <span class="aii-editable" contenteditable="true"
+                          x-text="o"
+                          @blur="fields.organizations[idx] = $event.target.innerText.trim(); saveField('organizations')"></span>
+                    <template x-for="c in candidatesFor('organization', idx)" :key="c.id">
+                      <button type="button" class="aii-suggest-btn"
+                              @click="confirmMatch('organization', idx, o, c.ref_type, c.ref_id)"
+                              x-text="'→ ' + c.ref_label"></button>
+                    </template>
+                    <button type="button" class="aii-create-btn" @click="openCreateAccount(idx)">Create account?</button>
+                  </span>
+                </template>
               </li>
             </template>
             <template x-if="fields.organizations.length === 0"><li class="aii-editable empty">(none)</li></template>
@@ -385,17 +739,170 @@ function renderExtracted(item, extractedRaw) {
       </div>
 
       <section class="aii-section" style="margin-top:1rem;">
-        <h2>Suggested destinations</h2>
-        <div>
+        <h2>Actions</h2>
+
+        <!-- Already-taken actions -->
+        <template x-if="links.length > 0">
+          <div class="aii-links">
+            <template x-for="link in links" :key="link.id">
+              <div class="aii-link-row">
+                <span class="aii-link-kind" x-text="destLabels[link.action_type] || link.action_type"></span>
+                <a class="aii-link-target" :href="linkHref(link)" x-text="link.ref_label || '(unlabeled)'"></a>
+                <button type="button" class="aii-rm-btn" @click="unlink(link.id)" title="Remove link">×</button>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- Suggested action buttons (only those with handlers) -->
+        <div class="aii-suggested-actions">
           <template x-for="d in fields.suggested_destinations" :key="d">
-            <span class="aii-dest" x-text="(${escape(destLabelsRaw)})[d] || d"></span>
+            <button type="button"
+                    class="aii-action-btn"
+                    :class="!isHandled(d) ? 'aii-action-btn-soon' : ''"
+                    :disabled="!isHandled(d)"
+                    :title="isHandled(d) ? '' : 'Coming soon'"
+                    @click="openAction(d)"
+                    x-text="destLabels[d] || d"></button>
           </template>
-          <template x-if="fields.suggested_destinations.length === 0">
-            <span class="aii-editable empty">(none)</span>
+          <template x-if="fields.suggested_destinations.length === 0 && links.length === 0">
+            <span class="aii-editable empty">(no suggestions)</span>
           </template>
         </div>
-        <div class="aii-meta" style="margin-top:.5rem;">
-          Phase 1: suggestions only — not wired to CRM/calendar/tasks yet.
+
+        <!-- Inline form: create_task -->
+        <div x-show="actionForm && actionForm.kind === 'create_task'" class="aii-action-form" x-cloak>
+          <h3>Create task</h3>
+          <label class="aii-form-row">
+            <span>Subject</span>
+            <input type="text" x-model="actionForm && actionForm.subject" placeholder="Task subject">
+          </label>
+          <label class="aii-form-row">
+            <span>Body</span>
+            <textarea rows="3" x-model="actionForm && actionForm.body" placeholder="Notes (optional)"></textarea>
+          </label>
+          <label class="aii-form-row">
+            <span>Due</span>
+            <input type="date" x-model="actionForm && actionForm.due_at">
+          </label>
+          <label class="aii-form-row">
+            <span>Account</span>
+            <span class="aii-typeahead-wrap">
+              <input type="text" x-model="actionForm && actionForm.account_label"
+                     placeholder="Type to search… (optional)"
+                     @input.debounce.250ms="searchEntities('account', $event.target.value); if (actionForm) actionForm.account_id = ''"
+                     @focus="searchEntities('account', actionForm && actionForm.account_label)">
+              <ul class="aii-typeahead" x-show="typeahead && typeahead.kind === 'account' && typeahead.results.length > 0" x-cloak>
+                <template x-for="r in (typeahead ? typeahead.results : [])" :key="r.ref_id">
+                  <li @click="pickAccount(r)">
+                    <span x-text="r.label"></span>
+                    <small x-text="r.sub" x-show="r.sub"></small>
+                  </li>
+                </template>
+              </ul>
+            </span>
+          </label>
+          <div class="aii-form-actions">
+            <button type="button" class="aii-btn aii-btn-primary" @click="submitAction()" :disabled="actionForm && actionForm.busy">Create task</button>
+            <button type="button" class="aii-btn" @click="closeAction()">Cancel</button>
+            <span x-show="actionForm && actionForm.error" class="aii-err-inline" x-text="actionForm && actionForm.error"></span>
+          </div>
+        </div>
+
+        <!-- Inline form: link_to_account -->
+        <div x-show="actionForm && actionForm.kind === 'link_to_account'" class="aii-action-form" x-cloak>
+          <h3>Link to account</h3>
+          <label class="aii-form-row">
+            <span>Account</span>
+            <span class="aii-typeahead-wrap">
+              <input type="text" x-model="actionForm && actionForm.account_label"
+                     placeholder="Type to search…"
+                     @input.debounce.250ms="searchEntities('account', $event.target.value); if (actionForm) actionForm.account_id = ''"
+                     @focus="searchEntities('account', actionForm && actionForm.account_label)">
+              <ul class="aii-typeahead" x-show="typeahead && typeahead.kind === 'account' && typeahead.results.length > 0" x-cloak>
+                <template x-for="r in (typeahead ? typeahead.results : [])" :key="r.ref_id">
+                  <li @click="pickAccount(r)">
+                    <span x-text="r.label"></span>
+                    <small x-text="r.sub" x-show="r.sub"></small>
+                  </li>
+                </template>
+              </ul>
+            </span>
+          </label>
+          <div class="aii-form-actions">
+            <button type="button" class="aii-btn aii-btn-primary" @click="submitAction()" :disabled="!(actionForm && actionForm.account_id) || (actionForm && actionForm.busy)">Link</button>
+            <button type="button" class="aii-btn" @click="closeAction()">Cancel</button>
+            <span x-show="actionForm && actionForm.error" class="aii-err-inline" x-text="actionForm && actionForm.error"></span>
+          </div>
+        </div>
+
+        <!-- Inline form: create_account -->
+        <div x-show="actionForm && actionForm.kind === 'create_account'" class="aii-action-form" x-cloak>
+          <h3>Create account</h3>
+          <label class="aii-form-row">
+            <span>Name</span>
+            <input type="text" x-model="actionForm && actionForm.name" placeholder="Account name">
+          </label>
+          <label class="aii-form-row">
+            <span>Alias</span>
+            <input type="text" x-model="actionForm && actionForm.alias" placeholder="Short name (optional)">
+          </label>
+          <label class="aii-form-row">
+            <span>Segment</span>
+            <input type="text" x-model="actionForm && actionForm.segment" placeholder="(optional)">
+          </label>
+          <div class="aii-form-actions">
+            <button type="button" class="aii-btn aii-btn-primary" @click="submitCreateAccount()" :disabled="actionForm && actionForm.busy">Create account</button>
+            <button type="button" class="aii-btn" @click="closeAction()">Cancel</button>
+            <span x-show="actionForm && actionForm.error" class="aii-err-inline" x-text="actionForm && actionForm.error"></span>
+          </div>
+        </div>
+
+        <!-- Inline form: create_contact -->
+        <div x-show="actionForm && actionForm.kind === 'create_contact'" class="aii-action-form" x-cloak>
+          <h3>Create contact</h3>
+          <label class="aii-form-row">
+            <span>First name</span>
+            <input type="text" x-model="actionForm && actionForm.first_name">
+          </label>
+          <label class="aii-form-row">
+            <span>Last name</span>
+            <input type="text" x-model="actionForm && actionForm.last_name">
+          </label>
+          <label class="aii-form-row">
+            <span>Email</span>
+            <input type="email" x-model="actionForm && actionForm.email">
+          </label>
+          <label class="aii-form-row">
+            <span>Title</span>
+            <input type="text" x-model="actionForm && actionForm.title">
+          </label>
+          <label class="aii-form-row">
+            <span>Phone</span>
+            <input type="text" x-model="actionForm && actionForm.phone">
+          </label>
+          <label class="aii-form-row">
+            <span>Account</span>
+            <span class="aii-typeahead-wrap">
+              <input type="text" x-model="actionForm && actionForm.account_label"
+                     placeholder="Type to search…"
+                     @input.debounce.250ms="searchEntities('account', $event.target.value); if (actionForm) actionForm.account_id = ''"
+                     @focus="searchEntities('account', actionForm && actionForm.account_label)">
+              <ul class="aii-typeahead" x-show="typeahead && typeahead.kind === 'account' && typeahead.results.length > 0" x-cloak>
+                <template x-for="r in (typeahead ? typeahead.results : [])" :key="r.ref_id">
+                  <li @click="pickAccount(r)">
+                    <span x-text="r.label"></span>
+                    <small x-text="r.sub" x-show="r.sub"></small>
+                  </li>
+                </template>
+              </ul>
+            </span>
+          </label>
+          <div class="aii-form-actions">
+            <button type="button" class="aii-btn aii-btn-primary" @click="submitCreateContact()" :disabled="actionForm && actionForm.busy">Create contact</button>
+            <button type="button" class="aii-btn" @click="closeAction()">Cancel</button>
+            <span x-show="actionForm && actionForm.error" class="aii-err-inline" x-text="actionForm && actionForm.error"></span>
+          </div>
         </div>
       </section>
 
