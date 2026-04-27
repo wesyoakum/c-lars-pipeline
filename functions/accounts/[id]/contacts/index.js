@@ -142,7 +142,7 @@ export async function onRequestPost(context) {
   }
 
   if (isPopupMode(request, input)) {
-    return popupCloseResponse('pms.contact.created', {
+    return popupCloseResponse('pipeline.contact.created', {
       contact: {
         id,
         first_name: value.first_name,

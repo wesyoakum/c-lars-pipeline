@@ -125,7 +125,7 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
               </tfoot>
             </table>
           </div>
-          <script>${raw(listScript('pms.libLabor.v1', 'description', 'asc'))}</script>
+          <script>${raw(listScript('pipeline.libLabor.v1', 'description', 'asc'))}</script>
         `}
     </section>
   `;

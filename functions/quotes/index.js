@@ -132,7 +132,7 @@ export async function onRequestGet(context) {
           // Launches js/wizards/quote.js \u2014 picks account \u2192 opportunity
           // \u2192 quote type, then POSTs to the existing quote-create
           // endpoint scoped to the chosen opportunity.
-          newOnClick: `window.PMS.openWizard('quote', {})`,
+          newOnClick: `window.Pipeline.openWizard('quote', {})`,
           newLabel: 'New quote',
         })}
       </div>
@@ -176,7 +176,7 @@ export async function onRequestGet(context) {
               </tbody>
             </table>
           </div>
-          <script>${raw(listScript('pms.quotes.v1', 'updated', 'desc', {
+          <script>${raw(listScript('pipeline.quotes.v1', 'updated', 'desc', {
             // Default view: just the "live" statuses — Draft, Issued,
             // Expired. Hides Accepted/Rejected/Dead so the main list is
             // the set of quotes that still need attention. Users can

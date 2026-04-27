@@ -202,7 +202,7 @@ export async function onRequestGet(context) {
                 : html`<button class="btn" disabled>Next \u2192</button>`}
             </div>
           </div>
-          <script>${raw(listScript('pms.history.v1', 'when', 'desc'))}</script>
+          <script>${raw(listScript('pipeline.history.v1', 'when', 'desc'))}</script>
         `}
     </section>
   `;

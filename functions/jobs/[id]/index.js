@@ -255,7 +255,7 @@ export async function onRequestGet(context) {
 
         ${canComplete ? html`
           <form method="post" action="/jobs/${escape(job.id)}/complete"
-                onsubmit="return (confirm('Mark this job complete? Any accepted quotes on the opportunity will be marked as completed too.') ? (window.PMS.submitFormWithBlockerCheck(this, 'Mark this job complete'), false) : false);"
+                onsubmit="return (confirm('Mark this job complete? Any accepted quotes on the opportunity will be marked as completed too.') ? (window.Pipeline.submitFormWithBlockerCheck(this, 'Mark this job complete'), false) : false);"
                 class="action-form">
             <fieldset>
               <legend>Mark Complete</legend>
@@ -269,7 +269,7 @@ export async function onRequestGet(context) {
 
         ${canClose ? html`
           <form method="post" action="/jobs/${escape(job.id)}/close"
-                onsubmit="return (confirm('Close this job?') ? (window.PMS.submitFormWithBlockerCheck(this, 'Cancel this job'), false) : false);"
+                onsubmit="return (confirm('Close this job?') ? (window.Pipeline.submitFormWithBlockerCheck(this, 'Cancel this job'), false) : false);"
                 class="action-form">
             <fieldset>
               <legend>Close Job</legend>

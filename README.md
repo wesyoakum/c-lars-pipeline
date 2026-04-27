@@ -1,4 +1,4 @@
-# PMS — C-LARS Pipeline Management System
+# C-LARS Pipeline
 
 Custom opportunity/quote/job pipeline management for C-LARS. Replaces
 WorkflowMax (WFM) with a system that actually understands the C-LARS
@@ -13,18 +13,22 @@ governing document hierarchy.
 
 | Layer          | Tech                                                    |
 | -------------- | ------------------------------------------------------- |
-| Hosting        | Cloudflare Pages (project `c-lars-pms`)                 |
+| Hosting        | Cloudflare Pages (project `c-lars-pipeline`)            |
 | Server logic   | Pages Functions (`functions/**`)                        |
-| Database       | D1 (SQLite) — `c-lars-pms-db`                           |
-| File storage   | R2 — `c-lars-pms-docs`                                  |
+| Database       | D1 (SQLite) — `c-lars-pms-db` (legacy name retained)    |
+| File storage   | R2 — `c-lars-pms-docs` (legacy name retained)           |
 | Auth           | Cloudflare Access (Google / Microsoft SSO, `@c-lars.com`) |
 | UI             | Server-rendered HTML + HTMX + Alpine.js (no build step) |
-| Domain         | `pms.c-lars.com`                                        |
+| Domain         | Pages `*.pages.dev` (custom domain not yet wired)       |
+
+> The D1 database and R2 bucket keep their legacy `c-lars-pms-*` names
+> because renaming Cloudflare D1/R2 resources requires data migration.
+> They're internal IDs not visible to users.
 
 ## Repository layout
 
 ```
-PMS/
+.
 ├── functions/         Cloudflare Pages Functions (server)
 │   ├── _middleware.js   Access JWT decode + user upsert
 │   ├── index.js         Dashboard (landing page)
@@ -37,6 +41,7 @@ PMS/
 ├── migrations/        D1 SQL migrations (0001_initial.sql, ...)
 ├── public/            Static assets (CSS, vendored JS)
 ├── scripts/           CLI utilities (wfm-import.mjs)
+├── workers/cron/      Sidecar Worker that triggers daily sweep
 ├── wrangler.jsonc     Pages + D1 + R2 binding config
 └── package.json
 ```
@@ -62,26 +67,27 @@ Run a local dev server against remote bindings:
 npx wrangler pages dev . --remote
 ```
 
-> Cloudflare Access protects `pms.c-lars.com` itself, not local dev.
-> During local dev the middleware falls back to a stub "dev user" so
-> you can iterate without an Access JWT.
+> Cloudflare Access protects the Pages site, not local dev. During
+> local dev the middleware falls back to a stub "dev user" so you can
+> iterate without an Access JWT.
 
 ## Deploy
 
 `main` branch auto-deploys to Cloudflare Pages. Preview deploys land on
-`*.c-lars-pms.pages.dev` behind the same Access policy.
+`*.c-lars-pipeline.pages.dev` behind the same Access policy.
 
 ## Cloudflare resources
 
-| Resource      | Name              | ID / Binding                               |
-| ------------- | ----------------- | ------------------------------------------ |
-| D1 database   | `c-lars-pms-db`   | `50f45535-8f4d-4428-8da1-d4ce4bd24d6e` → `DB` |
-| R2 bucket     | `c-lars-pms-docs` | → `DOCS`                                   |
-| Pages project | `c-lars-pms`      | github.com/wesyoakum/pms (branch `main`)   |
+| Resource      | Name                  | ID / Binding                                       |
+| ------------- | --------------------- | -------------------------------------------------- |
+| D1 database   | `c-lars-pms-db`       | `50f45535-8f4d-4428-8da1-d4ce4bd24d6e` → `DB`      |
+| R2 bucket     | `c-lars-pms-docs`     | → `DOCS`                                           |
+| Pages project | `c-lars-pipeline`     | github.com/wesyoakum/c-lars-pipeline (branch `main`) |
+| Cron Worker   | `c-lars-pipeline-cron`| Daily sweep at 14:00 UTC                           |
 
 ## Governing documents (reference)
 
-PMS enforces the commercial sequence defined by:
+Pipeline enforces the commercial sequence defined by:
 
 - **C-LARS Commercial Document Governance and Sequencing** Rev A
 - **C-LARS General Terms and Conditions of Sale and Services** Rev A

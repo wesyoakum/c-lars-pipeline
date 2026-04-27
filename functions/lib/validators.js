@@ -1,7 +1,7 @@
 // functions/lib/validators.js
 //
 // Small input validators used by route handlers. These are intentionally
-// tiny — no Zod, no Joi — because PMS route handlers are server-rendered
+// tiny — no Zod, no Joi — because Pipeline route handlers are server-rendered
 // and the set of fields per form is small. Each validator returns either
 // { ok: true, value } or { ok: false, errors: { field: 'message' } }.
 

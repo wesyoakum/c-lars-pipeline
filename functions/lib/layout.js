@@ -1,6 +1,6 @@
 // functions/lib/layout.js
 //
-// Small server-side HTML layout helper. PMS is rendered as plain HTML
+// Small server-side HTML layout helper. Pipeline is rendered as plain HTML
 // with HTMX for interactivity and Alpine.js for small local state —
 // no build step, no framework, no hydration. Every page is a function
 // that returns a string, wrapped in `layout(title, body, { user })`.
@@ -248,14 +248,14 @@ const NOTIFICATION_STORE_SCRIPT = (
 // that registers itself with the engine in /js/wizard-modal.js.
 //
 // Opened via:
-//   <button onclick="window.PMS.openWizard('task', { opportunity_id: '...' })">+ Task</button>
-//   <button onclick="window.PMS.openWizard('account', {})">+ New account</button>
+//   <button onclick="window.Pipeline.openWizard('task', { opportunity_id: '...' })">+ Task</button>
+//   <button onclick="window.Pipeline.openWizard('account', {})">+ New account</button>
 //
 // or via a custom event:
-//   window.dispatchEvent(new CustomEvent('pms:open-wizard',
+//   window.dispatchEvent(new CustomEvent('pipeline:open-wizard',
 //     { detail: { key: 'account', prefill: {} } }))
 //
-// Back-compat: window.PMS.openTaskModal(prefill) maps to openWizard('task', prefill).
+// Back-compat: window.Pipeline.openTaskModal(prefill) maps to openWizard('task', prefill).
 //
 // Picker data (users, open opps, recent quotes, accounts) is fetched
 // lazily from /activities/picker-data the first time a wizard with a
@@ -381,7 +381,7 @@ const WIZARD_MODAL_MARKUP = (
 // an entity is refused by the server because the entity has pending
 // tasks or active downstream objects (migration 0035 rule).
 //
-// Populated by window.PMS.showBlockerModal({
+// Populated by window.Pipeline.showBlockerModal({
 //   actionLabel: "Cancel this job",
 //   error: "optional server-provided summary",
 //   blockers: [{ kind, id, label, due_at?, resolveUrl, completeUrl? }],
@@ -453,7 +453,7 @@ const BLOCKER_MODAL_MARKUP = (
 
 // Blocker modal Alpine store + global helper.
 //
-// window.PMS.showBlockerModal({ actionLabel, error, blockers, retry })
+// window.Pipeline.showBlockerModal({ actionLabel, error, blockers, retry })
 //   - actionLabel: the short verb-phrase being blocked ("Close this
 //     opportunity", "Cancel this job"). Renders before the list.
 //   - error: optional server-provided one-liner to show at the bottom.
@@ -463,7 +463,7 @@ const BLOCKER_MODAL_MARKUP = (
 //     list empties to length 0). If it resolves to { ok: false, blockers }
 //     we repopulate the list (same flow as the original call).
 //
-// window.PMS.submitFormWithBlockerCheck(form, actionLabel)
+// window.Pipeline.submitFormWithBlockerCheck(form, actionLabel)
 //   - Intercepts a form submit, does a fetch with x-requested-with set,
 //     and on 409 opens the blocker modal wired to retry the same POST.
 //   - For <200 success, follows res.url (redirect target) or the form's
@@ -473,7 +473,7 @@ const BLOCKER_MODAL_MARKUP = (
 // surface blocker responses via this modal — that one stays there.
 const BLOCKER_MODAL_STORE_SCRIPT = (
   "(function () {\n" +
-  "  window.PMS = window.PMS || {};\n" +
+  "  window.Pipeline = window.Pipeline || {};\n" +
   "  document.addEventListener('alpine:init', function () {\n" +
   "    Alpine.store('blockerModal', {\n" +
   "      open: false,\n" +
@@ -557,7 +557,7 @@ const BLOCKER_MODAL_STORE_SCRIPT = (
   "  });\n" +
   "\n" +
   "  // Shortcut consumers use everywhere.\n" +
-  "  window.PMS.showBlockerModal = function (opts) {\n" +
+  "  window.Pipeline.showBlockerModal = function (opts) {\n" +
   "    var store = (typeof Alpine !== 'undefined' && Alpine.store)\n" +
   "      ? Alpine.store('blockerModal') : null;\n" +
   "    if (!store) { console.error('blockerModal store not ready'); return; }\n" +
@@ -567,7 +567,7 @@ const BLOCKER_MODAL_STORE_SCRIPT = (
   "  // Wrap a <form> submit: POST as AJAX, show modal on 409, navigate\n" +
   "  // on success. `actionLabel` is the user-facing verb phrase\n" +
   "  // (\"Close this opportunity\").\n" +
-  "  window.PMS.submitFormWithBlockerCheck = function (form, actionLabel) {\n" +
+  "  window.Pipeline.submitFormWithBlockerCheck = function (form, actionLabel) {\n" +
   "    if (!form) return;\n" +
   "    var method = (form.method || 'POST').toUpperCase();\n" +
   "    var action = form.getAttribute('action') || window.location.pathname;\n" +
@@ -599,7 +599,7 @@ const BLOCKER_MODAL_STORE_SCRIPT = (
   "    }\n" +
   "    doSubmit().then(function (result) {\n" +
   "      if (result && result.ok === false) {\n" +
-  "        window.PMS.showBlockerModal({\n" +
+  "        window.Pipeline.showBlockerModal({\n" +
   "          actionLabel: actionLabel,\n" +
   "          error: result.error,\n" +
   "          blockers: result.blockers,\n" +
@@ -972,7 +972,7 @@ const BOARD_LEFT_MARKUP = (
 
 // (The display-preferences gear popup previously lived here. The three
 // toggles were moved to the /settings page so there's a single obvious
-// place for all user preferences. window.PMS.userPrefs is still
+// place for all user preferences. window.Pipeline.userPrefs is still
 // populated via displayPrefsBootScript further down so client code can
 // branch on the current user's prefs without a server round-trip.)
 
@@ -1011,7 +1011,7 @@ const BOARD_RESTORE_HEADER_BTN = (
  */
 export function layout(title, body, opts = {}) {
   const { user, flash, activeNav, breadcrumbs } = opts;
-  const pageTitle = title ? `${escape(title)} — C-LARS PMS` : 'C-LARS PMS';
+  const pageTitle = title ? `${escape(title)} — C-LARS Pipeline` : 'C-LARS Pipeline';
   const versionTag = VERSION ? `v${escape(VERSION)}` : '';
 
   const breadcrumbHtml = breadcrumbs && breadcrumbs.length
@@ -1029,9 +1029,31 @@ export function layout(title, body, opts = {}) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${pageTitle}</title>
+  <script>
+    // One-time localStorage migration: rename legacy "pms.*" keys to
+    // "pipeline.*" so existing user prefs (column widths, sort orders,
+    // account-picker grouping) survive the rebrand. Runs synchronously
+    // before any deferred script reads localStorage.
+    (function () {
+      try {
+        if (localStorage.getItem('pipeline.__migrated')) return;
+        for (var i = localStorage.length - 1; i >= 0; i--) {
+          var k = localStorage.key(i);
+          if (k && k.indexOf('pms.') === 0) {
+            var newKey = 'pipeline.' + k.slice(4);
+            if (localStorage.getItem(newKey) === null) {
+              localStorage.setItem(newKey, localStorage.getItem(k));
+            }
+            localStorage.removeItem(k);
+          }
+        }
+        localStorage.setItem('pipeline.__migrated', '1');
+      } catch (_) { /* private mode etc. — ignore */ }
+    })();
+  </script>
   <link rel="icon" type="image/svg+xml" href="/img/logo.svg">
   <link rel="icon" type="image/png" sizes="120x120" href="/img/logo-120.png">
-  <link rel="stylesheet" href="/css/pms.css">
+  <link rel="stylesheet" href="/css/pipeline.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600;700&family=Kalam:wght@300;400;700&display=swap" rel="stylesheet">
@@ -1058,7 +1080,7 @@ export function layout(title, body, opts = {}) {
 <body>
   <header class="site-header">
     <div class="brand">
-      <a href="/"><img src="/img/logo-120.png" alt="C-LARS" class="brand-logo"><strong>PMS</strong></a>
+      <a href="/"><img src="/img/logo-120.png" alt="C-LARS" class="brand-logo"><strong>Pipeline</strong></a>
     </div>
     <nav class="site-nav">
       ${navLink('/accounts', 'Accounts', activeNav)}
@@ -1121,11 +1143,11 @@ ${body}
 
 // Inline boot script for the display-prefs gear popup. Registers the
 // Alpine.data factory and exposes the current user's prefs to client
-// code (account-picker.js, wizards) via window.PMS.userPrefs so they
+// code (account-picker.js, wizards) via window.Pipeline.userPrefs so they
 // can branch on show_alias / group_rollup without a server round-trip.
 function displayPrefsBootScript(user) {
   // Exposes the current user's display preferences on
-  // window.PMS.userPrefs so client code (account-picker.js, wizards,
+  // window.Pipeline.userPrefs so client code (account-picker.js, wizards,
   // list helpers) can branch on them without a server round-trip.
   //
   // The toggles themselves live on the /settings page; this boot
@@ -1148,11 +1170,11 @@ function displayPrefsBootScript(user) {
     }
   }
   return (
-    "window.PMS = window.PMS || {};\n" +
-    "window.PMS.userPrefs = { show_alias: " + showAlias +
+    "window.Pipeline = window.Pipeline || {};\n" +
+    "window.Pipeline.userPrefs = { show_alias: " + showAlias +
       ", group_rollup: " + groupRollup +
       ", active_only: " + activeOnly + " };\n" +
-    "window.PMS.listTableSiteDefaults = " + listPrefsJson + ";\n"
+    "window.Pipeline.listTableSiteDefaults = " + listPrefsJson + ";\n"
   );
 }
 

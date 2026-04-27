@@ -19,7 +19,7 @@
 //   import { listScript, listTableHead, listToolbar } from '../lib/list-table.js';
 //   // ... render HTML following conventions ...
 //   ${listToolbar({ id: 'quotes', count: rows.length, columns })}
-//   html`<script>${raw(listScript('pms.quotes.v1'))}</script>`
+//   html`<script>${raw(listScript('pipeline.quotes.v1'))}</script>`
 //
 // Pass `columns` to listToolbar() to get a working hamburger-icon
 // dropdown with per-column show/hide checkboxes, up/down reorder
@@ -39,7 +39,7 @@ import { html, escape } from './layout.js';
  * Standard toolbar: quicksearch + count + optional columns-menu + optional new button.
  *
  *   listToolbar({ id: 'quotes', count: rows.length, columns, newHref: '/quotes/new' })
- *   listToolbar({ id: 'acct',   count, columns, newOnClick: "window.PMS.openWizard('account', {})", newLabel: 'New account' })
+ *   listToolbar({ id: 'acct',   count, columns, newOnClick: "window.Pipeline.openWizard('account', {})", newLabel: 'New account' })
  *
  * Exactly one of `newHref` (renders an <a>) or `newOnClick` (renders a
  * <button> with the given onclick JS expression) should be provided to
@@ -151,7 +151,7 @@ export function rowDataAttrs(columns, row) {
  *   - Column visibility toggle + reorder (when columns menu exists)
  *   - localStorage persistence
  *
- * @param {string} storageKey   e.g. 'pms.quotes.v1'
+ * @param {string} storageKey   e.g. 'pipeline.quotes.v1'
  * @param {string} defaultSortKey  column key to sort by initially (default 'updated')
  * @param {string} defaultSortDir  'asc' or 'desc' (default 'desc')
  * @param {object} defaultFilters  optional initial filterState, keyed by
@@ -203,7 +203,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     var savedFilters = null;
 
     // Merge saved state. Prefer localStorage, but fall back to the
-    // admin-blessed site defaults injected into window.PMS by the
+    // admin-blessed site defaults injected into window.Pipeline by the
     // layout boot script (see layout.js displayPrefsBootScript +
     // migration 0039). Site defaults are keyed by storageKey so each
     // list page can have its own admin-snapshotted starting state.
@@ -211,7 +211,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
       if (!saved) {
         try {
-          var siteDefaults = window.PMS && window.PMS.listTableSiteDefaults;
+          var siteDefaults = window.Pipeline && window.Pipeline.listTableSiteDefaults;
           if (siteDefaults && siteDefaults[STORAGE_KEY]) {
             saved = siteDefaults[STORAGE_KEY];
           }

@@ -70,7 +70,7 @@ export async function onRequestGet(context) {
   // Column catalog — label, key, filter type, default visibility. The
   // client-side controller lets the user toggle visibility, reorder,
   // sort, and filter per column, and persists the state to localStorage
-  // under `pms.oppList.v1`. The table itself is server-rendered so the
+  // under `pipeline.oppList.v1`. The table itself is server-rendered so the
   // page is useful even without JS.
   const columns = [
     { key: 'open',         label: '\u2197',       sort: 'text',   filter: null,     default: true },
@@ -127,7 +127,7 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Opportunities</h1>
-        ${listToolbar({ id: 'opp', count: rows.length, columns, newOnClick: "window.PMS.openWizard('opportunity', {})", newLabel: 'New opportunity' })}
+        ${listToolbar({ id: 'opp', count: rows.length, columns, newOnClick: "window.Pipeline.openWizard('opportunity', {})", newLabel: 'New opportunity' })}
       </div>
 
       ${rows.length === 0
@@ -198,7 +198,7 @@ export async function onRequestGet(context) {
               </tbody>
             </table>
           </div>
-          <script>${raw(listScript('pms.oppList.v1'))}</script>
+          <script>${raw(listScript('pipeline.oppList.v1'))}</script>
           <script>${raw(listInlineEditScript('/opportunities/:id/patch', {
             // Column keys → patch field names differ here, so tell the
             // client which data-<attr> to update after each save.

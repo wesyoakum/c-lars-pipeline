@@ -91,7 +91,7 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
               </tfoot>
             </table>
           </div>
-          <script>${raw(listScript('pms.libItems.v1', 'name', 'asc'))}</script>
+          <script>${raw(listScript('pipeline.libItems.v1', 'name', 'asc'))}</script>
         `}
 
       <h2 class="section-h">Add item</h2>

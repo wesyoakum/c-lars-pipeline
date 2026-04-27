@@ -102,7 +102,7 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
               </tfoot>
             </table>
           </div>
-          <script>${raw(listScript('pms.libDm.v1', 'description', 'asc'))}</script>
+          <script>${raw(listScript('pipeline.libDm.v1', 'description', 'asc'))}</script>
         `}
     </section>
   `;

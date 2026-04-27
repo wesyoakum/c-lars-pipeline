@@ -5,7 +5,7 @@
 // Landing page for the AI Inbox experiment. Shows an upload form at
 // the top (audio file + optional context) and a newest-first list of
 // previous items with their status and a one-line summary. The whole
-// page is server-rendered HTML matching the rest of PMS — HTMX/Alpine
+// page is server-rendered HTML matching the rest of Pipeline — HTMX/Alpine
 // only where needed.
 
 import { all } from '../lib/db.js';

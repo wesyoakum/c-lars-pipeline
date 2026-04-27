@@ -144,7 +144,7 @@ export async function onRequestGet(context) {
         <div class="toolbar-right" style="display:flex;align-items:center;gap:0.5rem">
           ${listToolbar({ id: 'act', count: activities.length, columns })}
           <button class="btn btn-sm primary" type="button"
-                  onclick="window.PMS && window.PMS.openTaskModal({})">+ New task</button>
+                  onclick="window.Pipeline && window.Pipeline.openTaskModal({})">+ New task</button>
         </div>
       </div>
 
@@ -188,7 +188,7 @@ export async function onRequestGet(context) {
               </tbody>
             </table>
           </div>
-          <script>${raw(listScript('pms.activities.v1', 'due', 'asc'))}</script>
+          <script>${raw(listScript('pipeline.activities.v1', 'due', 'asc'))}</script>
           <script>${raw(listInlineEditScript('/activities/:id/patch', {
             // Column key `due` maps to patch field `due_at`.
             fieldAttrMap: { due_at: 'due' },

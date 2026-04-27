@@ -206,7 +206,7 @@ function resUpload() {
               </tbody>
             </table>
           </div>
-          <script>${raw(listScript('pms.resources.v1', 'title', 'asc'))}</script>
+          <script>${raw(listScript('pipeline.resources.v1', 'title', 'asc'))}</script>
           <script>
           document.addEventListener('alpine:init', function() {
             var catLabels = ${raw(JSON.stringify(CATEGORIES))};

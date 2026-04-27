@@ -1,5 +1,5 @@
 -- =====================================================================
--- C-LARS PMS — Migration 0002 — seed data
+-- C-LARS Pipeline — Migration 0002 — seed data
 --
 -- Seeds the stage catalog (one set of shared early stages per
 -- transaction_type, converging at closed_won on OC/NTP issuance),

@@ -1,5 +1,5 @@
 -- =====================================================================
--- C-LARS Pipeline Management System (PMS)
+-- C-LARS Pipeline Management System (Pipeline)
 -- Migration 0001 — initial schema
 --
 -- All tables from the P0 plan §2 are created in this single migration so

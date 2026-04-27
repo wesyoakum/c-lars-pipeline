@@ -1,6 +1,6 @@
 // functions/lib/audit.js
 //
-// Single writer for the audit_events table. Every mutation in PMS
+// Single writer for the audit_events table. Every mutation in Pipeline
 // (create, update, delete, stage_changed, quote_submitted, oc_issued,
 // ntp_issued, handed_off, document uploaded, etc.) goes through this
 // helper so we have one canonical change log per entity and per user.

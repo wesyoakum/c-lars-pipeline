@@ -28,7 +28,7 @@
 (function () {
   'use strict';
 
-  if (!window.PMS || typeof window.PMS.registerWizard !== 'function') {
+  if (!window.Pipeline || typeof window.Pipeline.registerWizard !== 'function') {
     /* eslint-disable-next-line no-console */
     if (typeof console !== 'undefined') console.error('wizards/opportunity.js: wizard-modal.js must load first');
     return;
@@ -42,7 +42,7 @@
     { value: 'service', label: 'Service' }
   ];
 
-  window.PMS.registerWizard('opportunity', {
+  window.Pipeline.registerWizard('opportunity', {
     title: 'New opportunity',
     submitLabel: 'Create opportunity',
 

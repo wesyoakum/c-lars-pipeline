@@ -116,7 +116,7 @@ export async function onRequestGet(context) {
               </tbody>
             </table>
           </div>
-          <script>${raw(listScript('pms.usersList.v1', 'email', 'asc'))}</script>
+          <script>${raw(listScript('pipeline.usersList.v1', 'email', 'asc'))}</script>
           <script>${raw(listInlineEditScript('/settings/users/:id/patch', {
             // Column key `status` \u2194 patch field `is_active`. Patch handler
             // accepts 'active'/'inactive' strings and coerces to 0/1.

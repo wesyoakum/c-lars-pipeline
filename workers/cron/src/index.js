@@ -1,6 +1,6 @@
 // workers/cron/src/index.js
 //
-// C-LARS PMS sidecar cron Worker.
+// C-LARS Pipeline sidecar cron Worker.
 //
 // Two entry points:
 //
@@ -16,7 +16,7 @@
 //       GET  /           → health check (no auth)
 //       POST /__run      → manual sweep; requires x-cron-secret header
 //
-// Cloudflare's Access sits in front of pms.c-lars.com, so the Worker
+// Cloudflare's Access sits in front of the Pages site, so the Worker
 // can't auth via a login flow. Instead it passes the pre-shared
 // CRON_SECRET on every request. The Pages endpoint validates the same
 // value, constant-time.
@@ -39,7 +39,7 @@ export default {
     if (request.method === 'GET' && url.pathname === '/') {
       return jsonResponse({
         ok: true,
-        name: 'c-lars-pms-cron',
+        name: 'c-lars-pipeline-cron',
         message: 'Sidecar cron Worker. POST /__run with x-cron-secret to fire a sweep.',
       });
     }
@@ -58,9 +58,9 @@ export default {
 };
 
 async function runSweep(env) {
-  const pmsUrl = (env.PMS_URL || '').replace(/\/$/, '');
-  if (!pmsUrl) {
-    const msg = 'PMS_URL is not configured — refusing to sweep.';
+  const pipelineUrl = (env.PIPELINE_URL || '').replace(/\/$/, '');
+  if (!pipelineUrl) {
+    const msg = 'PIPELINE_URL is not configured — refusing to sweep.';
     console.error(msg);
     return { ok: false, error: msg };
   }
@@ -70,7 +70,7 @@ async function runSweep(env) {
     return { ok: false, error: msg };
   }
 
-  const target = `${pmsUrl}/api/cron/sweep`;
+  const target = `${pipelineUrl}/api/cron/sweep`;
   const startedAt = new Date().toISOString();
 
   let res;
@@ -79,7 +79,7 @@ async function runSweep(env) {
       method: 'POST',
       headers: {
         'x-cron-secret': env.CRON_SECRET,
-        'user-agent': 'c-lars-pms-cron/1.0',
+        'user-agent': 'c-lars-pipeline-cron/1.0',
       },
     });
   } catch (err) {
@@ -100,7 +100,7 @@ async function runSweep(env) {
   // Log a compact summary to `wrangler tail` so it's easy to confirm
   // the sweep fired and see the per-trigger counts at a glance.
   console.log(JSON.stringify({
-    cron: 'c-lars-pms-cron',
+    cron: 'c-lars-pipeline-cron',
     startedAt,
     target,
     status: res.status,

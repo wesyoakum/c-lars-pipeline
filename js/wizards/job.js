@@ -30,13 +30,13 @@
 (function () {
   'use strict';
 
-  if (!window.PMS || typeof window.PMS.registerWizard !== 'function') {
+  if (!window.Pipeline || typeof window.Pipeline.registerWizard !== 'function') {
     /* eslint-disable-next-line no-console */
     if (typeof console !== 'undefined') console.error('wizards/job.js: wizard-modal.js must load first');
     return;
   }
 
-  window.PMS.registerWizard('job', {
+  window.Pipeline.registerWizard('job', {
     title: 'New job',
     submitLabel: 'Create job',
 

@@ -222,7 +222,7 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Accounts</h1>
-        ${listToolbar({ id: 'acct', count: rows.length, columns, newOnClick: "window.PMS.openWizard('account', {})", newLabel: 'New account' })}
+        ${listToolbar({ id: 'acct', count: rows.length, columns, newOnClick: "window.Pipeline.openWizard('account', {})", newLabel: 'New account' })}
       </div>
 
       ${rows.length === 0
@@ -289,7 +289,7 @@ export async function onRequestGet(context) {
               </tbody>
             </table>
           </div>
-          <script>${raw(listScript('pms.accounts.v1', 'name', 'asc'))}</script>
+          <script>${raw(listScript('pipeline.accounts.v1', 'name', 'asc'))}</script>
           <script>${raw(listInlineEditScript('/accounts/:id/patch', {
             // Column key `status` ↔ patch field `is_active`. The patch
             // handler accepts 'active'/'inactive' string values and
@@ -445,7 +445,7 @@ export async function onRequestPost(context) {
   }
 
   if (isPopupMode(request, input)) {
-    return popupCloseResponse('pms.account.created', {
+    return popupCloseResponse('pipeline.account.created', {
       account: { id, name: value.name },
     });
   }

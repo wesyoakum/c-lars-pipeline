@@ -280,7 +280,7 @@ function tplUpload() {
           </tbody>
         </table>
       </div>
-      <script>${raw(listScript('pms.templates.v1', 'label', 'asc'))}</script>
+      <script>${raw(listScript('pipeline.templates.v1', 'label', 'asc'))}</script>
       <script>${raw(`
       document.addEventListener('alpine:init', function() {
         Alpine.data('tplEdit', function(tplKey, field, initial) {

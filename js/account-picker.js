@@ -15,25 +15,25 @@
 //      option set.
 //
 //   3. Toggle pills (rendered elsewhere) flip the state and dispatch a
-//      `pms:account-picker-toggle` CustomEvent on `window`, which re-runs
+//      `pipeline:account-picker-toggle` CustomEvent on `window`, which re-runs
 //      the regroup pass. The same event is also dispatched on explicit
 //      "rebuild" calls (e.g. after HTMX swaps in new markup).
 //
 //   4. For inline-edit pickers (opportunity detail page), the <select>
 //      is created lazily when the user clicks the field. Those call
-//      `window.pmsAccountPicker.buildSelectOptions(select, items)` with
+//      `window.pipelineAccountPicker.buildSelectOptions(select, items)` with
 //      the parsed options array — that helper reads the toggle state
 //      from localStorage and appends the right <option>/<optgroup> tree.
 //
 // Toggle state:
-//   localStorage key `pms.accountPicker.grouped` = '1' (on) | '0' (off)
+//   localStorage key `pipeline.accountPicker.grouped` = '1' (on) | '0' (off)
 //   Default: off.
 
 (function () {
   'use strict';
 
-  var LS_KEY = 'pms.accountPicker.grouped';
-  var EVENT_NAME = 'pms:account-picker-toggle';
+  var LS_KEY = 'pipeline.accountPicker.grouped';
+  var EVENT_NAME = 'pipeline:account-picker-toggle';
 
   function isGrouped() {
     try {
@@ -59,7 +59,7 @@
   // primary list shows groups + ungrouped; picking a group swaps the
   // <select> to that group's member list.
   function isGroupRollup() {
-    return !!(window.PMS && window.PMS.userPrefs && window.PMS.userPrefs.group_rollup);
+    return !!(window.Pipeline && window.Pipeline.userPrefs && window.Pipeline.userPrefs.group_rollup);
   }
 
   // Collect the real account options from a <select> that was rendered
@@ -195,7 +195,7 @@
 
     // Stash the partition so re-renders (e.g. after a Back) don't have
     // to re-walk the source items.
-    sel.__pmsTwoStage = {
+    sel.__pipelineTwoStage = {
       placeholders: placeholders,
       specials: specials,
       ungrouped: ungrouped,
@@ -222,13 +222,13 @@
       renderTopLevel(sel, initialValue);
     }
 
-    if (!sel.__pmsTwoStageBound) {
-      sel.__pmsTwoStageBound = true;
+    if (!sel.__pipelineTwoStageBound) {
+      sel.__pipelineTwoStageBound = true;
       sel.addEventListener('change', function () {
         var v = sel.value;
         if (v && v.indexOf('__group:') === 0) {
           var label = v.slice('__group:'.length);
-          var members = (sel.__pmsTwoStage.byGroup[label]) || [];
+          var members = (sel.__pipelineTwoStage.byGroup[label]) || [];
           // Single-member group: auto-pick the only member without
           // forcing a second click.
           if (members.length === 1) {
@@ -246,7 +246,7 @@
   }
 
   function renderTopLevel(sel, restoreValue) {
-    var s = sel.__pmsTwoStage;
+    var s = sel.__pipelineTwoStage;
     while (sel.firstChild) sel.removeChild(sel.firstChild);
     s.placeholders.forEach(function (it) { sel.appendChild(makeOption(it)); });
     Object.keys(s.byGroup).sort(function (a, b) {
@@ -265,7 +265,7 @@
   }
 
   function renderMembers(sel, label, restoreValue) {
-    var s = sel.__pmsTwoStage;
+    var s = sel.__pipelineTwoStage;
     var members = (s.byGroup[label]) || [];
     while (sel.firstChild) sel.removeChild(sel.firstChild);
     var back = document.createElement('option');
@@ -289,10 +289,10 @@
       var sel = selects[i];
       // Snapshot the source options once, so repeated toggles don't
       // lose the flat order. We stash them on the element.
-      if (!sel.__pmsItems) {
-        sel.__pmsItems = collectOptionsFromSelect(sel);
+      if (!sel.__pipelineItems) {
+        sel.__pipelineItems = collectOptionsFromSelect(sel);
       }
-      buildSelectOptions(sel, sel.__pmsItems);
+      buildSelectOptions(sel, sel.__pipelineItems);
     }
     // Also refresh any visible toggle pills so their active state
     // tracks the shared localStorage value.
@@ -317,8 +317,8 @@
     var pills = document.querySelectorAll('[data-role="account-picker-toggle"]');
     for (var i = 0; i < pills.length; i++) {
       var pill = pills[i];
-      if (pill.__pmsBound) continue;
-      pill.__pmsBound = true;
+      if (pill.__pipelineBound) continue;
+      pill.__pipelineBound = true;
       pill.addEventListener('click', function (e) {
         e.preventDefault();
         toggle();
@@ -328,7 +328,7 @@
 
   // Expose a tiny API so other inline scripts (e.g. the opp detail
   // inline-edit activator) can reuse the grouping logic.
-  window.pmsAccountPicker = {
+  window.pipelineAccountPicker = {
     isGrouped: isGrouped,
     setGrouped: setGrouped,
     toggle: toggle,

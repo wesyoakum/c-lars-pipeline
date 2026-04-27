@@ -345,11 +345,11 @@ document.addEventListener('alpine:init', function() {
  *
  * - "+ New account" opens /accounts/new?popup=1 in a popup window. When
  *   the popup posts the created account back via window.postMessage with
- *   {type:'pms.account.created', account:{id,name}}, we append it to the
+ *   {type:'pipeline.account.created', account:{id,name}}, we append it to the
  *   account <select>, select it, and trigger a contacts reload.
  *
  * - "+ New contact" opens /accounts/:account_id/contacts/new?popup=1 and
- *   similarly listens for {type:'pms.contact.created', contact:{id,name}}.
+ *   similarly listens for {type:'pipeline.contact.created', contact:{id,name}}.
  *
  * - When the account <select> changes we fetch /api/accounts/:id/contacts
  *   (JSON) and repopulate the authority contact dropdown.
@@ -403,7 +403,7 @@ export function oppPickerScript() {
     accountSelect.addEventListener('change', () => {
       if (accountSelect.value === '__new__') {
         accountSelect.value = '';
-        openPopup('/accounts/new?popup=1', 'pms-new-account');
+        openPopup('/accounts/new?popup=1', 'pipeline-new-account');
       } else if (accountSelect.value === '__back__' || (accountSelect.value && accountSelect.value.indexOf('__group:') === 0)) {
         // Two-stage account picker transitions (group_rollup mode):
         // sentinel values that the two-stage builder consumes to swap
@@ -423,13 +423,13 @@ export function oppPickerScript() {
         alert('Pick an account first, then add a contact on that account.');
         return;
       }
-      openPopup('/accounts/' + encodeURIComponent(accountId) + '/contacts/new?popup=1', 'pms-new-contact');
+      openPopup('/accounts/' + encodeURIComponent(accountId) + '/contacts/new?popup=1', 'pipeline-new-contact');
     });
   }
 
   window.addEventListener('message', (ev) => {
     if (!ev.data || typeof ev.data !== 'object') return;
-    if (ev.data.type === 'pms.account.created' && ev.data.account) {
+    if (ev.data.type === 'pipeline.account.created' && ev.data.account) {
       const { id, name } = ev.data.account;
       if (accountSelect && !accountSelect.querySelector('option[value="' + id + '"]')) {
         const opt = document.createElement('option');
@@ -444,7 +444,7 @@ export function oppPickerScript() {
         loadContactsFor(id);
       }
     }
-    if (ev.data.type === 'pms.contact.created' && ev.data.contact) {
+    if (ev.data.type === 'pipeline.contact.created' && ev.data.contact) {
       const { id, first_name, last_name, title } = ev.data.contact;
       if (authoritySelect) {
         const opt = document.createElement('option');

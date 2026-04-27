@@ -124,7 +124,7 @@ function inlineSelect(field, value, options, opts = {}) {
   const displayClass = value ? '' : 'muted';
   const optJson = JSON.stringify(options);
   // When `opts.groupable` is set, the client-side activator (oppInline)
-  // will route through window.pmsAccountPicker.buildSelectOptions and
+  // will route through window.pipelineAccountPicker.buildSelectOptions and
   // respect the global "group accounts" localStorage toggle.
   const groupableAttr = opts.groupable ? ' data-groupable="true"' : '';
   return html`<span class="ie" data-field="${field}" data-type="select" data-options='${escape(optJson)}'${raw(groupableAttr)}>
@@ -467,7 +467,7 @@ export async function onRequestGet(context) {
                now created automatically when an OC is issued. Keep the
                wizard prefill in case we restore this later. -->
           <button class="icon-btn primary" type="button" title="New quote"
-                  onclick="window.PMS && window.PMS.openWizard('quote', ${escape(oppWizardPrefill)})">
+                  onclick="window.Pipeline && window.Pipeline.openWizard('quote', ${escape(oppWizardPrefill)})">
             <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="10" y1="4" x2="10" y2="16"/><line x1="4" y1="10" x2="16" y2="10"/></svg>
           </button>
           <form method="post" action="/opportunities/${escape(opp.id)}/delete"
@@ -496,7 +496,7 @@ export async function onRequestGet(context) {
       <form method="post" action="/opportunities/${escape(opp.id)}/stage"
             x-data="stageSelect('${escape(opp.stage)}')"
             x-ref="stageForm"
-            onsubmit="window.PMS.submitFormWithBlockerCheck(this, 'Move to this stage'); return false;"
+            onsubmit="window.Pipeline.submitFormWithBlockerCheck(this, 'Move to this stage'); return false;"
             class="stage-select" style="margin:0.5rem 0">
         <input type="hidden" name="to_stage" x-ref="toStage" value="">
         <div class="stage-select-row">
@@ -684,7 +684,7 @@ export async function onRequestGet(context) {
             <h2>Pending tasks${pendingTasks.length > 0 ? ` (${pendingTasks.length})` : ''}</h2>
             <div style="display:flex;gap:0.5rem;">
               <button class="btn btn-sm primary" type="button"
-                      onclick="window.PMS && window.PMS.openTaskModal(${escape(taskModalPrefill)})">+ Add task</button>
+                      onclick="window.Pipeline && window.Pipeline.openTaskModal(${escape(taskModalPrefill)})">+ Add task</button>
               <a class="btn btn-sm" href="/opportunities/${escape(opp.id)}?tab=tasks">View all</a>
             </div>
           </div>
@@ -1031,7 +1031,7 @@ export async function onRequestGet(context) {
       <div class="card-header">
         <h2>Tasks & Activities</h2>
         <button class="btn btn-sm primary" type="button"
-                onclick="window.PMS && window.PMS.openTaskModal(${escape(tasksTabPrefill)})">+ Add task</button>
+                onclick="window.Pipeline && window.Pipeline.openTaskModal(${escape(tasksTabPrefill)})">+ Add task</button>
       </div>
       ${taskRows.length === 0
         ? html`<p class="muted">No tasks or activities yet.</p>`
@@ -1416,9 +1416,9 @@ function oppInline(oppId, accountId) {
         input.className = 'ie-input';
         const options = JSON.parse(el.dataset.options || '[]');
         // Route account pickers through the shared grouping helper so
-        // the optgroup toggle (pmsAccountPicker) applies consistently.
+        // the optgroup toggle (pipelineAccountPicker) applies consistently.
         const groupable = el.dataset.groupable === 'true';
-        if (groupable && window.pmsAccountPicker) {
+        if (groupable && window.pipelineAccountPicker) {
           const items = options.map(o => ({
             value: o.value,
             label: o.label,
@@ -1427,7 +1427,7 @@ function oppInline(oppId, accountId) {
             isPlaceholder: o.value === '',
             isAddNew: o.value === '__new__',
           }));
-          window.pmsAccountPicker.buildSelectOptions(input, items);
+          window.pipelineAccountPicker.buildSelectOptions(input, items);
           // buildSelectOptions restores the select value from whatever
           // was already on the element, but we have not set anything
           // yet on this freshly-created <select>. Force it explicitly.

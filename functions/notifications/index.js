@@ -66,7 +66,7 @@ export async function onRequestGet(context) {
   ]);
 
   const rowsHtml = rows.length === 0
-    ? '<p class="muted">No notifications yet. As you work in PMS, you\'ll see updates here.</p>'
+    ? '<p class="muted">No notifications yet. As you work in Pipeline, you\'ll see updates here.</p>'
     : `<ul class="notification-list" x-data="{ markOne: function(id) { fetch('/notifications/' + encodeURIComponent(id) + '/read', { method: 'POST', credentials: 'same-origin' }).catch(function(){}); } }">
          ${rows.map((n) => {
            const unread = n.read_at == null;
@@ -110,7 +110,7 @@ export async function onRequestGet(context) {
       user,
       flash,
       breadcrumbs: [
-        { label: 'PMS', href: '/' },
+        { label: 'Pipeline', href: '/' },
         { label: 'Notifications' },
       ],
     }),

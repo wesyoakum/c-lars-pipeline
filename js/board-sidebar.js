@@ -155,7 +155,7 @@
       },
       serverTime: null,
       nowMs: Date.now(),
-      userId: (window.PMS && window.PMS.userId) || null,
+      userId: (window.Pipeline && window.Pipeline.userId) || null,
 
       // Tasks zone
       showCompleted: false,
@@ -296,7 +296,7 @@
       messagePrefix: function (msg) {
         if (!msg) return '';
         var name = msg.from_me
-          ? (window.PMS && window.PMS.userDisplayName) || ''
+          ? (window.Pipeline && window.Pipeline.userDisplayName) || ''
           : (msg.author_display_name || msg.author_email || '');
         var parts = (name || '').split(/[\s@.]+/).filter(Boolean);
         if (parts.length === 0) return '';
@@ -507,9 +507,9 @@
             if (data.prefs) self.prefs = data.prefs;
             if (data.user && data.user.id) {
               self.userId = data.user.id;
-              if (!window.PMS) window.PMS = {};
-              window.PMS.userId = data.user.id;
-              window.PMS.userDisplayName = data.user.display_name || data.user.email || '';
+              if (!window.Pipeline) window.Pipeline = {};
+              window.Pipeline.userId = data.user.id;
+              window.Pipeline.userDisplayName = data.user.display_name || data.user.email || '';
             }
             self.serverTime = data.server_time || null;
             self.nowMs = Date.now();

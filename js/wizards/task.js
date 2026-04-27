@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  if (!window.PMS || typeof window.PMS.registerWizard !== 'function') {
+  if (!window.Pipeline || typeof window.Pipeline.registerWizard !== 'function') {
     // wizard-modal.js hasn't loaded yet — this file was loaded out of order.
     /* eslint-disable-next-line no-console */
     if (typeof console !== 'undefined') console.error('wizards/task.js: wizard-modal.js must load first');
@@ -32,7 +32,7 @@
          + 'T' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
   }
 
-  window.PMS.registerWizard('task', {
+  window.Pipeline.registerWizard('task', {
     title: 'New task',
     submitLabel: 'Create task',
 

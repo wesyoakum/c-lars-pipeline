@@ -6,7 +6,7 @@
 -- the app.
 --
 -- Shape of both new columns: a JSON object keyed by list-table
--- storageKey (e.g. "pms.quotes.v1", "pms.usersList.v1", …). Each
+-- storageKey (e.g. "pipeline.quotes.v1", "pipeline.usersList.v1", …). Each
 -- value is the localStorage payload written by listScript()'s save():
 --
 --   {
@@ -20,7 +20,7 @@
 -- Flow mirrors the existing three-toggle defaults:
 --
 --   * /settings/save-defaults (admin) — admin's client collects all
---     `pms.*` localStorage blobs and POSTs them; server writes the
+--     `pipeline.*` localStorage blobs and POSTs them; server writes the
 --     merged JSON to site_prefs.list_table_defaults.
 --
 --   * /user/prefs-reset (any user) — server copies
@@ -31,7 +31,7 @@
 --   * auth.upsertUser() on first login — seeds new user's
 --     list_table_prefs from site_prefs.list_table_defaults, which is
 --     then injected into every page's layout script as
---     window.PMS.listTableSiteDefaults. listScript merges it as a
+--     window.Pipeline.listTableSiteDefaults. listScript merges it as a
 --     fallback when the user has no localStorage entry for that key.
 --
 -- Both columns are nullable TEXT; NULL means "no defaults configured".

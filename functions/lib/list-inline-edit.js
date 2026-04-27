@@ -3,7 +3,7 @@
 // Inline-edit helpers for list tables (the pages that use list-table.js:
 // accounts, opportunities, quotes, jobs, activities, …). They produce
 // the same .ie / .ie-display / .ie-input DOM the detail pages use, so
-// css/pms.css Section "Inline-edit fields" (line ~2298) styles them for
+// css/pipeline.css Section "Inline-edit fields" (line ~2298) styles them for
 // free.
 //
 // Server side:
@@ -259,8 +259,8 @@ export function listInlineEditScript(patchUrlTemplate, opts = {}) {
           // and let the user resolve inline (task complete / navigate
           // to open records). Retry reruns this same save.
           if (res.status === 409 && Array.isArray(data.blockers)
-              && window.PMS && typeof window.PMS.showBlockerModal === 'function') {
-            window.PMS.showBlockerModal({
+              && window.Pipeline && typeof window.Pipeline.showBlockerModal === 'function') {
+            window.Pipeline.showBlockerModal({
               actionLabel: 'This change',
               error: data.error,
               blockers: data.blockers,

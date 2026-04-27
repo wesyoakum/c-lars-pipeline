@@ -4,7 +4,7 @@ const path = require("path");
 const pres = new pptxgen();
 pres.layout = "LAYOUT_16x9";
 pres.author = "C-LARS";
-pres.title = "C-LARS PMS — Object Model Restructure";
+pres.title = "C-LARS Pipeline — Object Model Restructure";
 
 // Palette: Midnight Executive
 const NAVY    = "1E2761";
@@ -34,7 +34,7 @@ const FONT_BODY = "Calibri";
     x: 0, y: 0, w: 10, h: 0.06, fill: { color: ACCENT }
   });
 
-  s.addText("C-LARS PMS", {
+  s.addText("C-LARS Pipeline", {
     x: 0.8, y: 1.4, w: 8.4, h: 0.7,
     fontFace: FONT_HEAD, fontSize: 20, color: ICE,
     charSpacing: 6, bold: false
@@ -45,7 +45,7 @@ const FONT_BODY = "Calibri";
     fontFace: FONT_HEAD, fontSize: 40, color: WHITE, bold: true
   });
 
-  s.addText("Pipeline Management System — April 2026", {
+  s.addText("C-LARS Pipeline — April 2026", {
     x: 0.8, y: 3.5, w: 8.4, h: 0.5,
     fontFace: FONT_BODY, fontSize: 14, color: MUTED
   });
@@ -328,7 +328,7 @@ const FONT_BODY = "Calibri";
 }
 
 // ── Write file ──────────────────────────────────────────────────
-const outPath = path.join(__dirname, "pms-restructure.pptx");
+const outPath = path.join(__dirname, "pipeline-restructure.pptx");
 pres.writeFile({ fileName: outPath }).then(() => {
   console.log("Created:", outPath);
 }).catch(err => {

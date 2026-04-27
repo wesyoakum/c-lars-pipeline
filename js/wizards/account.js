@@ -24,13 +24,13 @@
 (function () {
   'use strict';
 
-  if (!window.PMS || typeof window.PMS.registerWizard !== 'function') {
+  if (!window.Pipeline || typeof window.Pipeline.registerWizard !== 'function') {
     /* eslint-disable-next-line no-console */
     if (typeof console !== 'undefined') console.error('wizards/account.js: wizard-modal.js must load first');
     return;
   }
 
-  window.PMS.registerWizard('account', {
+  window.Pipeline.registerWizard('account', {
     title: 'New account',
     submitLabel: 'Create account',
 

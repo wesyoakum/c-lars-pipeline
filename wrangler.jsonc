@@ -1,9 +1,11 @@
 {
-  // C-LARS Pipeline Management System (PMS)
+  // C-LARS Pipeline.
   // Cloudflare Pages project wired to D1 + R2.
-  // Auth is handled entirely by Cloudflare Access in front of pms.c-lars.com —
+  // Auth is handled entirely by Cloudflare Access in front of the Pages site —
   // middleware decodes the JWT and upserts the user in the D1 users table.
-  "name": "c-lars-pms",
+  // The D1 database (c-lars-pms-db) and R2 bucket (c-lars-pms-docs) keep their
+  // legacy names; renaming them would require a data migration.
+  "name": "c-lars-pipeline",
   "pages_build_output_dir": ".",
   "compatibility_date": "2026-04-10",
 
@@ -23,15 +25,15 @@
   ],
 
   "vars": {
-    // PMS_ENV=production: requests without a Cf-Access-Authenticated-User-Email
-    // header return 401. Cloudflare Access is in front of c-lars-pms.pages.dev,
-    // so every real request has this header. Local dev overrides PMS_ENV to
+    // PIPELINE_ENV=production: requests without a Cf-Access-Authenticated-User-Email
+    // header return 401. Cloudflare Access is in front of the Pages deployment,
+    // so every real request has this header. Local dev overrides PIPELINE_ENV to
     // 'development' via .dev.vars so the dev stub user still works locally.
     //
     // ConvertAPI secret for .docx → PDF conversion is set via
     // `wrangler pages secret put CONVERTAPI_SECRET` (not listed here
     // to avoid binding name conflict).
-    "PMS_ENV": "production",
+    "PIPELINE_ENV": "production",
     "CF_ACCESS_TEAM_DOMAIN": "c-lars.cloudflareaccess.com",
     "CF_ACCESS_AUD": ""
   }

@@ -1,5 +1,5 @@
 -- =====================================================================
--- C-LARS PMS — Migration 0003
+-- C-LARS Pipeline — Migration 0003
 --
 -- Three related changes:
 --   1. account_addresses table: accounts can now have multiple labeled

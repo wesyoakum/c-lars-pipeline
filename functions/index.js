@@ -216,7 +216,7 @@ export async function onRequestGet(context) {
           <h2>My open tasks <span class="muted">(${myTasks.length})</span></h2>
           <div style="display:flex;gap:0.5rem;">
             <button class="btn btn-sm primary" type="button"
-                    onclick="window.PMS && window.PMS.openTaskModal({})">+ Add task</button>
+                    onclick="window.Pipeline && window.Pipeline.openTaskModal({})">+ Add task</button>
             <a class="btn btn-sm" href="/activities">All tasks</a>
           </div>
         </div>

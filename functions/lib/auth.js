@@ -2,7 +2,7 @@
 //
 // Cloudflare Access JWT handling + user upsert.
 //
-// Cloudflare Access sits in front of pms.c-lars.com and injects
+// Cloudflare Access sits in front of __KEEP_PipelineDOMAIN__ and injects
 // a JWT into every request in the Cf-Access-Jwt-Assertion header.
 // It also sets the Cf-Access-Authenticated-User-Email header, which
 // is the easy path and what we rely on here. The JWT is present as a
@@ -10,7 +10,7 @@
 // later want stricter validation, but for P0 we trust the header
 // because Access *is* the front door.
 //
-// Local dev fallback: when PMS_ENV !== 'production' and no Access
+// Local dev fallback: when PIPELINE_ENV !== 'production' and no Access
 // header is present, we inject a stub dev user (wes.yoakum@c-lars.com,
 // role='admin'). This lets `wrangler pages dev` work without Access.
 
@@ -26,7 +26,7 @@ const DEV_USER_NAME = 'Wes Yoakum';
  * Strategy:
  *   1. Read Cf-Access-Authenticated-User-Email header.
  *   2. If present, upsert a users row keyed on email and return it.
- *   3. If absent and env.PMS_ENV !== 'production', fall back to dev stub.
+ *   3. If absent and env.PIPELINE_ENV !== 'production', fall back to dev stub.
  *   4. Otherwise return null (middleware will 401).
  *
  * @param {Request} request
@@ -39,7 +39,7 @@ export async function resolveUser(request, env) {
     ?.trim()
     ?.toLowerCase();
 
-  const isProd = env.PMS_ENV === 'production';
+  const isProd = env.PIPELINE_ENV === 'production';
 
   let email = headerEmail;
   let displayName = null;

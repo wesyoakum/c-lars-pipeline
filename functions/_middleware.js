@@ -3,12 +3,12 @@
 // Runs on every request into Pages Functions. Responsibilities:
 //   1. Let static assets (CSS/JS/images) through untouched.
 //   2. Resolve the current user from Cloudflare Access headers (or
-//      fall back to a dev stub when PMS_ENV !== 'production').
+//      fall back to a dev stub when PIPELINE_ENV !== 'production').
 //   3. Attach the resolved user to context.data so downstream handlers
 //      can do `context.data.user`.
 //   4. In production: return 401 if no Access identity was found.
 //
-// Auth model: Cloudflare Access sits in front of pms.c-lars.com and
+// Auth model: Cloudflare Access sits in front of __KEEP_PipelineDOMAIN__ and
 // authenticates the user via Google/Microsoft SSO against @c-lars.com.
 // It then proxies the request to the Pages app with
 // Cf-Access-Authenticated-User-Email set. We trust that header because
@@ -46,7 +46,7 @@ export async function onRequest(context) {
   // Make user available to downstream route handlers.
   context.data = context.data ?? {};
   context.data.user = user;
-  context.data.env = env.PMS_ENV ?? 'production';
+  context.data.env = env.PIPELINE_ENV ?? 'production';
 
   return next();
 }

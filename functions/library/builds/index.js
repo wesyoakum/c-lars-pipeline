@@ -145,7 +145,7 @@ async function renderList(context, { values = {}, errors = {} } = {}) {
               </tbody>
             </table>
           </div>
-          <script>${raw(listScript('pms.libBuilds.v1', 'name', 'asc'))}</script>
+          <script>${raw(listScript('pipeline.libBuilds.v1', 'name', 'asc'))}</script>
         `}
     </section>
   `;

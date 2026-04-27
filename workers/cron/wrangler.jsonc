@@ -1,5 +1,5 @@
 {
-  // C-LARS PMS sidecar cron Worker.
+  // C-LARS Pipeline sidecar cron Worker.
   //
   // Cloudflare Pages Functions can't be cron-triggered directly — only
   // Workers can. This tiny Worker exists just to call the Pages site's
@@ -16,7 +16,7 @@
   //   npx wrangler pages secret put CRON_SECRET
   //
   // Manual smoke test (no schedule wait):
-  //   curl -X POST https://c-lars-pms-cron.<account>.workers.dev/__run \
+  //   curl -X POST https://c-lars-pipeline-cron.<account>.workers.dev/__run \
   //     -H "x-cron-secret: $CRON_SECRET"
   //
   // Schedule: once per day at 14:00 UTC = 09:00 America/Chicago (CST).
@@ -24,7 +24,7 @@
   // so running more often just hits the dedup gate. If we ever want
   // sub-daily cadence (e.g. hourly expiring-soon scans for a last-day
   // quote), change the bucket key too.
-  "name": "c-lars-pms-cron",
+  "name": "c-lars-pipeline-cron",
   "main": "src/index.js",
   "compatibility_date": "2026-04-17",
   "triggers": {
@@ -32,9 +32,8 @@
   },
   "vars": {
     // The public URL of the Pages deployment. The Worker POSTs to
-    // `${PMS_URL}/api/cron/sweep`.
-    // Temporarily pointed at the raw Pages URL until the custom domain
-    // pms.c-lars.com is wired up. Switch back when the custom domain is live.
-    "PMS_URL": "https://c-lars-pms.pages.dev"
+    // `${PIPELINE_URL}/api/cron/sweep`.
+    // Pointed at the raw Pages URL until the custom domain is wired up.
+    "PIPELINE_URL": "https://c-lars-pipeline.pages.dev"
   }
 }

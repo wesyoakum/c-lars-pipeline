@@ -89,7 +89,7 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Contacts</h1>
-        ${listToolbar({ id: 'contacts', count: rows.length, columns, newOnClick: "window.PMS.openWizard('contact', {})", newLabel: 'New contact' })}
+        ${listToolbar({ id: 'contacts', count: rows.length, columns, newOnClick: "window.Pipeline.openWizard('contact', {})", newLabel: 'New contact' })}
       </div>
 
       ${rows.length === 0
@@ -140,7 +140,7 @@ export async function onRequestGet(context) {
               </tbody>
             </table>
           </div>
-          <script>${raw(listScript('pms.contacts.v1', 'last_name', 'asc'))}</script>
+          <script>${raw(listScript('pipeline.contacts.v1', 'last_name', 'asc'))}</script>
           <script>${raw(listInlineEditScript('/contacts/:id/patch'))}</script>
         `}
     </section>

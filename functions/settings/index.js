@@ -301,13 +301,13 @@ document.addEventListener('alpine:init', function () {
         }).then(function (body) {
           // Blow away every list-table's localStorage entry, then
           // re-seed from the site defaults the server just handed
-          // back. Prefixed scan so we only touch pms.* keys (not
-          // window.PMS other app state).
+          // back. Prefixed scan so we only touch pipeline.* keys (not
+          // unrelated app state).
           try {
             var toRemove = [];
             for (var i = 0; i < localStorage.length; i++) {
               var k = localStorage.key(i);
-              if (k && k.indexOf('pms.') === 0) toRemove.push(k);
+              if (k && k.indexOf('pipeline.') === 0) toRemove.push(k);
             }
             toRemove.forEach(function (k) { localStorage.removeItem(k); });
             var defaults = body && body.list_table_defaults;
@@ -328,13 +328,13 @@ document.addEventListener('alpine:init', function () {
         var self = this;
         self.busy = true;
         // Collect every list-table payload from localStorage (any key
-        // that starts with "pms." and parses as an object). The
+        // that starts with "pipeline." and parses as an object). The
         // server validates the shape; we send whatever's there.
         var listDefaults = {};
         try {
           for (var i = 0; i < localStorage.length; i++) {
             var k = localStorage.key(i);
-            if (!k || k.indexOf('pms.') !== 0) continue;
+            if (!k || k.indexOf('pipeline.') !== 0) continue;
             var raw = localStorage.getItem(k);
             if (!raw) continue;
             try {

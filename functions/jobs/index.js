@@ -123,7 +123,7 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Jobs</h1>
-        ${listToolbar({ id: 'jobs', count: rows.length, columns, newOnClick: "window.PMS.openWizard('job', {})", newLabel: 'New job' })}
+        ${listToolbar({ id: 'jobs', count: rows.length, columns, newOnClick: "window.Pipeline.openWizard('job', {})", newLabel: 'New job' })}
       </div>
 
       ${rows.length === 0
@@ -154,7 +154,7 @@ export async function onRequestGet(context) {
               </tbody>
             </table>
           </div>
-          <script>${raw(listScript('pms.jobs.v1'))}</script>
+          <script>${raw(listScript('pipeline.jobs.v1'))}</script>
           <script>${raw(listInlineEditScript('/jobs/:id/patch'))}</script>`}
     </section>`;
 

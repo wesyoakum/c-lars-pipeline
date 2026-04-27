@@ -3,7 +3,7 @@
 // GET /reports — Reporting hub with executive and sales team reports.
 // Charts are rendered via Chart.js (vendored at /js/chart.min.js).
 //
-// The executive tab is a 10-chart portfolio that showcases what PMS
+// The executive tab is a 10-chart portfolio that showcases what Pipeline
 // can do with the data already in D1. All 10 chart queries live in
 // functions/lib/chart-data.js so the dashboard carousel can reuse
 // them. The reports page adds a few extra queries (KPI strip,
@@ -74,7 +74,7 @@ export async function onRequestGet(context) {
       // expose an issue date in its export; we fall back to created_at
       // (set during import to "Valid Until", which is ~30 days after
       // issue but close enough for weekly buckets). For quotes issued
-      // natively in PMS, submitted_at is populated by submit.js and
+      // natively in Pipeline, submitted_at is populated by submit.js and
       // takes precedence. The status filter keeps drafts out — only
       // count quotes that are (or were) actually issued.
       `SELECT strftime('%Y-%W', COALESCE(q.submitted_at, q.created_at)) AS week,

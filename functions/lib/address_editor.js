@@ -69,7 +69,7 @@ export function renderAddressEditor(initial = [], { saveUrl = '' } = {}) {
   return html`
     <div class="address-editor" data-initial="${escape(initialJson)}"
          data-save-url="${escape(saveUrl)}"
-         x-data="pmsAddressEditor()">
+         x-data="pipelineAddressEditor()">
       <div class="address-editor-header">
         <strong>Addresses</strong>
         <div class="address-editor-actions">
@@ -121,7 +121,7 @@ export function renderAddressEditor(initial = [], { saveUrl = '' } = {}) {
 /**
  * Client-side Alpine component used by the editor. Returned as a plain
  * JS source string so it can be injected via raw() in the page <script>
- * block. Register with Alpine via `Alpine.data('pmsAddressEditor', ...)`
+ * block. Register with Alpine via `Alpine.data('pipelineAddressEditor', ...)`
  * on the same element you render the editor into (the x-data binding
  * above calls it by name).
  *
@@ -133,7 +133,7 @@ export function addressEditorScript() {
 (function() {
   var _keySeq = 1;
   function newKey() { return 'k' + (_keySeq++); }
-  function pmsAddressEditor() {
+  function pipelineAddressEditor() {
     return {
       addresses: [],
       saveUrl: '',
@@ -352,10 +352,10 @@ export function addressEditorScript() {
   }
   // Make it available at window scope so the x-data attribute can see it
   // when Alpine does its initial pass.
-  window.pmsAddressEditor = pmsAddressEditor;
+  window.pipelineAddressEditor = pipelineAddressEditor;
   document.addEventListener('alpine:init', function() {
     if (window.Alpine && window.Alpine.data) {
-      window.Alpine.data('pmsAddressEditor', pmsAddressEditor);
+      window.Alpine.data('pipelineAddressEditor', pipelineAddressEditor);
     }
   });
 })();

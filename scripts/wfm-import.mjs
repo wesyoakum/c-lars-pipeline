@@ -2,7 +2,7 @@
 //
 // scripts/wfm-import.mjs
 //
-// Bulk importer for WorkflowMax (WFM) exports into the C-LARS PMS D1.
+// Bulk importer for WorkflowMax (WFM) exports into the C-LARS Pipeline D1.
 // Invoked via the `import:wfm:dry` / `import:wfm:commit` npm scripts.
 //
 // Usage:
@@ -90,7 +90,7 @@ function parseArgs(argv) {
 
 function printUsage() {
   console.log(`
-scripts/wfm-import.mjs — WFM → PMS importer
+scripts/wfm-import.mjs — WFM → Pipeline importer
 
   --entity <name>   One of: accounts, contacts, opportunities, quotes
   --file <path>     Path to the WFM .xlsx export
@@ -338,7 +338,7 @@ function loadAccountLookup() {
 /**
  * Maps for the WFM contacts export's quirks. The export truncates long
  * client names (e.g. "Govt of Canada, Defence..." instead of the full
- * name) — these map the truncated form to the full PMS account name so
+ * name) — these map the truncated form to the full Pipeline account name so
  * slugify() lands on the right external_id.
  *
  * Keys are the raw WFM Client(s) string (verbatim). Values are the full
@@ -634,7 +634,7 @@ const OPP_ACCOUNT_NAME_REMAP = {
 
 /**
  * Strip the Excel-truncation ellipsis and, if that leaves a prefix,
- * try to match any PMS account whose name starts with that prefix.
+ * try to match any Pipeline account whose name starts with that prefix.
  * Returns the full name if resolved, else the input unchanged.
  */
 function resolveTruncatedAccountName(raw, accountLookupByName) {
@@ -649,7 +649,7 @@ function resolveTruncatedAccountName(raw, accountLookupByName) {
 }
 
 /**
- * WFM owners → PMS user IDs. Only Wes has a real login; the other three
+ * WFM owners → Pipeline user IDs. Only Wes has a real login; the other three
  * were seeded as stubs (role='sales', active=1) specifically so the
  * import preserves attribution. Null (1 lead) defaults to Wes as the
  * importing admin.
@@ -662,7 +662,7 @@ const OPP_OWNER_TO_USER_ID = {
 };
 
 /**
- * (WFM Stage, WFM Status) → PMS stage key.
+ * (WFM Stage, WFM Status) → Pipeline stage key.
  *
  * Status takes priority when Won/Lost: every Won maps to closed_won and
  * every Lost maps to closed_lost, EXCEPT the single Won + "6 Incomplete"
@@ -1068,7 +1068,7 @@ function loadOppsLookup() {
 }
 
 /**
- * WFM quotes Sales Person → PMS user ID.
+ * WFM quotes Sales Person → Pipeline user ID.
  *
  * Fatymee Byrne (1 row) is deliberately remapped to Wes per user direction
  * (her attribution was dropped). Blank Sales Person (87 rows) also defaults
@@ -1083,7 +1083,7 @@ const QUOTE_SALES_TO_USER_ID = {
 };
 
 /**
- * WFM quote status → PMS quote status. See migration 0011 for PMS statuses:
+ * WFM quote status → Pipeline quote status. See migration 0011 for Pipeline statuses:
  *   draft | issued | revision_draft | revision_issued |
  *   accepted | rejected | expired | dead
  *
@@ -1397,7 +1397,7 @@ function buildQuotesStatements(rows, accountLookup, oppsLookup) {
       const revision = REVISION_LETTERS[revisionIdx] ?? `R${revisionIdx}`;
 
       const wfmStatus = String(r.Status ?? '').trim();
-      const pmsStatus = QUOTE_STATUS_MAP[wfmStatus] ?? 'draft';
+      const pipelineStatus = QUOTE_STATUS_MAP[wfmStatus] ?? 'draft';
 
       const title = String(r.Name ?? '').trim();
       const total = parseWfmMoney(r.Amount);
@@ -1435,7 +1435,7 @@ function buildQuotesStatements(rows, accountLookup, oppsLookup) {
           `   created_at, updated_at, created_by_user_id,`,
           `   quote_seq, show_discounts, quote_due_date)`,
           `VALUES (`,
-          `  ${sqlLit(id)}, ${sqlLit(number)}, ${sqlLit(oppId)}, ${sqlLit(revision)}, ${sqlLit(oppTxnType)}, ${sqlLit(pmsStatus)},`,
+          `  ${sqlLit(id)}, ${sqlLit(number)}, ${sqlLit(oppId)}, ${sqlLit(revision)}, ${sqlLit(oppTxnType)}, ${sqlLit(pipelineStatus)},`,
           `  ${sqlLit(title)}, NULL, ${sqlLit(validUntilIso)}, 'USD',`,
           `  ${sqlLit(totalVal)}, 0, ${sqlLit(totalVal)},`,
           `  NULL, NULL, NULL, NULL,`,
@@ -1458,7 +1458,7 @@ function buildQuotesStatements(rows, accountLookup, oppsLookup) {
         opportunity_number: oppNumber,
         revision,
         quote_type: oppTxnType,
-        status: pmsStatus,
+        status: pipelineStatus,
         wfm_status: wfmStatus,
         title,
         total_price: totalVal,
@@ -1489,7 +1489,7 @@ function buildQuotesStatements(rows, accountLookup, oppsLookup) {
         quote_number: number,
         revision,
         wfm_status: wfmStatus,
-        pms_status: pmsStatus,
+        pipeline_status: pipelineStatus,
         title,
         account_name: rg.account.name,
         opp_number: oppNumber,
@@ -1609,7 +1609,7 @@ function main() {
 
   if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR, { recursive: true });
 
-  console.log(`\nWFM → PMS importer`);
+  console.log(`\nWFM → Pipeline importer`);
   console.log(`─────────────────────────────────────────────`);
   console.log(`  entity: ${args.entity}`);
   console.log(`  file:   ${args.file}`);
@@ -1714,7 +1714,7 @@ function main() {
   runWrangler(sqlFile, { local: args.local, remote: args.remote });
 
   // Mark summary rows as imported. This file is useful after the fact
-  // to map WFM names → new PMS UUIDs.
+  // to map WFM names → new Pipeline UUIDs.
   summaryRows.forEach((r) => (r.status = 'imported'));
   const summaryFile = path.join(OUT_DIR, `wfm-${args.entity}-import-summary.csv`);
   writeCsv(summaryFile, Object.keys(summaryRows[0]), summaryRows);

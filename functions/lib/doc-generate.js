@@ -430,7 +430,7 @@ export async function getQuoteDocData(env, quoteId) {
     : quote.number;
 
   return {
-    // Header — camelCase (PMS)
+    // Header — camelCase (Pipeline)
     clientName: quote.account_name || '',
     clientAlias: quote.account_alias || '',
     clientAddress: billingAddr?.address || '',
@@ -440,7 +440,7 @@ export async function getQuoteDocData(env, quoteId) {
     delivery: quote.delivery_estimate || '',
     description: quote.description || '',
 
-    // Contact info — camelCase (PMS)
+    // Contact info — camelCase (Pipeline)
     contactFirstName: contactFirst,
     contactLastName:  contactLast,
     contactEmail: quote.contact_email || '',
@@ -448,7 +448,7 @@ export async function getQuoteDocData(env, quoteId) {
     contactTitle: quote.contact_title || '',
     contactName:  contactFullName,
 
-    // Line items — camelCase (PMS)
+    // Line items — camelCase (Pipeline)
     lines: formattedLines,
     options: formattedOptions,
     hasOptions: optionLines.length > 0,
@@ -467,7 +467,7 @@ export async function getQuoteDocData(env, quoteId) {
       ? quoteTypeParts.map(p => QUOTE_TYPE_LABELS[p] ?? p).join(' + ')
       : '',
 
-    // Pricing breakdown — camelCase (PMS)
+    // Pricing breakdown — camelCase (Pipeline)
     // `quoteSubtotal` is the DISPLAYED subtotal (with phantom markups in).
     // `quoteSubtotalStored` is the real banked subtotal. For quotes
     // without any phantom discounts the two are equal.

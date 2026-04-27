@@ -26,7 +26,7 @@
 (function () {
   'use strict';
 
-  if (!window.PMS || typeof window.PMS.registerWizard !== 'function') {
+  if (!window.Pipeline || typeof window.Pipeline.registerWizard !== 'function') {
     if (typeof console !== 'undefined') console.error('wizards/quote.js: wizard-modal.js must load first');
     return;
   }
@@ -48,7 +48,7 @@
     { value: 'refurb_modified',      label: 'Refurb \u2014 Modified' },
   ];
 
-  window.PMS.registerWizard('quote', {
+  window.Pipeline.registerWizard('quote', {
     title: 'New quote',
     submitLabel: 'Create quote',
 

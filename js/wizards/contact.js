@@ -31,13 +31,13 @@
 (function () {
   'use strict';
 
-  if (!window.PMS || typeof window.PMS.registerWizard !== 'function') {
+  if (!window.Pipeline || typeof window.Pipeline.registerWizard !== 'function') {
     /* eslint-disable-next-line no-console */
     if (typeof console !== 'undefined') console.error('wizards/contact.js: wizard-modal.js must load first');
     return;
   }
 
-  window.PMS.registerWizard('contact', {
+  window.Pipeline.registerWizard('contact', {
     title: 'New contact',
     submitLabel: 'Create contact',
 

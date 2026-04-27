@@ -463,7 +463,7 @@ export async function onRequestGet(context) {
       <div class="card-header">
         <h2>Contacts</h2>
         <button class="btn primary" type="button"
-                onclick="window.PMS && window.PMS.openWizard('contact', ${escape(acctWizardPrefill)})">New contact</button>
+                onclick="window.Pipeline && window.Pipeline.openWizard('contact', ${escape(acctWizardPrefill)})">New contact</button>
       </div>
 
       ${contacts.length === 0
@@ -537,7 +537,7 @@ export async function onRequestGet(context) {
       <div class="card-header">
         <h2>Opportunities</h2>
         <button class="btn primary" type="button"
-                onclick="window.PMS && window.PMS.openWizard('opportunity', ${escape(acctWizardPrefill)})">New opportunity</button>
+                onclick="window.Pipeline && window.Pipeline.openWizard('opportunity', ${escape(acctWizardPrefill)})">New opportunity</button>
       </div>
       ${oppRows.length === 0
         ? html`<p class="muted">No opportunities yet.</p>`
@@ -601,7 +601,7 @@ export async function onRequestGet(context) {
       <div class="card-header">
         <h2>Tasks &amp; Activities</h2>
         <button class="btn btn-sm primary" type="button"
-                onclick="window.PMS && window.PMS.openTaskModal(${escape(tasksTabPrefill)})">+ Add task</button>
+                onclick="window.Pipeline && window.Pipeline.openTaskModal(${escape(tasksTabPrefill)})">+ Add task</button>
       </div>
       ${taskRows.length === 0
         ? html`<p class="muted">No tasks or activities yet.</p>`
@@ -848,7 +848,7 @@ export async function onRequestGet(context) {
 
             // Update page title if name changed
             if (field === 'name' && data.value) {
-              document.title = data.value + ' \u2014 PMS';
+              document.title = data.value + ' \u2014 Pipeline';
               const crumb = document.querySelector('.breadcrumbs span:last-child, .breadcrumbs a:last-child');
             }
 

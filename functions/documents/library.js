@@ -202,7 +202,7 @@ export async function onRequestGet(context) {
               </tbody>
             </table>
           </div>
-          <script>${raw(listScript('pms.docLib.v2', 'date', 'desc'))}</script>
+          <script>${raw(listScript('pipeline.docLib.v2', 'date', 'desc'))}</script>
           <script>
           document.addEventListener('alpine:init', function() {
             var kindLabels = ${raw(JSON.stringify(DOC_KIND_LABELS))};

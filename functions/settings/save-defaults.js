@@ -9,7 +9,7 @@
 //     read fresh from the admin's users row.
 //
 //   * list_table_defaults — a JSON blob keyed by list-table storageKey
-//     (e.g. "pms.quotes.v1"). Captures per-column filters, sort, column
+//     (e.g. "pipeline.quotes.v1"). Captures per-column filters, sort, column
 //     visibility / order / widths. Since this state lives in the
 //     admin's browser localStorage, the client uploads it in the
 //     request body as `{ list_table_defaults: { … } }`. Passing null or
@@ -57,7 +57,7 @@ export async function onRequestPost(context) {
   // empty body (or a non-JSON body) is fine — that branch just skips
   // updating the column. Validate the shape enough to not store
   // obvious garbage: must be a plain object whose keys look like
-  // storageKeys ("pms.*") and whose values are plain objects.
+  // storageKeys ("pipeline.*") and whose values are plain objects.
   let listTableDefaultsJson = undefined;  // undefined = leave column alone
   let hasBody = false;
   try {
@@ -70,7 +70,7 @@ export async function onRequestPost(context) {
       } else if (blob && typeof blob === 'object' && !Array.isArray(blob)) {
         const clean = {};
         Object.keys(blob).forEach((k) => {
-          if (typeof k !== 'string' || !k.startsWith('pms.')) return;
+          if (typeof k !== 'string' || !k.startsWith('pipeline.')) return;
           const v = blob[k];
           if (v && typeof v === 'object' && !Array.isArray(v)) clean[k] = v;
         });

@@ -207,7 +207,7 @@ export async function onRequestGet(context) {
                 <button class="btn primary" type="submit">Accept</button>
               </form>
               <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/reject"
-                    onsubmit="window.PMS.submitFormWithBlockerCheck(this, 'Reject this quote'); return false;"
+                    onsubmit="window.Pipeline.submitFormWithBlockerCheck(this, 'Reject this quote'); return false;"
                     class="inline-form">
                 <button class="btn" type="submit">Reject</button>
               </form>

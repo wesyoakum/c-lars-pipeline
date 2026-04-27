@@ -11,7 +11,7 @@
 //   - Double-click the grip to AutoFit: measures the widest visible cell
 //     in the column and locks the column to that width (Excel-style).
 //   - Widths persist in localStorage keyed by
-//     `pms.tblResize::<path>::<tableIdx>::<labelsHash>`.
+//     `pipeline.tblResize::<path>::<tableIdx>::<labelsHash>`.
 //
 // Scoping:
 //   - Only tables with class "data" are wired. Ad-hoc tables (quote
@@ -56,7 +56,7 @@
     for (var j = 0; j < s.length; j++) {
       h = ((h << 5) - h + s.charCodeAt(j)) | 0;
     }
-    return 'pms.tblResize::' + location.pathname + '::' + idx + '::' + ths.length + '::' + (h >>> 0).toString(36);
+    return 'pipeline.tblResize::' + location.pathname + '::' + idx + '::' + ths.length + '::' + (h >>> 0).toString(36);
   }
 
   function wireTable(table, ths, storageKey) {

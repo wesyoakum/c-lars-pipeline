@@ -76,7 +76,7 @@ export function readFlash(url) {
  * create (e.g. new account, new contact). Posts a message back to the
  * window.opener with the created entity payload and auto-closes.
  *
- * `type` should be a string like 'pms.account.created'. `payload` is a
+ * `type` should be a string like 'pipeline.account.created'. `payload` is a
  * plain object the opener script knows how to interpret. Safe-serializes
  * via JSON.stringify and escapes the </script> attack vector.
  */

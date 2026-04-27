@@ -22,7 +22,7 @@
 --   - opportunities.supplemental_quote
 --   - jobs.amended_oc_*  (4 cols)  — moved to change_orders
 --   - jobs.inspection_report_*  (2 cols)  — inspection reports leave
---     the PMS entirely
+--     the Pipeline entirely
 --
 -- Stage catalog rewrite (all four transaction_types):
 --   Remove refurb-only supplemental/inspection_report stages.
@@ -165,7 +165,7 @@ VALUES
   ('eps', 'closed_lost',                   'Closed — lost',                900,   0, 1, 0, NULL),
   ('eps', 'closed_died',                   'Closed — died',                910,   0, 1, 0, NULL);
 
--- Refurb (no inspection report stage anymore — inspection leaves the PMS)
+-- Refurb (no inspection report stage anymore — inspection leaves the Pipeline)
 INSERT OR REPLACE INTO stage_definitions
   (transaction_type, stage_key, label, sort_order, default_probability, is_terminal, is_won, gate_rules_json)
 VALUES

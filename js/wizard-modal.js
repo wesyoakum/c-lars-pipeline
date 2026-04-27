@@ -8,16 +8,16 @@
 //
 // Each concrete wizard (task, account, contact, opportunity, quote,
 // job) lives in its own tiny file under /js/wizards/*.js and calls
-//   window.PMS.registerWizard('<key>', { title, steps, submit, ... })
+//   window.Pipeline.registerWizard('<key>', { title, steps, submit, ... })
 // to register itself.
 //
 // Opening a wizard:
-//   window.PMS.openWizard('task', { opportunity_id: '...' })
-//   window.PMS.openWizard('account', {})
-//   window.dispatchEvent(new CustomEvent('pms:open-wizard',
+//   window.Pipeline.openWizard('task', { opportunity_id: '...' })
+//   window.Pipeline.openWizard('account', {})
+//   window.dispatchEvent(new CustomEvent('pipeline:open-wizard',
 //     { detail: { key: 'account', prefill: {} } }))
 //
-// Back-compat shim: window.PMS.openTaskModal(prefill) still works and
+// Back-compat shim: window.Pipeline.openTaskModal(prefill) still works and
 // maps to openWizard('task', prefill).
 //
 // The markup lives in functions/lib/layout.js (WIZARD_MODAL_MARKUP)
@@ -247,8 +247,8 @@
   // (e.g. a submit handler that formats a date answer as YYYY-MM-DD).
   // ---------------------------------------------------------------
 
-  window.PMS = window.PMS || {};
-  window.PMS.wizardHelpers = {
+  window.Pipeline = window.Pipeline || {};
+  window.Pipeline.wizardHelpers = {
     toLocalIso: toLocalIso,
     parseDateInput: parseDateInput,
     userLabel: userLabel
@@ -260,7 +260,7 @@
 
   var WIZARDS = Object.create(null);
 
-  window.PMS.registerWizard = function (key, config) {
+  window.Pipeline.registerWizard = function (key, config) {
     if (!key || !config) return;
     WIZARDS[key] = config;
   };
@@ -271,7 +271,7 @@
 
   var __pendingOpen = null;
 
-  window.PMS.openWizard = function (key, prefill) {
+  window.Pipeline.openWizard = function (key, prefill) {
     try {
       var store = (typeof Alpine !== 'undefined' && Alpine && typeof Alpine.store === 'function')
         ? Alpine.store('wizard')
@@ -285,16 +285,16 @@
   };
 
   // Back-compat shim: pre-wizard callers still use openTaskModal.
-  window.PMS.openTaskModal = function (prefill) {
-    window.PMS.openWizard('task', prefill || {});
+  window.Pipeline.openTaskModal = function (prefill) {
+    window.Pipeline.openWizard('task', prefill || {});
   };
 
-  window.addEventListener('pms:open-task-modal', function (e) {
-    window.PMS.openTaskModal((e && e.detail) || {});
+  window.addEventListener('pipeline:open-task-modal', function (e) {
+    window.Pipeline.openTaskModal((e && e.detail) || {});
   });
-  window.addEventListener('pms:open-wizard', function (e) {
+  window.addEventListener('pipeline:open-wizard', function (e) {
     if (!e || !e.detail || !e.detail.key) return;
-    window.PMS.openWizard(e.detail.key, e.detail.prefill || {});
+    window.Pipeline.openWizard(e.detail.key, e.detail.prefill || {});
   });
 
   // ---------------------------------------------------------------
