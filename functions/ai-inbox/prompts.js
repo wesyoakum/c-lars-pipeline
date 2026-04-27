@@ -1,20 +1,25 @@
 // functions/ai-inbox/prompts.js
 //
-// All OpenAI calls for the AI Inbox feature live here so route handlers
-// stay focused on HTTP concerns and the prompts can be tuned in one place.
+// All AI calls for the AI Inbox feature live here so route handlers stay
+// focused on HTTP concerns and the prompts can be tuned in one place.
 //
 // Three steps:
-//   1. transcribe(env, audioBlob, opts) — POST audio bytes to the
-//      audio/transcriptions endpoint. Returns plain text.
-//   2. classify(env, transcript)        — chat completion that returns
-//      one of CONTEXT_TYPES.
-//   3. extract(env, transcript, contextType, userContext)
-//                                       — type-specific JSON extraction.
+//   1. transcribe(env, audioBlob)         — OpenAI audio/transcriptions
+//   2. classify(env, transcript)          — Anthropic, returns one of CONTEXT_TYPES
+//   3. extract(env, transcript, ...)      — Anthropic, type-specific JSON extraction
 //
-// Calls are split (rather than one combined) so each can be retried
-// independently and we can swap models per step. We use plain fetch()
-// against the OpenAI REST API to keep zero npm dependencies (matches
-// how ConvertAPI is called from functions/lib/doc-generate.js).
+// Audio transcription stays on OpenAI Whisper / gpt-4o-transcribe (best
+// in class for voice). Everything text-shaped runs on Anthropic for better
+// JSON discipline + prompt caching. Both clients route through Cloudflare
+// AI Gateway when configured — see functions/lib/ai-gateway.js.
+//
+// Phase 1 AI Inbox notes are "free-floating" (not yet linked to a specific
+// account/opp), so we run them at share-mode 'full'. Pricing and PNs are
+// still tokenized by the redaction layer regardless.
+
+import { transcribeAudio } from '../lib/openai.js';
+import { messagesJson, ANTHROPIC_MODELS } from '../lib/anthropic.js';
+import { redactText, unredactJson } from '../lib/ai-redact.js';
 
 export const CONTEXT_TYPES = [
   'quick_note',
@@ -37,60 +42,20 @@ const CONTEXT_TYPE_DESCRIPTIONS = {
     'Anything that does not clearly fit the above categories.',
 };
 
-// Default models. Overridable via environment variables.
-const DEFAULT_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe';
-const DEFAULT_CLASSIFY_MODEL = 'gpt-4o-mini';
-const DEFAULT_EXTRACT_MODEL = 'gpt-4o';
-
-const OPENAI_BASE = 'https://api.openai.com/v1';
-
-function requireKey(env) {
-  const key = env.OPENAI_API_KEY;
-  if (!key) throw new Error('OPENAI_API_KEY is not configured.');
-  return key;
-}
-
 /**
- * Transcribe an audio file via OpenAI's audio/transcriptions endpoint.
- *
- * @param {object} env  Pages Functions env (must contain OPENAI_API_KEY)
- * @param {File|Blob} audioBlob  Audio bytes (with .name + .type set on File)
- * @param {object} [opts]
- * @param {string} [opts.model]  Transcription model override
- * @returns {Promise<{text: string, model: string}>}
+ * Transcribe an audio file. Thin wrapper over the shared OpenAI client so
+ * the AI Inbox pipeline stays self-contained at the call sites.
  */
 export async function transcribe(env, audioBlob, opts = {}) {
-  const key = requireKey(env);
-  const model = opts.model || env.AI_INBOX_TRANSCRIPTION_MODEL || DEFAULT_TRANSCRIPTION_MODEL;
-
-  const form = new FormData();
-  form.append('file', audioBlob, audioBlob.name || 'audio.m4a');
-  form.append('model', model);
-  form.append('response_format', 'text');
-
-  const resp = await fetch(`${OPENAI_BASE}/audio/transcriptions`, {
-    method: 'POST',
-    headers: { authorization: `Bearer ${key}` },
-    body: form,
-  });
-
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => '');
-    throw new Error(`OpenAI transcription failed (${resp.status}): ${detail.slice(0, 500)}`);
-  }
-
-  const text = (await resp.text()).trim();
-  return { text, model };
+  return transcribeAudio(env, audioBlob, opts);
 }
 
 /**
- * Classify a transcript into one of CONTEXT_TYPES.
- * Returns the type string. Falls back to 'other' if the model
- * returns something unexpected.
+ * Classify a transcript into one of CONTEXT_TYPES. Falls back to 'other'
+ * if the model returns something unexpected.
  */
 export async function classify(env, transcript) {
-  const key = requireKey(env);
-  const model = env.AI_INBOX_CLASSIFY_MODEL || DEFAULT_CLASSIFY_MODEL;
+  const model = env.AI_INBOX_CLASSIFY_MODEL || ANTHROPIC_MODELS.fast;
 
   const typeList = CONTEXT_TYPES
     .map((t) => `- ${t}: ${CONTEXT_TYPE_DESCRIPTIONS[t]}`)
@@ -101,77 +66,52 @@ export async function classify(env, transcript) {
     typeList,
     '',
     'Return strict JSON: {"context_type": "<one of the types above>"}.',
-    'No explanation. No additional fields.',
+    'No prose, no markdown fences, no additional fields.',
   ].join('\n');
 
-  const resp = await chatJson(env, {
+  // Free-floating note → mode 'full', no name replacements; pricing/PNs
+  // tokenized automatically by redactText.
+  const { text: redactedTranscript } = redactText(transcript.slice(0, 8000), { mode: 'full' });
+
+  const { json } = await messagesJson(env, {
     model,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: transcript.slice(0, 8000) },
-    ],
+    system,
+    user: redactedTranscript,
+    cacheSystem: true,
+    maxTokens: 64,
   });
 
-  const type = String(resp?.context_type || '').trim().toLowerCase();
+  const type = String(json?.context_type || '').trim().toLowerCase();
   return CONTEXT_TYPES.includes(type) ? type : 'other';
 }
 
 /**
  * Type-specific structured extraction. Returns the parsed JSON object
- * matching the schema described in the system prompt.
+ * matching the schema described in the system prompt, with redacted
+ * tokens swapped back to real values.
  */
 export async function extract(env, transcript, contextType, userContext) {
-  const key = requireKey(env);
-  const model = env.AI_INBOX_EXTRACT_MODEL || DEFAULT_EXTRACT_MODEL;
+  const model = env.AI_INBOX_EXTRACT_MODEL || ANTHROPIC_MODELS.default;
 
   const system = buildExtractionPrompt(contextType);
   const userMsg = buildUserMessage(transcript, userContext);
+  const { text: redactedUser, restoreMap } = redactText(userMsg, { mode: 'full' });
 
-  const resp = await chatJson(env, {
+  const { json } = await messagesJson(env, {
     model,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: userMsg },
-    ],
+    system,
+    user: redactedUser,
+    cacheSystem: true,
+    maxTokens: 2048,
   });
 
-  return normalizeExtraction(resp);
+  const restored = unredactJson(json, restoreMap);
+  return normalizeExtraction(restored);
 }
 
 // ---------------------------------------------------------------------
-// Internals
+// Prompt construction
 // ---------------------------------------------------------------------
-
-async function chatJson(env, body) {
-  const key = requireKey(env);
-  const resp = await fetch(`${OPENAI_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${key}`,
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      ...body,
-      response_format: { type: 'json_object' },
-      temperature: 0.2,
-    }),
-  });
-
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => '');
-    throw new Error(`OpenAI chat failed (${resp.status}): ${detail.slice(0, 500)}`);
-  }
-
-  const data = await resp.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error('OpenAI chat returned no content.');
-
-  try {
-    return JSON.parse(content);
-  } catch (e) {
-    throw new Error(`OpenAI chat returned invalid JSON: ${content.slice(0, 300)}`);
-  }
-}
 
 function buildUserMessage(transcript, userContext) {
   const parts = [];
@@ -207,7 +147,7 @@ Rules:
 - Use ISO 8601 dates (YYYY-MM-DD) when a date is mentioned; leave empty otherwise.
 - Confidence reflects your confidence in the extraction overall, not in any one field.
 - Do not invent people/organizations/dates that the transcript does not contain.
-- No additional top-level fields.`;
+- No prose, no markdown fences, no additional top-level fields.`;
 
 function buildExtractionPrompt(contextType) {
   const focusGuidance = {

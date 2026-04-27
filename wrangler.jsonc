@@ -35,6 +35,21 @@
     // ConvertAPI secret for .docx → PDF conversion is set via
     // `wrangler pages secret put CONVERTAPI_SECRET` (not listed here
     // to avoid binding name conflict).
+    //
+    // AI provider configuration (set as secrets, not vars):
+    //   OPENAI_API_KEY          — audio transcription (Whisper / gpt-4o-transcribe)
+    //   ANTHROPIC_API_KEY       — text → structure (Claude Sonnet/Haiku)
+    //   AI_GATEWAY_ACCOUNT_ID   — Cloudflare account id (optional)
+    //   AI_GATEWAY_NAME         — Cloudflare AI Gateway slug (optional)
+    // When AI_GATEWAY_* are set, every AI call routes through the gateway
+    // for unified logging, caching, retries, and cost tracking. See
+    // functions/lib/ai-gateway.js.
+    //
+    // Per-step model overrides (optional):
+    //   AI_INBOX_TRANSCRIPTION_MODEL   default 'gpt-4o-mini-transcribe'
+    //   AI_INBOX_CLASSIFY_MODEL        default Claude Haiku
+    //   AI_INBOX_EXTRACT_MODEL         default Claude Sonnet
+    //   ANTHROPIC_MODEL                 global default for Anthropic calls
     "PIPELINE_ENV": "production",
     "CF_ACCESS_TEAM_DOMAIN": "c-lars.cloudflareaccess.com",
     "CF_ACCESS_AUD": ""

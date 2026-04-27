@@ -87,6 +87,37 @@ npx wrangler pages dev . --remote
 | Pages project | `c-lars-pms`          | github.com/wesyoakum/c-lars-pipeline (branch `main`) |
 | Cron Worker   | `c-lars-pipeline-cron`| Daily sweep at 14:00 UTC                           |
 
+## AI / LLM integration
+
+C-LARS Pipeline uses two providers, both routed through Cloudflare AI
+Gateway when configured (see `functions/lib/ai-gateway.js`):
+
+| Provider  | Used for                                                | Client                       |
+| --------- | ------------------------------------------------------- | ---------------------------- |
+| OpenAI    | Audio transcription (Whisper / gpt-4o-transcribe)       | `functions/lib/openai.js`    |
+| Anthropic | Classification, extraction, narratives, NBA, RFQ intake | `functions/lib/anthropic.js` |
+
+Every prompt that leaves Pipeline passes through
+`functions/lib/ai-redact.js`, which:
+
+- Tokenizes prices (`$PRICE_1$`) and part numbers (`$PN_1$`) every time —
+  the model never sees real dollar figures or PNs.
+- Applies the per-record `share_with_ai` policy on accounts and
+  opportunities (migration 0050):
+  - `full` (default) — names flow through unchanged.
+  - `alias` — customer/contact names replaced with the account alias or a
+    stable pseudonym (`Customer-A`).
+  - `block` — record is excluded from every AI feature.
+
+Required secrets (set via `wrangler pages secret put`):
+
+```
+OPENAI_API_KEY
+ANTHROPIC_API_KEY
+AI_GATEWAY_ACCOUNT_ID   # optional, enables Cloudflare AI Gateway
+AI_GATEWAY_NAME         # optional, enables Cloudflare AI Gateway
+```
+
 ## Governing documents (reference)
 
 Pipeline enforces the commercial sequence defined by:
