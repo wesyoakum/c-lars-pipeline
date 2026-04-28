@@ -156,7 +156,10 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
       .aii-list { list-style: none; padding-left: 0; margin: 0; }
       .aii-list li { padding: .35rem .5rem; border-radius: 4px; }
       .aii-list li + li { margin-top: .15rem; }
-      .aii-action { display: grid; grid-template-columns: 1fr auto auto auto; gap: .4rem; align-items: center; padding: .35rem .5rem; border: 1px solid #eee; border-radius: 4px; background: #fafafa; }
+      .aii-action { display: grid; grid-template-columns: 1fr auto auto auto auto; gap: .4rem; align-items: center; padding: .35rem .5rem; border: 1px solid #eee; border-radius: 4px; background: #fafafa; }
+      .aii-apply-btn { padding: .25rem .65rem; border: 1px solid #c8d4ff; background: #f0f4ff; color: #2451b8; border-radius: 3px; font-size: .75rem; cursor: pointer; }
+      .aii-apply-btn:hover:not(:disabled) { background: #dbe5ff; }
+      .aii-apply-btn:disabled { opacity: .45; cursor: not-allowed; }
       .aii-action + .aii-action { margin-top: .35rem; }
       .aii-action input { padding: .25rem .4rem; border: 1px solid #ddd; border-radius: 3px; }
       .aii-action .task-in { width: 100%; }
@@ -223,6 +226,21 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
       .aii-create-btn:hover { background: #f6f8ff; color: #1f6feb; }
 
       [x-cloak] { display: none !important; }
+
+      /* v3 Apply-suggestions modal */
+      .aii-actions-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .35rem; flex-wrap: wrap; }
+      .aii-actions-head h2 { margin: 0; }
+      .aii-review-apply { font-size: .85rem; }
+      .aii-apply-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(20,20,30,.45); z-index: 5000; display: flex; align-items: center; justify-content: center; padding: 1rem; }
+      .aii-apply-modal { background: white; border-radius: 8px; padding: 1.25rem 1.5rem; max-width: 540px; width: 100%; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 24px rgba(0,0,0,.18); }
+      .aii-apply-list { list-style: none; padding-left: 0; margin: 0; }
+      .aii-apply-row { padding: .5rem .25rem; border-top: 1px solid #eee; }
+      .aii-apply-row:first-child { border-top: 0; }
+      .aii-apply-row label { display: flex; align-items: center; gap: .5rem; cursor: pointer; }
+      .aii-apply-row input[type="checkbox"] { flex-shrink: 0; }
+      .aii-apply-row-label { flex: 1 1 auto; font-size: .9rem; }
+      .aii-apply-row-detail { color: #666; font-size: .8rem; }
+      .aii-apply-row-disabled { color: #888; font-size: .75rem; font-style: italic; }
 
       .flash { padding: .65rem .9rem; border-radius: 4px; margin-bottom: 1rem; }
       .flash-success { background: #d4ecdb; color: #1a3d24; }
@@ -356,24 +374,39 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
           addAction() { this.fields.action_items.push({ task: '', owner: '', due: '' }); },
           removeAction(idx) { this.fields.action_items.splice(idx, 1); this.saveField('action_items'); },
 
-          // ----- v2: actions -----
+          // ----- v2/v3: actions -----
           isHandled(kind) { return this.handledActions.indexOf(kind) >= 0; },
+
+          // v3: init() runs once when Alpine instantiates the component.
+          // Registers the wizard-success listener that records matches /
+          // links after an in-context-create wizard completes.
+          init() {
+            window.addEventListener('pipeline:wizard-success', this.onWizardSuccess.bind(this));
+          },
 
           openAction(kind) {
             if (!this.isHandled(kind)) return;
             const accountId = this.preferredAccountId();
             const accountLabel = this.preferredAccountLabel();
             if (kind === 'create_task') {
+              // v3: open the existing task wizard rather than an inline
+              // form. After the wizard creates the activity, our
+              // pipeline:wizard-success listener records the link.
               const firstAction = (this.fields.action_items || [])[0];
               const summaryFirst = ((this.fields.summary || '').split(/\\r?\\n/)[0] || '').slice(0, 80);
-              this.actionForm = {
-                kind, busy: false, error: '',
-                subject: (firstAction && firstAction.task) || summaryFirst || '',
-                body: this.fields.summary || '',
+              const body = (firstAction && firstAction.task)
+                || summaryFirst
+                || this.fields.summary
+                || this.fields.title
+                || '';
+              this.openTaskWizard({
+                body,
                 due_at: (firstAction && firstAction.due) || '',
                 account_id: accountId,
                 account_label: accountLabel,
-              };
+                source_action_idx: -1,  // -1 means "from suggested_destinations, not from a specific action item row"
+              });
+              return;
             } else if (kind === 'link_to_account') {
               this.actionForm = {
                 kind, busy: false, error: '',
@@ -516,8 +549,168 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
             if (dataJson.ok) this.matches = dataJson.matches || [];
           },
 
-          // ----- v2: create-account / create-contact mini-forms -----
+          // ----- v3: in-context create via existing wizards -----
+          // openCreateAccount / openCreateContact / openTaskWizard each
+          // launch the registered Pipeline wizard with prefill that
+          // tells our pipeline:wizard-success listener what to do
+          // after the wizard's POST returns. The wizard suppresses its
+          // default redirect because of __on_success.
           openCreateAccount(idx) {
+            if (!window.Pipeline || typeof window.Pipeline.openWizard !== 'function') {
+              alert('Wizard system is not available on this page.');
+              return;
+            }
+            const mention = (this.fields.organizations || [])[idx] || '';
+            window.Pipeline.openWizard('account', {
+              name: mention,
+              __on_success: 'pipeline:wizard-success',
+              __ai_inbox: {
+                source: 'create_account',
+                entry_id: this.itemId,
+                mention_kind: 'organization',
+                mention_idx: idx,
+                mention_text: mention,
+              },
+            });
+          },
+          openCreateContact(idx) {
+            if (!window.Pipeline || typeof window.Pipeline.openWizard !== 'function') {
+              alert('Wizard system is not available on this page.');
+              return;
+            }
+            const mention = (this.fields.people || [])[idx] || '';
+            const tokens = (mention || '').trim().split(/\\s+/);
+            const first = tokens[0] || '';
+            const last = tokens.length > 1 ? tokens[tokens.length - 1] : '';
+            window.Pipeline.openWizard('contact', {
+              first_name: first,
+              last_name: last,
+              account_id: this.preferredAccountId(),
+              __on_success: 'pipeline:wizard-success',
+              __ai_inbox: {
+                source: 'create_contact',
+                entry_id: this.itemId,
+                mention_kind: 'person',
+                mention_idx: idx,
+                mention_text: mention,
+              },
+            });
+          },
+
+          openTaskWizard(opts) {
+            if (!window.Pipeline || typeof window.Pipeline.openWizard !== 'function') {
+              alert('Wizard system is not available on this page.');
+              return;
+            }
+            const prefill = {
+              body: opts.body || '',
+              due_at: opts.due_at || '',
+              account_id: opts.account_id || '',
+              link_label: opts.account_label || '',
+              __on_success: 'pipeline:wizard-success',
+              __ai_inbox: {
+                source: 'create_task',
+                entry_id: this.itemId,
+                action_idx: typeof opts.source_action_idx === 'number' ? opts.source_action_idx : -1,
+              },
+            };
+            window.Pipeline.openWizard('task', prefill);
+          },
+
+          // Listener for the 'pipeline:wizard-success' event. Routes to
+          // the right /entities/match or /links/record call based on
+          // the __ai_inbox prefill metadata. Ignores events whose
+          // prefill doesn't have an entry_id matching this component.
+          async onWizardSuccess(e) {
+            const detail = e?.detail || {};
+            const meta = detail.prefill?.__ai_inbox;
+            if (!meta || meta.entry_id !== this.itemId) return;
+
+            const resp = detail.response || {};
+            const newId = resp.id;
+            if (!newId) return;
+
+            try {
+              if (meta.source === 'create_account') {
+                await this.recordMatchAndLink({
+                  mention_kind: 'organization',
+                  mention_idx: meta.mention_idx,
+                  mention_text: meta.mention_text,
+                  ref_type: 'account',
+                  ref_id: newId,
+                  action_type: 'create_account',
+                });
+              } else if (meta.source === 'create_contact') {
+                await this.recordMatchAndLink({
+                  mention_kind: 'person',
+                  mention_idx: meta.mention_idx,
+                  mention_text: meta.mention_text,
+                  ref_type: 'contact',
+                  ref_id: newId,
+                  action_type: 'create_contact',
+                });
+              } else if (meta.source === 'create_task') {
+                await this.recordLinkOnly({
+                  ref_type: 'activity',
+                  ref_id: newId,
+                  ref_label: resp.subject || '(task)',
+                  action_type: 'create_task',
+                });
+              }
+            } catch (err) {
+              console.warn('[ai-inbox] post-wizard recording failed:', err);
+            }
+          },
+
+          async recordMatchAndLink({ mention_kind, mention_idx, mention_text, ref_type, ref_id, action_type }) {
+            // 1. Tell the resolver this is now the user-confirmed match.
+            const matchRes = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId) + '/entities/match', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ mention_kind, mention_idx, mention_text, ref_type, ref_id }),
+            });
+            const matchJson = await matchRes.json();
+            if (matchJson.ok && matchJson.match) {
+              this.matches = this.matches.filter(
+                m => !(m.mention_kind === mention_kind && m.mention_idx === mention_idx)
+              );
+              this.matches.push(matchJson.match);
+            }
+
+            // 2. Record an action history row for the create.
+            const linkRes = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId) + '/links/record', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                action_type, ref_type, ref_id,
+                ref_label: matchJson.match?.ref_label || '(unnamed)',
+              }),
+            });
+            const linkJson = await linkRes.json();
+            if (linkJson.ok && linkJson.link) {
+              this.links = [linkJson.link, ...this.links];
+            }
+          },
+
+          async recordLinkOnly({ ref_type, ref_id, ref_label, action_type }) {
+            const res = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId) + '/links/record', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ action_type, ref_type, ref_id, ref_label }),
+            });
+            const dataJson = await res.json();
+            if (dataJson.ok && dataJson.link) {
+              this.links = [dataJson.link, ...this.links];
+            }
+          },
+
+          // ----- v2: legacy inline forms (kept for the link_to_account
+          // typeahead — Save All batch path also still uses /entities/
+          // create-account and /entities/create-contact server-side) -----
+          _legacyOpenCreateAccount(idx) {
             const mention = (this.fields.organizations || [])[idx] || '';
             this.actionForm = {
               kind: 'create_account', busy: false, error: '',
@@ -525,7 +718,7 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
               name: mention, alias: '', segment: '',
             };
           },
-          openCreateContact(idx) {
+          _legacyOpenCreateContact(idx) {
             const mention = (this.fields.people || [])[idx] || '';
             const tokens = (mention || '').trim().split(/\\s+/);
             const first = tokens[0] || '';
@@ -601,6 +794,124 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
             } catch (e) {
               f.busy = false; f.error = String(e.message || e);
             }
+          },
+
+          // ----- v3: Apply-suggestions modal -----
+          // Single-button bulk-apply UX: opens a modal with one row per
+          // pending action (action items that haven't been applied as
+          // tasks yet, and auto-resolved matches that haven't been
+          // confirmed). User unchecks rows to skip; Apply runs the
+          // remaining ones in sequence.
+          applyModal: null,
+
+          openApplyModal() {
+            // Action items that haven't already been linked as a task.
+            const linkedActivityRefs = new Set(
+              (this.links || [])
+                .filter((l) => l.action_type === 'create_task' && l.ref_type === 'activity')
+                .map((l) => l.ref_label)
+            );
+            const taskRows = (this.fields.action_items || []).map((a, idx) => {
+              const alreadyLinked = linkedActivityRefs.has(a.task);
+              return {
+                key: 'task_' + idx,
+                kind: 'create_task',
+                label: 'Create task: ' + (a.task || '(blank)'),
+                detail: a.due ? 'Due ' + a.due : '',
+                action_idx: idx,
+                checked: !alreadyLinked && !!a.task,
+                disabled: alreadyLinked || !a.task,
+                disabledReason: alreadyLinked ? 'Already created' : (!a.task ? 'No task text' : ''),
+              };
+            });
+
+            // Auto-resolved matches not yet user-confirmed.
+            const matchRows = (this.matches || [])
+              .filter((m) => m.auto_resolved && !m.user_overridden && m.rank === 1)
+              .map((m) => ({
+                key: 'match_' + m.mention_kind + '_' + m.mention_idx,
+                kind: 'confirm_match',
+                label: 'Confirm: ' + m.mention_text + ' → ' + m.ref_label,
+                detail: '(' + m.mention_kind + ' #' + (m.mention_idx + 1) + ')',
+                mention_kind: m.mention_kind,
+                mention_idx: m.mention_idx,
+                mention_text: m.mention_text,
+                ref_type: m.ref_type,
+                ref_id: m.ref_id,
+                checked: true,
+                disabled: false,
+                disabledReason: '',
+              }));
+
+            const items = [...taskRows, ...matchRows];
+
+            this.applyModal = {
+              items,
+              busy: false,
+              error: '',
+              progress: '',
+            };
+          },
+
+          closeApplyModal() { this.applyModal = null; },
+
+          async executeApplyModal() {
+            if (!this.applyModal) return;
+            const m = this.applyModal;
+            m.busy = true; m.error = '';
+            const toApply = m.items.filter((it) => it.checked && !it.disabled);
+            let done = 0;
+
+            for (const it of toApply) {
+              m.progress = 'Applying ' + (++done) + ' of ' + toApply.length + '…';
+              try {
+                if (it.kind === 'create_task') {
+                  const a = (this.fields.action_items || [])[it.action_idx];
+                  if (!a || !a.task) continue;
+                  const res = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId)
+                    + '/actions/create-task', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({
+                      subject: a.task,
+                      body: '',
+                      due_at: a.due || '',
+                      account_id: this.preferredAccountId() || '',
+                    }),
+                  });
+                  const j = await res.json();
+                  if (j.ok && j.link) this.links = [j.link, ...this.links];
+                } else if (it.kind === 'confirm_match') {
+                  const res = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId)
+                    + '/entities/match', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({
+                      mention_kind: it.mention_kind,
+                      mention_idx: it.mention_idx,
+                      mention_text: it.mention_text,
+                      ref_type: it.ref_type,
+                      ref_id: it.ref_id,
+                    }),
+                  });
+                  const j = await res.json();
+                  if (j.ok && j.match) {
+                    this.matches = this.matches.filter(
+                      x => !(x.mention_kind === it.mention_kind && x.mention_idx === it.mention_idx)
+                    );
+                    this.matches.push(j.match);
+                  }
+                }
+              } catch (err) {
+                m.error = 'Some actions failed: ' + (err.message || err);
+              }
+            }
+
+            m.busy = false;
+            m.progress = '';
+            this.applyModal = null;
           },
 
           // ----- helpers -----
@@ -724,6 +1035,10 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
             <input class="task-in" type="text" placeholder="Task" x-model="a.task" @blur="saveField('action_items')">
             <input class="owner-in" type="text" placeholder="${escape(userName)} (you)" x-model="a.owner" @blur="saveField('action_items')">
             <input class="due-in" type="text" placeholder="YYYY-MM-DD" x-model="a.due" @blur="saveField('action_items')">
+            <button type="button" class="aii-apply-btn"
+                    :disabled="!a.task"
+                    title="Open the task wizard pre-filled with this action item"
+                    @click="openTaskWizard({ body: a.task, due_at: a.due, account_id: preferredAccountId(), account_label: preferredAccountLabel(), source_action_idx: idx })">Apply as task</button>
             <button type="button" class="aii-rm-btn" @click="removeAction(idx)">×</button>
           </div>
         </template>
@@ -762,7 +1077,12 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
       </div>
 
       <section class="aii-section" style="margin-top:1rem;">
-        <h2>Actions</h2>
+        <div class="aii-actions-head">
+          <h2>Actions</h2>
+          <button type="button" class="aii-btn aii-btn-primary aii-review-apply"
+                  @click="openApplyModal()"
+                  title="Open a checklist of all pending actions and apply them in one batch">Review &amp; apply suggestions</button>
+        </div>
 
         <!-- Already-taken actions -->
         <template x-if="links.length > 0">
@@ -791,6 +1111,40 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
           <template x-if="fields.suggested_destinations.length === 0 && links.length === 0">
             <span class="aii-editable empty">(no suggestions)</span>
           </template>
+        </div>
+
+        <!-- Review & apply modal -->
+        <div x-show="applyModal" x-cloak class="aii-apply-overlay" @click.self="closeApplyModal()">
+          <div class="aii-apply-modal" x-show="applyModal" x-cloak>
+            <h3 style="margin:0 0 .5rem;">Review &amp; apply</h3>
+            <template x-if="applyModal && applyModal.items.length === 0">
+              <p class="aii-meta">Nothing pending. Action items get a row here once you fill them in, and any auto-resolved match shows up until you confirm it.</p>
+            </template>
+            <template x-if="applyModal && applyModal.items.length > 0">
+              <ul class="aii-apply-list">
+                <template x-for="it in applyModal.items" :key="it.key">
+                  <li class="aii-apply-row">
+                    <label>
+                      <input type="checkbox" x-model="it.checked" :disabled="it.disabled">
+                      <span class="aii-apply-row-label" x-text="it.label"></span>
+                      <span class="aii-apply-row-detail" x-text="it.detail" x-show="it.detail"></span>
+                      <span class="aii-apply-row-disabled" x-text="it.disabledReason" x-show="it.disabled"></span>
+                    </label>
+                  </li>
+                </template>
+              </ul>
+            </template>
+            <div class="aii-form-actions" style="margin-top:.75rem;">
+              <button type="button" class="aii-btn aii-btn-primary"
+                      @click="executeApplyModal()"
+                      :disabled="applyModal && (applyModal.busy || applyModal.items.filter(it => it.checked && !it.disabled).length === 0)">
+                <span x-show="!applyModal || !applyModal.busy">Apply</span>
+                <span x-show="applyModal && applyModal.busy" x-text="applyModal.progress || 'Applying…'"></span>
+              </button>
+              <button type="button" class="aii-btn" @click="closeApplyModal()" :disabled="applyModal && applyModal.busy">Cancel</button>
+              <span x-show="applyModal && applyModal.error" class="aii-err-inline" x-text="applyModal && applyModal.error"></span>
+            </div>
+          </div>
         </div>
 
         <!-- Inline form: create_task -->

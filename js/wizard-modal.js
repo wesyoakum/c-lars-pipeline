@@ -600,6 +600,17 @@
         this.config = config;
         this.error = null;
         this.reloadOnSuccess = prefill.reload_on_success !== false;
+        // v3 in-context creation: when prefill.__on_success is a string,
+        // we suppress the default redirect/reload after a successful
+        // submit and instead dispatch a CustomEvent with that name on
+        // window. The detail object includes the wizard key, the server
+        // response, and the original prefill so listeners can correlate
+        // the new entity back to whatever opened the wizard. See AI
+        // Inbox detail page for an example caller.
+        this.onSuccessEvent = (typeof prefill.__on_success === 'string' && prefill.__on_success)
+          ? prefill.__on_success
+          : null;
+        this.openPrefill = prefill;
         this.stepIndex = 0;
         this.typedInput = '';
         this.suggestionIndex = 0;
@@ -1110,6 +1121,22 @@
               return;
             }
             self.closeModal();
+            // v3 in-context-create: when the caller asked for an event
+            // instead of a redirect, dispatch and stop. Listeners get
+            // the response, the wizard key, and the original prefill so
+            // they can record the new entity wherever they need to.
+            if (self.onSuccessEvent) {
+              try {
+                window.dispatchEvent(new CustomEvent(self.onSuccessEvent, {
+                  detail: {
+                    key: self.wizardKey,
+                    response: result,
+                    prefill: self.openPrefill,
+                  },
+                }));
+              } catch (e) { /* ignore — listener handles its own errors */ }
+              return;
+            }
             if (result.redirectUrl) {
               window.location.href = result.redirectUrl;
               return;
