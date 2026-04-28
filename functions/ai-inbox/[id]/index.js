@@ -219,8 +219,11 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
       .aii-suggested-actions { display: flex; flex-wrap: wrap; gap: .35rem; margin: .25rem 0 .5rem; }
       .aii-action-btn { padding: .25rem .7rem; border: 1px solid #c8d4ff; background: #f0f4ff; color: #2451b8; border-radius: 4px; font-size: .85rem; cursor: pointer; }
       .aii-action-btn:hover { background: #dbe5ff; }
+      .aii-action-btn-suggested { box-shadow: 0 0 0 1px #f0c000 inset; }
+      .aii-action-btn-suggested:hover { background: #fff5cc; }
       .aii-action-btn-soon { opacity: .55; cursor: not-allowed; }
       .aii-action-btn-soon:hover { background: #f0f4ff; }
+      .aii-action-suggested-mark { color: #d4a017; margin-left: .25rem; }
 
       .aii-action-form { margin-top: .75rem; padding: .85rem; border: 1px solid #e1e4e8; border-radius: 4px; background: #fafbfc; }
       .aii-action-form h3 { margin: 0 0 .5rem; font-size: .9rem; color: #333; }
@@ -352,9 +355,14 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
           tagInput: '',
           saving: '',
           itemId: itemId,
-          // Action types we have a form for; others render as-is from
-          // the suggestions but don't open anything when clicked.
-          handledActions: ['create_task', 'link_to_account'],
+          // Action types we have a form for; others render as
+          // greyed-out coming-soon buttons.
+          handledActions: ['create_task', 'link_to_account', 'link_to_opportunity'],
+          // Always-visible action buttons (regardless of which ones the
+          // LLM listed in suggested_destinations). The LLM's suggestions
+          // get a small "suggested" indicator but every handled action
+          // is reachable from the entry, always.
+          allActions: ['create_task', 'link_to_account', 'link_to_opportunity'],
           destLabels: {
             keep_as_note: 'Keep as note',
             create_task: 'Create task',
@@ -403,6 +411,9 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
 
           // ----- v2/v3: actions -----
           isHandled(kind) { return this.handledActions.indexOf(kind) >= 0; },
+          isSuggested(kind) {
+            return (this.fields.suggested_destinations || []).indexOf(kind) >= 0;
+          },
 
           // v3: init() runs once when Alpine instantiates the component.
           // Registers the wizard-success listener that records matches /
@@ -440,6 +451,16 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
                 account_id: accountId,
                 account_label: accountLabel,
               };
+            } else if (kind === 'link_to_opportunity') {
+              this.actionForm = {
+                kind, busy: false, error: '',
+                opportunity_id: '',
+                opportunity_label: '',
+              };
+              // Pre-fetch a few opportunities — scoped to the resolved
+              // org if any, otherwise the most-recent active opps. Gives
+              // the user something to click without having to type.
+              this.searchEntities('opportunity', '', accountId);
             }
           },
           closeAction() { this.actionForm = null; this.typeahead = null; },
@@ -459,6 +480,9 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
               } else if (f.kind === 'link_to_account') {
                 payload.account_id = f.account_id || '';
                 if (!payload.account_id) { f.busy = false; f.error = 'Pick an account first.'; return; }
+              } else if (f.kind === 'link_to_opportunity') {
+                payload.opportunity_id = f.opportunity_id || '';
+                if (!payload.opportunity_id) { f.busy = false; f.error = 'Pick an opportunity first.'; return; }
               }
               const res = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId)
                           + '/actions/' + path, {
@@ -486,14 +510,20 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
             }
           },
 
-          // ----- v2: typeahead -----
+          // ----- v2/v3: typeahead -----
           async searchEntities(kind, q, accountId) {
             this.typeahead = { kind, q, results: [], loading: true };
             const params = new URLSearchParams();
             if (q) params.set('q', q);
             if (accountId) params.set('account_id', accountId);
             const path = kind === 'account' ? '/ai-inbox/_search/accounts'
-                                            : '/ai-inbox/_search/contacts';
+                       : kind === 'contact' ? '/ai-inbox/_search/contacts'
+                       : kind === 'opportunity' ? '/ai-inbox/_search/opportunities'
+                       : null;
+            if (!path) {
+              this.typeahead.loading = false;
+              return;
+            }
             try {
               const res = await fetch(path + '?' + params.toString(),
                 { credentials: 'same-origin' });
@@ -510,7 +540,58 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
             this.actionForm.account_label = r.label;
             this.typeahead = null;
           },
+          pickOpportunity(r) {
+            if (!this.actionForm) return;
+            this.actionForm.opportunity_id = r.ref_id;
+            this.actionForm.opportunity_label = (r.sub ? (r.label + ' — ' + r.sub) : r.label);
+            this.typeahead = null;
+          },
           clearTypeahead() { this.typeahead = null; },
+
+          // ----- v3: open wizards from inline link forms -----
+          // "New account" / "New opportunity" buttons inside the
+          // inline link forms launch the existing wizards. After a
+          // successful submit, the pipeline:wizard-success listener
+          // (registered in init()) records the link.
+          openAccountWizardForLink() {
+            if (!window.Pipeline || typeof window.Pipeline.openWizard !== 'function') {
+              alert('Wizard system is not available on this page.');
+              return;
+            }
+            const seed = (this.actionForm && this.actionForm.account_label) || '';
+            // Close the inline form so the wizard isn't fighting it visually.
+            this.closeAction();
+            window.Pipeline.openWizard('account', {
+              name: seed,
+              __on_success: 'pipeline:wizard-success',
+              __ai_inbox: {
+                source: 'link_to_account_via_create',
+                entry_id: this.itemId,
+              },
+            });
+          },
+          openOpportunityWizardForLink() {
+            if (!window.Pipeline || typeof window.Pipeline.openWizard !== 'function') {
+              alert('Wizard system is not available on this page.');
+              return;
+            }
+            this.closeAction();
+            const accountId = this.preferredAccountId();
+            const accountLabel = this.preferredAccountLabel();
+            // Title hint from the entry summary or title — gives the
+            // user something to confirm or edit instead of starting blank.
+            const titleSeed = this.fields.title || ((this.fields.summary || '').split(/\\r?\\n/)[0] || '').slice(0, 80);
+            window.Pipeline.openWizard('opportunity', {
+              title: titleSeed,
+              account_id: accountId,
+              account_label: accountLabel,
+              __on_success: 'pipeline:wizard-success',
+              __ai_inbox: {
+                source: 'link_to_opportunity_via_create',
+                entry_id: this.itemId,
+              },
+            });
+          },
 
           // ----- v2: entity matches -----
           matchesFor(kind, idx) {
@@ -683,6 +764,20 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
                   ref_id: newId,
                   ref_label: resp.subject || '(task)',
                   action_type: 'create_task',
+                });
+              } else if (meta.source === 'link_to_account_via_create') {
+                await this.recordLinkOnly({
+                  ref_type: 'account',
+                  ref_id: newId,
+                  ref_label: resp.name || '(account)',
+                  action_type: 'link_to_account',
+                });
+              } else if (meta.source === 'link_to_opportunity_via_create') {
+                await this.recordLinkOnly({
+                  ref_type: 'opportunity',
+                  ref_id: newId,
+                  ref_label: resp.label || resp.title || ('OPP-' + (resp.number || newId)),
+                  action_type: 'link_to_opportunity',
                 });
               }
             } catch (err) {
@@ -1125,19 +1220,20 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
           </div>
         </template>
 
-        <!-- Suggested action buttons (only those with handlers) -->
+        <!-- v3: All available action buttons are always rendered.
+             The LLM's suggested_destinations are highlighted with a
+             "★ Suggested" hint but every action is reachable from
+             every entry, regardless of what the LLM picked. -->
         <div class="aii-suggested-actions">
-          <template x-for="d in fields.suggested_destinations" :key="d">
+          <template x-for="d in allActions" :key="d">
             <button type="button"
                     class="aii-action-btn"
-                    :class="!isHandled(d) ? 'aii-action-btn-soon' : ''"
-                    :disabled="!isHandled(d)"
-                    :title="isHandled(d) ? '' : 'Coming soon'"
-                    @click="openAction(d)"
-                    x-text="destLabels[d] || d"></button>
-          </template>
-          <template x-if="fields.suggested_destinations.length === 0 && links.length === 0">
-            <span class="aii-editable empty">(no suggestions)</span>
+                    :class="isSuggested(d) ? 'aii-action-btn-suggested' : ''"
+                    :title="isSuggested(d) ? 'Suggested by extraction' : ''"
+                    @click="openAction(d)">
+              <span x-text="destLabels[d] || d"></span>
+              <span class="aii-action-suggested-mark" x-show="isSuggested(d)" title="Suggested by extraction">★</span>
+            </button>
           </template>
         </div>
 
@@ -1221,7 +1317,7 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
             <span>Account</span>
             <span class="aii-typeahead-wrap">
               <input type="text" x-model="actionForm && actionForm.account_label"
-                     placeholder="Type to search…"
+                     placeholder="Type to search existing accounts…"
                      @input.debounce.250ms="searchEntities('account', $event.target.value); if (actionForm) actionForm.account_id = ''"
                      @focus="searchEntities('account', actionForm && actionForm.account_label)">
               <ul class="aii-typeahead" x-show="typeahead && typeahead.kind === 'account' && typeahead.results.length > 0" x-cloak>
@@ -1236,6 +1332,35 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
           </label>
           <div class="aii-form-actions">
             <button type="button" class="aii-btn aii-btn-primary" @click="submitAction()" :disabled="!(actionForm && actionForm.account_id) || (actionForm && actionForm.busy)">Link</button>
+            <button type="button" class="aii-btn" @click="openAccountWizardForLink()" title="Open the account wizard with the typed name pre-filled">+ New account</button>
+            <button type="button" class="aii-btn" @click="closeAction()">Cancel</button>
+            <span x-show="actionForm && actionForm.error" class="aii-err-inline" x-text="actionForm && actionForm.error"></span>
+          </div>
+        </div>
+
+        <!-- Inline form: link_to_opportunity -->
+        <div x-show="actionForm && actionForm.kind === 'link_to_opportunity'" class="aii-action-form" x-cloak>
+          <h3>Link to opportunity</h3>
+          <label class="aii-form-row">
+            <span>Opportunity</span>
+            <span class="aii-typeahead-wrap">
+              <input type="text" x-model="actionForm && actionForm.opportunity_label"
+                     placeholder="Type to search opportunities (number or title)…"
+                     @input.debounce.250ms="searchEntities('opportunity', $event.target.value, preferredAccountId()); if (actionForm) actionForm.opportunity_id = ''"
+                     @focus="searchEntities('opportunity', actionForm && actionForm.opportunity_label, preferredAccountId())">
+              <ul class="aii-typeahead" x-show="typeahead && typeahead.kind === 'opportunity' && typeahead.results.length > 0" x-cloak>
+                <template x-for="r in (typeahead ? typeahead.results : [])" :key="r.ref_id">
+                  <li @click="pickOpportunity(r)">
+                    <span x-text="r.label"></span>
+                    <small x-text="r.sub" x-show="r.sub"></small>
+                  </li>
+                </template>
+              </ul>
+            </span>
+          </label>
+          <div class="aii-form-actions">
+            <button type="button" class="aii-btn aii-btn-primary" @click="submitAction()" :disabled="!(actionForm && actionForm.opportunity_id) || (actionForm && actionForm.busy)">Link</button>
+            <button type="button" class="aii-btn" @click="openOpportunityWizardForLink()" title="Open the opportunity wizard pre-filled from this entry">+ New opportunity</button>
             <button type="button" class="aii-btn" @click="closeAction()">Cancel</button>
             <span x-show="actionForm && actionForm.error" class="aii-err-inline" x-text="actionForm && actionForm.error"></span>
           </div>
