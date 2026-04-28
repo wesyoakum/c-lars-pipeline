@@ -115,6 +115,11 @@ export async function extract(env, transcript, contextType, userContext) {
 
 function buildUserMessage(transcript, userContext) {
   const parts = [];
+  // Today's date so the model can resolve relative date phrases like
+  // "next week" or "Friday" into ISO 8601. Lives in the user message
+  // (not the system prompt) so the system prompt stays cacheable.
+  parts.push(`Today is ${todayIso()}.`);
+  parts.push('');
   if (userContext && userContext.trim()) {
     parts.push(`User-provided context: ${userContext.trim()}`);
     parts.push('');
@@ -122,6 +127,14 @@ function buildUserMessage(transcript, userContext) {
   parts.push('Transcript:');
   parts.push(transcript);
   return parts.join('\n');
+}
+
+function todayIso() {
+  // UTC date — Workers don't have a server timezone, and the user's
+  // recordings can come from any timezone. ISO date in UTC is good
+  // enough for resolving "next week" / "Friday" within a few hours
+  // either way.
+  return new Date().toISOString().slice(0, 10);
 }
 
 const COMMON_SCHEMA_BLOCK = `Return strict JSON with this exact shape:
@@ -144,7 +157,14 @@ const COMMON_SCHEMA_BLOCK = `Return strict JSON with this exact shape:
 
 Rules:
 - All array fields must be present (use [] when nothing applies).
-- Use ISO 8601 dates (YYYY-MM-DD) when a date is mentioned; leave empty otherwise.
+- Use ISO 8601 dates (YYYY-MM-DD) when a date is mentioned. Resolve
+  relative phrases ("next week", "Friday", "tomorrow", "in two weeks")
+  using the "Today is …" line in the user message as the anchor.
+  Leave the date field empty only when no date is implied at all.
+- Action item owner: if the recorder uses first-person language
+  ("I'll send", "I need to follow up", "we should call"), leave the
+  owner field empty — the recorder is the implicit owner. Only fill
+  owner when a specific other person is named ("Bob will reply").
 - Confidence reflects your confidence in the extraction overall, not in any one field.
 - Do not invent people/organizations/dates that the transcript does not contain.
 - No prose, no markdown fences, no additional top-level fields.`;

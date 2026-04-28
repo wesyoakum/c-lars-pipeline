@@ -79,11 +79,11 @@ export async function onRequestGet(context) {
       [params.id]),
   ]);
 
-  const body = renderDetail({ item, extracted, flash, links, matches });
+  const body = renderDetail({ item, extracted, flash, links, matches, user });
   return htmlResponse(layout('AI Inbox · Item', body, { user }));
 }
 
-function renderDetail({ item, extracted, flash, links, matches }) {
+function renderDetail({ item, extracted, flash, links, matches, user }) {
   const statusLabel = STATUS_LABELS[item.status] || item.status;
   const statusColor = STATUS_COLORS[item.status] || '#888';
   const ctxLabel = item.context_type ? (CONTEXT_TYPE_LABELS[item.context_type] || item.context_type) : null;
@@ -116,7 +116,11 @@ function renderDetail({ item, extracted, flash, links, matches }) {
       .aii-section h2 { margin: 0 0 .65rem; font-size: 1rem; color: #333; }
       .aii-audio { width: 100%; margin: .35rem 0; }
       .aii-meta { font-size: .8rem; color: #777; }
-      .aii-transcript { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: .85rem; line-height: 1.45; max-height: 26rem; overflow-y: auto; padding: .75rem; background: #f8f8fa; border-radius: 4px; }
+      .aii-transcript { white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: .85rem; line-height: 1.45; max-height: 26rem; overflow-y: auto; padding: .75rem; background: #f8f8fa; border-radius: 4px; margin-top: .5rem; }
+      .aii-transcript-details > summary { cursor: pointer; list-style: none; user-select: none; }
+      .aii-transcript-details > summary::-webkit-details-marker { display: none; }
+      .aii-transcript-details > summary::before { content: '▸ '; display: inline-block; transition: transform .15s; }
+      .aii-transcript-details[open] > summary::before { content: '▾ '; }
       .aii-err { color: #cf222e; padding: .65rem .9rem; border: 1px solid #fadddd; border-radius: 4px; background: #fff5f5; }
 
       /* Inline-edit fields */
@@ -244,13 +248,15 @@ function renderDetail({ item, extracted, flash, links, matches }) {
 
       ${item.raw_transcript
         ? html`<section class="aii-section">
-            <h2>Transcript</h2>
-            <div class="aii-transcript">${escape(item.raw_transcript)}</div>
+            <details class="aii-transcript-details">
+              <summary><h2 style="display:inline;margin:0;">Transcript</h2></summary>
+              <div class="aii-transcript">${escape(item.raw_transcript)}</div>
+            </details>
           </section>`
         : ''}
 
       ${extracted
-        ? renderExtracted(item, extractedRaw, linksRaw, matchesRaw)
+        ? renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user)
         : ''}
 
       <div class="aii-actions-bar">
@@ -605,7 +611,11 @@ function renderDetail({ item, extracted, flash, links, matches }) {
   `.toString();
 }
 
-function renderExtracted(item, extractedRaw, linksRaw, matchesRaw) {
+function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
+  const userName = user?.display_name || user?.first_name || 'You';
+  // Display name only used as the placeholder for the action-item Owner
+  // field — when the LLM left owner blank, it means "the recorder", and
+  // showing the recorder's own name makes that explicit.
   // JSON-into-attribute pattern. Each value was already JSON.stringify'd
   // and had < neutralized; escape() handles the attribute boundary. The
   // browser decodes the attribute and Alpine evaluates it as JS.
@@ -699,7 +709,7 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw) {
         <template x-for="(a, idx) in fields.action_items" :key="idx">
           <div class="aii-action">
             <input class="task-in" type="text" placeholder="Task" x-model="a.task" @blur="saveField('action_items')">
-            <input class="owner-in" type="text" placeholder="Owner" x-model="a.owner" @blur="saveField('action_items')">
+            <input class="owner-in" type="text" placeholder="${escape(userName)} (you)" x-model="a.owner" @blur="saveField('action_items')">
             <input class="due-in" type="text" placeholder="YYYY-MM-DD" x-model="a.due" @blur="saveField('action_items')">
             <button type="button" class="aii-rm-btn" @click="removeAction(idx)">×</button>
           </div>

@@ -10,7 +10,8 @@
 
 import { one, run, stmt, batch } from '../lib/db.js';
 import { uuid, now } from '../lib/ids.js';
-import { transcribe, classify, extract } from './prompts.js';
+// classify() is intentionally not imported anymore (v3: classifier dropped).
+import { transcribe, extract } from './prompts.js';
 import { resolveEntities } from '../lib/entity-resolver.js';
 
 /**
@@ -73,26 +74,14 @@ export async function processItem(env, itemId, fromStep = 'transcribe') {
     fromStep = 'classify';
   }
 
-  // ------------ Step 2: Classify ------------
+  // ------------ Step 2: Classify (REMOVED in v3) ------------
+  // The 5-bucket classifier (quick_note / meeting / trade_show / etc.)
+  // was misclassifying real entries (a phone call labeled trade_show)
+  // and the bucket no longer drives meaningful prompt routing — the
+  // extraction prompt is good enough on its own. Skip straight to
+  // extract. The classify() function still exists in prompts.js for
+  // historical reference but is no longer called.
   if (fromStep === 'classify') {
-    if (!transcript) {
-      await failItem(env.DB, itemId, 'No transcript to classify.');
-      throw new Error('No transcript to classify.');
-    }
-    await setStatus(env.DB, itemId, 'classifying');
-    try {
-      contextType = await classify(env, transcript);
-      await run(
-        env.DB,
-        `UPDATE ai_inbox_items
-            SET context_type = ?, updated_at = ?
-          WHERE id = ?`,
-        [contextType, now(), itemId]
-      );
-    } catch (e) {
-      await failItem(env.DB, itemId, `Classification failed: ${e.message || e}`);
-      throw e;
-    }
     fromStep = 'extract';
   }
 
@@ -105,6 +94,7 @@ export async function processItem(env, itemId, fromStep = 'transcribe') {
     }
     await setStatus(env.DB, itemId, 'extracting');
     try {
+      // contextType is left null — extract() handles 'other' as fallback.
       extracted = await extract(env, transcript, contextType || 'other', item.user_context);
       await run(
         env.DB,
