@@ -71,11 +71,35 @@ export async function onRequestGet(context) {
       `SELECT id, action_type, ref_type, ref_id, ref_label, created_at
          FROM ai_inbox_links WHERE item_id = ? ORDER BY created_at DESC`,
       [params.id]),
+    // v3 push-aware enrichment: pull each match together with the
+    // current values of the fields a user might push onto it
+    // (target_email / target_phone / target_mobile / target_title).
+    // The Alpine UI uses these to hide the "↑ push" button when the
+    // captured value already matches what's on the target row, so we
+    // don't tempt the user to make a redundant write.
     all(env.DB,
-      `SELECT id, mention_kind, mention_text, mention_idx, ref_type, ref_id,
-              ref_label, score, rank, auto_resolved, user_overridden
-         FROM ai_inbox_entity_matches WHERE item_id = ?
-        ORDER BY mention_kind, mention_idx, rank`,
+      `SELECT m.id, m.mention_kind, m.mention_text, m.mention_idx,
+              m.ref_type, m.ref_id, m.ref_label, m.score, m.rank,
+              m.auto_resolved, m.user_overridden,
+              CASE m.ref_type
+                WHEN 'contact'     THEN c.email
+                WHEN 'account'     THEN a.email
+              END AS target_email,
+              CASE m.ref_type
+                WHEN 'contact'     THEN c.phone
+                WHEN 'account'     THEN a.phone
+              END AS target_phone,
+              CASE m.ref_type
+                WHEN 'contact'     THEN c.mobile
+              END AS target_mobile,
+              CASE m.ref_type
+                WHEN 'contact'     THEN c.title
+              END AS target_title
+         FROM ai_inbox_entity_matches m
+         LEFT JOIN contacts c ON c.id = m.ref_id AND m.ref_type = 'contact'
+         LEFT JOIN accounts a ON a.id = m.ref_id AND m.ref_type = 'account'
+        WHERE m.item_id = ?
+        ORDER BY m.mention_kind, m.mention_idx, m.rank`,
       [params.id]),
     all(env.DB,
       `SELECT id, kind, sort_order, is_primary, include_in_context,
@@ -435,6 +459,46 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
           pushKey(kind, idx, field) { return kind + ':' + idx + ':' + field; },
           isPushed(kind, idx, field) { return !!this.pushedFields[this.pushKey(kind, idx, field)]; },
 
+          // Should we show the "↑ push" button at all? Three reasons
+          // we'd hide it:
+          //   1. No matched CRM target.
+          //   2. We already pushed this field this session (button
+          //      flipped to ✓).
+          //   3. The target already holds the same value we'd push,
+          //      so the click would be a no-op.
+          shouldShowPush(kind, idx, field) {
+            const detail = this.detailFor(kind, idx);
+            const match = this.bestMatch(kind, idx);
+            if (!detail || !match) return false;
+            if (this.isPushed(kind, idx, field)) return false;
+            const captured = (detail[field] || '').trim();
+            if (!captured) return false;
+            const existing = (match['target_' + field] || '').trim();
+            if (!existing) return true;  // empty target — definitely worth pushing
+            return !this.valuesMatch(field, captured, existing);
+          },
+
+          // Equality with field-specific normalization.
+          //   - Phones: strip non-digits, then compare. If either side
+          //     has a US-shape "1" prefix making it 11 digits, drop
+          //     the "1" so "+1.555.987.6543" matches "555-987-6543".
+          //   - Emails: case-insensitive.
+          //   - Everything else: straight equality after trim.
+          valuesMatch(field, a, b) {
+            if (field === 'phone' || field === 'mobile') {
+              const norm = (s) => {
+                let d = s.replace(/\\D+/g, '');
+                if (d.length === 11 && d[0] === '1') d = d.slice(1);
+                return d;
+              };
+              return norm(a) === norm(b);
+            }
+            if (field === 'email') {
+              return a.toLowerCase() === b.toLowerCase();
+            }
+            return a === b;
+          },
+
           async pushDetail(kind, idx, field) {
             const detail = this.detailFor(kind, idx);
             const match = this.bestMatch(kind, idx);
@@ -490,6 +554,15 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
               at: new Date().toISOString(),
               value: response.value || '',
             };
+            // Update the in-memory match row's target_<field> so
+            // shouldShowPush starts returning false for this row even
+            // before a page reload. Without this, the button would
+            // stay hidden via isPushed but a re-render or matches
+            // refresh might bring it back briefly.
+            const match = this.bestMatch(kind, idx);
+            if (match && response.value) {
+              match['target_' + field] = response.value;
+            }
             if (response.links?.associate) {
               this.links = [response.links.associate, ...this.links];
             }
@@ -1230,7 +1303,7 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
                       <strong>Email</strong>
                       <a :href="'mailto:' + detailFor('person', idx).email" x-text="detailFor('person', idx).email"></a>
                       <button type="button" class="aii-push-btn"
-                              x-show="bestMatch('person', idx) && !isPushed('person', idx, 'email')"
+                              x-show="shouldShowPush('person', idx, 'email')"
                               :title="'Push email onto ' + bestMatch('person', idx)?.ref_label"
                               @click="pushDetail('person', idx, 'email')">↑ push</button>
                       <span class="aii-push-done" x-show="isPushed('person', idx, 'email')" title="Pushed">✓</span>
@@ -1241,7 +1314,7 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
                       <strong>Phone</strong>
                       <a :href="'tel:' + detailFor('person', idx).phone" x-text="detailFor('person', idx).phone"></a>
                       <button type="button" class="aii-push-btn"
-                              x-show="bestMatch('person', idx) && !isPushed('person', idx, 'phone')"
+                              x-show="shouldShowPush('person', idx, 'phone')"
                               :title="'Push phone onto ' + bestMatch('person', idx)?.ref_label"
                               @click="pushDetail('person', idx, 'phone')">↑ push</button>
                       <span class="aii-push-done" x-show="isPushed('person', idx, 'phone')" title="Pushed">✓</span>
@@ -1290,7 +1363,7 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
                       <strong>Phone</strong>
                       <a :href="'tel:' + detailFor('organization', idx).phone" x-text="detailFor('organization', idx).phone"></a>
                       <button type="button" class="aii-push-btn"
-                              x-show="bestMatch('organization', idx) && !isPushed('organization', idx, 'phone')"
+                              x-show="shouldShowPush('organization', idx, 'phone')"
                               :title="'Push phone onto ' + bestMatch('organization', idx)?.ref_label"
                               @click="pushDetail('organization', idx, 'phone')">↑ push</button>
                       <span class="aii-push-done" x-show="isPushed('organization', idx, 'phone')" title="Pushed">✓</span>
@@ -1301,7 +1374,7 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
                       <strong>Email</strong>
                       <a :href="'mailto:' + detailFor('organization', idx).email" x-text="detailFor('organization', idx).email"></a>
                       <button type="button" class="aii-push-btn"
-                              x-show="bestMatch('organization', idx) && !isPushed('organization', idx, 'email')"
+                              x-show="shouldShowPush('organization', idx, 'email')"
                               :title="'Push email onto ' + bestMatch('organization', idx)?.ref_label"
                               @click="pushDetail('organization', idx, 'email')">↑ push</button>
                       <span class="aii-push-done" x-show="isPushed('organization', idx, 'email')" title="Pushed">✓</span>
