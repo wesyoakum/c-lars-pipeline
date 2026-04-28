@@ -22,6 +22,7 @@ const ALLOWED_FIELDS = new Set([
   'title', 'summary', 'confidence',
   'people', 'organizations', 'action_items', 'open_questions',
   'tags', 'suggested_destinations',
+  'people_detail', 'organizations_detail',
 ]);
 
 const ALLOWED_DESTINATIONS = new Set([
@@ -99,6 +100,26 @@ function sanitize(name, value) {
     return value
       .map((s) => (typeof s === 'string' ? s.trim() : ''))
       .filter((s) => ALLOWED_DESTINATIONS.has(s));
+  }
+  if (name === 'people_detail') {
+    if (!Array.isArray(value)) return [];
+    return value.map((p) => ({
+      name: typeof p?.name === 'string' ? p.name.trim() : '',
+      title: typeof p?.title === 'string' ? p.title.trim() : '',
+      email: typeof p?.email === 'string' ? p.email.trim() : '',
+      phone: typeof p?.phone === 'string' ? p.phone.trim() : '',
+      organization: typeof p?.organization === 'string' ? p.organization.trim() : '',
+    })).filter((p) => p.name);
+  }
+  if (name === 'organizations_detail') {
+    if (!Array.isArray(value)) return [];
+    return value.map((o) => ({
+      name: typeof o?.name === 'string' ? o.name.trim() : '',
+      phone: typeof o?.phone === 'string' ? o.phone.trim() : '',
+      email: typeof o?.email === 'string' ? o.email.trim() : '',
+      website: typeof o?.website === 'string' ? o.website.trim() : '',
+      address: typeof o?.address === 'string' ? o.address.trim() : '',
+    })).filter((o) => o.name);
   }
   return value;
 }

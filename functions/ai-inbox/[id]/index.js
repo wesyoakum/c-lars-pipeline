@@ -245,11 +245,17 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
       .aii-link-target { color: #1f6feb; text-decoration: none; flex: 1; }
       .aii-link-target:hover { text-decoration: underline; }
 
-      .aii-mention { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; padding: .35rem .5rem; }
+      .aii-mention { display: flex; flex-direction: column; gap: .15rem; padding: .35rem .5rem; }
       .aii-mention + .aii-mention { border-top: 1px dashed #eef; }
+      .aii-mention-head { display: flex; align-items: center; gap: .35rem; flex-wrap: wrap; }
       .aii-mention-link { color: #1f6feb; text-decoration: none; font-weight: 500; }
       .aii-mention-link:hover { text-decoration: underline; }
       .aii-mention-orig { color: #999; font-size: .75rem; }
+      .aii-mention-detail { display: flex; flex-wrap: wrap; gap: .15rem .85rem; padding-left: .15rem; font-size: .8rem; color: #444; }
+      .aii-detail-row { white-space: nowrap; }
+      .aii-detail-row strong { color: #888; font-weight: 500; margin-right: .25rem; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; }
+      .aii-detail-row a { color: #1f6feb; text-decoration: none; }
+      .aii-detail-row a:hover { text-decoration: underline; }
       .aii-suggest-btn { padding: .15rem .55rem; border: 1px solid #c8d4ff; background: #f0f4ff; color: #2451b8; border-radius: 3px; font-size: .75rem; cursor: pointer; }
       .aii-suggest-btn:hover { background: #dbe5ff; }
       .aii-create-btn { padding: .15rem .55rem; border: 1px dashed #c8d4ff; background: white; color: #555; border-radius: 3px; font-size: .75rem; cursor: pointer; }
@@ -343,6 +349,7 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
           fields: initial || {
             title: '', summary: '',
             people: [], organizations: [], tags: [],
+            people_detail: [], organizations_detail: [],
             action_items: [], open_questions: [], suggested_destinations: [],
             confidence: 'medium',
           },
@@ -413,6 +420,29 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
           isHandled(kind) { return this.handledActions.indexOf(kind) >= 0; },
           isSuggested(kind) {
             return (this.fields.suggested_destinations || []).indexOf(kind) >= 0;
+          },
+
+          // Look up the rich-shape detail row for a person or org
+          // mention, if the LLM captured one. Used to surface a
+          // person's title/phone/email or an org's phone/website
+          // directly under the mention name.
+          detailFor(kind, idx) {
+            if (kind === 'person') {
+              const name = (this.fields.people || [])[idx];
+              if (!name) return null;
+              return (this.fields.people_detail || []).find((d) => d.name === name) || null;
+            }
+            if (kind === 'organization') {
+              const name = (this.fields.organizations || [])[idx];
+              if (!name) return null;
+              return (this.fields.organizations_detail || []).find((d) => d.name === name) || null;
+            }
+            return null;
+          },
+          hasAnyDetail(kind, idx) {
+            const d = this.detailFor(kind, idx);
+            if (!d) return false;
+            return !!(d.title || d.email || d.phone || d.website || d.address || d.organization);
           },
 
           // v3: init() runs once when Alpine instantiates the component.
@@ -1093,26 +1123,42 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
           <ul class="aii-list">
             <template x-for="(p, idx) in fields.people" :key="idx">
               <li class="aii-mention">
-                <template x-if="bestMatch('person', idx)">
-                  <span>
-                    <a class="aii-mention-link" :href="entityHref(bestMatch('person', idx))" x-text="bestMatch('person', idx).ref_label"></a>
-                    <small class="aii-mention-orig" x-show="bestMatch('person', idx).ref_label !== p" x-text="'(' + p + ')'"></small>
-                    <button type="button" class="aii-rm-btn" @click="unmatch('person', idx)" title="Unmatch">×</button>
-                  </span>
-                </template>
-                <template x-if="!bestMatch('person', idx)">
-                  <span>
-                    <span class="aii-editable" contenteditable="true"
-                          x-text="p"
-                          @blur="fields.people[idx] = $event.target.innerText.trim(); saveField('people')"></span>
-                    <template x-for="c in candidatesFor('person', idx)" :key="c.id">
-                      <button type="button" class="aii-suggest-btn"
-                              @click="confirmMatch('person', idx, p, c.ref_type, c.ref_id)"
-                              x-text="'→ ' + c.ref_label"></button>
-                    </template>
-                    <button type="button" class="aii-create-btn" @click="openCreateContact(idx)">Create contact?</button>
-                  </span>
-                </template>
+                <div class="aii-mention-head">
+                  <template x-if="bestMatch('person', idx)">
+                    <span>
+                      <a class="aii-mention-link" :href="entityHref(bestMatch('person', idx))" x-text="bestMatch('person', idx).ref_label"></a>
+                      <small class="aii-mention-orig" x-show="bestMatch('person', idx).ref_label !== p" x-text="'(' + p + ')'"></small>
+                      <button type="button" class="aii-rm-btn" @click="unmatch('person', idx)" title="Unmatch">×</button>
+                    </span>
+                  </template>
+                  <template x-if="!bestMatch('person', idx)">
+                    <span>
+                      <span class="aii-editable" contenteditable="true"
+                            x-text="p"
+                            @blur="fields.people[idx] = $event.target.innerText.trim(); saveField('people')"></span>
+                      <template x-for="c in candidatesFor('person', idx)" :key="c.id">
+                        <button type="button" class="aii-suggest-btn"
+                                @click="confirmMatch('person', idx, p, c.ref_type, c.ref_id)"
+                                x-text="'→ ' + c.ref_label"></button>
+                      </template>
+                      <button type="button" class="aii-create-btn" @click="openCreateContact(idx)">Create contact?</button>
+                    </span>
+                  </template>
+                </div>
+                <div class="aii-mention-detail" x-show="hasAnyDetail('person', idx)" x-cloak>
+                  <template x-if="detailFor('person', idx)?.title">
+                    <span class="aii-detail-row"><strong>Title</strong> <span x-text="detailFor('person', idx).title"></span></span>
+                  </template>
+                  <template x-if="detailFor('person', idx)?.email">
+                    <span class="aii-detail-row"><strong>Email</strong> <a :href="'mailto:' + detailFor('person', idx).email" x-text="detailFor('person', idx).email"></a></span>
+                  </template>
+                  <template x-if="detailFor('person', idx)?.phone">
+                    <span class="aii-detail-row"><strong>Phone</strong> <a :href="'tel:' + detailFor('person', idx).phone" x-text="detailFor('person', idx).phone"></a></span>
+                  </template>
+                  <template x-if="detailFor('person', idx)?.organization && !bestMatch('person', idx)">
+                    <span class="aii-detail-row"><strong>At</strong> <span x-text="detailFor('person', idx).organization"></span></span>
+                  </template>
+                </div>
               </li>
             </template>
             <template x-if="fields.people.length === 0"><li class="aii-editable empty">(none)</li></template>
@@ -1124,26 +1170,42 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
           <ul class="aii-list">
             <template x-for="(o, idx) in fields.organizations" :key="idx">
               <li class="aii-mention">
-                <template x-if="bestMatch('organization', idx)">
-                  <span>
-                    <a class="aii-mention-link" :href="entityHref(bestMatch('organization', idx))" x-text="bestMatch('organization', idx).ref_label"></a>
-                    <small class="aii-mention-orig" x-show="bestMatch('organization', idx).ref_label !== o" x-text="'(' + o + ')'"></small>
-                    <button type="button" class="aii-rm-btn" @click="unmatch('organization', idx)" title="Unmatch">×</button>
-                  </span>
-                </template>
-                <template x-if="!bestMatch('organization', idx)">
-                  <span>
-                    <span class="aii-editable" contenteditable="true"
-                          x-text="o"
-                          @blur="fields.organizations[idx] = $event.target.innerText.trim(); saveField('organizations')"></span>
-                    <template x-for="c in candidatesFor('organization', idx)" :key="c.id">
-                      <button type="button" class="aii-suggest-btn"
-                              @click="confirmMatch('organization', idx, o, c.ref_type, c.ref_id)"
-                              x-text="'→ ' + c.ref_label"></button>
-                    </template>
-                    <button type="button" class="aii-create-btn" @click="openCreateAccount(idx)">Create account?</button>
-                  </span>
-                </template>
+                <div class="aii-mention-head">
+                  <template x-if="bestMatch('organization', idx)">
+                    <span>
+                      <a class="aii-mention-link" :href="entityHref(bestMatch('organization', idx))" x-text="bestMatch('organization', idx).ref_label"></a>
+                      <small class="aii-mention-orig" x-show="bestMatch('organization', idx).ref_label !== o" x-text="'(' + o + ')'"></small>
+                      <button type="button" class="aii-rm-btn" @click="unmatch('organization', idx)" title="Unmatch">×</button>
+                    </span>
+                  </template>
+                  <template x-if="!bestMatch('organization', idx)">
+                    <span>
+                      <span class="aii-editable" contenteditable="true"
+                            x-text="o"
+                            @blur="fields.organizations[idx] = $event.target.innerText.trim(); saveField('organizations')"></span>
+                      <template x-for="c in candidatesFor('organization', idx)" :key="c.id">
+                        <button type="button" class="aii-suggest-btn"
+                                @click="confirmMatch('organization', idx, o, c.ref_type, c.ref_id)"
+                                x-text="'→ ' + c.ref_label"></button>
+                      </template>
+                      <button type="button" class="aii-create-btn" @click="openCreateAccount(idx)">Create account?</button>
+                    </span>
+                  </template>
+                </div>
+                <div class="aii-mention-detail" x-show="hasAnyDetail('organization', idx)" x-cloak>
+                  <template x-if="detailFor('organization', idx)?.phone">
+                    <span class="aii-detail-row"><strong>Phone</strong> <a :href="'tel:' + detailFor('organization', idx).phone" x-text="detailFor('organization', idx).phone"></a></span>
+                  </template>
+                  <template x-if="detailFor('organization', idx)?.email">
+                    <span class="aii-detail-row"><strong>Email</strong> <a :href="'mailto:' + detailFor('organization', idx).email" x-text="detailFor('organization', idx).email"></a></span>
+                  </template>
+                  <template x-if="detailFor('organization', idx)?.website">
+                    <span class="aii-detail-row"><strong>Web</strong> <a :href="detailFor('organization', idx).website" target="_blank" rel="noopener" x-text="detailFor('organization', idx).website"></a></span>
+                  </template>
+                  <template x-if="detailFor('organization', idx)?.address">
+                    <span class="aii-detail-row"><strong>Addr</strong> <span x-text="detailFor('organization', idx).address"></span></span>
+                  </template>
+                </div>
               </li>
             </template>
             <template x-if="fields.organizations.length === 0"><li class="aii-editable empty">(none)</li></template>

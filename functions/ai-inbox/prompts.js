@@ -141,8 +141,26 @@ const COMMON_SCHEMA_BLOCK = `Return strict JSON with this exact shape:
 {
   "title": "string — short, scannable title (under 80 chars)",
   "summary": "string — 1-3 sentence executive summary",
-  "people": ["string"],
-  "organizations": ["string"],
+  "people": ["string — full name of each person mentioned"],
+  "organizations": ["string — name of each company/org mentioned"],
+  "people_detail": [
+    {
+      "name": "string — must match a string in 'people' exactly",
+      "title": "string or empty",
+      "email": "string or empty",
+      "phone": "string or empty",
+      "organization": "string or empty — name of the org they belong to, if mentioned"
+    }
+  ],
+  "organizations_detail": [
+    {
+      "name": "string — must match a string in 'organizations' exactly",
+      "phone": "string or empty",
+      "email": "string or empty",
+      "website": "string or empty",
+      "address": "string or empty"
+    }
+  ],
   "action_items": [
     { "task": "string", "owner": "string or empty", "due": "string or empty (ISO date if known)" }
   ],
@@ -157,6 +175,15 @@ const COMMON_SCHEMA_BLOCK = `Return strict JSON with this exact shape:
 
 Rules:
 - All array fields must be present (use [] when nothing applies).
+- people_detail: include ONE entry per name in 'people' that has at
+  least one non-empty contact detail (title, email, phone, org). If
+  none of those details are mentioned for a person, omit them from
+  people_detail entirely (don't include rows full of empty strings).
+- organizations_detail: same rule — only include orgs for which at
+  least one non-name field is mentioned in the source text.
+- Phone/email/title: only fill when the source text explicitly states
+  them. Do not invent or guess. A business card or email signature is
+  the most common source.
 - Use ISO 8601 dates (YYYY-MM-DD) when a date is mentioned. Resolve
   relative phrases ("next week", "Friday", "tomorrow", "in two weeks")
   using the "Today is …" line in the user message as the anchor.
@@ -205,11 +232,35 @@ function normalizeExtraction(raw) {
     due: str(a?.due),
   })).filter((a) => a.task);
 
+  // people_detail / organizations_detail are optional rich-shape
+  // companions to the people / organizations string arrays. They
+  // carry the fields we want to push to a contact/account (title,
+  // phone, email, website, address). Each entry must have at least
+  // one non-empty non-name field; bare-name rows get filtered out
+  // since the parallel `people` array already covers that.
+  const peopleDetail = arr(raw?.people_detail).map((p) => ({
+    name: str(p?.name),
+    title: str(p?.title),
+    email: str(p?.email),
+    phone: str(p?.phone),
+    organization: str(p?.organization),
+  })).filter((p) => p.name && (p.title || p.email || p.phone || p.organization));
+
+  const orgsDetail = arr(raw?.organizations_detail).map((o) => ({
+    name: str(o?.name),
+    phone: str(o?.phone),
+    email: str(o?.email),
+    website: str(o?.website),
+    address: str(o?.address),
+  })).filter((o) => o.name && (o.phone || o.email || o.website || o.address));
+
   return {
     title: str(raw?.title) || '(untitled)',
     summary: str(raw?.summary),
     people: arr(raw?.people).map(str).filter(Boolean),
     organizations: arr(raw?.organizations).map(str).filter(Boolean),
+    people_detail: peopleDetail,
+    organizations_detail: orgsDetail,
     action_items: actions,
     open_questions: arr(raw?.open_questions).map(str).filter(Boolean),
     tags: arr(raw?.tags).map(str).filter(Boolean),
