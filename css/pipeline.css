@@ -2941,6 +2941,139 @@ textarea.ie-input { width: 100%; min-width: 12rem; resize: vertical; }
   background: #fff0f0;
 }
 
+/* ---------- Audio recorder modal (js/audio-recorder.js) ---------- */
+.aii-rec-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 20, 30, 0.55);
+  z-index: 6000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.aii-rec-card {
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem 1.5rem 1.25rem;
+  max-width: 480px;
+  width: 100%;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
+  text-align: center;
+}
+.aii-rec-title {
+  margin: 0 0 0.65rem;
+  font-size: 1.05rem;
+}
+.aii-rec-msg {
+  margin: 0 0 0.85rem;
+  color: #555;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+.aii-rec-error {
+  color: #cf222e;
+}
+.aii-rec-timer {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 2.25rem;
+  margin: 0.85rem 0 1rem;
+  color: #1f6feb;
+  letter-spacing: 0.05em;
+}
+.aii-rec-playback {
+  width: 100%;
+  margin: 0 0 0.85rem;
+}
+.aii-rec-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+}
+.aii-rec-btn {
+  padding: 0.65rem 1rem;
+  border: 1px solid #ccd;
+  background: white;
+  color: #333;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  min-height: 44px;
+  min-width: 88px;
+}
+.aii-rec-btn:hover {
+  background: #f6f8ff;
+}
+.aii-rec-btn-primary {
+  background: #1f6feb;
+  color: white;
+  border-color: #1f6feb;
+}
+.aii-rec-btn-primary:hover {
+  background: #1858c4;
+}
+.aii-rec-btn-stop {
+  background: #cf222e;
+  color: white;
+  border-color: #cf222e;
+}
+.aii-rec-btn-stop:hover {
+  background: #a91823;
+}
+.aii-rec-btn-cancel {
+  color: #888;
+}
+@media (max-width: 480px) {
+  .aii-rec-card {
+    padding: 1.1rem 1rem 1rem;
+    max-width: 100%;
+  }
+  .aii-rec-timer {
+    font-size: 1.85rem;
+  }
+  .aii-rec-btn {
+    flex: 1 1 calc(50% - 0.25rem);
+    min-width: 0;
+  }
+}
+
+/* ---------- AI Inbox: capture / record / camera buttons ---------- */
+.aii-capture-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0;
+  align-items: center;
+  justify-content: center;
+}
+.aii-capture-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.55rem 1rem;
+  border: 1px solid #c8d4ff;
+  background: #f0f4ff;
+  color: #2451b8;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  min-height: 44px;
+}
+.aii-capture-btn:hover {
+  background: #dbe5ff;
+}
+.aii-capture-btn-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.aii-capture-hint {
+  font-size: 0.75rem;
+  color: #888;
+  flex: 1 1 100%;
+  text-align: center;
+}
+
 /* ---------- Detail pairs (side-by-side key-value) ---------- */
 
 .detail-grid {

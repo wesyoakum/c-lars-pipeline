@@ -125,6 +125,16 @@ function renderPage({ items, flash }) {
       .flash { padding: .65rem .9rem; border-radius: 4px; margin-bottom: 1rem; }
       .flash-success { background: #d4ecdb; color: #1a3d24; }
       .flash-error { background: #fadddd; color: #6a1a20; }
+
+      /* Mobile (≤ 640px): tighter padding and the drop panel takes
+         less vertical space so the recent-items list is visible
+         above the fold. */
+      @media (max-width: 640px) {
+        .ai-inbox-wrap { padding: 1rem .75rem; }
+        .dz-big-content { padding: 1.1rem .75rem; }
+        .dz-big-title { font-size: .95rem; }
+        .ai-inbox-card { padding: .65rem .75rem; }
+      }
     </style>
 
     <div class="ai-inbox-wrap">
@@ -151,8 +161,61 @@ function renderPage({ items, flash }) {
         </form>
       </div>
 
+      <div class="aii-capture-bar">
+        <button type="button" class="aii-capture-btn" id="aii-record-new" title="Record audio in your browser">
+          <span class="aii-capture-btn-icon">🎤</span> Record audio
+        </button>
+        <button type="button" class="aii-capture-btn" id="aii-photo-new" title="Take or choose a photo">
+          <span class="aii-capture-btn-icon">📷</span> Take photo
+        </button>
+        <input type="file" id="aii-photo-input-new" accept="image/*" capture="environment" hidden>
+      </div>
+
       <script src="/js/dropzone.js"></script>
       <script src="/js/inbox-droppanel.js"></script>
+      <script src="/js/audio-recorder.js"></script>
+      <script>
+        (function () {
+          // After-record / after-photo handler: package the file the
+          // same way the dropzone does (multipart POST to /ai-inbox/new)
+          // so the browser follows the 303 redirect to the new entry's
+          // detail page.
+          function uploadAsNewEntry(file) {
+            const fd = new FormData();
+            fd.append('file', file);
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/ai-inbox/new';
+            form.enctype = 'multipart/form-data';
+            form.style.display = 'none';
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.name = 'file';
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            input.files = dt.files;
+            form.appendChild(input);
+            document.body.appendChild(form);
+            form.submit();
+          }
+
+          var rec = document.getElementById('aii-record-new');
+          if (rec) rec.addEventListener('click', function () {
+            window.PipelineAudioRecorder.open(uploadAsNewEntry);
+          });
+
+          var photoBtn = document.getElementById('aii-photo-new');
+          var photoInput = document.getElementById('aii-photo-input-new');
+          if (photoBtn && photoInput) {
+            photoBtn.addEventListener('click', function () { photoInput.click(); });
+            photoInput.addEventListener('change', function () {
+              if (photoInput.files && photoInput.files[0]) {
+                uploadAsNewEntry(photoInput.files[0]);
+              }
+            });
+          }
+        })();
+      </script>
 
       ${items.length === 0
         ? html`<div class="ai-inbox-empty">No items yet. Upload your first recording above.</div>`

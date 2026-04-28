@@ -294,6 +294,65 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
       .flash { padding: .65rem .9rem; border-radius: 4px; margin-bottom: 1rem; }
       .flash-success { background: #d4ecdb; color: #1a3d24; }
       .flash-error { background: #fadddd; color: #6a1a20; }
+
+      /* Capture bar status / inline label */
+      .aii-capture-status { font-size: .8rem; color: #1f6feb; flex: 1 1 100%; text-align: center; min-height: 1em; }
+
+      /* ---------- Mobile (≤ 640px) ---------- */
+      @media (max-width: 640px) {
+        .aii-wrap { padding: 1rem .75rem; }
+
+        /* Action items: stack inputs full-width instead of squeezing
+           into a 5-column grid. The remove + apply buttons share a
+           row at the bottom of each item. */
+        .aii-action {
+          grid-template-columns: 1fr;
+          gap: .35rem;
+        }
+        .aii-action .task-in,
+        .aii-action .owner-in,
+        .aii-action .due-in {
+          width: 100%;
+        }
+        .aii-action .aii-apply-btn,
+        .aii-action .aii-rm-btn {
+          justify-self: end;
+        }
+        .aii-action .aii-apply-btn { width: auto; }
+
+        /* Form rows in inline create-task / link-account / wizard
+           launchers: stack the label above the input so the input has
+           full width to type into. */
+        .aii-form-row {
+          grid-template-columns: 1fr;
+          gap: .15rem;
+        }
+        .aii-form-row > span {
+          font-size: .7rem;
+          color: #888;
+          text-transform: uppercase;
+          letter-spacing: .04em;
+        }
+
+        /* Bigger touch targets on the inline-edit fields and the
+           little actions next to mentions. iOS HIG min is 44px. */
+        .aii-editable { padding: .5rem .55rem; min-height: 1.5rem; }
+        .aii-rm-btn,
+        .aii-add-btn,
+        .aii-suggest-btn,
+        .aii-create-btn,
+        .aii-action-btn,
+        .aii-push-btn { min-height: 36px; padding: .35rem .65rem; }
+
+        /* Mentions: drop side-by-side detail pairs to one per line so
+           a long email/phone doesn't run off the screen. */
+        .aii-mention-detail { flex-direction: column; gap: .15rem; }
+        .aii-detail-row { white-space: normal; }
+
+        /* Apply / Cancel button rows wrap nicely. */
+        .aii-form-actions { flex-wrap: wrap; }
+        .aii-form-actions .aii-btn { flex: 1 1 calc(50% - .25rem); min-width: 0; }
+      }
     </style>
 
     <div class="aii-wrap">
@@ -1599,6 +1658,17 @@ function renderAttachments({ item, attachments }) {
       </form>
     </div>
 
+    <div class="aii-capture-bar">
+      <button type="button" class="aii-capture-btn" data-aii-record title="Record audio in your browser">
+        <span class="aii-capture-btn-icon">🎤</span> Record audio
+      </button>
+      <button type="button" class="aii-capture-btn" data-aii-photo title="Take or choose a photo">
+        <span class="aii-capture-btn-icon">📷</span> Take photo
+      </button>
+      <input type="file" data-aii-photo-input accept="image/*" capture="environment" hidden>
+      <span class="aii-capture-status" data-aii-capture-status></span>
+    </div>
+
     <div class="aii-att-list">${rows}</div>
 
     <div x-show="open" x-cloak class="aii-att-add">
@@ -1619,7 +1689,58 @@ function renderAttachments({ item, attachments }) {
 
     <script src="/js/dropzone.js"></script>
     <script src="/js/inbox-droppanel.js"></script>
+    <script src="/js/audio-recorder.js"></script>
     <script>
+      // Wire the Record / Take photo buttons in the capture bar above
+      // the attachments list. Both submit to /ai-inbox/:id/attachments/add
+      // with kind='auto' so the server infers from the file type. Page
+      // reloads on success so the new attachment + re-extracted state
+      // appears together.
+      (function () {
+        const entryId = '${escape(item.id)}';
+
+        async function uploadToEntry(file, statusEl) {
+          if (statusEl) statusEl.textContent = 'Uploading ' + file.name + '…';
+          try {
+            const fd = new FormData();
+            fd.append('kind', 'auto');
+            fd.append('file', file);
+            fd.append('reextract', '1');
+            const res = await fetch('/ai-inbox/' + encodeURIComponent(entryId) + '/attachments/add', {
+              method: 'POST', credentials: 'same-origin', body: fd,
+            });
+            const j = await res.json();
+            if (!j.ok) {
+              if (statusEl) statusEl.textContent = 'Upload failed: ' + (j.error || 'unknown');
+              return;
+            }
+            if (statusEl) statusEl.textContent = 'Reloading…';
+            window.location.reload();
+          } catch (e) {
+            if (statusEl) statusEl.textContent = 'Upload failed: ' + (e.message || e);
+          }
+        }
+
+        document.querySelectorAll('[data-aii-record]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const status = btn.parentElement.querySelector('[data-aii-capture-status]');
+            window.PipelineAudioRecorder.open((file) => uploadToEntry(file, status));
+          });
+        });
+
+        document.querySelectorAll('[data-aii-photo]').forEach((btn) => {
+          const input = btn.parentElement.querySelector('[data-aii-photo-input]');
+          if (!input) return;
+          btn.addEventListener('click', () => input.click());
+          input.addEventListener('change', () => {
+            if (input.files && input.files[0]) {
+              const status = btn.parentElement.querySelector('[data-aii-capture-status]');
+              uploadToEntry(input.files[0], status);
+            }
+          });
+        });
+      })();
+
       window.aiInboxAttachInit = function (entryId) {
         return {
           entryId, open: false, busy: false, error: '',
