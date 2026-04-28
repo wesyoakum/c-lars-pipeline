@@ -101,6 +101,64 @@ code {
 .nav-link:hover  { background: var(--bg-alt); text-decoration: none; }
 .nav-link.active { background: var(--bg-alt); font-weight: 600; }
 
+/* Hamburger toggle. Only visible at mobile widths via media query
+   below; desktop hides it and shows the inline nav. */
+.nav-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 0.4rem;
+  border-radius: var(--radius);
+  color: var(--fg);
+  min-width: 44px;
+  min-height: 44px;
+}
+.nav-toggle:hover { background: var(--bg-alt); }
+.nav-toggle[aria-expanded="true"] { background: var(--bg-alt); }
+.nav-toggle-icon { display: block; }
+
+/* Mobile (≤ 800px): collapse the nav into a hamburger-triggered
+   drawer that slides down below the header. The header itself
+   tightens up so the brand + toggle + bell + user info still fit
+   without overflow. */
+@media (max-width: 800px) {
+  .site-header { gap: 0.65rem; padding: 0.5rem 0.85rem; }
+  .nav-toggle { display: inline-flex; }
+  .site-nav {
+    display: none;
+    position: absolute;
+    top: var(--site-header-h, 53px);
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.45rem 0.85rem 0.85rem;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    z-index: 39;
+    max-height: calc(100vh - var(--site-header-h, 53px));
+    overflow-y: auto;
+  }
+  .site-nav.is-open { display: flex; }
+  .site-nav .nav-link {
+    padding: 0.7rem 0.85rem;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+  /* Hide the multi-line user badge on mobile — the email + role
+     wraps awkwardly. The user can still get to /settings via the
+     drawer. */
+  .user-badge { display: none; }
+  /* Brand: keep the logo + Pipeline word, but no environment badge
+     hover overflow. */
+  .brand-logo { height: 24px; }
+}
+
 /* Sub-navigation tab strip (e.g. Accounts ↔ Contacts under /accounts). */
 .subnav-tabs {
   display: flex;

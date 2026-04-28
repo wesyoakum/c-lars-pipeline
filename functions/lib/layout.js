@@ -177,6 +177,41 @@ const BACK_TO_TOP_SCRIPT = (
   "})();\n"
 );
 
+// Hamburger nav toggle. On mobile (≤ 800px wide), .site-nav is hidden
+// by default and slides down as a drawer when the toggle button is
+// tapped. Outside-click and link-click both close the drawer. The
+// button only renders interactively on mobile via CSS; on desktop
+// the nav is always visible and this script does nothing useful.
+const NAV_TOGGLE_SCRIPT = (
+  "(function () {\n" +
+  "  var toggle = document.querySelector('.nav-toggle');\n" +
+  "  var nav = document.querySelector('.site-nav');\n" +
+  "  if (!toggle || !nav) return;\n" +
+  "  function setOpen(open) {\n" +
+  "    nav.classList.toggle('is-open', open);\n" +
+  "    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');\n" +
+  "  }\n" +
+  "  toggle.addEventListener('click', function (e) {\n" +
+  "    e.stopPropagation();\n" +
+  "    setOpen(!nav.classList.contains('is-open'));\n" +
+  "  });\n" +
+  "  document.addEventListener('click', function (e) {\n" +
+  "    if (!nav.classList.contains('is-open')) return;\n" +
+  "    if (toggle.contains(e.target) || nav.contains(e.target)) return;\n" +
+  "    setOpen(false);\n" +
+  "  });\n" +
+  "  nav.addEventListener('click', function (e) {\n" +
+  "    if (e.target.closest && e.target.closest('a')) setOpen(false);\n" +
+  "  });\n" +
+  "  // Close the drawer if the viewport widens past the breakpoint —\n" +
+  "  // otherwise an open mobile drawer would visually persist on a\n" +
+  "  // desktop after a rotate / resize.\n" +
+  "  window.addEventListener('resize', function () {\n" +
+  "    if (window.innerWidth > 800 && nav.classList.contains('is-open')) setOpen(false);\n" +
+  "  });\n" +
+  "})();\n"
+);
+
 const NOTIFICATION_STORE_SCRIPT = (
   "document.addEventListener('alpine:init', function () {\n" +
   "  Alpine.store('notifications', {\n" +
@@ -1082,7 +1117,14 @@ export function layout(title, body, opts = {}) {
     <div class="brand">
       <a href="/"><img src="/img/logo-120.png" alt="C-LARS" class="brand-logo"><strong>Pipeline</strong></a>
     </div>
-    <nav class="site-nav">
+    <button type="button" class="nav-toggle" aria-label="Open navigation menu" aria-expanded="false" aria-controls="site-nav">
+      <svg class="nav-toggle-icon" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <line x1="4" y1="7"  x2="20" y2="7"  stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <line x1="4" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <line x1="4" y1="17" x2="20" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <nav class="site-nav" id="site-nav">
       ${navLink('/accounts', 'Accounts', activeNav)}
       ${navLink('/opportunities', 'Opportunities', activeNav)}
       ${navLink('/quotes', 'Quotes', activeNav)}
@@ -1136,6 +1178,7 @@ ${body}
     <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 14 12 8 18 14"/></svg>
   </button>
   <script>${BACK_TO_TOP_SCRIPT}</script>
+  <script>${NAV_TOGGLE_SCRIPT}</script>
   ${user ? `<script>${NOTIFICATION_STORE_SCRIPT}</script>` : ''}
   ${user ? `<script>${BLOCKER_MODAL_STORE_SCRIPT}</script>` : ''}
 </body>
