@@ -256,6 +256,9 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
       .aii-detail-row strong { color: #888; font-weight: 500; margin-right: .25rem; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; }
       .aii-detail-row a { color: #1f6feb; text-decoration: none; }
       .aii-detail-row a:hover { text-decoration: underline; }
+      .aii-push-btn { padding: .05rem .35rem; border: 1px solid #c8d4ff; background: #f0f4ff; color: #2451b8; border-radius: 3px; font-size: .65rem; cursor: pointer; margin-left: .35rem; vertical-align: middle; }
+      .aii-push-btn:hover { background: #dbe5ff; }
+      .aii-push-done { color: #1a7f37; font-weight: 600; margin-left: .35rem; }
       .aii-suggest-btn { padding: .15rem .55rem; border: 1px solid #c8d4ff; background: #f0f4ff; color: #2451b8; border-radius: 3px; font-size: .75rem; cursor: pointer; }
       .aii-suggest-btn:hover { background: #dbe5ff; }
       .aii-create-btn { padding: .15rem .55rem; border: 1px dashed #c8d4ff; background: white; color: #555; border-radius: 3px; font-size: .75rem; cursor: pointer; }
@@ -420,6 +423,79 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
           isHandled(kind) { return this.handledActions.indexOf(kind) >= 0; },
           isSuggested(kind) {
             return (this.fields.suggested_destinations || []).indexOf(kind) >= 0;
+          },
+
+          // ----- v3 push: send captured contact details onto the
+          // matched CRM entity (one click per field). -----
+          //
+          // pushedFields tracks "field X on this mention has been
+          // pushed already" so the UI can show a checkmark and disable
+          // the button after the click. Keyed by '<kind>:<idx>:<field>'.
+          pushedFields: {},
+          pushKey(kind, idx, field) { return kind + ':' + idx + ':' + field; },
+          isPushed(kind, idx, field) { return !!this.pushedFields[this.pushKey(kind, idx, field)]; },
+
+          async pushDetail(kind, idx, field) {
+            const detail = this.detailFor(kind, idx);
+            const match = this.bestMatch(kind, idx);
+            if (!detail || !match) return;
+            const value = detail[field];
+            if (!value) return;
+
+            const refType = match.ref_type;
+            const refId = match.ref_id;
+            const url = '/ai-inbox/' + encodeURIComponent(this.itemId) + '/push/' + field;
+            const body = { ref_type: refType, ref_id: refId };
+            body[field] = value;
+
+            const doPost = async (force) => {
+              if (force) body.force = true;
+              const res = await fetch(url, {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify(body),
+              });
+              return { status: res.status, json: await res.json() };
+            };
+
+            try {
+              const r1 = await doPost(false);
+              if (r1.json.ok) {
+                this.recordPushSuccess(kind, idx, field, r1.json);
+                return;
+              }
+              if (r1.status === 409 && r1.json.error && r1.json.error.endsWith('_already_set')) {
+                const existing = r1.json.existing || '(empty)';
+                const ok = confirm(
+                  'The ' + field + ' on this contact is already set to:\\n\\n  ' + existing +
+                  '\\n\\nReplace with:\\n\\n  ' + value + '\\n\\nProceed?'
+                );
+                if (!ok) return;
+                const r2 = await doPost(true);
+                if (r2.json.ok) {
+                  this.recordPushSuccess(kind, idx, field, r2.json);
+                  return;
+                }
+                alert('Could not push: ' + (r2.json.error || 'unknown'));
+                return;
+              }
+              alert('Could not push ' + field + ': ' + (r1.json.error || 'unknown'));
+            } catch (e) {
+              alert('Push failed: ' + (e.message || e));
+            }
+          },
+
+          recordPushSuccess(kind, idx, field, response) {
+            this.pushedFields[this.pushKey(kind, idx, field)] = {
+              at: new Date().toISOString(),
+              value: response.value || '',
+            };
+            if (response.links?.associate) {
+              this.links = [response.links.associate, ...this.links];
+            }
+            if (response.links?.push) {
+              this.links = [response.links.push, ...this.links];
+            }
           },
 
           // Look up the rich-shape detail row for a person or org
@@ -1150,10 +1226,26 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
                     <span class="aii-detail-row"><strong>Title</strong> <span x-text="detailFor('person', idx).title"></span></span>
                   </template>
                   <template x-if="detailFor('person', idx)?.email">
-                    <span class="aii-detail-row"><strong>Email</strong> <a :href="'mailto:' + detailFor('person', idx).email" x-text="detailFor('person', idx).email"></a></span>
+                    <span class="aii-detail-row">
+                      <strong>Email</strong>
+                      <a :href="'mailto:' + detailFor('person', idx).email" x-text="detailFor('person', idx).email"></a>
+                      <button type="button" class="aii-push-btn"
+                              x-show="bestMatch('person', idx) && !isPushed('person', idx, 'email')"
+                              :title="'Push email onto ' + bestMatch('person', idx)?.ref_label"
+                              @click="pushDetail('person', idx, 'email')">↑ push</button>
+                      <span class="aii-push-done" x-show="isPushed('person', idx, 'email')" title="Pushed">✓</span>
+                    </span>
                   </template>
                   <template x-if="detailFor('person', idx)?.phone">
-                    <span class="aii-detail-row"><strong>Phone</strong> <a :href="'tel:' + detailFor('person', idx).phone" x-text="detailFor('person', idx).phone"></a></span>
+                    <span class="aii-detail-row">
+                      <strong>Phone</strong>
+                      <a :href="'tel:' + detailFor('person', idx).phone" x-text="detailFor('person', idx).phone"></a>
+                      <button type="button" class="aii-push-btn"
+                              x-show="bestMatch('person', idx) && !isPushed('person', idx, 'phone')"
+                              :title="'Push phone onto ' + bestMatch('person', idx)?.ref_label"
+                              @click="pushDetail('person', idx, 'phone')">↑ push</button>
+                      <span class="aii-push-done" x-show="isPushed('person', idx, 'phone')" title="Pushed">✓</span>
+                    </span>
                   </template>
                   <template x-if="detailFor('person', idx)?.organization && !bestMatch('person', idx)">
                     <span class="aii-detail-row"><strong>At</strong> <span x-text="detailFor('person', idx).organization"></span></span>
@@ -1194,10 +1286,26 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
                 </div>
                 <div class="aii-mention-detail" x-show="hasAnyDetail('organization', idx)" x-cloak>
                   <template x-if="detailFor('organization', idx)?.phone">
-                    <span class="aii-detail-row"><strong>Phone</strong> <a :href="'tel:' + detailFor('organization', idx).phone" x-text="detailFor('organization', idx).phone"></a></span>
+                    <span class="aii-detail-row">
+                      <strong>Phone</strong>
+                      <a :href="'tel:' + detailFor('organization', idx).phone" x-text="detailFor('organization', idx).phone"></a>
+                      <button type="button" class="aii-push-btn"
+                              x-show="bestMatch('organization', idx) && !isPushed('organization', idx, 'phone')"
+                              :title="'Push phone onto ' + bestMatch('organization', idx)?.ref_label"
+                              @click="pushDetail('organization', idx, 'phone')">↑ push</button>
+                      <span class="aii-push-done" x-show="isPushed('organization', idx, 'phone')" title="Pushed">✓</span>
+                    </span>
                   </template>
                   <template x-if="detailFor('organization', idx)?.email">
-                    <span class="aii-detail-row"><strong>Email</strong> <a :href="'mailto:' + detailFor('organization', idx).email" x-text="detailFor('organization', idx).email"></a></span>
+                    <span class="aii-detail-row">
+                      <strong>Email</strong>
+                      <a :href="'mailto:' + detailFor('organization', idx).email" x-text="detailFor('organization', idx).email"></a>
+                      <button type="button" class="aii-push-btn"
+                              x-show="bestMatch('organization', idx) && !isPushed('organization', idx, 'email')"
+                              :title="'Push email onto ' + bestMatch('organization', idx)?.ref_label"
+                              @click="pushDetail('organization', idx, 'email')">↑ push</button>
+                      <span class="aii-push-done" x-show="isPushed('organization', idx, 'email')" title="Pushed">✓</span>
+                    </span>
                   </template>
                   <template x-if="detailFor('organization', idx)?.website">
                     <span class="aii-detail-row"><strong>Web</strong> <a :href="detailFor('organization', idx).website" target="_blank" rel="noopener" x-text="detailFor('organization', idx).website"></a></span>
