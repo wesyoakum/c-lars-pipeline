@@ -65,8 +65,8 @@ export async function onRequestGet(context) {
   }
 
   // v2: Load action history (links) and entity matches in parallel.
-  // Both are populated lazily by other endpoints; either may be empty.
-  const [links, matches] = await Promise.all([
+  // v3: also load attachments for the new attachments-list panel.
+  const [links, matches, attachments] = await Promise.all([
     all(env.DB,
       `SELECT id, action_type, ref_type, ref_id, ref_label, created_at
          FROM ai_inbox_links WHERE item_id = ? ORDER BY created_at DESC`,
@@ -77,13 +77,21 @@ export async function onRequestGet(context) {
          FROM ai_inbox_entity_matches WHERE item_id = ?
         ORDER BY mention_kind, mention_idx, rank`,
       [params.id]),
+    all(env.DB,
+      `SELECT id, kind, sort_order, is_primary, include_in_context,
+              r2_key, mime_type, size_bytes, filename,
+              captured_text, captured_text_model, status, error_message,
+              created_at
+         FROM ai_inbox_attachments WHERE entry_id = ?
+        ORDER BY sort_order, created_at`,
+      [params.id]),
   ]);
 
-  const body = renderDetail({ item, extracted, flash, links, matches, user });
+  const body = renderDetail({ item, extracted, flash, links, matches, user, attachments });
   return htmlResponse(layout('AI Inbox · Item', body, { user }));
 }
 
-function renderDetail({ item, extracted, flash, links, matches, user }) {
+function renderDetail({ item, extracted, flash, links, matches, user, attachments }) {
   const statusLabel = STATUS_LABELS[item.status] || item.status;
   const statusColor = STATUS_COLORS[item.status] || '#888';
   const ctxLabel = item.context_type ? (CONTEXT_TYPE_LABELS[item.context_type] || item.context_type) : null;
@@ -121,6 +129,19 @@ function renderDetail({ item, extracted, flash, links, matches, user }) {
       .aii-transcript-details > summary::-webkit-details-marker { display: none; }
       .aii-transcript-details > summary::before { content: '▸ '; display: inline-block; transition: transform .15s; }
       .aii-transcript-details[open] > summary::before { content: '▾ '; }
+
+      /* v3 attachments panel */
+      .aii-att-list { display: flex; flex-direction: column; gap: .5rem; }
+      .aii-att-row { padding: .55rem .7rem; border: 1px solid #e1e4e8; border-radius: 4px; background: #fafbfc; }
+      .aii-att-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; font-size: .85rem; }
+      .aii-att-kind { display: inline-block; padding: .1rem .5rem; background: #eef; color: #335; border-radius: 3px; font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+      .aii-att-primary { color: #d4a017; font-size: 1rem; line-height: 1; }
+      .aii-att-meta { color: #555; font-size: .8rem; flex: 1 1 auto; min-width: 8rem; }
+      .aii-att-excluded { display: inline-block; padding: .05rem .35rem; background: #f4ddc3; color: #6b4a18; font-size: .7rem; border-radius: 2px; }
+      .aii-att-captured > summary { cursor: pointer; font-size: .8rem; color: #555; margin-top: .35rem; user-select: none; }
+      .aii-att-captured > summary::-webkit-details-marker { display: none; }
+      .aii-att-captured > summary::before { content: '▸ '; display: inline-block; }
+      .aii-att-captured[open] > summary::before { content: '▾ '; }
       .aii-err { color: #cf222e; padding: .65rem .9rem; border: 1px solid #fadddd; border-radius: 4px; background: #fff5f5; }
 
       /* Inline-edit fields */
@@ -230,21 +251,13 @@ function renderDetail({ item, extracted, flash, links, matches, user }) {
           </div>`
         : ''}
 
-      <section class="aii-section">
-        <h2>Audio</h2>
-        ${item.audio_r2_key
-          ? html`<audio class="aii-audio" controls preload="metadata"
-                      src="/ai-inbox/${escape(item.id)}/audio"></audio>`
-          : html`<p>No audio attached.</p>`}
-        <div class="aii-meta">
-          ${item.audio_filename ? escape(item.audio_filename) : ''}
-          ${item.audio_size_bytes ? ` · ${formatSize(item.audio_size_bytes)}` : ''}
-          ${item.transcription_model ? ` · model: ${escape(item.transcription_model)}` : ''}
-        </div>
-        ${item.user_context
-          ? html`<div style="margin-top:.5rem;font-size:.85rem;"><strong>Your note:</strong> ${escape(item.user_context)}</div>`
-          : ''}
-      </section>
+      ${renderAttachments({ item, attachments })}
+
+      ${item.user_context
+        ? html`<section class="aii-section">
+            <div style="font-size:.85rem;"><strong>Your note:</strong> ${escape(item.user_context)}</div>
+          </section>`
+        : ''}
 
       ${item.raw_transcript
         ? html`<section class="aii-section">
@@ -922,6 +935,94 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
     </section>
   `;
 }
+
+// v3: Render the attachments panel. Each attachment is a row with:
+//   - Kind icon + filename + size + status pill
+//   - Audio player (only for kind='audio' with an r2_key)
+//   - "Primary" star indicator
+//   - Expandable captured_text view
+// Phase B: read-only. Add/reorder/toggle controls land in Phase C/D.
+function renderAttachments({ item, attachments }) {
+  if (!attachments || attachments.length === 0) {
+    return html`<section class="aii-section">
+      <h2>Attachments</h2>
+      <p class="aii-meta">No attachments. (This shouldn't happen — every entry should have at least one.)</p>
+    </section>`;
+  }
+
+  const rows = attachments.map((a) => {
+    const kindLabel = ATTACHMENT_KIND_LABELS[a.kind] || a.kind;
+    const statusColor = ATTACHMENT_STATUS_COLORS[a.status] || '#888';
+    const statusLabel = ATTACHMENT_STATUS_LABELS[a.status] || a.status;
+    const primaryBadge = a.is_primary
+      ? html`<span class="aii-att-primary" title="Primary attachment">★</span>`
+      : '';
+    const includeBadge = a.include_in_context === 0
+      ? html`<span class="aii-att-excluded" title="Not included in compiled context">excluded</span>`
+      : '';
+    const metaParts = [
+      a.filename || '(no filename)',
+      a.size_bytes ? formatSize(a.size_bytes) : null,
+      a.captured_text_model ? `via ${a.captured_text_model}` : null,
+    ].filter(Boolean);
+
+    const player = (a.kind === 'audio' && a.r2_key)
+      ? html`<audio class="aii-audio" controls preload="metadata"
+              src="/ai-inbox/${escape(item.id)}/audio"></audio>`
+      : '';
+
+    const errorBlock = (a.status === 'error' && a.error_message)
+      ? html`<div class="aii-err" style="margin-top:.4rem;font-size:.8rem;">${escape(a.error_message)}</div>`
+      : '';
+
+    const capturedBlock = a.captured_text
+      ? html`<details class="aii-att-captured">
+          <summary>Captured text</summary>
+          <div class="aii-transcript" style="margin-top:.4rem;">${escape(a.captured_text)}</div>
+        </details>`
+      : '';
+
+    return html`<div class="aii-att-row">
+      <div class="aii-att-head">
+        <span class="aii-att-kind">${escape(kindLabel)}</span>
+        ${primaryBadge}
+        <span class="aii-att-meta">${metaParts.join(' · ')}</span>
+        ${includeBadge}
+        <span class="status-pill" style="background:${escape(statusColor)};">${escape(statusLabel)}</span>
+      </div>
+      ${player}
+      ${errorBlock}
+      ${capturedBlock}
+    </div>`;
+  });
+
+  return html`<section class="aii-section">
+    <h2>Attachments</h2>
+    <div class="aii-att-list">${rows}</div>
+  </section>`;
+}
+
+const ATTACHMENT_KIND_LABELS = {
+  audio: 'Audio',
+  text: 'Text',
+  document: 'Document',
+  email: 'Email',
+  image: 'Image',
+};
+
+const ATTACHMENT_STATUS_LABELS = {
+  pending: 'pending',
+  processing: 'processing',
+  ready: 'ready',
+  error: 'error',
+};
+
+const ATTACHMENT_STATUS_COLORS = {
+  pending: '#888',
+  processing: '#1f6feb',
+  ready: '#1a7f37',
+  error: '#cf222e',
+};
 
 function formatDate(iso) {
   if (!iso) return '';

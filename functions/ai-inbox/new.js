@@ -8,7 +8,7 @@
 // pipeline (transcribe → classify → extract). Redirects to the detail
 // page when done.
 
-import { run } from '../lib/db.js';
+import { run, stmt, batch } from '../lib/db.js';
 import { uuid, now } from '../lib/ids.js';
 import { uploadToR2 } from '../lib/r2.js';
 import { redirectWithFlash, redirect } from '../lib/http.js';
@@ -76,17 +76,27 @@ export async function onRequestPost(context) {
     return redirectWithFlash('/ai-inbox', `Upload failed: ${e.message || e}`, 'error');
   }
 
-  await run(
-    env.DB,
-    `INSERT INTO ai_inbox_items
-       (id, user_id, created_at, updated_at, status, source, user_context,
-        audio_r2_key, audio_mime_type, audio_size_bytes, audio_filename)
-     VALUES (?, ?, ?, ?, 'pending', 'audio_upload', ?, ?, ?, ?, ?)`,
-    [
-      id, user.id, ts, ts, userContext,
-      r2Key, mime || `audio/${r2Ext}`, file.size, filename,
-    ]
-  );
+  // v3: insert the entry row + an audio attachment row in a single
+  // batch. The audio_* columns on ai_inbox_items continue to be
+  // populated for backward compatibility through the v3 transition;
+  // the canonical source is now the attachment row.
+  const attachmentId = uuid();
+  await batch(env.DB, [
+    stmt(env.DB,
+      `INSERT INTO ai_inbox_items
+         (id, user_id, created_at, updated_at, status, source, user_context,
+          audio_r2_key, audio_mime_type, audio_size_bytes, audio_filename)
+       VALUES (?, ?, ?, ?, 'pending', 'audio_upload', ?, ?, ?, ?, ?)`,
+      [id, user.id, ts, ts, userContext,
+       r2Key, mime || `audio/${r2Ext}`, file.size, filename]),
+    stmt(env.DB,
+      `INSERT INTO ai_inbox_attachments
+         (id, entry_id, kind, sort_order, is_primary, include_in_context,
+          r2_key, mime_type, size_bytes, filename,
+          status, created_at, updated_at)
+       VALUES (?, ?, 'audio', 0, 1, 1, ?, ?, ?, ?, 'pending', ?, ?)`,
+      [attachmentId, id, r2Key, mime || `audio/${r2Ext}`, file.size, filename, ts, ts]),
+  ]);
 
   // Run the pipeline synchronously. If it fails, the row's status is
   // set to 'error' inside processItem and the user lands on the detail

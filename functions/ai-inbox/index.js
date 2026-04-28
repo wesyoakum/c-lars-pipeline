@@ -75,8 +75,17 @@ function renderPage({ items, flash }) {
       }
       .ai-inbox-upload h2 { margin: 0 0 .5rem; font-size: 1.05rem; }
       .ai-inbox-upload .row { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; }
-      .ai-inbox-upload input[type="file"] { flex: 1 1 280px; min-width: 0; }
       .ai-inbox-upload input[type="text"] { flex: 1 1 280px; min-width: 0; padding: .4rem .55rem; }
+
+      /* Drag-and-drop zone */
+      .dz {
+        flex: 1 1 280px; min-width: 0; padding: .75rem 1rem; border: 2px dashed #b8c1d6;
+        border-radius: 6px; background: white; cursor: pointer; transition: border-color .15s, background .15s;
+      }
+      .dz:hover { border-color: #1f6feb; background: #f6f8ff; }
+      .dz.dz-active { border-color: #1f6feb; background: #e6efff; border-style: solid; }
+      .dz input[type="file"] { display: block; width: 100%; cursor: pointer; }
+      .dz-hint { font-size: .8rem; color: #666; margin-top: .35rem; pointer-events: none; }
       .ai-inbox-upload button {
         padding: .45rem 1.1rem; background: #1f6feb; color: white;
         border: 0; border-radius: 4px; cursor: pointer; font-weight: 600;
@@ -129,7 +138,10 @@ function renderPage({ items, flash }) {
             enctype="multipart/form-data">
         <h2>Upload audio</h2>
         <div class="row">
-          <input type="file" name="audio" accept="audio/*,.m4a,.mp3,.wav,.webm,.mp4,.mpeg,.mpga,.ogg,.flac" required>
+          <div class="dz" data-dropzone>
+            <input type="file" name="audio" accept="audio/*,.m4a,.mp3,.wav,.webm,.mp4,.mpeg,.mpga,.ogg,.flac" required>
+            <div class="dz-hint">…or drag and drop your audio file here</div>
+          </div>
           <input type="text" name="user_context" placeholder="Optional context (e.g., 'trade show, Helix booth')" maxlength="200">
           <button type="submit">Upload &amp; process</button>
         </div>
@@ -138,6 +150,8 @@ function renderPage({ items, flash }) {
           Capture with iPhone Voice Memos or any other recorder.
         </div>
       </form>
+
+      <script src="/js/dropzone.js"></script>
 
       ${items.length === 0
         ? html`<div class="ai-inbox-empty">No items yet. Upload your first recording above.</div>`

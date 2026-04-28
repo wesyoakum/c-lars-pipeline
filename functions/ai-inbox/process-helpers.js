@@ -1,119 +1,130 @@
 // functions/ai-inbox/process-helpers.js
 //
-// Orchestration for the three-step AI Inbox pipeline:
-//   transcribe → classify → extract
+// v3 orchestration: an entry has N attachments, each gets processed
+// independently into captured_text, all the captured_texts get
+// compiled into a single "context" string, the LLM extracts structure
+// from that, and the resolver matches extracted entities against
+// existing CRM rows.
 //
-// Each step writes its status and intermediate result back to D1 so a
-// partial failure (e.g., transcribe ok, extract fails) is recoverable
-// from the last good step. The caller passes an item id; we read the
-// row, advance it through the steps, and persist along the way.
+//   For each non-ready attachment:
+//     attachment-processor → captured_text + status='ready'
+//   Compile context from ready+included attachments
+//   Extract structure from context → extracted_json on entry
+//   Resolve people/orgs → ai_inbox_entity_matches
+//
+// Per-attachment failures are isolated: one failed PDF doesn't block the
+// rest of the entry's extraction. The entry only flips to status='error'
+// if extraction itself fails. Resolver failure is best-effort and stays
+// silent so a bad mention doesn't fail the whole pipeline.
 
-import { one, run, stmt, batch } from '../lib/db.js';
+import { one, all, run, stmt, batch } from '../lib/db.js';
 import { uuid, now } from '../lib/ids.js';
-// classify() is intentionally not imported anymore (v3: classifier dropped).
-import { transcribe, extract } from './prompts.js';
+import { extract } from './prompts.js';
 import { resolveEntities } from '../lib/entity-resolver.js';
+import { processAttachment, compileContext } from './attachment-processors.js';
 
 /**
- * Process an AI Inbox item end-to-end. Reads the row, fetches the audio
- * from R2, runs the three OpenAI calls, and writes results back to D1.
+ * Process an AI Inbox entry end-to-end.
  *
- * On any failure:
- *   - status is set to 'error'
- *   - error_message is recorded
- *   - the function still throws so the caller can decide whether to
- *     surface the error in the response or just redirect to the detail
- *     page (the route handler usually wants the latter).
+ * @param {object} env
+ * @param {string} entryId
+ * @param {'attachments'|'extract'} [fromStep='attachments']
+ *   - 'attachments' (default): process every attachment that isn't
+ *     already ready, then extract + resolve
+ *   - 'extract': skip attachment processing, just re-run extract +
+ *     resolve over whatever captured_text is already cached. Useful
+ *     when only the prompt has changed.
  *
- * On success:
- *   - status='ready'
- *   - raw_transcript, context_type, extracted_json, transcription_model populated.
- *
- * If `fromStep` is provided ('transcribe' | 'classify' | 'extract'),
- * the pipeline starts from that step using whatever's already in the
- * row (used by the manual re-run endpoint).
+ * Legacy values 'transcribe' / 'classify' are aliased to 'attachments'
+ * so any old caller (or stored job that resumes mid-flight) still works.
  */
-export async function processItem(env, itemId, fromStep = 'transcribe') {
-  const item = await one(
+export async function processItem(env, entryId, fromStep = 'attachments') {
+  const entry = await one(
     env.DB,
     'SELECT * FROM ai_inbox_items WHERE id = ?',
-    [itemId]
+    [entryId]
   );
-  if (!item) throw new Error(`Item not found: ${itemId}`);
+  if (!entry) throw new Error(`Entry not found: ${entryId}`);
 
-  let transcript = item.raw_transcript || '';
-  let model = item.transcription_model || null;
-  let contextType = item.context_type || null;
+  // Normalize legacy step names.
+  if (fromStep === 'transcribe' || fromStep === 'classify') fromStep = 'attachments';
 
-  // ------------ Step 1: Transcribe ------------
-  if (fromStep === 'transcribe') {
-    await setStatus(env.DB, itemId, 'transcribing');
-    try {
-      const audioObj = await env.DOCS.get(item.audio_r2_key);
-      if (!audioObj) throw new Error('Audio file missing in R2.');
-      const audioBuffer = await audioObj.arrayBuffer();
-      const blob = new Blob([audioBuffer], { type: item.audio_mime_type || 'audio/m4a' });
-      // Tag the blob with a filename so the OpenAI multipart accepts it.
-      const named = new File([blob], item.audio_filename || `audio.${guessExt(item.audio_mime_type)}`, {
-        type: item.audio_mime_type || 'audio/m4a',
-      });
-      const result = await transcribe(env, named);
-      transcript = result.text;
-      model = result.model;
+  // ------------ Step 1: Process attachments ------------
+  if (fromStep === 'attachments') {
+    await setStatus(env.DB, entryId, 'transcribing'); // generic "processing attachments" status
+
+    const attachments = await loadAttachments(env.DB, entryId);
+    if (attachments.length === 0) {
+      // No attachments to process. Could be a brand-new entry that hasn't
+      // had any attachment uploaded yet, or a legacy entry that for some
+      // reason has no attachment row. Either way we can't extract from
+      // nothing — fail visibly.
+      await failItem(env.DB, entryId, 'Entry has no attachments to process.');
+      throw new Error('Entry has no attachments to process.');
+    }
+
+    const toProcess = attachments.filter((a) => a.status !== 'ready');
+    for (const att of toProcess) {
+      try {
+        await processAttachment(env, att);
+      } catch (e) {
+        // Per-attachment failure logged on the attachment row itself by
+        // its processor. Keep going so other attachments still process.
+        console.warn(`[ai-inbox] attachment ${att.id} failed:`, e?.message || e);
+      }
+    }
+
+    // Mirror the primary audio attachment's captured_text into the
+    // entry's legacy raw_transcript / transcription_model columns for
+    // backward compatibility. v1/v2 readers (and the current detail
+    // page) still look at these. A later migration will drop them.
+    const refreshed = await loadAttachments(env.DB, entryId);
+    const primaryAudio = refreshed.find(
+      (a) => a.kind === 'audio' && a.is_primary === 1 && a.status === 'ready'
+    );
+    if (primaryAudio && primaryAudio.captured_text) {
       await run(
         env.DB,
         `UPDATE ai_inbox_items
             SET raw_transcript = ?, transcription_model = ?, updated_at = ?
           WHERE id = ?`,
-        [transcript, model, now(), itemId]
+        [primaryAudio.captured_text, primaryAudio.captured_text_model || null, now(), entryId]
       );
-    } catch (e) {
-      await failItem(env.DB, itemId, `Transcription failed: ${e.message || e}`);
-      throw e;
     }
-    fromStep = 'classify';
-  }
 
-  // ------------ Step 2: Classify (REMOVED in v3) ------------
-  // The 5-bucket classifier (quick_note / meeting / trade_show / etc.)
-  // was misclassifying real entries (a phone call labeled trade_show)
-  // and the bucket no longer drives meaningful prompt routing — the
-  // extraction prompt is good enough on its own. Skip straight to
-  // extract. The classify() function still exists in prompts.js for
-  // historical reference but is no longer called.
-  if (fromStep === 'classify') {
     fromStep = 'extract';
   }
 
-  // ------------ Step 3: Extract ------------
+  // ------------ Step 2: Extract ------------
   let extracted = null;
   if (fromStep === 'extract') {
-    if (!transcript) {
-      await failItem(env.DB, itemId, 'No transcript to extract from.');
-      throw new Error('No transcript to extract from.');
+    const attachments = await loadAttachments(env.DB, entryId);
+    const context = compileContext(attachments);
+    if (!context) {
+      await failItem(env.DB, entryId, 'No attachment text available to extract from.');
+      throw new Error('No attachment text available to extract from.');
     }
-    await setStatus(env.DB, itemId, 'extracting');
+
+    await setStatus(env.DB, entryId, 'extracting');
     try {
-      // contextType is left null — extract() handles 'other' as fallback.
-      extracted = await extract(env, transcript, contextType || 'other', item.user_context);
+      // contextType is now always 'other' — the v1 classify step is
+      // gone. extract() still accepts the param for backward compat
+      // with prompts.js.
+      extracted = await extract(env, context, 'other', entry.user_context);
       await run(
         env.DB,
         `UPDATE ai_inbox_items
             SET extracted_json = ?, status = 'ready', error_message = NULL, updated_at = ?
           WHERE id = ?`,
-        [JSON.stringify(extracted), now(), itemId]
+        [JSON.stringify(extracted), now(), entryId]
       );
     } catch (e) {
-      await failItem(env.DB, itemId, `Extraction failed: ${e.message || e}`);
+      await failItem(env.DB, entryId, `Extraction failed: ${e.message || e}`);
       throw e;
     }
   }
 
-  // ------------ Step 4: Entity resolution (best-effort) ------------
-  // Match extracted people/organizations against existing CRM rows so
-  // the detail page can render links instead of plain text. Failures
-  // here MUST NOT flip the item to 'error' — the user-visible AI work
-  // (transcribe/classify/extract) already succeeded.
+  // ------------ Step 3: Entity resolution (best-effort) ------------
   if (extracted) {
     try {
       const candidates = await resolveEntities(env.DB, {
@@ -126,23 +137,41 @@ export async function processItem(env, itemId, fromStep = 'transcribe') {
           // Re-runs replace non-overridden rows; user-confirmed picks survive.
           stmt(env.DB,
             'DELETE FROM ai_inbox_entity_matches WHERE item_id = ? AND user_overridden = 0',
-            [itemId]),
-          ...candidates.map(c => stmt(env.DB,
+            [entryId]),
+          ...candidates.map((c) => stmt(env.DB,
             `INSERT INTO ai_inbox_entity_matches
                (id, item_id, mention_kind, mention_text, mention_idx,
                 ref_type, ref_id, ref_label, score, rank,
                 auto_resolved, user_overridden, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-            [uuid(), itemId, c.mention_kind, c.mention_text, c.mention_idx,
+            [uuid(), entryId, c.mention_kind, c.mention_text, c.mention_idx,
              c.ref_type, c.ref_id, c.ref_label, c.score, c.rank,
              c.auto_resolved, ts, ts])),
         ];
         await batch(env.DB, stmts);
       }
     } catch (e) {
-      console.warn(`[ai-inbox] entity resolver failed for ${itemId}:`, e?.message || e);
+      console.warn(`[ai-inbox] entity resolver failed for ${entryId}:`, e?.message || e);
     }
   }
+}
+
+// ---------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------
+
+async function loadAttachments(db, entryId) {
+  return all(
+    db,
+    `SELECT id, entry_id, kind, sort_order, is_primary, include_in_context,
+            r2_key, mime_type, size_bytes, filename,
+            captured_text, captured_text_model, status, error_message,
+            created_at, updated_at
+       FROM ai_inbox_attachments
+      WHERE entry_id = ?
+      ORDER BY sort_order, created_at`,
+    [entryId]
+  );
 }
 
 async function setStatus(db, id, status) {
@@ -159,16 +188,4 @@ async function failItem(db, id, message) {
     'UPDATE ai_inbox_items SET status = ?, error_message = ?, updated_at = ? WHERE id = ?',
     ['error', String(message).slice(0, 1000), now(), id]
   );
-}
-
-function guessExt(mime) {
-  if (!mime) return 'm4a';
-  const m = String(mime).toLowerCase();
-  if (m.includes('mpeg') || m.includes('mp3')) return 'mp3';
-  if (m.includes('wav')) return 'wav';
-  if (m.includes('ogg')) return 'ogg';
-  if (m.includes('flac')) return 'flac';
-  if (m.includes('webm')) return 'webm';
-  if (m.includes('mp4') || m.includes('m4a')) return 'm4a';
-  return 'm4a';
 }
