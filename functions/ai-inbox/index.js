@@ -73,19 +73,23 @@ function renderPage({ items, flash }) {
         border: 1px dashed #ccd; padding: 1rem 1.25rem; border-radius: 8px;
         background: #fafbff; margin-bottom: 1.5rem;
       }
-      .ai-inbox-upload h2 { margin: 0 0 .5rem; font-size: 1.05rem; }
-      .ai-inbox-upload .row { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; }
-      .ai-inbox-upload input[type="text"] { flex: 1 1 280px; min-width: 0; padding: .4rem .55rem; }
-
-      /* Drag-and-drop zone */
-      .dz {
-        flex: 1 1 280px; min-width: 0; padding: .75rem 1rem; border: 2px dashed #b8c1d6;
-        border-radius: 6px; background: white; cursor: pointer; transition: border-color .15s, background .15s;
+      /* Persistent big drop zone */
+      .ai-inbox-droppanel {
+        margin-bottom: 1.25rem; border: 2px dashed #b8c1d6; border-radius: 8px;
+        background: #fafbff; cursor: pointer; transition: border-color .15s, background .15s;
+        position: relative;
       }
-      .dz:hover { border-color: #1f6feb; background: #f6f8ff; }
-      .dz.dz-active { border-color: #1f6feb; background: #e6efff; border-style: solid; }
-      .dz input[type="file"] { display: block; width: 100%; cursor: pointer; }
-      .dz-hint { font-size: .8rem; color: #666; margin-top: .35rem; pointer-events: none; }
+      .ai-inbox-droppanel.dz-active { border-color: #1f6feb; background: #e6efff; border-style: solid; }
+      .ai-inbox-droppanel.dz-busy { opacity: .7; cursor: wait; }
+      .ai-inbox-droppanel input[type="file"] {
+        position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;
+      }
+      .ai-inbox-droppanel.dz-busy input[type="file"] { pointer-events: none; }
+      .dz-big-content { padding: 1.5rem 1.25rem; text-align: center; pointer-events: none; }
+      .dz-big-icon { font-size: 1.6rem; color: #5a6e96; margin-bottom: .25rem; }
+      .dz-big-title { font-size: 1rem; font-weight: 600; color: #2c3a55; }
+      .dz-big-hint { font-size: .85rem; color: #666; margin-top: .35rem; }
+      .dz-big-status { font-size: .85rem; color: #1f6feb; margin-top: .5rem; min-height: 1.2em; }
       .ai-inbox-upload button {
         padding: .45rem 1.1rem; background: #1f6feb; color: white;
         border: 0; border-radius: 4px; cursor: pointer; font-weight: 600;
@@ -126,32 +130,29 @@ function renderPage({ items, flash }) {
     <div class="ai-inbox-wrap">
       <h1>AI Inbox</h1>
       <p style="color:#555; margin-top:0;">
-        Upload a voice recording. We transcribe it, classify the context,
-        extract structured fields (people, action items, etc.), and drop
-        it here for you to review. Phase 1: suggestions only — nothing
-        is written to your CRM/calendar/tasks yet.
+        Drop in audio, a PDF, an email, an image, or anything else.
+        We extract structure (people, organizations, action items,
+        open questions) and resolve mentions against your CRM. Each
+        capture lives as an Entry — permanent, with one or more
+        attachments.
       </p>
 
       ${flashHtml}
 
-      <form class="ai-inbox-upload" method="post" action="/ai-inbox/new"
-            enctype="multipart/form-data">
-        <h2>Upload audio</h2>
-        <div class="row">
-          <div class="dz" data-dropzone>
-            <input type="file" name="audio" accept="audio/*,.m4a,.mp3,.wav,.webm,.mp4,.mpeg,.mpga,.ogg,.flac" required>
-            <div class="dz-hint">…or drag and drop your audio file here</div>
+      <div class="ai-inbox-droppanel" data-dropzone-big id="aii-drop-new">
+        <form method="post" action="/ai-inbox/new" enctype="multipart/form-data" data-dz-form>
+          <input type="file" name="file" data-dz-input>
+          <div class="dz-big-content">
+            <div class="dz-big-icon">⬆</div>
+            <div class="dz-big-title">Drop a file to start a new entry</div>
+            <div class="dz-big-hint">…or click to browse. Audio gets transcribed; PDFs &amp; DOCX get text-extracted; everything is fair game.</div>
+            <div class="dz-big-status" data-dz-status></div>
           </div>
-          <input type="text" name="user_context" placeholder="Optional context (e.g., 'trade show, Helix booth')" maxlength="200">
-          <button type="submit">Upload &amp; process</button>
-        </div>
-        <div class="help">
-          Max 25 MB. Supported: m4a, mp3, wav, webm, mp4, mpeg, mpga, ogg, flac.
-          Capture with iPhone Voice Memos or any other recorder.
-        </div>
-      </form>
+        </form>
+      </div>
 
       <script src="/js/dropzone.js"></script>
+      <script src="/js/inbox-droppanel.js"></script>
 
       ${items.length === 0
         ? html`<div class="ai-inbox-empty">No items yet. Upload your first recording above.</div>`

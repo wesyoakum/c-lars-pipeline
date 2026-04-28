@@ -144,6 +144,25 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
       .aii-att-captured[open] > summary::before { content: '▾ '; }
       .aii-attachments-head { display: flex; justify-content: space-between; align-items: center; gap: .75rem; margin-bottom: .35rem; }
       .aii-attachments-head h2 { margin: 0; }
+
+      /* Persistent drop panel (compact variant for the entry detail
+         page; matches the larger one on /ai-inbox). */
+      .ai-inbox-droppanel.ai-inbox-droppanel-compact {
+        margin: .5rem 0; border: 2px dashed #b8c1d6; border-radius: 6px;
+        background: #fafbff; cursor: pointer; transition: border-color .15s, background .15s;
+        position: relative;
+      }
+      .ai-inbox-droppanel.ai-inbox-droppanel-compact.dz-active { border-color: #1f6feb; background: #e6efff; border-style: solid; }
+      .ai-inbox-droppanel.ai-inbox-droppanel-compact.dz-busy { opacity: .7; cursor: wait; }
+      .ai-inbox-droppanel.ai-inbox-droppanel-compact input[type="file"] {
+        position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;
+      }
+      .ai-inbox-droppanel.ai-inbox-droppanel-compact.dz-busy input[type="file"] { pointer-events: none; }
+      .ai-inbox-droppanel.ai-inbox-droppanel-compact .dz-big-content { padding: .85rem 1rem; text-align: center; pointer-events: none; }
+      .ai-inbox-droppanel.ai-inbox-droppanel-compact .dz-big-icon { font-size: 1.2rem; color: #5a6e96; margin-bottom: .15rem; }
+      .ai-inbox-droppanel.ai-inbox-droppanel-compact .dz-big-title { font-size: .9rem; font-weight: 600; color: #2c3a55; }
+      .ai-inbox-droppanel.ai-inbox-droppanel-compact .dz-big-hint { font-size: .75rem; color: #666; margin-top: .2rem; }
+      .ai-inbox-droppanel.ai-inbox-droppanel-compact .dz-big-status { font-size: .8rem; color: #1f6feb; margin-top: .35rem; min-height: 1em; }
       .aii-att-add { margin-top: .75rem; padding: .85rem; border: 1px solid #e1e4e8; border-radius: 4px; background: #fafbfc; }
       .aii-att-add-row { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; margin-bottom: .5rem; }
       .aii-att-add-row label { display: flex; align-items: center; gap: .35rem; font-size: .85rem; }
@@ -594,6 +613,7 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
               first_name: first,
               last_name: last,
               account_id: this.preferredAccountId(),
+              account_label: this.preferredAccountLabel(),
               __on_success: 'pipeline:wizard-success',
               __ai_inbox: {
                 source: 'create_contact',
@@ -1365,39 +1385,33 @@ function renderAttachments({ item, attachments }) {
     x-data="aiInboxAttachInit('${escape(item.id)}')">
     <div class="aii-attachments-head">
       <h2>Attachments</h2>
-      <button type="button" class="aii-add-btn" @click="open = !open" x-text="open ? 'Cancel' : '+ Add attachment'"></button>
+      <button type="button" class="aii-add-btn" @click="open = !open" x-text="open ? 'Cancel typing note' : '+ Type / paste note'"></button>
     </div>
+
+    <!-- Persistent drop zone — drag any file in to add it as an
+         attachment. Click anywhere on it opens a file picker. -->
+    <div class="ai-inbox-droppanel ai-inbox-droppanel-compact" data-dropzone-big>
+      <form method="post" action="/ai-inbox/${escape(item.id)}/attachments/add" enctype="multipart/form-data" data-dz-form>
+        <input type="file" name="file" data-dz-input multiple>
+        <div class="dz-big-content">
+          <div class="dz-big-icon">⬆</div>
+          <div class="dz-big-title">Drop a file to add to this entry</div>
+          <div class="dz-big-hint">Audio, PDF, DOCX, image, email, or anything else. Multiple files OK.</div>
+          <div class="dz-big-status" data-dz-status></div>
+        </div>
+      </form>
+    </div>
+
     <div class="aii-att-list">${rows}</div>
 
     <div x-show="open" x-cloak class="aii-att-add">
-      <div class="aii-att-add-row">
-        <label>
-          <span class="aii-meta">Kind</span>
-          <select x-model="kind">
-            <option value="text">Text (paste / type)</option>
-            <option value="audio">Audio file</option>
-          </select>
-        </label>
-      </div>
-
-      <div x-show="kind === 'text'" x-cloak>
-        <textarea class="aii-att-textarea" rows="6"
-                  x-model="text"
-                  placeholder="Paste an email body, type a follow-up note, etc. Will be merged into the entry's context and the LLM re-runs extraction."></textarea>
-      </div>
-
-      <div x-show="kind === 'audio'" x-cloak>
-        <div class="dz" data-dropzone>
-          <input type="file" name="audio" accept="audio/*,.m4a,.mp3,.wav,.webm,.mp4,.mpeg,.mpga,.ogg,.flac"
-                 @change="audioFile = $event.target.files[0] || null">
-          <div class="dz-hint">…or drag and drop your audio file here</div>
-        </div>
-      </div>
-
+      <textarea class="aii-att-textarea" rows="6"
+                x-model="text"
+                placeholder="Paste an email body, type a follow-up note, etc. Will be merged into the entry's context and the LLM re-runs extraction."></textarea>
       <div class="aii-form-actions" style="margin-top:.6rem;">
         <button type="button" class="aii-btn aii-btn-primary"
                 @click="submit()"
-                :disabled="busy || (kind === 'text' && !text.trim()) || (kind === 'audio' && !audioFile)">
+                :disabled="busy || !text.trim()">
           <span x-show="!busy">Add &amp; re-extract</span>
           <span x-show="busy">Working…</span>
         </button>
@@ -1407,22 +1421,13 @@ function renderAttachments({ item, attachments }) {
     </div>
 
     <script src="/js/dropzone.js"></script>
+    <script src="/js/inbox-droppanel.js"></script>
     <script>
       window.aiInboxAttachInit = function (entryId) {
         return {
           entryId, open: false, busy: false, error: '',
-          kind: 'text', text: '', audioFile: null,
-          init() {
-            // When the dropzone (re)mounts after open toggles, rebind it.
-            this.$watch('open', (v) => {
-              if (v && window.PipelineDropzone) {
-                window.PipelineDropzone.bindAll(this.$el);
-              }
-            });
-          },
-          reset() {
-            this.kind = 'text'; this.text = ''; this.audioFile = null; this.error = '';
-          },
+          text: '',
+          reset() { this.text = ''; this.error = ''; },
           async deleteAttachment(attachmentId) {
             if (!confirm('Remove this attachment? This will not re-run extraction.')) return;
             try {
@@ -1444,12 +1449,8 @@ function renderAttachments({ item, attachments }) {
             this.busy = true; this.error = '';
             try {
               const fd = new FormData();
-              fd.append('kind', this.kind);
-              if (this.kind === 'text') {
-                fd.append('text', this.text);
-              } else if (this.kind === 'audio') {
-                fd.append('file', this.audioFile);
-              }
+              fd.append('kind', 'text');
+              fd.append('text', this.text);
               const res = await fetch('/ai-inbox/' + encodeURIComponent(this.entryId)
                 + '/attachments/add', {
                 method: 'POST', credentials: 'same-origin', body: fd,
@@ -1457,8 +1458,7 @@ function renderAttachments({ item, attachments }) {
               const j = await res.json();
               if (!j.ok) throw new Error(j.error || 'failed');
               // Re-extraction may have run server-side; reload to reflect
-              // the new attachment + updated extraction in a single
-              // pass.
+              // the new attachment + updated extraction in a single pass.
               window.location.reload();
             } catch (e) {
               this.busy = false;

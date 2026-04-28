@@ -31,6 +31,27 @@ const MAX_TEXT_LEN = 50000;              // 50K chars of pasted text — plenty 
 
 const ALLOWED_KINDS = new Set(['audio', 'text', 'document', 'email', 'image']);
 
+const AUDIO_EXTS = new Set(['m4a', 'mp3', 'wav', 'webm', 'mp4', 'mpeg', 'mpga', 'ogg', 'flac']);
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'heic', 'heif', 'webp', 'bmp', 'tiff']);
+const EMAIL_EXTS = new Set(['eml', 'msg']);
+const DOCUMENT_EXTS = new Set([
+  'pdf', 'docx', 'doc', 'rtf', 'odt', 'txt', 'md', 'csv', 'tsv', 'log',
+  'json', 'xml', 'html', 'ppt', 'pptx', 'xls', 'xlsx',
+]);
+
+function inferKind(file) {
+  const mime = (file.type || '').toLowerCase();
+  const filename = (file.name || '').toLowerCase();
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+
+  if (mime.startsWith('audio/') || mime === 'video/mp4' || AUDIO_EXTS.has(ext)) return 'audio';
+  if (mime.startsWith('image/') || IMAGE_EXTS.has(ext)) return 'image';
+  if (mime === 'message/rfc822' || EMAIL_EXTS.has(ext)) return 'email';
+  if (mime.startsWith('application/') || mime === 'text/plain' || mime === 'text/csv'
+      || mime === 'text/markdown' || DOCUMENT_EXTS.has(ext)) return 'document';
+  return 'document';
+}
+
 export async function onRequestPost(context) {
   const { env, data, request, params } = context;
   const user = data?.user;
@@ -50,7 +71,18 @@ export async function onRequestPost(context) {
     return json({ ok: false, error: 'invalid_form_data' }, 400);
   }
 
-  const kind = String(formData.get('kind') || '').trim();
+  // Allow callers to explicitly request a kind, OR pass kind='auto' (or
+  // omit kind entirely) and let the server infer from the file's MIME /
+  // extension. The persistent drop zone uses 'auto' so dragging in any
+  // file type Just Works.
+  let kind = String(formData.get('kind') || '').trim();
+  if (kind === 'auto' || kind === '') {
+    const file = formData.get('file');
+    if (!file || typeof file === 'string') {
+      return json({ ok: false, error: 'file_required_for_auto_kind' }, 400);
+    }
+    kind = inferKind(file);
+  }
   if (!ALLOWED_KINDS.has(kind)) {
     return json({ ok: false, error: 'bad_kind' }, 400);
   }

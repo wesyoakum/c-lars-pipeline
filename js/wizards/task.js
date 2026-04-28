@@ -89,22 +89,64 @@
       };
     },
 
-    // Pre-fill the link step from { opportunity_id | quote_id | account_id } +
-    // link_label, and tell the engine to show the pinned row + skip the step.
+    // Pre-fill any of the wizard's answer fields from a single prefill
+    // object. Supports:
+    //   body:        textarea step is pre-populated
+    //   due_at:      ISO string ('YYYY-MM-DD' or full ISO); date step
+    //                arrives pre-resolved
+    //   remind_at:   same shape as due_at
+    //   assigned_user_id + assigned_user_label: pin a specific assignee
+    //   opportunity_id | quote_id | account_id + link_label: pin the
+    //                link step (existing behavior)
     applyPrefill: function (answers, prefill /*, ctx */) {
       if (!prefill) return null;
+
+      // Body
+      if (typeof prefill.body === 'string' && prefill.body.trim()) {
+        answers.body = prefill.body;
+      }
+
+      // Due date / reminder — accept ISO string and resolve to the
+      // engine's { raw, parsed: Date } shape.
+      var parseIso = function (s) {
+        if (!s) return null;
+        var d = new Date(s);
+        if (isNaN(d.getTime())) {
+          // Try YYYY-MM-DD which Date in some browsers won't parse
+          // without a time component.
+          var m = String(s).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+          if (m) d = new Date(+m[1], +m[2] - 1, +m[3], 9, 0, 0);
+        }
+        return isNaN(d.getTime()) ? null : { raw: String(s), parsed: d };
+      };
+      var due = parseIso(prefill.due_at);
+      if (due) answers.due = due;
+      var remind = parseIso(prefill.remind_at);
+      if (remind) answers.remind = remind;
+
+      // Assignee
+      if (prefill.assigned_user_id) {
+        answers.assignee = {
+          id: prefill.assigned_user_id,
+          label: prefill.assigned_user_label || '',
+          email: '',
+        };
+      }
+
+      // Existing link prefill — opportunity / quote / account.
       var kind = null, id = null;
       if (prefill.opportunity_id) { kind = 'opportunity'; id = prefill.opportunity_id; }
       else if (prefill.quote_id) { kind = 'quote'; id = prefill.quote_id; }
       else if (prefill.account_id) { kind = 'account'; id = prefill.account_id; }
-      if (!kind) return null;
-      answers.link = {
-        kind: kind,
-        id: id,
-        label: prefill.link_label || ''
-      };
-      if (prefill.link_label) {
-        return { locked: true, prefix: 'Linked to', label: prefill.link_label };
+      if (kind) {
+        answers.link = {
+          kind: kind,
+          id: id,
+          label: prefill.link_label || ''
+        };
+        if (prefill.link_label) {
+          return { locked: true, prefix: 'Linked to', label: prefill.link_label };
+        }
       }
       return null;
     },
@@ -135,7 +177,14 @@
           if (!result.ok || !result.data || !result.data.ok) {
             return { ok: false, error: (result.data && result.data.error) || 'Could not create task.' };
           }
-          return { ok: true };
+          // Pass the created activity's id + subject through so listeners
+          // (e.g. AI Inbox's pipeline:wizard-success handler) can correlate
+          // the new entity back to whatever opened the wizard.
+          return {
+            ok: true,
+            id: result.data.id || null,
+            subject: result.data.subject || '',
+          };
         })
         .catch(function () {
           return { ok: false, error: 'Could not create task.' };
