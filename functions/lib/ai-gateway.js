@@ -11,8 +11,12 @@
 // Configuration (set via `wrangler pages secret put` or .dev.vars):
 //   AI_GATEWAY_ACCOUNT_ID  Cloudflare account id (the gateway is per-account)
 //   AI_GATEWAY_NAME        Gateway slug, e.g. 'c-lars-pms'
+//   AI_GATEWAY_TOKEN       Optional. Required when the gateway has
+//                          "Authenticated Gateway" turned on — every call
+//                          must include cf-aig-authorization: Bearer <token>.
+//                          Generate one in the gateway's Settings tab.
 //
-// When both are set, calls go to:
+// When AI_GATEWAY_ACCOUNT_ID and AI_GATEWAY_NAME are both set, calls go to:
 //   https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/<provider>
 // Otherwise calls go direct to the provider.
 
@@ -46,4 +50,19 @@ export function aiBaseUrl(env, provider) {
  */
 export function isGatewayEnabled(env) {
   return Boolean(env.AI_GATEWAY_ACCOUNT_ID && env.AI_GATEWAY_NAME);
+}
+
+/**
+ * Headers to attach to outbound AI calls so they're accepted by the
+ * gateway when "Authenticated Gateway" is on. Returns {} when no token is
+ * configured (either gateway is off, or auth is off and we don't need it).
+ *
+ * Spread the result into your fetch headers object:
+ *   headers: { authorization: `Bearer ${key}`, ...gatewayHeaders(env) }
+ */
+export function gatewayHeaders(env) {
+  if (!isGatewayEnabled(env)) return {};
+  const token = env.AI_GATEWAY_TOKEN;
+  if (!token) return {};
+  return { 'cf-aig-authorization': `Bearer ${token}` };
 }

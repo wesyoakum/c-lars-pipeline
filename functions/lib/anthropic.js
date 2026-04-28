@@ -20,7 +20,7 @@
 //     pattern by asking for strict JSON in the system prompt and parsing
 //     the first text block.
 
-import { aiBaseUrl } from './ai-gateway.js';
+import { aiBaseUrl, gatewayHeaders } from './ai-gateway.js';
 
 // Default models. Overridable via env so we can swap per-step without code
 // changes. Anthropic SDK doesn't ship a "version" header per route — the
@@ -71,6 +71,7 @@ export async function messages(env, opts) {
       'x-api-key': key,
       'anthropic-version': ANTHROPIC_VERSION,
       'content-type': 'application/json',
+      ...gatewayHeaders(env),
     },
     body: JSON.stringify(body),
   });

@@ -7,7 +7,7 @@
 // Like the Anthropic client, this routes through Cloudflare AI Gateway
 // when AI_GATEWAY_* is configured. Wire format is identical either way.
 
-import { aiBaseUrl } from './ai-gateway.js';
+import { aiBaseUrl, gatewayHeaders } from './ai-gateway.js';
 
 function requireKey(env) {
   const key = env.OPENAI_API_KEY;
@@ -36,7 +36,10 @@ export async function transcribeAudio(env, audioBlob, opts = {}) {
   const url = `${aiBaseUrl(env, 'openai')}/audio/transcriptions`;
   const resp = await fetch(url, {
     method: 'POST',
-    headers: { authorization: `Bearer ${key}` },
+    headers: {
+      authorization: `Bearer ${key}`,
+      ...gatewayHeaders(env),
+    },
     body: form,
   });
 
