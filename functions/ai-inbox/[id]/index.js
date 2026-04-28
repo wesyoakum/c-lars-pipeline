@@ -142,6 +142,14 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
       .aii-att-captured > summary::-webkit-details-marker { display: none; }
       .aii-att-captured > summary::before { content: '▸ '; display: inline-block; }
       .aii-att-captured[open] > summary::before { content: '▾ '; }
+      .aii-attachments-head { display: flex; justify-content: space-between; align-items: center; gap: .75rem; margin-bottom: .35rem; }
+      .aii-attachments-head h2 { margin: 0; }
+      .aii-att-add { margin-top: .75rem; padding: .85rem; border: 1px solid #e1e4e8; border-radius: 4px; background: #fafbfc; }
+      .aii-att-add-row { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; margin-bottom: .5rem; }
+      .aii-att-add-row label { display: flex; align-items: center; gap: .35rem; font-size: .85rem; }
+      .aii-att-add-row select { padding: .25rem .4rem; border: 1px solid #ccd; border-radius: 3px; font-size: .85rem; }
+      .aii-att-textarea { width: 100%; padding: .5rem .65rem; border: 1px solid #ccd; border-radius: 4px; font-family: inherit; font-size: .9rem; box-sizing: border-box; min-height: 6rem; }
+      .aii-att-row .aii-rm-btn { margin-left: auto; }
       .aii-err { color: #cf222e; padding: .65rem .9rem; border: 1px solid #fadddd; border-radius: 4px; background: #fff5f5; }
 
       /* Inline-edit fields */
@@ -1343,6 +1351,9 @@ function renderAttachments({ item, attachments }) {
         <span class="aii-att-meta">${metaParts.join(' · ')}</span>
         ${includeBadge}
         <span class="status-pill" style="background:${escape(statusColor)};">${escape(statusLabel)}</span>
+        <button type="button" class="aii-rm-btn"
+                @click="deleteAttachment('${escape(a.id)}')"
+                title="Remove this attachment">×</button>
       </div>
       ${player}
       ${errorBlock}
@@ -1350,9 +1361,113 @@ function renderAttachments({ item, attachments }) {
     </div>`;
   });
 
-  return html`<section class="aii-section">
-    <h2>Attachments</h2>
+  return html`<section class="aii-section"
+    x-data="aiInboxAttachInit('${escape(item.id)}')">
+    <div class="aii-attachments-head">
+      <h2>Attachments</h2>
+      <button type="button" class="aii-add-btn" @click="open = !open" x-text="open ? 'Cancel' : '+ Add attachment'"></button>
+    </div>
     <div class="aii-att-list">${rows}</div>
+
+    <div x-show="open" x-cloak class="aii-att-add">
+      <div class="aii-att-add-row">
+        <label>
+          <span class="aii-meta">Kind</span>
+          <select x-model="kind">
+            <option value="text">Text (paste / type)</option>
+            <option value="audio">Audio file</option>
+          </select>
+        </label>
+      </div>
+
+      <div x-show="kind === 'text'" x-cloak>
+        <textarea class="aii-att-textarea" rows="6"
+                  x-model="text"
+                  placeholder="Paste an email body, type a follow-up note, etc. Will be merged into the entry's context and the LLM re-runs extraction."></textarea>
+      </div>
+
+      <div x-show="kind === 'audio'" x-cloak>
+        <div class="dz" data-dropzone>
+          <input type="file" name="audio" accept="audio/*,.m4a,.mp3,.wav,.webm,.mp4,.mpeg,.mpga,.ogg,.flac"
+                 @change="audioFile = $event.target.files[0] || null">
+          <div class="dz-hint">…or drag and drop your audio file here</div>
+        </div>
+      </div>
+
+      <div class="aii-form-actions" style="margin-top:.6rem;">
+        <button type="button" class="aii-btn aii-btn-primary"
+                @click="submit()"
+                :disabled="busy || (kind === 'text' && !text.trim()) || (kind === 'audio' && !audioFile)">
+          <span x-show="!busy">Add &amp; re-extract</span>
+          <span x-show="busy">Working…</span>
+        </button>
+        <button type="button" class="aii-btn" @click="open = false; reset()">Cancel</button>
+        <span x-show="error" class="aii-err-inline" x-text="error"></span>
+      </div>
+    </div>
+
+    <script src="/js/dropzone.js"></script>
+    <script>
+      window.aiInboxAttachInit = function (entryId) {
+        return {
+          entryId, open: false, busy: false, error: '',
+          kind: 'text', text: '', audioFile: null,
+          init() {
+            // When the dropzone (re)mounts after open toggles, rebind it.
+            this.$watch('open', (v) => {
+              if (v && window.PipelineDropzone) {
+                window.PipelineDropzone.bindAll(this.$el);
+              }
+            });
+          },
+          reset() {
+            this.kind = 'text'; this.text = ''; this.audioFile = null; this.error = '';
+          },
+          async deleteAttachment(attachmentId) {
+            if (!confirm('Remove this attachment? This will not re-run extraction.')) return;
+            try {
+              const res = await fetch('/ai-inbox/' + encodeURIComponent(this.entryId)
+                + '/attachments/' + encodeURIComponent(attachmentId) + '/delete', {
+                method: 'POST', credentials: 'same-origin',
+              });
+              const j = await res.json();
+              if (!j.ok) {
+                alert('Could not delete: ' + (j.error || 'unknown'));
+                return;
+              }
+              window.location.reload();
+            } catch (e) {
+              alert('Could not delete: ' + (e.message || e));
+            }
+          },
+          async submit() {
+            this.busy = true; this.error = '';
+            try {
+              const fd = new FormData();
+              fd.append('kind', this.kind);
+              if (this.kind === 'text') {
+                fd.append('text', this.text);
+              } else if (this.kind === 'audio') {
+                fd.append('file', this.audioFile);
+              }
+              const res = await fetch('/ai-inbox/' + encodeURIComponent(this.entryId)
+                + '/attachments/add', {
+                method: 'POST', credentials: 'same-origin', body: fd,
+              });
+              const j = await res.json();
+              if (!j.ok) throw new Error(j.error || 'failed');
+              // Re-extraction may have run server-side; reload to reflect
+              // the new attachment + updated extraction in a single
+              // pass.
+              window.location.reload();
+            } catch (e) {
+              this.busy = false;
+              this.error = String(e.message || e);
+            }
+          },
+        };
+      };
+    </script>
   </section>`;
 }
 
