@@ -14,8 +14,7 @@
 // Response:
 //   { ok: true, link }
 
-import { one, stmt, batch } from '../../../lib/db.js';
-import { auditStmt } from '../../../lib/audit.js';
+import { one, run } from '../../../lib/db.js';
 import { uuid, now } from '../../../lib/ids.js';
 
 function json(data, status = 200) {
@@ -59,20 +58,14 @@ export async function onRequestPost(context) {
   const linkId = uuid();
   const ts = now();
 
-  await batch(env.DB, [
-    stmt(env.DB,
-      `INSERT INTO ai_inbox_links
-         (id, item_id, action_type, ref_type, ref_id, ref_label, created_at, created_by_user_id)
-       VALUES (?, ?, 'link_to_opportunity', 'opportunity', ?, ?, ?, ?)`,
-      [linkId, params.id, opportunityId, refLabel, ts, user.id]),
-    auditStmt(env.DB, {
-      entityType: 'opportunity',
-      entityId: opportunityId,
-      eventType: 'updated',
-      user,
-      summary: 'Linked from AI Inbox',
-    }),
-  ]);
+  // No audit_events write here — see link-account.js for rationale.
+  // The link is recorded AI-Inbox-side; we do not pollute the opp's
+  // audit log just because it's been linked to an inbox suggestion.
+  await run(env.DB,
+    `INSERT INTO ai_inbox_links
+       (id, item_id, action_type, ref_type, ref_id, ref_label, created_at, created_by_user_id)
+     VALUES (?, ?, 'link_to_opportunity', 'opportunity', ?, ?, ?, ?)`,
+    [linkId, params.id, opportunityId, refLabel, ts, user.id]);
 
   return json({
     ok: true,

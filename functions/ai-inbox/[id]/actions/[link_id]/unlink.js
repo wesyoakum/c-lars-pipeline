@@ -11,8 +11,7 @@
 //   { ok: true }
 //   { ok: false, error }
 
-import { one, run, stmt, batch } from '../../../../lib/db.js';
-import { auditStmt } from '../../../../lib/audit.js';
+import { one, run } from '../../../../lib/db.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -29,7 +28,7 @@ export async function onRequestPost(context) {
   // the link belongs to this item in a single query.
   const link = await one(
     env.DB,
-    `SELECT l.id, l.action_type, l.ref_type, l.ref_id, l.ref_label
+    `SELECT l.id
        FROM ai_inbox_links l
        JOIN ai_inbox_items i ON i.id = l.item_id
       WHERE l.id = ? AND l.item_id = ? AND i.user_id = ?`,
@@ -37,20 +36,9 @@ export async function onRequestPost(context) {
   );
   if (!link) return json({ ok: false, error: 'not_found' }, 404);
 
-  // Audit the underlying entity (when there is one — archive has none).
-  const stmts = [
-    stmt(env.DB, `DELETE FROM ai_inbox_links WHERE id = ?`, [link.id]),
-  ];
-  if (link.ref_type && link.ref_id) {
-    stmts.push(auditStmt(env.DB, {
-      entityType: link.ref_type,
-      entityId: link.ref_id,
-      eventType: 'updated',
-      user,
-      summary: 'Unlinked from AI Inbox',
-    }));
-  }
-  await batch(env.DB, stmts);
+  // Drop the link row only. No audit_events write on the underlying
+  // entity — see link-account.js for rationale.
+  await run(env.DB, 'DELETE FROM ai_inbox_links WHERE id = ?', [link.id]);
 
   return json({ ok: true });
 }

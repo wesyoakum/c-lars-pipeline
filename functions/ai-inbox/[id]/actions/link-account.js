@@ -14,8 +14,7 @@
 //   { ok: true, link }
 //   { ok: false, error }
 
-import { one, stmt, batch } from '../../../lib/db.js';
-import { auditStmt } from '../../../lib/audit.js';
+import { one, run } from '../../../lib/db.js';
 import { uuid, now } from '../../../lib/ids.js';
 
 function json(data, status = 200) {
@@ -56,20 +55,18 @@ export async function onRequestPost(context) {
   const linkId = uuid();
   const ts = now();
 
-  await batch(env.DB, [
-    stmt(env.DB,
-      `INSERT INTO ai_inbox_links
-         (id, item_id, action_type, ref_type, ref_id, ref_label, created_at, created_by_user_id)
-       VALUES (?, ?, 'link_to_account', 'account', ?, ?, ?, ?)`,
-      [linkId, params.id, accountId, refLabel, ts, user.id]),
-    auditStmt(env.DB, {
-      entityType: 'account',
-      entityId: accountId,
-      eventType: 'updated',
-      user,
-      summary: 'Linked from AI Inbox',
-    }),
-  ]);
+  // Note: we deliberately do NOT write an audit_events row on the
+  // linked account here. The link itself is recorded AI-Inbox-side in
+  // ai_inbox_links; polluting the account's audit log with "Linked
+  // from AI Inbox" entries every time someone explores a suggestion
+  // is noise, not provenance. Real-create routes (create-account /
+  // create-contact / create-task) still audit because they actually
+  // mutate CRM rows.
+  await run(env.DB,
+    `INSERT INTO ai_inbox_links
+       (id, item_id, action_type, ref_type, ref_id, ref_label, created_at, created_by_user_id)
+     VALUES (?, ?, 'link_to_account', 'account', ?, ?, ?, ?)`,
+    [linkId, params.id, accountId, refLabel, ts, user.id]);
 
   return json({
     ok: true,
