@@ -2918,6 +2918,29 @@ textarea.ie-input { width: 100%; min-width: 12rem; resize: vertical; }
   background: var(--bg-alt, #f0f2f5);
 }
 
+.opp-list-table td.col-delete,
+.opp-list-table th.col-delete {
+  width: 1.75rem;
+  padding-left: 0.25rem;
+  padding-right: 0.25rem;
+  text-align: center;
+}
+.row-delete-btn {
+  display: inline-block;
+  border: 0;
+  background: transparent;
+  color: var(--fg-muted);
+  font-size: 1.1em;
+  line-height: 1;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.row-delete-btn:hover {
+  color: #cf222e;
+  background: #fff0f0;
+}
+
 /* ---------- Detail pairs (side-by-side key-value) ---------- */
 
 .detail-grid {

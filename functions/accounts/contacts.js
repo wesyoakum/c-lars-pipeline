@@ -57,6 +57,7 @@ export async function onRequestGet(context) {
     { key: 'mobile',       label: 'Mobile',       sort: 'text',   filter: 'text',   default: false },
     { key: 'is_primary',   label: 'Primary',      sort: 'text',   filter: 'select', default: true },
     { key: 'updated',      label: 'Updated',      sort: 'date',   filter: 'text',   default: true },
+    { key: 'delete',       label: '',             sort: null,     filter: null,     default: true },
   ];
 
   const rowData = rows.map(r => ({
@@ -135,6 +136,12 @@ export async function onRequestGet(context) {
                       ${ieSelect('is_primary', r.is_primary, PRIMARY_OPTIONS)}
                     </td>
                     <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
+                    <td class="col-delete" data-col="delete">
+                      <form method="post" action="/contacts/${escape(r.id)}/delete" style="display:inline;"
+                            onsubmit="return confirm('Delete contact ${escape((r.first_name + ' ' + r.last_name).trim() || '(no name)')}? This cannot be undone.');">
+                        <button type="submit" class="row-delete-btn" title="Delete contact" aria-label="Delete contact">×</button>
+                      </form>
+                    </td>
                   </tr>
                 `)}
               </tbody>
