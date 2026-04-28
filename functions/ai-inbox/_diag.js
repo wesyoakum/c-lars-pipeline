@@ -8,6 +8,7 @@
 // fields — never echoes the OpenAI key or gateway token.
 //
 // SAFE TO REMOVE once gateway auth is working.
+// (rev2: forces redeploy so updated AI_GATEWAY_ACCOUNT_ID secret takes effect)
 
 import { aiBaseUrl, isGatewayEnabled, gatewayHeaders } from '../lib/ai-gateway.js';
 
