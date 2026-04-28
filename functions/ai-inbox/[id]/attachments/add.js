@@ -134,6 +134,13 @@ export async function onRequestPost(context) {
     }
   }
 
+  // Optional question-context: when the user clicks "↳ Answer" on
+  // an open question, the client passes the question text here so we
+  // record what the attachment is answering. Stored on the attachment
+  // row and used by compileContext() to label the section header in
+  // the next extraction's user message.
+  const answersQuestion = String(formData.get('answers_question') || '').trim().slice(0, 500) || null;
+
   // Compute next sort_order — append to the end.
   const maxSort = await one(
     env.DB,
@@ -148,11 +155,11 @@ export async function onRequestPost(context) {
     `INSERT INTO ai_inbox_attachments
        (id, entry_id, kind, sort_order, is_primary, include_in_context,
         r2_key, mime_type, size_bytes, filename,
-        captured_text, captured_text_model, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        captured_text, captured_text_model, status, answers_question, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 0, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [attachmentId, params.id, kind, sortOrder,
      r2Key, mimeType, sizeBytes, filename,
-     capturedText, capturedTextModel, initialStatus, ts, ts]);
+     capturedText, capturedTextModel, initialStatus, answersQuestion, ts, ts]);
 
   // Optionally re-process the entry so the newly-added attachment's
   // captured_text feeds the next extraction round. fromStep='attachments'
@@ -177,7 +184,7 @@ export async function onRequestPost(context) {
     `SELECT id, kind, sort_order, is_primary, include_in_context,
             r2_key, mime_type, size_bytes, filename,
             captured_text, captured_text_model, status, error_message,
-            created_at
+            answers_question, created_at
        FROM ai_inbox_attachments WHERE id = ?`,
     [attachmentId]);
 

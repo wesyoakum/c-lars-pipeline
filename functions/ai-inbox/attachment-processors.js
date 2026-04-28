@@ -252,7 +252,13 @@ export function compileContext(attachments) {
   return ordered
     .map((a) => {
       const label = KIND_LABELS[a.kind] || a.kind;
-      const heading = a.filename ? `${label} — ${a.filename}` : label;
+      let heading = a.filename ? `${label} — ${a.filename}` : label;
+      // When the attachment was created via "↳ Answer" on an open
+      // question, encode the question into the section header so
+      // the LLM sees the explicit Q/A pairing on the next extraction.
+      if (a.answers_question) {
+        heading += ` (answer to: "${String(a.answers_question).slice(0, 200)}")`;
+      }
       return `=== ${heading} ===\n${a.captured_text}`;
     })
     .join('\n\n');

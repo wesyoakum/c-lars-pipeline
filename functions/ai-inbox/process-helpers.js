@@ -166,7 +166,7 @@ async function loadAttachments(db, entryId) {
     `SELECT id, entry_id, kind, sort_order, is_primary, include_in_context,
             r2_key, mime_type, size_bytes, filename,
             captured_text, captured_text_model, status, error_message,
-            created_at, updated_at
+            answers_question, created_at, updated_at
        FROM ai_inbox_attachments
       WHERE entry_id = ?
       ORDER BY sort_order, created_at`,

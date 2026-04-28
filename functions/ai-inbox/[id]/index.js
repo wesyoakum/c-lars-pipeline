@@ -105,7 +105,7 @@ export async function onRequestGet(context) {
       `SELECT id, kind, sort_order, is_primary, include_in_context,
               r2_key, mime_type, size_bytes, filename,
               captured_text, captured_text_model, status, error_message,
-              created_at
+              answers_question, created_at
          FROM ai_inbox_attachments WHERE entry_id = ?
         ORDER BY sort_order, created_at`,
       [params.id]),
@@ -297,6 +297,21 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
 
       /* Capture bar status / inline label */
       .aii-capture-status { font-size: .8rem; color: #1f6feb; flex: 1 1 100%; text-align: center; min-height: 1em; }
+
+      /* Open questions: each item has a row (text + Answer button)
+         then an expandable answer panel with three input modes. */
+      .aii-q-list .aii-q-item { padding: .35rem .5rem; }
+      .aii-q-list .aii-q-item + .aii-q-item { border-top: 1px dashed #eef; }
+      .aii-q-row { display: flex; gap: .5rem; align-items: flex-start; flex-wrap: wrap; }
+      .aii-q-row .aii-editable { flex: 1 1 auto; min-width: 10rem; }
+      .aii-q-answer-btn { padding: .15rem .55rem; border: 1px solid #c8d4ff; background: #f0f4ff; color: #2451b8; border-radius: 3px; font-size: .75rem; cursor: pointer; align-self: center; }
+      .aii-q-answer-btn:hover { background: #dbe5ff; }
+      .aii-q-answer-panel { margin-top: .5rem; padding: .65rem .75rem; background: #fafbfc; border: 1px solid #e1e4e8; border-radius: 4px; }
+      .aii-q-answer-actions { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+      .aii-q-answer-status { font-size: .8rem; color: #1f6feb; margin-top: .35rem; }
+
+      /* Attachment "answers" badge */
+      .aii-att-answers { font-size: .75rem; color: #1a7f37; background: #eef5e6; padding: .15rem .5rem; border-radius: 3px; margin-top: .25rem; display: inline-block; }
 
       /* ---------- Mobile (≤ 640px) ---------- */
       @media (max-width: 640px) {
@@ -492,6 +507,98 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
           isHandled(kind) { return this.handledActions.indexOf(kind) >= 0; },
           isSuggested(kind) {
             return (this.fields.suggested_destinations || []).indexOf(kind) >= 0;
+          },
+
+          // ----- v3 answer-an-open-question -----
+          // Click the "↳ Answer" button next to an open question and
+          // pick how to answer it: record audio, type text, or attach
+          // a file. Each path turns into an attachment on this entry
+          // (so the question + answer become part of the next
+          // re-extraction round). The page reloads after upload to
+          // pick up the new attachment + the resulting extraction.
+          answerPanel: null,
+
+          openAnswer(idx) {
+            this.answerPanel = {
+              idx,
+              mode: null,         // null | 'text'
+              text: '',
+              busy: false,
+              error: '',
+              status: '',
+            };
+          },
+          closeAnswer() { this.answerPanel = null; },
+
+          // The shared upload helper used by all three modes. The
+          // server route already accepts kind='auto', so files (audio,
+          // pdf, image, etc.) auto-route to the right processor.
+          // Passes reextract=1 so the new question/answer pair feeds
+          // the next extraction. The captured_text on the new
+          // attachment carries the question header so the LLM has the
+          // explicit Q/A pairing in compiled context.
+          async _uploadAnswer(idx, formExtras, statusText) {
+            if (!this.answerPanel) return;
+            const q = (this.fields.open_questions || [])[idx] || '';
+            this.answerPanel.busy = true;
+            this.answerPanel.error = '';
+            this.answerPanel.status = statusText || 'Uploading…';
+            try {
+              const fd = new FormData();
+              for (const [k, v] of Object.entries(formExtras || {})) fd.append(k, v);
+              fd.append('reextract', '1');
+              fd.append('answers_question', q);
+              const res = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId) + '/attachments/add', {
+                method: 'POST', credentials: 'same-origin', body: fd,
+              });
+              const j = await res.json();
+              if (!j.ok) throw new Error(j.error || 'failed');
+              this.answerPanel.status = 'Saved. Reloading…';
+              window.location.reload();
+            } catch (e) {
+              this.answerPanel.busy = false;
+              this.answerPanel.error = String(e.message || e);
+              this.answerPanel.status = '';
+            }
+          },
+
+          async submitAnswerText(idx) {
+            if (!this.answerPanel || !this.answerPanel.text.trim()) return;
+            await this._uploadAnswer(idx, {
+              kind: 'text',
+              text: this.answerPanel.text,
+            }, 'Saving answer…');
+          },
+
+          answerByRecording(idx) {
+            if (!window.PipelineAudioRecorder || typeof window.PipelineAudioRecorder.open !== 'function') {
+              alert('Audio recorder is not available on this page.');
+              return;
+            }
+            window.PipelineAudioRecorder.open((file) => {
+              this._uploadAnswer(idx, {
+                kind: 'auto',
+                file: file,
+              }, 'Uploading recording…');
+            });
+          },
+
+          answerByFile(idx, btnEl) {
+            const input = btnEl.parentElement.querySelector('[data-aii-q-file]');
+            if (!input) return;
+            // Reset the input so picking the same file twice still fires.
+            input.value = '';
+            const handler = () => {
+              input.removeEventListener('change', handler);
+              if (input.files && input.files[0]) {
+                this._uploadAnswer(idx, {
+                  kind: 'auto',
+                  file: input.files[0],
+                }, 'Uploading file…');
+              }
+            };
+            input.addEventListener('change', handler);
+            input.click();
           },
 
           // ----- v3 push: send captured contact details onto the
@@ -1343,12 +1450,53 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
       <div class="aii-row">
         <section class="aii-section" style="margin-top:1rem;">
           <h2>Open questions</h2>
-          <ul class="aii-list">
+          <ul class="aii-list aii-q-list">
             <template x-for="(q, idx) in fields.open_questions" :key="idx">
-              <li>
-                <span class="aii-editable" contenteditable="true"
-                      x-text="q"
-                      @blur="fields.open_questions[idx] = $event.target.innerText.trim(); saveField('open_questions')"></span>
+              <li class="aii-q-item">
+                <div class="aii-q-row">
+                  <span class="aii-editable" contenteditable="true"
+                        x-text="q"
+                        @blur="fields.open_questions[idx] = $event.target.innerText.trim(); saveField('open_questions')"></span>
+                  <button type="button"
+                          class="aii-q-answer-btn"
+                          x-show="!answerPanel || answerPanel.idx !== idx"
+                          title="Answer this question with audio, text, or a file"
+                          @click="openAnswer(idx)">↳ Answer</button>
+                </div>
+
+                <div class="aii-q-answer-panel" x-show="answerPanel && answerPanel.idx === idx" x-cloak>
+                  <div class="aii-q-answer-actions" x-show="answerPanel && !answerPanel.mode">
+                    <button type="button" class="aii-capture-btn" @click="answerByRecording(idx)">
+                      <span class="aii-capture-btn-icon">🎤</span> Record an answer
+                    </button>
+                    <button type="button" class="aii-capture-btn" @click="answerPanel.mode = 'text'">
+                      <span class="aii-capture-btn-icon">⌨</span> Type an answer
+                    </button>
+                    <button type="button" class="aii-capture-btn" @click="answerByFile(idx, $el)">
+                      <span class="aii-capture-btn-icon">📎</span> Attach a file
+                    </button>
+                    <input type="file" data-aii-q-file hidden>
+                    <button type="button" class="aii-btn" @click="closeAnswer()">Cancel</button>
+                  </div>
+
+                  <div x-show="answerPanel && answerPanel.mode === 'text'" x-cloak>
+                    <textarea class="aii-att-textarea" rows="4"
+                              x-model="answerPanel && answerPanel.text"
+                              placeholder="Your answer…"></textarea>
+                    <div class="aii-form-actions" style="margin-top:.5rem;">
+                      <button type="button" class="aii-btn aii-btn-primary"
+                              @click="submitAnswerText(idx)"
+                              :disabled="answerPanel && (answerPanel.busy || !(answerPanel.text || '').trim())">
+                        <span x-show="!answerPanel || !answerPanel.busy">Save answer</span>
+                        <span x-show="answerPanel && answerPanel.busy">Saving…</span>
+                      </button>
+                      <button type="button" class="aii-btn" @click="closeAnswer()" :disabled="answerPanel && answerPanel.busy">Cancel</button>
+                    </div>
+                  </div>
+
+                  <div class="aii-q-answer-status" x-show="answerPanel && answerPanel.status" x-text="answerPanel && answerPanel.status" x-cloak></div>
+                  <div class="aii-err-inline" x-show="answerPanel && answerPanel.error" x-text="answerPanel && answerPanel.error" x-cloak></div>
+                </div>
               </li>
             </template>
             <template x-if="fields.open_questions.length === 0"><li class="aii-editable empty">(none)</li></template>
@@ -1620,6 +1768,9 @@ function renderAttachments({ item, attachments }) {
         </details>`
       : '';
 
+    const answersBadge = a.answers_question
+      ? html`<div class="aii-att-answers" title="Answer to: ${escape(a.answers_question)}">↳ Answers: ${escape(a.answers_question)}</div>`
+      : '';
     return html`<div class="aii-att-row">
       <div class="aii-att-head">
         <span class="aii-att-kind">${escape(kindLabel)}</span>
@@ -1631,6 +1782,7 @@ function renderAttachments({ item, attachments }) {
                 @click="deleteAttachment('${escape(a.id)}')"
                 title="Remove this attachment">×</button>
       </div>
+      ${answersBadge}
       ${player}
       ${errorBlock}
       ${capturedBlock}
