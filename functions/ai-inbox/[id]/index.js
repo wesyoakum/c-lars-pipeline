@@ -290,20 +290,6 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
 
       [x-cloak] { display: none !important; }
 
-      /* v3 Apply-suggestions modal */
-      .aii-actions-head { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .35rem; flex-wrap: wrap; }
-      .aii-actions-head h2 { margin: 0; }
-      .aii-review-apply { font-size: .85rem; }
-      .aii-apply-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(20,20,30,.45); z-index: 5000; display: flex; align-items: center; justify-content: center; padding: 1rem; }
-      .aii-apply-modal { background: white; border-radius: 8px; padding: 1.25rem 1.5rem; max-width: 540px; width: 100%; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 24px rgba(0,0,0,.18); }
-      .aii-apply-list { list-style: none; padding-left: 0; margin: 0; }
-      .aii-apply-row { padding: .5rem .25rem; border-top: 1px solid #eee; }
-      .aii-apply-row:first-child { border-top: 0; }
-      .aii-apply-row label { display: flex; align-items: center; gap: .5rem; cursor: pointer; }
-      .aii-apply-row input[type="checkbox"] { flex-shrink: 0; }
-      .aii-apply-row-label { flex: 1 1 auto; font-size: .9rem; }
-      .aii-apply-row-detail { color: #666; font-size: .8rem; }
-      .aii-apply-row-disabled { color: #888; font-size: .75rem; font-style: italic; }
 
       .flash { padding: .65rem .9rem; border-radius: 4px; margin-bottom: 1rem; }
       .flash-success { background: #d4ecdb; color: #1a3d24; }
@@ -1098,124 +1084,6 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
             }
           },
 
-          // ----- v3: Apply-suggestions modal -----
-          // Single-button bulk-apply UX: opens a modal with one row per
-          // pending action (action items that haven't been applied as
-          // tasks yet, and auto-resolved matches that haven't been
-          // confirmed). User unchecks rows to skip; Apply runs the
-          // remaining ones in sequence.
-          applyModal: null,
-
-          openApplyModal() {
-            // Action items that haven't already been linked as a task.
-            const linkedActivityRefs = new Set(
-              (this.links || [])
-                .filter((l) => l.action_type === 'create_task' && l.ref_type === 'activity')
-                .map((l) => l.ref_label)
-            );
-            const taskRows = (this.fields.action_items || []).map((a, idx) => {
-              const alreadyLinked = linkedActivityRefs.has(a.task);
-              return {
-                key: 'task_' + idx,
-                kind: 'create_task',
-                label: 'Create task: ' + (a.task || '(blank)'),
-                detail: a.due ? 'Due ' + a.due : '',
-                action_idx: idx,
-                checked: !alreadyLinked && !!a.task,
-                disabled: alreadyLinked || !a.task,
-                disabledReason: alreadyLinked ? 'Already created' : (!a.task ? 'No task text' : ''),
-              };
-            });
-
-            // Auto-resolved matches not yet user-confirmed.
-            const matchRows = (this.matches || [])
-              .filter((m) => m.auto_resolved && !m.user_overridden && m.rank === 1)
-              .map((m) => ({
-                key: 'match_' + m.mention_kind + '_' + m.mention_idx,
-                kind: 'confirm_match',
-                label: 'Confirm: ' + m.mention_text + ' → ' + m.ref_label,
-                detail: '(' + m.mention_kind + ' #' + (m.mention_idx + 1) + ')',
-                mention_kind: m.mention_kind,
-                mention_idx: m.mention_idx,
-                mention_text: m.mention_text,
-                ref_type: m.ref_type,
-                ref_id: m.ref_id,
-                checked: true,
-                disabled: false,
-                disabledReason: '',
-              }));
-
-            const items = [...taskRows, ...matchRows];
-
-            this.applyModal = {
-              items,
-              busy: false,
-              error: '',
-              progress: '',
-            };
-          },
-
-          closeApplyModal() { this.applyModal = null; },
-
-          async executeApplyModal() {
-            if (!this.applyModal) return;
-            const m = this.applyModal;
-            m.busy = true; m.error = '';
-            const toApply = m.items.filter((it) => it.checked && !it.disabled);
-            let done = 0;
-
-            for (const it of toApply) {
-              m.progress = 'Applying ' + (++done) + ' of ' + toApply.length + '…';
-              try {
-                if (it.kind === 'create_task') {
-                  const a = (this.fields.action_items || [])[it.action_idx];
-                  if (!a || !a.task) continue;
-                  const res = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId)
-                    + '/actions/create-task', {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: { 'content-type': 'application/json' },
-                    body: JSON.stringify({
-                      subject: a.task,
-                      body: '',
-                      due_at: a.due || '',
-                      account_id: this.preferredAccountId() || '',
-                    }),
-                  });
-                  const j = await res.json();
-                  if (j.ok && j.link) this.links = [j.link, ...this.links];
-                } else if (it.kind === 'confirm_match') {
-                  const res = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId)
-                    + '/entities/match', {
-                    method: 'POST',
-                    credentials: 'same-origin',
-                    headers: { 'content-type': 'application/json' },
-                    body: JSON.stringify({
-                      mention_kind: it.mention_kind,
-                      mention_idx: it.mention_idx,
-                      mention_text: it.mention_text,
-                      ref_type: it.ref_type,
-                      ref_id: it.ref_id,
-                    }),
-                  });
-                  const j = await res.json();
-                  if (j.ok && j.match) {
-                    this.matches = this.matches.filter(
-                      x => !(x.mention_kind === it.mention_kind && x.mention_idx === it.mention_idx)
-                    );
-                    this.matches.push(j.match);
-                  }
-                }
-              } catch (err) {
-                m.error = 'Some actions failed: ' + (err.message || err);
-              }
-            }
-
-            m.busy = false;
-            m.progress = '';
-            this.applyModal = null;
-          },
-
           // ----- helpers -----
           preferredAccountId() {
             const m = this.matches.find(
@@ -1443,12 +1311,7 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
       </div>
 
       <section class="aii-section" style="margin-top:1rem;">
-        <div class="aii-actions-head">
-          <h2>Actions</h2>
-          <button type="button" class="aii-btn aii-btn-primary aii-review-apply"
-                  @click="openApplyModal()"
-                  title="Open a checklist of all pending actions and apply them in one batch">Review &amp; apply suggestions</button>
-        </div>
+        <h2>Actions</h2>
 
         <!-- Already-taken actions -->
         <template x-if="links.length > 0">
@@ -1478,40 +1341,6 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
               <span class="aii-action-suggested-mark" x-show="isSuggested(d)" title="Suggested by extraction">★</span>
             </button>
           </template>
-        </div>
-
-        <!-- Review & apply modal -->
-        <div x-show="applyModal" x-cloak class="aii-apply-overlay" @click.self="closeApplyModal()">
-          <div class="aii-apply-modal" x-show="applyModal" x-cloak>
-            <h3 style="margin:0 0 .5rem;">Review &amp; apply</h3>
-            <template x-if="applyModal && applyModal.items.length === 0">
-              <p class="aii-meta">Nothing pending. Action items get a row here once you fill them in, and any auto-resolved match shows up until you confirm it.</p>
-            </template>
-            <template x-if="applyModal && applyModal.items.length > 0">
-              <ul class="aii-apply-list">
-                <template x-for="it in applyModal.items" :key="it.key">
-                  <li class="aii-apply-row">
-                    <label>
-                      <input type="checkbox" x-model="it.checked" :disabled="it.disabled">
-                      <span class="aii-apply-row-label" x-text="it.label"></span>
-                      <span class="aii-apply-row-detail" x-text="it.detail" x-show="it.detail"></span>
-                      <span class="aii-apply-row-disabled" x-text="it.disabledReason" x-show="it.disabled"></span>
-                    </label>
-                  </li>
-                </template>
-              </ul>
-            </template>
-            <div class="aii-form-actions" style="margin-top:.75rem;">
-              <button type="button" class="aii-btn aii-btn-primary"
-                      @click="executeApplyModal()"
-                      :disabled="applyModal && (applyModal.busy || applyModal.items.filter(it => it.checked && !it.disabled).length === 0)">
-                <span x-show="!applyModal || !applyModal.busy">Apply</span>
-                <span x-show="applyModal && applyModal.busy" x-text="applyModal.progress || 'Applying…'"></span>
-              </button>
-              <button type="button" class="aii-btn" @click="closeApplyModal()" :disabled="applyModal && applyModal.busy">Cancel</button>
-              <span x-show="applyModal && applyModal.error" class="aii-err-inline" x-text="applyModal && applyModal.error"></span>
-            </div>
-          </div>
         </div>
 
         <!-- Inline form: create_task -->
