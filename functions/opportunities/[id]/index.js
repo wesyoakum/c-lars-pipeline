@@ -591,6 +591,17 @@ export async function onRequestGet(context) {
           ${inlineTextarea('description', opp.description ?? '', { placeholder: 'Click to add description...' })}
         </div>
 
+        <!-- Internal notes (C-LARS only) — paired yellow tinted box,
+             same pattern as the quote-detail "Internal notes" panel.
+             AI Inbox tech-spec push targets this field; user can also
+             type freely. Never appears on customer-facing PDFs. -->
+        <div style="margin-top:0.75rem;padding:0.5rem 0.7rem;background:#fff8c5;border:1px solid #d4a72c;border-radius:var(--radius)">
+          <span class="detail-label" style="display:block; margin-bottom:0.15rem; font-size:0.85em">
+            Internal notes (C-LARS only, never shared with customer)
+          </span>
+          ${inlineTextarea('notes_internal', opp.notes_internal ?? '', { placeholder: 'Click to add internal notes...' })}
+        </div>
+
         <!-- More details toggle -->
         <button class="show-more-toggle" style="margin-top:0.75rem" @click="more = !more">
           <span x-text="more ? '&#9662; Less details' : '&#9656; More details'"></span>

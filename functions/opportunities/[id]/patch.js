@@ -20,6 +20,12 @@ const PATCHABLE = new Set([
   'bant_budget', 'bant_authority', 'bant_need', 'bant_timeline',
   'bant_authority_contact_id',
   'customer_po_number',
+  // Internal-notes panel — non-customer-facing free text. Migration
+  // 0058 added the column; the AI Inbox apply-requirements flow
+  // appends here. The opportunity detail page now exposes it as a
+  // yellow-tinted textarea below the description so the user can
+  // read and edit what landed.
+  'notes_internal',
   // Universal tri-state toggle (NULL = undecided, 1 = CO active,
   // 0 = no CO). Drives stage-picker filtering: hides CO-loop stages
   // when != 1 so the picker keeps a simple path from oc_submitted /
