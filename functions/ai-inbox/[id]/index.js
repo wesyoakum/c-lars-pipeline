@@ -1074,11 +1074,84 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
             const tokens = (mention || '').trim().split(/\\s+/);
             const first = tokens[0] || '';
             const last = tokens.length > 1 ? tokens[tokens.length - 1] : '';
-            window.Pipeline.openWizard('contact', {
+
+            // Pull the rich-shape detail row (captured title/email/
+            // phone/organization from the LLM) so we can prefill the
+            // wizard with the card data instead of making the user
+            // re-type it.
+            const detail = this.detailFor('person', idx) || {};
+            const carriedFields = {
               first_name: first,
               last_name: last,
-              account_id: this.preferredAccountId(),
-              account_label: this.preferredAccountLabel(),
+              title: detail.title || '',
+              email: detail.email || '',
+              // contacts.phone not exposed on the contact wizard but
+              // we'll push it onto the contact after creation if the
+              // card had one.
+            };
+
+            const resolvedAccountId = this.preferredAccountId();
+            const resolvedAccountLabel = this.preferredAccountLabel();
+
+            // Case 1: the org is already matched to an existing
+            // account. Open the contact wizard with the account
+            // step locked.
+            if (resolvedAccountId) {
+              window.Pipeline.openWizard('contact', {
+                ...carriedFields,
+                account_id: resolvedAccountId,
+                account_label: resolvedAccountLabel,
+                __on_success: 'pipeline:wizard-success',
+                __ai_inbox: {
+                  source: 'create_contact',
+                  entry_id: this.itemId,
+                  mention_kind: 'person',
+                  mention_idx: idx,
+                  mention_text: mention,
+                  pending_phone: detail.phone || '',
+                },
+              });
+              return;
+            }
+
+            // Case 2: the card carries an org name but no match
+            // exists yet. Chain: open the account wizard first
+            // pre-filled with the org name, then on success open
+            // the contact wizard with the new account_id locked.
+            const orgName = (detail.organization || '').trim();
+            const orgMentionIdx = orgName
+              ? (this.fields.organizations || []).findIndex((o) => o === orgName)
+              : -1;
+
+            if (orgName) {
+              window.Pipeline.openWizard('account', {
+                name: orgName,
+                __on_success: 'pipeline:wizard-success',
+                __ai_inbox: {
+                  source: 'create_account_for_contact',
+                  entry_id: this.itemId,
+                  mention_kind: 'organization',
+                  mention_idx: orgMentionIdx,
+                  mention_text: orgName,
+                  // Carry the contact data through so the wizard-success
+                  // listener can open the contact wizard next, with the
+                  // new account_id locked.
+                  pending_contact: {
+                    ...carriedFields,
+                    person_mention_idx: idx,
+                    person_mention_text: mention,
+                    pending_phone: detail.phone || '',
+                  },
+                },
+              });
+              return;
+            }
+
+            // Case 3: no org info on the card. Fall back to the
+            // original "open contact wizard, user picks the account"
+            // flow.
+            window.Pipeline.openWizard('contact', {
+              ...carriedFields,
               __on_success: 'pipeline:wizard-success',
               __ai_inbox: {
                 source: 'create_contact',
@@ -1086,6 +1159,7 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
                 mention_kind: 'person',
                 mention_idx: idx,
                 mention_text: mention,
+                pending_phone: detail.phone || '',
               },
             });
           },
@@ -1142,6 +1216,23 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
                   ref_id: newId,
                   action_type: 'create_contact',
                 });
+                // If the card carried a phone number, push it onto
+                // the brand-new contact automatically. We just
+                // created the contact, so phone is empty — no
+                // overwrite-conflict risk; no need for force.
+                if (meta.pending_phone) {
+                  try {
+                    await fetch('/ai-inbox/' + encodeURIComponent(this.itemId) + '/push/phone', {
+                      method: 'POST', credentials: 'same-origin',
+                      headers: { 'content-type': 'application/json' },
+                      body: JSON.stringify({
+                        ref_type: 'contact',
+                        ref_id: newId,
+                        phone: meta.pending_phone,
+                      }),
+                    });
+                  } catch (_) { /* best-effort; visible button stays */ }
+                }
               } else if (meta.source === 'create_task') {
                 await this.recordLinkOnly({
                   ref_type: 'activity',
@@ -1155,6 +1246,49 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
                   ref_id: newId,
                   ref_label: resp.name || '(account)',
                   action_type: 'link_to_account',
+                });
+              } else if (meta.source === 'create_account_for_contact') {
+                // Chained: the user clicked "Create contact?" on a
+                // mention whose org wasn't matched. We just created
+                // the account; record the org match + link, then
+                // open the contact wizard with the new account_id
+                // locked.
+                if (meta.mention_idx >= 0) {
+                  await this.recordMatchAndLink({
+                    mention_kind: 'organization',
+                    mention_idx: meta.mention_idx,
+                    mention_text: meta.mention_text,
+                    ref_type: 'account',
+                    ref_id: newId,
+                    action_type: 'create_account',
+                  });
+                } else {
+                  // org wasn't a top-level mention (rare); just
+                  // record the create as a link.
+                  await this.recordLinkOnly({
+                    ref_type: 'account',
+                    ref_id: newId,
+                    ref_label: resp.name || meta.mention_text || '(account)',
+                    action_type: 'create_account',
+                  });
+                }
+                const pc = meta.pending_contact || {};
+                window.Pipeline.openWizard('contact', {
+                  first_name: pc.first_name || '',
+                  last_name: pc.last_name || '',
+                  title: pc.title || '',
+                  email: pc.email || '',
+                  account_id: newId,
+                  account_label: resp.name || meta.mention_text || '',
+                  __on_success: 'pipeline:wizard-success',
+                  __ai_inbox: {
+                    source: 'create_contact',
+                    entry_id: this.itemId,
+                    mention_kind: 'person',
+                    mention_idx: pc.person_mention_idx,
+                    mention_text: pc.person_mention_text || '',
+                    pending_phone: pc.pending_phone || '',
+                  },
                 });
               } else if (meta.source === 'link_to_opportunity_via_create') {
                 await this.recordLinkOnly({
@@ -1902,13 +2036,15 @@ function renderAttachments({ item, attachments }) {
     </div>
 
     <div class="aii-capture-bar">
-      <button type="button" class="aii-capture-btn" data-aii-record title="Record audio in your browser">
-        <span class="aii-capture-btn-icon">🎤</span> Record audio
+      <button type="button" class="aii-capture-btn" data-aii-record
+              title="Record audio" aria-label="Record audio">
+        <span class="aii-capture-btn-icon">🎤</span>
       </button>
-      <button type="button" class="aii-capture-btn" data-aii-photo title="Take or choose a photo">
-        <span class="aii-capture-btn-icon">📷</span> Take photo
+      <button type="button" class="aii-capture-btn" data-aii-photo
+              title="Add a photo (camera or library)" aria-label="Add a photo">
+        <span class="aii-capture-btn-icon">📷</span>
       </button>
-      <input type="file" data-aii-photo-input accept="image/*" capture="environment" hidden>
+      <input type="file" data-aii-photo-input accept="image/*" hidden>
       <span class="aii-capture-status" data-aii-capture-status></span>
     </div>
 

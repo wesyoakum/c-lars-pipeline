@@ -172,16 +172,19 @@ function renderPage({ items, flash }) {
       </div>
 
       <div class="aii-capture-bar">
-        <button type="button" class="aii-capture-btn" id="aii-record-new" title="Record audio in your browser">
-          <span class="aii-capture-btn-icon">🎤</span> Record audio
+        <button type="button" class="aii-capture-btn" id="aii-record-new"
+                title="Record audio" aria-label="Record audio">
+          <span class="aii-capture-btn-icon">🎤</span>
         </button>
-        <button type="button" class="aii-capture-btn" id="aii-photo-new" title="Take or choose a photo">
-          <span class="aii-capture-btn-icon">📷</span> Take photo
+        <button type="button" class="aii-capture-btn" id="aii-photo-new"
+                title="Add a photo (camera or library)" aria-label="Add a photo">
+          <span class="aii-capture-btn-icon">📷</span>
         </button>
-        <button type="button" class="aii-capture-btn" id="aii-text-new" title="Type or paste a note">
-          <span class="aii-capture-btn-icon">⌨</span> Type text
+        <button type="button" class="aii-capture-btn" id="aii-text-new"
+                title="Type or paste a note" aria-label="Type or paste a note">
+          <span class="aii-capture-btn-icon">⌨</span>
         </button>
-        <input type="file" id="aii-photo-input-new" accept="image/*" capture="environment" hidden>
+        <input type="file" id="aii-photo-input-new" accept="image/*" hidden>
       </div>
 
       <div class="aii-text-panel" id="aii-text-panel-new" hidden>
