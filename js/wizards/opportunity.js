@@ -56,6 +56,15 @@
       placeholder: 'e.g. ACME Corp emailed asking for spares quote on the pump skid replacement. They want it by end of Q2.',
     },
 
+    // Phase 5b-2: cascade the account dedup. After Smart-start
+    // extraction, the planner finds the customer in the existing
+    // accounts (or proposes creating it). User confirms → executor
+    // creates / pushes account fields, then the wizard drops into
+    // its standard step UI with the account pinned. The user fills
+    // in transaction_type / value / etc. and submits the opp via
+    // the regular create path.
+    plan: true,
+
     steps: [
       {
         key: 'title',

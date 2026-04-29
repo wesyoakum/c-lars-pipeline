@@ -390,6 +390,33 @@ async function planAccount(env, extracted) {
   };
 }
 
+// ----- opportunity-wizard planner ----------------------------------
+//
+// Phase 5b-2: just dedup the account. The opp wizard's steps already
+// handle title/type/value/description (with title and description
+// prefilled from extraction via applyExtraction); the cascade simply
+// resolves the account up front so the user doesn't have to type-
+// search for it. After the user confirms the account, the executor
+// creates / pushes account fields and the engine transitions to the
+// standard step UI to finish the opp creation (type, value, etc.).
+
+async function planOpportunity(env, extracted) {
+  const orgDetail = (extracted?.organizations_detail && extracted.organizations_detail[0]) || null;
+  const orgName = (orgDetail && orgDetail.name)
+    || (extracted?.organizations && extracted.organizations[0])
+    || '';
+
+  const accountSection = await buildAccountSection(env, orgDetail, orgName);
+  if (!accountSection) return null;
+
+  return {
+    account: accountSection,
+    // No contact / opportunity sections — those happen in the
+    // standard step UI after the cascade resolves the account.
+    continue_to_steps: true,
+  };
+}
+
 // --------------------------------------------------------------------
 
 export async function onRequestPost(context) {
@@ -416,6 +443,13 @@ export async function onRequestPost(context) {
 
   if (wizardKey === 'account') {
     const plan = await planAccount(env, extracted);
+    if (!plan) return json({ ok: true, plan: null });
+    plan.ai_inbox_entry_id = aiInboxEntryId;
+    return json({ ok: true, plan });
+  }
+
+  if (wizardKey === 'opportunity') {
+    const plan = await planOpportunity(env, extracted);
     if (!plan) return json({ ok: true, plan: null });
     plan.ai_inbox_entry_id = aiInboxEntryId;
     return json({ ok: true, plan });

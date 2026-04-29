@@ -904,6 +904,19 @@
         c.checked = !c.checked;
       },
 
+      // Label for the Confirm button on the review screen.
+      // - "Confirm and continue" when the cascade hands off to the
+      //   step UI (opportunity wizard)
+      // - "Confirm and create" / "Confirm and save" otherwise
+      confirmButtonLabel: function () {
+        if (!this.plan) return 'Confirm';
+        if (this.plan.continue_to_steps) return 'Confirm and continue';
+        // Pure update path (matched account, no proposed-new anywhere
+        // and no new contact)
+        var hasAnyCreate = !!(this.plan.account?.proposed_new || this.plan.contact?.proposed_new);
+        return hasAnyCreate ? 'Confirm and create' : 'Confirm and save';
+      },
+
       // One-line narrative summary of the plan, shown above the
       // review-screen sections. Surfaces the cascade ordering
       // ("first the account, then the contact") in plain language so
@@ -917,6 +930,7 @@
         var matchAcct = !!acct.matched;
         var newCtc = !!ctc.proposed_new;
         var matchCtc = !!ctc.matched;
+        var continueAfter = !!p.continue_to_steps;
 
         var acctLabel = acct.proposed_new
           ? acct.proposed_new.name
@@ -924,6 +938,21 @@
         var ctcLabel = ctc.proposed_new
           ? ((ctc.proposed_new.first_name || '') + ' ' + (ctc.proposed_new.last_name || '')).trim()
           : (ctc.matched ? ((ctc.matched.first_name || '') + ' ' + (ctc.matched.last_name || '')).trim() : '');
+
+        // Wizard-specific framing for plans that continue to the step
+        // UI after the cascade resolves the prerequisites (e.g. opp
+        // wizard cascades the account, then steps for type/value).
+        if (continueAfter) {
+          var entity = (this.config && this.config.title) || 'record';
+          // Strip the leading "New " from "New opportunity" → "opportunity"
+          entity = entity.replace(/^New\s+/i, '');
+          if (newAcct) {
+            return 'First we’ll add the new account "' + acctLabel + '", then continue to ' + entity + ' details.';
+          }
+          if (matchAcct) {
+            return 'Looks like "' + acctLabel + '" already exists. Confirm and continue to ' + entity + ' details.';
+          }
+        }
 
         if (newAcct && newCtc) {
           return 'First we’ll add the new account "' + acctLabel + '", then create "' + ctcLabel + '" as a contact at it.';
@@ -963,7 +992,11 @@
         this.focusInput();
       },
 
-      // Confirm the plan: hit /wizards/execute and redirect.
+      // Confirm the plan: hit /wizards/execute. On success either
+      // close + redirect (terminal cascades like contact / account)
+      // or transition to the standard step UI with answers locked
+      // (continue cascades like opportunity, where the user still
+      // needs to fill in wizard-specific fields).
       confirmPlan: function () {
         var self = this;
         if (self.executing || !self.plan) return;
@@ -986,11 +1019,38 @@
               self.error = (r.j && r.j.error) || ('Could not execute (status ' + r.status + ').');
               return;
             }
+
+            // Continue cascade: account (and optionally contact) was
+            // created, but the wizard's primary entity still needs
+            // user input. Lock the resolved account into answers and
+            // drop into the step UI with a pinned "Account: X" row.
+            if (r.j.mode === 'continue') {
+              if (r.j.account_id) {
+                self.answers.account = {
+                  kind: 'account',
+                  id: r.j.account_id,
+                  label: r.j.account_label || '',
+                };
+                self.pinnedPrefix = 'Account';
+                self.pinnedValue = r.j.account_label || '';
+              }
+              // Clear the plan so the review screen doesn't reappear,
+              // and re-evaluate skip-when so the now-locked account
+              // step (and any other prefilled steps) are skipped.
+              self.plan = null;
+              self.aiInboxEntryId = null;  // already linked server-side
+              self.stepIndex = 0;
+              while (self.shouldSkipStep(self.currentStep()) && self.stepIndex < self.steps().length) {
+                self.stepIndex++;
+              }
+              self.typedInput = self.currentTypedForStep();
+              self.phase = 'steps';
+              self.focusInput();
+              return;
+            }
+
+            // Terminal cascade: server already wrote AI Inbox links.
             self.closeModal();
-            // Smart-start already handled the AI Inbox link rows in
-            // /wizards/execute — no need for the submit-time link
-            // call. Just redirect to the contact (or whatever the
-            // executor returns).
             if (r.j.redirect_url) {
               window.location.href = r.j.redirect_url;
             } else if (self.reloadOnSuccess) {

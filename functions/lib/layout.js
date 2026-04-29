@@ -444,8 +444,8 @@ const WIZARD_MODAL_MARKUP = (
   '<button type="button" class="btn btn-sm primary task-wizard-review-confirm" ' +
   '@click="$store.wizard.confirmPlan()" ' +
   ':disabled="$store.wizard.executing">' +
-  '<span x-show="!$store.wizard.executing">Confirm and create</span>' +
-  '<span x-show="$store.wizard.executing">Creating…</span>' +
+  '<span x-show="!$store.wizard.executing" x-text="$store.wizard.confirmButtonLabel()"></span>' +
+  '<span x-show="$store.wizard.executing">Working…</span>' +
   '</button>' +
   '</div>' +
 

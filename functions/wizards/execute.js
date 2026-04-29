@@ -117,6 +117,32 @@ export async function onRequestPost(context) {
     });
   }
 
+  // ---- opportunity wizard: account dedup, then continue to steps ----
+  // Process account section the same way, but instead of redirecting
+  // we hand control back to the wizard's step UI with the account
+  // locked in answers. The user fills in title (prefilled) / type /
+  // value / etc. and submits via the standard opp create path.
+  if (wizardKey === 'opportunity') {
+    const acct = processAccountSection(env, plan, ts, user, statements);
+    if (acct.error) return json({ ok: false, error: acct.error }, 400);
+
+    if (aiInboxEntryId) {
+      statements.push(linkStmt(env.DB, aiInboxEntryId,
+        acct.createdNew ? 'create_account' : 'link_to_account',
+        'account', acct.accountId, acct.accountLabel, user));
+    }
+
+    await batch(env.DB, statements);
+
+    return json({
+      ok: true,
+      mode: 'continue',
+      account_id: acct.accountId,
+      account_label: acct.accountLabel,
+      created_new_account: acct.createdNew,
+    });
+  }
+
   return json({ ok: false, error: 'unsupported_wizard_key' }, 400);
 }
 
