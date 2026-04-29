@@ -146,6 +146,12 @@ export async function onRequestGet(context) {
           ${escape(job.number)}
           — ${inlineText('title', job.title, { placeholder: 'Add title' })}
         </h1>
+        ${user && user.email === 'wes.yoakum@c-lars.com' ? html`<div class="header-actions" style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">
+          <button type="button" class="aii-page-capture-btn"
+                  onclick="window.PipelineAICapture && window.PipelineAICapture.open({ refType: 'job', refId: '${escape(job.id)}', refLabel: '${escape(job.number)} — ${escape((job.title || '').slice(0, 60))}' })">
+            <span class="aii-page-capture-icon">🎤</span> Capture
+          </button>
+        </div>` : ''}
       </div>
       <p class="muted" style="margin:0.15rem 0 0.5rem">
         <span class="pill ${statusClass(job.status)}">${escape(STATUS_LABELS[job.status] ?? job.status)}</span>
@@ -338,7 +344,10 @@ export async function onRequestGet(context) {
           </ul>`}
     </section>`;
 
-  const scripts = html`<script>${raw(jobInlineScript())}</script>`;
+  const captureScripts = (user && user.email === 'wes.yoakum@c-lars.com')
+    ? html`<script defer src="/js/audio-recorder.js"></script><script defer src="/js/ai-capture.js"></script>`
+    : '';
+  const scripts = html`<script>${raw(jobInlineScript())}</script>${captureScripts}`;
 
   return htmlResponse(
     layout(job.number, body + scripts, {

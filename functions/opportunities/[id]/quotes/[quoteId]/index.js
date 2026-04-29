@@ -194,6 +194,10 @@ export async function onRequestGet(context) {
         <div class="header-actions-stack">
           <a class="back-link" href="/opportunities/${escape(quote.opportunity_id)}?tab=quotes">\u2190 Quotes</a>
           <div class="header-actions">
+            ${user && user.email === 'wes.yoakum@c-lars.com' ? html`<button type="button" class="aii-page-capture-btn"
+                    onclick="window.PipelineAICapture && window.PipelineAICapture.open({ refType: 'quote', refId: '${escape(quote.id)}', refLabel: '${escape(quote.number)} \u2014 ${escape((quote.title || '').slice(0, 60))}' })">
+              <span class="aii-page-capture-icon">\ud83c\udfa4</span> Capture
+            </button>` : ''}
             ${isDraft ? html`
               <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/submit" class="inline-form">
                 <button class="btn primary" type="submit">Issue</button>
@@ -1485,7 +1489,14 @@ export async function onRequestGet(context) {
     </script>
   `;
 
-  const body = html`${headerSection}<div class="quote-doc">${bannerCard}${detailsSection}${linesSection}${footerSection}</div>${scripts}`;
+  // AI Inbox in-context capture scripts (gated to wes.yoakum like the
+  // /ai-inbox nav link). Loads the recorder + capture modal only when
+  // the user actually has access to the feature.
+  const captureScripts = (user && user.email === 'wes.yoakum@c-lars.com')
+    ? html`<script defer src="/js/audio-recorder.js"></script><script defer src="/js/ai-capture.js"></script>`
+    : '';
+
+  const body = html`${headerSection}<div class="quote-doc">${bannerCard}${detailsSection}${linesSection}${footerSection}</div>${scripts}${captureScripts}`;
 
   return htmlResponse(
     layout(

@@ -112,6 +112,7 @@ export async function onRequestGet(context) {
     { key: 'opp_count',     label: 'Opps',      sort: 'number', filter: 'range',  default: true },
     { key: 'website',       label: 'Website',   sort: 'text',   filter: 'text',   default: false },
     { key: 'updated',       label: 'Updated',   sort: 'date',   filter: 'text',   default: true },
+    { key: 'delete',        label: '',          sort: null,     filter: null,     default: true },
   ];
 
   // Build the per-row payload. When `prefs.show_alias` is on we swap the
@@ -284,6 +285,14 @@ export async function onRequestGet(context) {
                         : ieText('website', r.website, { inputType: 'url' })}
                     </td>
                     <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
+                    <td class="col-delete" data-col="delete">
+                      ${r.is_group
+                        ? html`<span class="muted">—</span>`
+                        : html`<form method="post" action="/accounts/${escape(r.id)}/delete" style="display:inline;"
+                                onsubmit="return confirm('Delete account ${escape((r.legal_name || r.name_display || '').slice(0, 80))} and all its contacts? This cannot be undone.');">
+                            <button type="submit" class="row-delete-btn" title="Delete account" aria-label="Delete account">×</button>
+                          </form>`}
+                    </td>
                   </tr>
                 `)}
               </tbody>
