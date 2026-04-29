@@ -861,6 +861,24 @@ export async function fillTemplate(env, templateKey, data) {
   const templateBuf = await obj.arrayBuffer();
   const zip = new PizZip(templateBuf);
 
+  // ── WFM → docxtemplater loop-syntax bridge ──
+  // Templates authored in Word's mail-merge UX use:
+  //   {TableStart:Cost}...{TableEnd:Cost}
+  // docxtemplater's native loop syntax is:
+  //   {#Cost}...{/Cost}
+  // Without rewriting, the {TableStart:X} placeholders are treated
+  // as ordinary lookups, find no matching key, and render empty —
+  // and the row never repeats, so a 6-line quote shows one blank
+  // row in the PDF.
+  //
+  // Word often splits the placeholder across runs as a side effect
+  // of editing (`<w:t>{TableStart:</w:t><w:t>Cost}</w:t>`), so the
+  // regex captures everything between the opening {TableStart:/
+  // {TableEnd: and the closing brace, then strips any embedded XML
+  // before recombining. The substitution merges any split runs into
+  // one, which is fine for these invisible loop markers.
+  rewriteWfmLoopMarkers(zip);
+
   const doc = new Docxtemplater(zip, {
     paragraphLoop: true,
     linebreaks: true,
@@ -874,6 +892,29 @@ export async function fillTemplate(env, templateKey, data) {
     type: 'arraybuffer',
     mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   });
+}
+
+function rewriteWfmLoopMarkers(zip) {
+  // Walk every XML part — document.xml is the main one but headers
+  // and footers can also contain template tokens.
+  const xmlNames = Object.keys(zip.files).filter(
+    n => n.endsWith('.xml') && n.startsWith('word/')
+  );
+  const re = /\{(TableStart|TableEnd):([\s\S]*?)\}/g;
+  for (const name of xmlNames) {
+    const original = zip.files[name].asText();
+    if (original.indexOf('{TableStart:') < 0 && original.indexOf('{TableEnd:') < 0) {
+      continue;
+    }
+    const next = original.replace(re, (_match, kind, body) => {
+      const cleaned = body.replace(/<[^>]+>/g, '').trim();
+      if (!cleaned) return _match;
+      return kind === 'TableStart' ? `{#${cleaned}}` : `{/${cleaned}}`;
+    });
+    if (next !== original) {
+      zip.file(name, next);
+    }
+  }
 }
 
 // ── Convert to PDF ──────────────────────────────────────────────────
