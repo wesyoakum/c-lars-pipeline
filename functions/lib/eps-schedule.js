@@ -20,17 +20,50 @@ import { one, batch, stmt } from './db.js';
 import { auditStmt } from './audit.js';
 
 /**
- * Hardcoded fallback used when site_prefs.eps_schedule is NULL.
- * Matches the schedule that was hardcoded in the quote detail page
- * before migration 0040.
+ * Default 6-milestone EPS schedule. Used as the fallback when
+ * site_prefs.eps_schedule is NULL. The percent column sums to 100
+ * (10 + 15 + 30 + 20 + 20 + 5). Rows 3-6 use the {weeks} token —
+ * substituted at render time via floor(weeks_num * W / weeks_den)
+ * where W is the quote's delivery-weeks value.
+ *
+ * Milestone breakdown:
+ *   1  10%  Order Confirmation
+ *   2  15%  PDR / Production schedule released / Long-leads on order — fixed 4 weeks
+ *   3  30%  Detailed Design Review + Purchasing Complete — ~30% of lead time
+ *   4  20%  Fabrication Completion / Assembly Under Way — ~50% of lead time
+ *   5  20%  FAT Completion — ~70% of lead time
+ *   6   5%  Final Documentation Delivery — 100% of lead time
  */
 export const DEFAULT_EPS_SCHEDULE = {
   rows: [
-    { percent: 25, label: 'Due upon receipt of purchase order' },
-    { percent: 25, label: 'Due {weeks} weeks ARO', weeks_num: 1, weeks_den: 3 },
-    { percent: 25, label: 'Due {weeks} weeks ARO', weeks_num: 2, weeks_den: 3 },
-    { percent: 15, label: 'Due upon completion of FAT' },
-    { percent: 10, label: 'Due upon delivery of final documentation' },
+    {
+      percent: 10,
+      label: 'Due at Order Confirmation.',
+    },
+    {
+      percent: 15,
+      label: 'Due at Preliminary Design Review, Production Schedule Released, and Long-leads on order. 4 weeks after Order Confirmation.',
+    },
+    {
+      percent: 30,
+      label: 'Due at Detailed Design Review, and Purchasing Complete. Approx. {weeks} weeks after Order Confirmation.',
+      weeks_num: 30, weeks_den: 100,
+    },
+    {
+      percent: 20,
+      label: 'Due at Fabrication Completion, and Assembly Under Way. Approx. {weeks} weeks after Order Confirmation.',
+      weeks_num: 50, weeks_den: 100,
+    },
+    {
+      percent: 20,
+      label: 'Due at FAT Completion. Approx. {weeks} weeks after Order Confirmation.',
+      weeks_num: 70, weeks_den: 100,
+    },
+    {
+      percent: 5,
+      label: 'Due at Final Documentation Delivery. {weeks} weeks from Order Confirmation.',
+      weeks_num: 100, weeks_den: 100,
+    },
   ],
 };
 
