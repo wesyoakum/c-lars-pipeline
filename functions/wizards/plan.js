@@ -152,9 +152,14 @@ async function planContact(env, extracted) {
       });
     }
     if (orgDetail.address) {
+      // Address rows carry separate Physical / Billing toggles instead
+      // of a single checked flag. The executor reads those to decide
+      // the kind ('physical' / 'billing' / 'both') or skip the row
+      // entirely when neither is set.
       accountPushCandidates.push({
         field: 'address', current: '', proposed: orgDetail.address,
         conflict: false, checked: true,
+        address_physical: true, address_billing: false,
       });
     }
   }
@@ -198,6 +203,8 @@ async function planContact(env, extracted) {
           proposed: orgDetail.address,
           conflict: existing.length > 0,
           checked: existing.length === 0,
+          address_physical: existing.length === 0,
+          address_billing: false,
         });
       }
     }

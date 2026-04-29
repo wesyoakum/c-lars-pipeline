@@ -258,6 +258,24 @@ function normalizeLinkedinUrl(s) {
   return 'https://www.linkedin.com/in/' + slug;
 }
 
+// Reformat a single-line address into mailing-label form. The LLM
+// often returns "123 Main St., San Diego, CA" as one line; we want
+//   123 Main St.
+//   San Diego, CA
+// — street on its own line, city + state/region (+ zip + country)
+// joined on the next. Heuristic: split on commas, take the first
+// part as the street line, join the rest with ", " on a second line.
+// If the address is already multi-line (contains \n), leave it alone.
+function normalizeAddressLines(s) {
+  if (!s) return '';
+  const trimmed = String(s).trim();
+  if (!trimmed) return '';
+  if (trimmed.indexOf('\n') >= 0) return trimmed;
+  const parts = trimmed.split(/,\s*/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 2) return trimmed;
+  return parts[0] + '\n' + parts.slice(1).join(', ');
+}
+
 function normalizeExtraction(raw) {
   const arr = (v) => (Array.isArray(v) ? v.filter(Boolean) : []);
   const str = (v) => (typeof v === 'string' ? v.trim() : '');
@@ -289,7 +307,7 @@ function normalizeExtraction(raw) {
     phone: str(o?.phone),
     email: str(o?.email),
     website: str(o?.website),
-    address: str(o?.address),
+    address: normalizeAddressLines(str(o?.address)),
   })).filter((o) => o.name && (o.phone || o.email || o.website || o.address));
 
   return {

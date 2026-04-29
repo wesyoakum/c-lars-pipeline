@@ -922,6 +922,50 @@ code {
   border-left: 3px solid #f59e0b;  /* amber-500 */
   padding-left: 0.4rem;
 }
+
+/* Address rows: 2-column grid (label + value), with the kind toggles
+   stacked on a third row that spans the full width. Multi-line
+   address text renders with line breaks (the LLM gives us "street
+   line\ncity, state" after normalizeAddressLines runs in prompts.js). */
+.task-wizard-review-field-address {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  grid-template-areas:
+    "label value"
+    ".     kinds"
+    ".     current";
+  gap: 0.25rem 0.5rem;
+  cursor: default;             /* not click-to-toggle as a whole — only the sub-checkboxes */
+}
+.task-wizard-review-field-address .task-wizard-review-field-name {
+  grid-area: label;
+}
+.task-wizard-review-field-address .task-wizard-review-address-text {
+  grid-area: value;
+  white-space: pre-line;       /* render \n as line breaks */
+  line-height: 1.35;
+}
+.task-wizard-review-address-kinds {
+  grid-area: kinds;
+  display: flex;
+  gap: 0.85rem;
+  font-size: 0.82rem;
+  color: var(--fg-muted);
+  margin-top: 0.15rem;
+}
+.task-wizard-review-address-kinds label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+  user-select: none;
+}
+.task-wizard-review-address-kinds input[type="checkbox"] {
+  margin: 0;
+}
+.task-wizard-review-field-address .task-wizard-review-field-current {
+  grid-area: current;
+}
 .task-wizard-review-actions {
   display: flex;
   gap: 0.5rem;

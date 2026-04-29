@@ -89,7 +89,14 @@ export async function onRequestPost(context) {
     // proposed_new also carries phone/website/address: it's a copy of
     // what the LLM saw, but the executor doesn't read those — it
     // reads push_candidates so unchecks actually stick.)
-    const addressForCol = pickChecked(plan.account.push_candidates, 'address');
+    const addrCand = (plan.account.push_candidates || []).find((c) => c.field === 'address');
+    const addressKind = pickAddressKind(addrCand);
+    const addressForRow = addressKind ? addrCand.proposed : null;
+    // Mirror the address into the right denormalized column. 'both'
+    // (and physical-only) write to address_physical; billing-only to
+    // address_billing.
+    const addressBillingCol = (addressKind === 'billing' || addressKind === 'both') ? addrCand.proposed : null;
+    const addressPhysicalCol = (addressKind === 'physical' || addressKind === 'both') ? addrCand.proposed : null;
     const phoneFromPlan = pickChecked(plan.account.push_candidates, 'phone');
     const websiteFromPlan = pickChecked(plan.account.push_candidates, 'website');
 
@@ -98,17 +105,17 @@ export async function onRequestPost(context) {
          (id, name, alias, segment, address_billing, address_physical,
           phone, website, notes, owner_user_id, is_active,
           created_at, updated_at, created_by_user_id)
-       VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, NULL, ?, 1, ?, ?, ?)`,
-      [accountId, a.name, a.alias || a.name, addressForCol, phoneFromPlan, websiteFromPlan, user.id, ts, ts, user.id]));
+       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?)`,
+      [accountId, a.name, a.alias || a.name, addressBillingCol, addressPhysicalCol, phoneFromPlan, websiteFromPlan, user.id, ts, ts, user.id]));
 
-    // Address row (separate table). Only insert when there's a
-    // checked address; the denormalized column above mirrors it.
-    if (addressForCol) {
+    // Address row (separate table). Only insert when there's a chosen
+    // kind; the denormalized columns above mirror it.
+    if (addressForRow) {
       statements.push(stmt(env.DB,
         `INSERT INTO account_addresses
            (id, account_id, kind, label, address, is_default, notes, created_at, updated_at)
-         VALUES (?, ?, 'physical', NULL, ?, 1, NULL, ?, ?)`,
-        [uuid(), accountId, addressForCol, ts, ts]));
+         VALUES (?, ?, ?, NULL, ?, 1, NULL, ?, ?)`,
+        [uuid(), accountId, addressKind, addressForRow, ts, ts]));
     }
 
     statements.push(auditStmt(env.DB, {
@@ -123,16 +130,21 @@ export async function onRequestPost(context) {
     // Account exists. Apply checked push_candidates.
     const updates = {};
     for (const c of (plan.account.push_candidates || [])) {
-      if (!c.checked) continue;
       if (c.field === 'address') {
-        // Add a new row in account_addresses (don't overwrite existing).
+        // Address rows are gated by their own physical/billing
+        // toggles; add a new row in account_addresses (don't
+        // overwrite existing). Skip entirely when neither toggle is
+        // on.
+        const kind = pickAddressKind(c);
+        if (!kind) continue;
         statements.push(stmt(env.DB,
           `INSERT INTO account_addresses
              (id, account_id, kind, label, address, is_default, notes, created_at, updated_at)
-           VALUES (?, ?, 'physical', NULL, ?, 0, NULL, ?, ?)`,
-          [uuid(), accountId, c.proposed, ts, ts]));
+           VALUES (?, ?, ?, NULL, ?, 0, NULL, ?, ?)`,
+          [uuid(), accountId, kind, c.proposed, ts, ts]));
         continue;
       }
+      if (!c.checked) continue;
       if (ACCOUNT_PUSH_COLUMNS.has(c.field)) {
         updates[c.field] = c.proposed;
       }
@@ -266,6 +278,22 @@ export async function onRequestPost(context) {
 function pickChecked(candidates, field) {
   const c = (candidates || []).find((x) => x.field === field && x.checked);
   return c ? c.proposed : null;
+}
+
+// For an address candidate, return the chosen kind based on the
+// physical/billing toggles, or null if both are off (skip this row).
+//   { address_physical: true,  address_billing: false } → 'physical'
+//   { address_physical: false, address_billing: true  } → 'billing'
+//   { address_physical: true,  address_billing: true  } → 'both'
+//   { address_physical: false, address_billing: false } → null
+function pickAddressKind(candidate) {
+  if (!candidate) return null;
+  const phys = !!candidate.address_physical;
+  const bill = !!candidate.address_billing;
+  if (phys && bill) return 'both';
+  if (phys) return 'physical';
+  if (bill) return 'billing';
+  return null;
 }
 
 function linkStmt(db, itemId, actionType, refType, refId, refLabel, user) {

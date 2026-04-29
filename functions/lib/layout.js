@@ -368,15 +368,32 @@ const WIZARD_MODAL_MARKUP = (
   '</span>' +
   '</template>' +
   '</div>' +
-  // Push candidates for the account
+  // Push candidates for the account. Address rows render with two
+  // sub-toggles (Physical / Billing) instead of a single checkbox —
+  // either, both, or neither selectable.
   '<div class="task-wizard-review-fields" x-show="$store.wizard.plan.account.push_candidates.length > 0">' +
   '<template x-for="(c, idx) in $store.wizard.plan.account.push_candidates" :key="\'a\' + idx">' +
+  '<div>' +
+  '<template x-if="c.field !== \'address\'">' +
   '<label class="task-wizard-review-field" :class="{ conflict: c.conflict }">' +
   '<input type="checkbox" :checked="c.checked" @change="$store.wizard.togglePushCandidate(\'account\', idx)">' +
   '<span class="task-wizard-review-field-name" x-text="c.field"></span>' +
   '<span class="task-wizard-review-field-proposed" x-text="c.proposed"></span>' +
   '<span class="task-wizard-review-field-current" x-show="c.conflict">(current: <span x-text="c.current || \'(empty)\'"></span>)</span>' +
   '</label>' +
+  '</template>' +
+  '<template x-if="c.field === \'address\'">' +
+  '<div class="task-wizard-review-field task-wizard-review-field-address" :class="{ conflict: c.conflict }">' +
+  '<span class="task-wizard-review-field-name">address</span>' +
+  '<span class="task-wizard-review-field-proposed task-wizard-review-address-text" x-text="c.proposed"></span>' +
+  '<div class="task-wizard-review-address-kinds">' +
+  '<label><input type="checkbox" x-model="c.address_physical"> Physical</label>' +
+  '<label><input type="checkbox" x-model="c.address_billing"> Billing</label>' +
+  '</div>' +
+  '<span class="task-wizard-review-field-current" x-show="c.conflict">(current: <span x-text="c.current || \'(empty)\'"></span>)</span>' +
+  '</div>' +
+  '</template>' +
+  '</div>' +
   '</template>' +
   '</div>' +
   '</div>' +
