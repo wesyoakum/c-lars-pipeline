@@ -40,7 +40,16 @@
         type: 'text',
         prompt: 'Short name for lists?',
         hint: 'Optional. Tab to skip — we\'ll derive one from the legal name.',
-        placeholder: 'e.g. Helix Robotics'
+        placeholder: 'e.g. Helix Robotics',
+        // Skip this step entirely when the caller pre-filled the legal
+        // name (e.g. AI Inbox business-card flow). The alias gets
+        // derived from the legal name on submit, and the user can edit
+        // it later from the accounts list — no point asking up front
+        // when the name is already known and the user just wants to
+        // confirm it.
+        skipWhen: function (answers, ctx) {
+          return !!(ctx && ctx.openPrefill && ctx.openPrefill.name);
+        }
       },
       {
         key: 'name',
