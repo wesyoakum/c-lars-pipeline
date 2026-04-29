@@ -29,7 +29,7 @@
 // queries these elements via document.querySelector because they
 // live in the toolbar (a sibling of .opp-list), not inside it.
 
-import { html, escape } from './layout.js';
+import { html, escape, raw } from './layout.js';
 
 /* ------------------------------------------------------------------ */
 /*  Server-side HTML helpers                                          */
