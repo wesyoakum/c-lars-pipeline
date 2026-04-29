@@ -31,6 +31,25 @@
     return;
   }
 
+  // Mirror of stripCustomerName() in functions/wizards/plan.js. Used
+  // by applyExtraction (the Edit-Manually fallback path); the
+  // server-side planner does the same scrub for the review screen.
+  function stripCustomerNameFromTitle(title, customerName) {
+    if (!title || !customerName) return title;
+    var t = String(title).trim();
+    var c = String(customerName).trim();
+    if (!c) return t;
+    var cEsc = c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var sep = '\\s*[-:—–|·]?\\s*';
+    var r = t;
+    r = r.replace(new RegExp('^' + cEsc + sep, 'i'), '');
+    r = r.replace(new RegExp(sep + cEsc + '\\s*$', 'i'), '');
+    r = r.replace(new RegExp('\\s+(for|to|from|at|with)\\s+' + cEsc + '\\b', 'i'), '');
+    r = r.replace(new RegExp('\\b' + cEsc + '\\b', 'i'), '');
+    r = r.replace(/\s+/g, ' ').replace(/^\s*[-:—–|·]\s*|\s*[-:—–|·]\s*$/g, '').trim();
+    return r || t;
+  }
+
   // Quote-type options. Server revalidates against the opportunity's
   // transaction_type and rejects mismatches via a flash redirect, so
   // we can show all of them here without needing per-opp data.

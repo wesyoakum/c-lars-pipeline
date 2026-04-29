@@ -139,7 +139,7 @@ function todayIso() {
 
 const COMMON_SCHEMA_BLOCK = `Return strict JSON with this exact shape:
 {
-  "title": "string — short, scannable title (under 80 chars)",
+  "title": "string — short, scannable title (under 80 chars). Do NOT include the company / customer / organization name; the title describes WHAT, not WHO. The org name is captured separately in 'organizations'. Examples — good: 'Spares quote on pump skid replacement', 'Trade-show debrief', 'EPS proposal follow-up'. Bad: 'Acme Corp - Spares quote' or 'Quote for Acme'.",
   "summary": "string — 1-3 sentence executive summary",
   "people": ["string — full name of each person mentioned"],
   "organizations": ["string — name of each company/org mentioned"],

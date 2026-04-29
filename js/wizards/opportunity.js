@@ -34,6 +34,25 @@
     return;
   }
 
+  // Mirror of stripCustomerName() in functions/wizards/plan.js. Used
+  // by applyExtraction (the Edit-Manually fallback path); the
+  // server-side planner does the same scrub for the review screen.
+  function stripCustomerNameFromTitle(title, customerName) {
+    if (!title || !customerName) return title;
+    var t = String(title).trim();
+    var c = String(customerName).trim();
+    if (!c) return t;
+    var cEsc = c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var sep = '\\s*[-:—–|·]?\\s*';
+    var r = t;
+    r = r.replace(new RegExp('^' + cEsc + sep, 'i'), '');
+    r = r.replace(new RegExp(sep + cEsc + '\\s*$', 'i'), '');
+    r = r.replace(new RegExp('\\s+(for|to|from|at|with)\\s+' + cEsc + '\\b', 'i'), '');
+    r = r.replace(new RegExp('\\b' + cEsc + '\\b', 'i'), '');
+    r = r.replace(/\s+/g, ' ').replace(/^\s*[-:—–|·]\s*|\s*[-:—–|·]\s*$/g, '').trim();
+    return r || t;
+  }
+
   var TYPE_OPTIONS = [
     { value: '',        label: '\u2014 Pick a type \u2014' },
     { value: 'spares',  label: 'Spares' },
@@ -177,10 +196,18 @@
     // skip auto-picking the account / type / value — those are the
     // user's deliberate decisions and the wizard's required steps
     // make the user confirm them.
+    //
+    // Coaching: customer/org names belong on the account_id link,
+    // not in the opp title. Strip the extracted org name from the
+    // title before use (the server planner does the same — this is
+    // the Edit-Manually fallback path mirror).
     applyExtraction: function (answers, extracted /*, ctx */) {
       if (!extracted) return null;
+      var orgName = (extracted.organizations_detail && extracted.organizations_detail[0] && extracted.organizations_detail[0].name)
+        || (extracted.organizations && extracted.organizations[0])
+        || '';
       if (extracted.title && !answers.title) {
-        answers.title = String(extracted.title).trim();
+        answers.title = stripCustomerNameFromTitle(String(extracted.title).trim(), orgName);
       }
       if (extracted.summary && !answers.description) {
         answers.description = String(extracted.summary).trim();

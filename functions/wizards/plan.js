@@ -98,6 +98,44 @@ function splitFullName(name) {
   return { first_name: parts[0], last_name: parts.slice(1).join(' ') };
 }
 
+// Strip a customer/organization name from an opportunity or quote
+// title — the title describes WHAT, the link to the account
+// describes WHO. The extraction prompt asks for this, but the LLM
+// occasionally slips ("Acme Corp - Spares quote on pump skid"), so
+// we belt-and-suspender here.
+//
+// Patterns handled:
+//   "Acme Corp - Spares for pump skid"        → "Spares for pump skid"
+//   "Acme Corp: Spares for pump skid"         → "Spares for pump skid"
+//   "Spares for Acme Corp pump skid"          → "Spares for pump skid"
+//   "Quote for Acme Corp"                     → "Quote"
+//   "Acme Corp Spares Quote"                  → "Spares Quote"
+//   "Spares Quote — Acme Corp"                → "Spares Quote"
+// Returns the original title if stripping would empty it (rare).
+function stripCustomerName(title, customerName) {
+  if (!title || !customerName) return title;
+  const t = String(title).trim();
+  const c = String(customerName).trim();
+  if (!c) return t;
+  const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const cEsc = escapeRegex(c);
+  // Common separator characters that might sit between the name and
+  // the rest of the title.
+  const sep = '\\s*[-:—–|·]?\\s*';
+  let r = t;
+  // Customer at the start (with optional separator after).
+  r = r.replace(new RegExp('^' + cEsc + sep, 'i'), '');
+  // Customer at the end (with optional separator before).
+  r = r.replace(new RegExp(sep + cEsc + '\\s*$', 'i'), '');
+  // " for|to|from|at|with Acme Corp" anywhere.
+  r = r.replace(new RegExp('\\s+(for|to|from|at|with)\\s+' + cEsc + '\\b', 'i'), '');
+  // Bare "Acme Corp" leftover anywhere — last-resort strip.
+  r = r.replace(new RegExp('\\b' + cEsc + '\\b', 'i'), '');
+  // Collapse double spaces / dangling separators after stripping.
+  r = r.replace(/\s+/g, ' ').replace(/^\s*[-:—–|·]\s*|\s*[-:—–|·]\s*$/g, '').trim();
+  return r || t;
+}
+
 // ----- shared section builders -------------------------------------
 
 // Build an Account section: resolve the org name against existing
@@ -416,9 +454,11 @@ async function planOpportunity(env, extracted) {
   // estimated_value_usd / expected_close_date / transaction_type
   // aren't extracted by the LLM today; leaving empty for the user
   // to fill is fine.
+  // Title: scrub the customer name out (the account_id link is what
+  // identifies the customer — the title describes WHAT).
   const opportunitySection = {
     proposed_new: {
-      title: String(extracted?.title || '').trim(),
+      title: stripCustomerName(String(extracted?.title || '').trim(), orgName),
       description: String(extracted?.summary || '').trim(),
       transaction_type: '',
       estimated_value_usd: '',
@@ -504,6 +544,10 @@ async function planQuote(env, extracted) {
   // "create new".
   const defaultSelected = existingOpps.length > 0 ? existingOpps[0].id : '';
 
+  // Customer name belongs on the account link, not in opp/quote
+  // titles — strip it from anything the LLM extracted.
+  const cleanTitle = stripCustomerName(String(extracted?.title || '').trim(), orgName);
+
   const opportunitySection = {
     existing: existingOpps.map((o) => ({
       id: o.id,
@@ -514,7 +558,7 @@ async function planQuote(env, extracted) {
     })),
     selected_id: defaultSelected,
     proposed_new: {
-      title: String(extracted?.title || '').trim(),
+      title: cleanTitle,
       description: String(extracted?.summary || '').trim(),
       transaction_type: '',
       estimated_value_usd: '',
@@ -524,7 +568,7 @@ async function planQuote(env, extracted) {
 
   const quoteSection = {
     proposed_new: {
-      title: String(extracted?.title || '').trim(),
+      title: cleanTitle,
       description: String(extracted?.summary || '').trim(),
       quote_type: '',
     },
