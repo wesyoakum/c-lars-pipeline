@@ -30,6 +30,7 @@ import { slugifyGroup, loadSiblingAccounts, listGroupLabels } from '../../lib/ac
 import { loadStageCatalog } from '../../lib/stages.js';
 import { fmtDollar } from '../../lib/pricing.js';
 import { INACTIVE_OPPORTUNITY_STAGES } from '../../lib/activeness.js';
+import { iconAddButton } from '../../lib/list-table.js';
 
 const UPDATE_FIELDS = [
   'name',
@@ -466,8 +467,10 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h2>Contacts</h2>
-        <button class="btn primary" type="button"
-                onclick="window.Pipeline && window.Pipeline.openWizard('contact', ${escape(acctWizardPrefill)})">New contact</button>
+        ${iconAddButton({
+          onClick: `window.Pipeline && window.Pipeline.openWizard('contact', ${acctWizardPrefill})`,
+          label: 'New contact',
+        })}
       </div>
 
       ${contacts.length === 0
@@ -540,8 +543,10 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h2>Opportunities</h2>
-        <button class="btn primary" type="button"
-                onclick="window.Pipeline && window.Pipeline.openWizard('opportunity', ${escape(acctWizardPrefill)})">New opportunity</button>
+        ${iconAddButton({
+          onClick: `window.Pipeline && window.Pipeline.openWizard('opportunity', ${acctWizardPrefill})`,
+          label: 'New opportunity',
+        })}
       </div>
       ${oppRows.length === 0
         ? html`<p class="muted">No opportunities yet.</p>`

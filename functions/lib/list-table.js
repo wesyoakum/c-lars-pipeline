@@ -36,6 +36,30 @@ import { html, escape } from './layout.js';
 /* ------------------------------------------------------------------ */
 
 /**
+ * Standard "+" icon-button (the consistent "create" affordance used
+ * everywhere — list-page toolbars, detail-page section headers, etc.).
+ *
+ *   iconAddButton({ onClick: "window.Pipeline.openWizard('contact', {})", label: 'New contact' })
+ *   iconAddButton({ href: '/quotes/new', label: 'New quote' })
+ *
+ * Pass exactly one of `onClick` (renders <button>) or `href` (renders
+ * <a>). The label populates `title` and `aria-label` only — the button
+ * face is the icon. Pass `extraClass` to add classes alongside
+ * `icon-btn primary`.
+ */
+export function iconAddButton({ onClick, href, label = 'New', extraClass = '' } = {}) {
+  const cls = ['icon-btn', 'primary', extraClass].filter(Boolean).join(' ');
+  const svg = '<svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="10" y1="4" x2="10" y2="16"/><line x1="4" y1="10" x2="16" y2="10"/></svg>';
+  if (onClick) {
+    return html`<button type="button" class="${cls}" onclick="${escape(onClick)}" title="${escape(label)}" aria-label="${escape(label)}">${raw(svg)}</button>`;
+  }
+  if (href) {
+    return html`<a class="${cls}" href="${escape(href)}" title="${escape(label)}" aria-label="${escape(label)}">${raw(svg)}</a>`;
+  }
+  return '';
+}
+
+/**
  * Standard toolbar: quicksearch + count + optional columns-menu + optional new button.
  *
  *   listToolbar({ id: 'quotes', count: rows.length, columns, newHref: '/quotes/new' })
@@ -89,15 +113,7 @@ export function listToolbar({ id, count, columns = null, newHref, newOnClick, ne
           </div>
         </details>
       ` : ''}
-      ${newOnClick ? html`
-        <button type="button" class="icon-btn primary" onclick="${escape(newOnClick)}" title="${escape(newLabel)}">
-          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="10" y1="4" x2="10" y2="16"/><line x1="4" y1="10" x2="16" y2="10"/></svg>
-        </button>
-      ` : newHref ? html`
-        <a class="icon-btn primary" href="${escape(newHref)}" title="${escape(newLabel)}">
-          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="10" y1="4" x2="10" y2="16"/><line x1="4" y1="10" x2="16" y2="10"/></svg>
-        </a>
-      ` : ''}
+      ${iconAddButton({ onClick: newOnClick, href: newHref, label: newLabel })}
     </div>`;
 }
 

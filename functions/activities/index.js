@@ -142,9 +142,13 @@ export async function onRequestGet(context) {
       <div class="card-header">
         <h2>Activities</h2>
         <div class="toolbar-right" style="display:flex;align-items:center;gap:0.5rem">
-          ${listToolbar({ id: 'act', count: activities.length, columns })}
-          <button class="btn btn-sm primary" type="button"
-                  onclick="window.Pipeline && window.Pipeline.openTaskModal({})">+ New task</button>
+          ${listToolbar({
+            id: 'act',
+            count: activities.length,
+            columns,
+            newOnClick: 'window.Pipeline && window.Pipeline.openTaskModal({})',
+            newLabel: 'New task',
+          })}
         </div>
       </div>
 
