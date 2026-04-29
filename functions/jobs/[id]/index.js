@@ -149,8 +149,9 @@ export async function onRequestGet(context) {
         </h1>
         ${user && user.email === 'wes.yoakum@c-lars.com' ? html`<div class="header-actions" style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">
           <button type="button" class="aii-page-capture-btn"
+                  title="Capture an audio note for this job" aria-label="Capture audio note"
                   onclick="window.PipelineAICapture && window.PipelineAICapture.open({ refType: 'job', refId: '${escape(job.id)}', refLabel: '${escape(job.number)} — ${escape((job.title || '').slice(0, 60))}' })">
-            <span class="aii-page-capture-icon">${raw(ICON_MIC)}</span> Capture
+            <span class="aii-page-capture-icon">${raw(ICON_MIC)}</span>
           </button>
         </div>` : ''}
       </div>

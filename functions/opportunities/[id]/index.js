@@ -470,8 +470,9 @@ export async function onRequestGet(context) {
                opportunity so the rep can keep working on the deal page
                instead of context-switching to /ai-inbox. -->
           ${user && user.email === 'wes.yoakum@c-lars.com' ? html`<button type="button" class="aii-page-capture-btn"
+                  title="Capture an audio note for this opportunity" aria-label="Capture audio note"
                   onclick="window.PipelineAICapture && window.PipelineAICapture.open({ refType: 'opportunity', refId: '${escape(opp.id)}', refLabel: 'OPP-${escape(opp.number)} — ${escape((opp.title || '').slice(0, 60))}' })">
-            <span class="aii-page-capture-icon">${raw(ICON_MIC)}</span> Capture
+            <span class="aii-page-capture-icon">${raw(ICON_MIC)}</span>
           </button>` : ''}
           <!-- "New job" button paused per feedback 2026-04-17; jobs are
                now created automatically when an OC is issued. Keep the

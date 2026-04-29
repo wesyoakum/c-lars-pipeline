@@ -18,7 +18,7 @@ import { auditStmt, diff } from '../../../../lib/audit.js';
 import { now } from '../../../../lib/ids.js';
 import { layout, htmlResponse, html, raw, escape } from '../../../../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../../../../lib/http.js';
-import { ICON_CALCULATOR, ICON_CALCULATOR_PLUS, ICON_PDF, ICON_DOCX } from '../../../../lib/icons.js';
+import { ICON_CALCULATOR, ICON_CALCULATOR_PLUS, ICON_PDF, ICON_DOCX, ICON_MIC } from '../../../../lib/icons.js';
 import {
   validateQuote,
   allowedQuoteTypes,
@@ -196,8 +196,9 @@ export async function onRequestGet(context) {
           <a class="back-link" href="/opportunities/${escape(quote.opportunity_id)}?tab=quotes">\u2190 Quotes</a>
           <div class="header-actions">
             ${user && user.email === 'wes.yoakum@c-lars.com' ? html`<button type="button" class="aii-page-capture-btn"
+                    title="Capture an audio note for this quote" aria-label="Capture audio note"
                     onclick="window.PipelineAICapture && window.PipelineAICapture.open({ refType: 'quote', refId: '${escape(quote.id)}', refLabel: '${escape(quote.number)} \u2014 ${escape((quote.title || '').slice(0, 60))}' })">
-              <span class="aii-page-capture-icon">\ud83c\udfa4</span> Capture
+              <span class="aii-page-capture-icon">${raw(ICON_MIC)}</span>
             </button>` : ''}
             ${isDraft ? html`
               <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/submit" class="inline-form">
@@ -241,14 +242,12 @@ export async function onRequestGet(context) {
               </form>
             ` : ''}
             <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/generate-pdf" class="inline-form">
-              <button class="btn btn-icon-doc" type="submit" title="Generate PDF" aria-label="Generate PDF"
-                      style="display:inline-flex;align-items:center;justify-content:center;padding:0.35rem 0.55rem">
+              <button class="btn btn-icon" type="submit" title="Generate PDF" aria-label="Generate PDF">
                 ${raw(ICON_PDF)}
               </button>
             </form>
             <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/generate-docx" class="inline-form">
-              <button class="btn btn-icon-doc" type="submit" title="Download Word document" aria-label="Download Word"
-                      style="display:inline-flex;align-items:center;justify-content:center;padding:0.35rem 0.55rem">
+              <button class="btn btn-icon" type="submit" title="Download Word document" aria-label="Download Word">
                 ${raw(ICON_DOCX)}
               </button>
             </form>

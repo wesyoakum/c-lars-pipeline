@@ -3783,20 +3783,24 @@ textarea.ie-input { width: 100%; min-width: 12rem; resize: vertical; }
   }
 }
 
-/* ---------- "Capture" button shown on entity detail pages ---------- */
+/* ---------- "Capture" button shown on entity detail pages ----------
+ * Sized to match the standard .btn (same height + same vertical
+ * padding) so an action row of [Capture] [Issue] [Delete] [PDF]
+ * [DOCX] reads as one consistent group. The blue tint sets it apart
+ * as a meta-action (opens an audio capture modal). */
 .aii-page-capture-btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.35rem;
-  padding: 0.45rem 0.85rem;
+  padding: 0.5rem 0.7rem;
   border: 1px solid #c8d4ff;
   background: #f0f4ff;
   color: #2451b8;
-  border-radius: 6px;
+  border-radius: var(--radius);
   cursor: pointer;
-  font-size: 0.85rem;
+  font: inherit;
   text-decoration: none;
-  min-height: 36px;
 }
 .aii-page-capture-btn:hover {
   background: #dbe5ff;
@@ -3810,8 +3814,25 @@ textarea.ie-input { width: 100%; min-width: 12rem; resize: vertical; }
 }
 .aii-page-capture-btn .aii-page-capture-icon svg {
   display: block;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
+}
+
+/* Icon-only variant of .btn — narrower horizontal padding to keep the
+ * box square-ish around an 18×18 icon, but the same vertical padding
+ * as the standard .btn so it lines up with text-label siblings. Used
+ * for the Generate-PDF / Download-Word affordances on quote / OC /
+ * NTP pages. */
+.btn.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0.7rem;
+}
+.btn.btn-icon svg {
+  display: block;
+  width: 18px;
+  height: 18px;
 }
 
 /* ---------- Detail pairs (side-by-side key-value) ---------- */

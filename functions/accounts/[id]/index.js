@@ -398,8 +398,9 @@ export async function onRequestGet(context) {
         </div>
         <div class="header-actions" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
           ${user && user.email === 'wes.yoakum@c-lars.com' ? html`<button type="button" class="aii-page-capture-btn"
+                  title="Capture an audio note for this account" aria-label="Capture audio note"
                   onclick="window.PipelineAICapture && window.PipelineAICapture.open({ refType: 'account', refId: '${escape(account.id)}', refLabel: '${escape((account.alias || account.name || '').slice(0, 60))}' })">
-            <span class="aii-page-capture-icon">${raw(ICON_MIC)}</span> Capture
+            <span class="aii-page-capture-icon">${raw(ICON_MIC)}</span>
           </button>` : ''}
           <form method="post" action="/accounts/${escape(account.id)}/delete"
                 onsubmit="return window.Pipeline && Pipeline.confirmCascadeDelete(event, { entityType: 'account', entityId: '${escape(account.id)}', entityLabel: '${escape((account.alias || account.name || '').slice(0, 60))}' });"
