@@ -147,13 +147,18 @@ export async function onRequestGet(context) {
           ${escape(job.number)}
           — ${inlineText('title', job.title, { placeholder: 'Add title' })}
         </h1>
-        ${user && user.email === 'wes.yoakum@c-lars.com' ? html`<div class="header-actions" style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">
-          <button type="button" class="aii-page-capture-btn"
+        <div class="header-actions" style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">
+          ${user && user.email === 'wes.yoakum@c-lars.com' ? html`<button type="button" class="aii-page-capture-btn"
                   title="Capture an audio note for this job" aria-label="Capture audio note"
                   onclick="window.PipelineAICapture && window.PipelineAICapture.open({ refType: 'job', refId: '${escape(job.id)}', refLabel: '${escape(job.number)} — ${escape((job.title || '').slice(0, 60))}' })">
             <span class="aii-page-capture-icon">${raw(ICON_MIC)}</span>
-          </button>
-        </div>` : ''}
+          </button>` : ''}
+          <form method="post" action="/jobs/${escape(job.id)}/delete"
+                class="inline-form"
+                onsubmit="return window.Pipeline && Pipeline.confirmCascadeDelete(event, { entityType: 'job', entityId: '${escape(job.id)}', entityLabel: '${escape((job.number || '') + ' · ' + (job.title || '').slice(0, 60))}' });">
+            <button class="btn danger" type="submit">Delete</button>
+          </form>
+        </div>
       </div>
       <p class="muted" style="margin:0.15rem 0 0.5rem">
         <span class="pill ${statusClass(job.status)}">${escape(STATUS_LABELS[job.status] ?? job.status)}</span>
