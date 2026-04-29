@@ -449,7 +449,8 @@ function renderDetail({ item, extracted, links, matches, user, attachments }) {
             title: '', summary: '',
             people: [], organizations: [], tags: [],
             people_detail: [], organizations_detail: [],
-            action_items: [], open_questions: [], suggested_destinations: [],
+            action_items: [], open_questions: [], requirements: [],
+            suggested_destinations: [],
             confidence: 'medium',
           },
           links: links || [],
@@ -515,6 +516,67 @@ function renderDetail({ item, extracted, links, matches, user, attachments }) {
           removeTag(idx) { this.fields.tags.splice(idx, 1); this.saveField('tags'); },
           addAction() { this.fields.action_items.push({ task: '', owner: '', due: '' }); },
           removeAction(idx) { this.fields.action_items.splice(idx, 1); this.saveField('action_items'); },
+          addRequirement() {
+            if (!this.fields.requirements) this.fields.requirements = [];
+            this.fields.requirements.push({ text: '', category: 'other' });
+          },
+          removeRequirement(idx) {
+            this.fields.requirements.splice(idx, 1);
+            this.saveField('requirements');
+          },
+          // Targets the entry can push tech specs to: linked opps + quotes.
+          // Returns [{ id, kind, label }] derived from the links array.
+          requirementTargets() {
+            return (this.links || [])
+              .filter(l => l.action_type === 'link_to_opportunity' || l.action_type === 'link_to_quote')
+              .map(l => ({
+                id:   l.ref_id,
+                kind: l.action_type === 'link_to_opportunity' ? 'opportunity' : 'quote',
+                label: l.ref_label || (l.action_type === 'link_to_opportunity' ? '(opportunity)' : '(quote)'),
+              }));
+          },
+          // Selected destination for the apply-requirements push.
+          // Stored as "<kind>:<id>" so a single <select> covers both.
+          requirementTarget: '',
+          async applyRequirements() {
+            const reqs = (this.fields.requirements || []).filter(r => (r.text || '').trim());
+            if (reqs.length === 0) {
+              this.saving = 'No specs to push';
+              setTimeout(() => { this.saving = ''; }, 1500);
+              return;
+            }
+            const targets = this.requirementTargets();
+            if (targets.length === 0) {
+              alert('Link this entry to an opportunity or quote first, then push.');
+              return;
+            }
+            // Default to first target if none picked.
+            const sel = this.requirementTarget
+              || (targets[0] ? targets[0].kind + ':' + targets[0].id : '');
+            if (!sel) return;
+            const [kind, id] = sel.split(':');
+            const target = targets.find(t => t.kind === kind && t.id === id);
+            const targetLabel = target ? target.label : '(target)';
+            if (!confirm(`Append ${reqs.length} tech spec${reqs.length === 1 ? '' : 's'} to internal notes on ${targetLabel}?`)) {
+              return;
+            }
+            this.saving = 'Pushing…';
+            try {
+              const res = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId) + '/apply-requirements', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ target_kind: kind, target_id: id }),
+              });
+              const json = await res.json().catch(() => ({}));
+              if (!res.ok || !json.ok) throw new Error(json.error || 'failed');
+              this.saving = `Pushed ${json.count}`;
+              setTimeout(() => { this.saving = ''; }, 2000);
+            } catch (e) {
+              this.saving = 'Push failed';
+              setTimeout(() => { this.saving = ''; }, 2500);
+            }
+          },
 
           // ----- v2/v3: actions -----
           isHandled(kind) { return this.handledActions.indexOf(kind) >= 0; },
@@ -1673,6 +1735,59 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
         </template>
         <template x-if="fields.action_items.length === 0">
           <div class="aii-editable empty">(no action items)</div>
+        </template>
+      </section>
+
+      <!-- Technical specs / requirements — extracted from the entry's
+           captured text. Each row has a category + free-text spec.
+           "Push to internal notes" sends the whole list to a linked
+           opp or quote's notes_internal field as one appended block. -->
+      <section class="aii-section" style="margin-top:1rem;">
+        <h2 style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
+          <span>Technical specs &amp; requirements</span>
+          <button type="button" class="aii-add-btn" @click="addRequirement()">+ Add</button>
+          <span style="flex:1"></span>
+          <template x-if="fields.requirements && fields.requirements.length > 0">
+            <span style="display:inline-flex;align-items:center;gap:.4rem;font-size:.82rem;font-weight:400">
+              <template x-if="requirementTargets().length === 0">
+                <span class="muted" title="Link this entry to an opportunity or quote, then push the specs to its internal notes.">No linked opp / quote yet</span>
+              </template>
+              <template x-if="requirementTargets().length > 0">
+                <select x-model="requirementTarget" style="font-size:.82rem;padding:.2rem .4rem">
+                  <template x-for="t in requirementTargets()" :key="t.kind + ':' + t.id">
+                    <option :value="t.kind + ':' + t.id" x-text="(t.kind === 'opportunity' ? 'Opp · ' : 'Quote · ') + t.label"></option>
+                  </template>
+                </select>
+              </template>
+              <button type="button" class="aii-apply-btn"
+                      :disabled="requirementTargets().length === 0"
+                      title="Append every spec to the internal-notes panel on the selected opportunity or quote"
+                      @click="applyRequirements()">Push to internal notes</button>
+            </span>
+          </template>
+        </h2>
+        <template x-for="(r, idx) in (fields.requirements || [])" :key="idx">
+          <div class="aii-action">
+            <select class="owner-in" style="max-width:9rem"
+                    x-model="r.category"
+                    @change="saveField('requirements')">
+              <option value="performance">Performance</option>
+              <option value="operational">Operational</option>
+              <option value="interface">Interface</option>
+              <option value="environmental">Environmental</option>
+              <option value="regulatory">Regulatory</option>
+              <option value="commercial">Commercial</option>
+              <option value="other">Other</option>
+            </select>
+            <input class="task-in" type="text"
+                   placeholder="e.g. 10–20 ton load capacity, 500 m water depth, ABS class certified"
+                   x-model="r.text"
+                   @blur="saveField('requirements')">
+            <button type="button" class="aii-rm-btn" @click="removeRequirement(idx)">×</button>
+          </div>
+        </template>
+        <template x-if="!fields.requirements || fields.requirements.length === 0">
+          <div class="aii-editable empty">(no technical specs extracted)</div>
         </template>
       </section>
 

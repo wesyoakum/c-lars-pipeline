@@ -21,8 +21,14 @@ import { now } from '../../lib/ids.js';
 const ALLOWED_FIELDS = new Set([
   'title', 'summary', 'confidence',
   'people', 'organizations', 'action_items', 'open_questions',
+  'requirements',
   'tags', 'suggested_destinations',
   'people_detail', 'organizations_detail',
+]);
+
+const REQUIREMENT_CATEGORIES = new Set([
+  'performance', 'operational', 'interface',
+  'environmental', 'regulatory', 'commercial', 'other',
 ]);
 
 const ALLOWED_DESTINATIONS = new Set([
@@ -94,6 +100,20 @@ function sanitize(name, value) {
       owner: typeof a?.owner === 'string' ? a.owner.trim() : '',
       due: typeof a?.due === 'string' ? a.due.trim() : '',
     })).filter((a) => a.task);
+  }
+  if (name === 'requirements') {
+    if (!Array.isArray(value)) return [];
+    return value.map((r) => {
+      // Tolerate string entries (older payloads / paste-in flows).
+      if (typeof r === 'string') {
+        return { text: r.trim(), category: 'other' };
+      }
+      const cat = typeof r?.category === 'string' ? r.category.trim().toLowerCase() : '';
+      return {
+        text: typeof r?.text === 'string' ? r.text.trim() : '',
+        category: REQUIREMENT_CATEGORIES.has(cat) ? cat : 'other',
+      };
+    }).filter((r) => r.text);
   }
   if (name === 'suggested_destinations') {
     if (!Array.isArray(value)) return [];

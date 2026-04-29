@@ -166,6 +166,10 @@ const COMMON_SCHEMA_BLOCK = `Return strict JSON with this exact shape:
     { "task": "string", "owner": "string or empty", "due": "string or empty (ISO date if known)" }
   ],
   "open_questions": ["string"],
+  "requirements": [
+    { "text": "string — concise spec or requirement statement",
+      "category": "performance | operational | interface | environmental | regulatory | commercial | other" }
+  ],
   "tags": ["string"],
   "suggested_destinations": [
     "keep_as_note" | "create_task" | "create_reminder" |
@@ -198,6 +202,19 @@ Rules:
   ("I'll send", "I need to follow up", "we should call"), leave the
   owner field empty — the recorder is the implicit owner. Only fill
   owner when a specific other person is named ("Bob will reply").
+- Requirements are technical specifications, performance criteria,
+  capacities, ratings, certifications, depth/load/voltage/etc.
+  ranges, environmental tolerances, commercial conditions, or any
+  measurable customer constraint that would belong in an internal
+  engineering spec sheet — NOT generic action items, opinions, or
+  open questions. Examples: "10–20 ton load capacity", "Active
+  heave compensation", "500 m water depth", "ABS class certified",
+  "Lead time ≤ 30 weeks ARO". Include only items the source text
+  actually states or implies as a constraint; do not invent or
+  pad. Use [] when the entry has no technical specs.
+- Requirements category: pick the closest of performance,
+  operational, interface, environmental, regulatory, commercial,
+  or other. When unsure, use "other".
 - Confidence reflects your confidence in the extraction overall, not in any one field.
 - Do not invent people/organizations/dates that the transcript does not contain.
 - No prose, no markdown fences, no additional top-level fields.
@@ -319,6 +336,27 @@ function normalizeExtraction(raw) {
     address: normalizeAddressLines(str(o?.address)),
   })).filter((o) => o.name && (o.phone || o.email || o.website || o.address));
 
+  // Requirements — technical specs / performance criteria the LLM
+  // pulled from the source text. Each entry needs non-empty text;
+  // category is normalized to one of the known buckets, defaulting
+  // to 'other' when missing or unrecognized.
+  const REQ_CATS = new Set([
+    'performance', 'operational', 'interface',
+    'environmental', 'regulatory', 'commercial', 'other',
+  ]);
+  const requirements = arr(raw?.requirements).map((r) => {
+    // Be tolerant — older prompts may emit a string array; coerce to
+    // the {text, category} shape rather than dropping the data.
+    if (typeof r === 'string') {
+      return { text: r.trim(), category: 'other' };
+    }
+    const cat = str(r?.category).toLowerCase();
+    return {
+      text: str(r?.text),
+      category: REQ_CATS.has(cat) ? cat : 'other',
+    };
+  }).filter((r) => r.text);
+
   return {
     title: str(raw?.title) || '(untitled)',
     summary: str(raw?.summary),
@@ -328,6 +366,7 @@ function normalizeExtraction(raw) {
     organizations_detail: orgsDetail,
     action_items: actions,
     open_questions: arr(raw?.open_questions).map(str).filter(Boolean),
+    requirements,
     tags: arr(raw?.tags).map(str).filter(Boolean),
     suggested_destinations: arr(raw?.suggested_destinations).map(str).filter(Boolean),
     confidence: conf,
