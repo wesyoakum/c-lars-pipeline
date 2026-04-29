@@ -11,7 +11,7 @@ import { html } from './layout.js';
 
 /**
  * Render the Settings sub-nav.
- * @param {'preferences'|'auto-tasks'|'users'|'history'} active — which tab is active
+ * @param {'preferences'|'notifications'|'auto-tasks'|'users'|'history'} active — which tab is active
  * @param {boolean} isAdmin — include admin-only tabs when true
  */
 export function settingsSubNav(active, isAdmin) {
@@ -19,6 +19,8 @@ export function settingsSubNav(active, isAdmin) {
     <nav class="card" style="padding:0.5rem 1rem; display:flex; align-items:center; gap:1rem; flex-wrap:wrap; margin-bottom:0;">
       <a class="nav-link ${active === 'preferences' ? 'active' : ''}"
          href="/settings">Preferences</a>
+      <a class="nav-link ${active === 'notifications' ? 'active' : ''}"
+         href="/settings/notifications">Notifications</a>
       ${isAdmin ? html`
         <a class="nav-link ${active === 'auto-tasks' ? 'active' : ''}"
            href="/settings/auto-tasks">Auto-Task Rules</a>

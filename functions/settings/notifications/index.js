@@ -1,0 +1,226 @@
+// functions/settings/notifications/index.js
+//
+// GET /settings/notifications — per-user notification settings page.
+//
+// Two sections on one page:
+//   1. Channels: list of configured Teams webhook URLs / email
+//      addresses. Form to add another. Per-row Test + Delete buttons.
+//   2. What to send: the event × channel matrix of toggles. Save
+//      All Changes button at the bottom.
+//
+// Phase 7a — foundation only. Until 7b/7c land providers, the
+// "Test" button reports "no provider configured" and the matrix
+// settings persist but don't fire anything.
+
+import { all, one } from '../../lib/db.js';
+import { layout, htmlResponse, html, escape, raw } from '../../lib/layout.js';
+import { readFlash } from '../../lib/http.js';
+import { hasRole } from '../../lib/auth.js';
+import { settingsSubNav } from '../../lib/settings-subnav.js';
+import {
+  NOTIFICATION_EVENTS,
+  NOTIFICATION_EVENT_LABELS,
+  NOTIFICATION_CHANNELS,
+  NOTIFICATION_CHANNEL_LABELS,
+} from '../../lib/notify-external.js';
+
+export async function onRequestGet(context) {
+  const { env, data, request } = context;
+  const user = data?.user;
+  if (!user) {
+    return htmlResponse(
+      layout('Notifications',
+        '<section class="card"><h1>Notifications</h1><p>Sign in required.</p></section>',
+        { env: data?.env, activeNav: '/settings' }),
+      { status: 401 });
+  }
+
+  const url = new URL(request.url);
+  const isAdmin = hasRole(user, 'admin');
+
+  // Load current channels
+  const channels = await all(env.DB,
+    `SELECT id, channel, target, active, last_test_at, last_test_ok
+       FROM user_notification_channels
+      WHERE user_id = ?
+      ORDER BY channel, created_at`,
+    [user.id]);
+
+  // Load current prefs matrix
+  const prefRows = await all(env.DB,
+    `SELECT event_type, channel, enabled
+       FROM user_notification_prefs
+      WHERE user_id = ?`,
+    [user.id]);
+
+  // Build a lookup for the matrix
+  const prefMap = {};
+  for (const r of prefRows) {
+    prefMap[`${r.event_type}|${r.channel}`] = !!r.enabled;
+  }
+
+  // Load current digest timing
+  const userRow = await one(env.DB,
+    `SELECT timezone, digest_hour_local FROM users WHERE id = ?`,
+    [user.id]);
+  const tz = userRow?.timezone || 'America/New_York';
+  const digestHour = userRow?.digest_hour_local ?? 4;
+
+  const eventTypes = Object.values(NOTIFICATION_EVENTS);
+  const channelTypes = Object.values(NOTIFICATION_CHANNELS);
+
+  const body = html`
+    ${settingsSubNav('notifications', isAdmin)}
+
+    <section class="card">
+      <div class="card-header">
+        <h1>External notifications</h1>
+      </div>
+      <p class="muted" style="margin-top:0">
+        Get pinged outside the app for the things you care about. The in-app
+        notifications bell stays on regardless — these are additive.
+      </p>
+
+      <h2 style="margin-top:1.25rem">Channels</h2>
+
+      ${channels.length === 0
+        ? html`<p class="muted">No channels configured yet — add one below.</p>`
+        : html`
+          <table class="data" style="margin-top:0.5rem">
+            <thead>
+              <tr>
+                <th>Channel</th>
+                <th>Target</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${channels.map(c => html`
+                <tr>
+                  <td><strong>${escape(NOTIFICATION_CHANNEL_LABELS[c.channel] || c.channel)}</strong></td>
+                  <td><code style="font-size:0.85em">${escape(truncate(c.target || '', 50))}</code></td>
+                  <td>${c.last_test_at
+                    ? html`<small class="muted">tested ${escape(c.last_test_at.slice(0, 16).replace('T', ' '))} —
+                            ${c.last_test_ok ? raw('<span style="color:#166534">OK</span>') : raw('<span style="color:#b42318">failed</span>')}</small>`
+                    : html`<small class="muted">not tested</small>`}
+                  </td>
+                  <td>
+                    <form method="post" action="/settings/notifications/channels/${escape(c.id)}/test" style="display:inline">
+                      <button type="submit" class="btn btn-sm">Test</button>
+                    </form>
+                    <form method="post" action="/settings/notifications/channels/${escape(c.id)}/delete"
+                          style="display:inline"
+                          onsubmit="return confirm('Remove this channel?');">
+                      <button type="submit" class="btn btn-sm danger">Remove</button>
+                    </form>
+                  </td>
+                </tr>
+              `)}
+            </tbody>
+          </table>
+        `}
+
+      <h3 style="margin-top:1.25rem">Add a channel</h3>
+      <form method="post" action="/settings/notifications/channels"
+            class="stacked"
+            style="display:flex;flex-direction:column;gap:0.5rem;max-width:560px">
+        <label>
+          <span style="display:block;font-size:0.85rem;color:var(--fg-muted)">Channel</span>
+          <select name="channel" required>
+            <option value="teams">Microsoft Teams (incoming webhook)</option>
+            <option value="email">Email</option>
+          </select>
+        </label>
+        <label>
+          <span style="display:block;font-size:0.85rem;color:var(--fg-muted)">Target</span>
+          <input type="text" name="target"
+                 placeholder="Teams webhook URL OR email address"
+                 required style="width:100%;font:inherit;padding:0.4rem;border:1px solid var(--border);border-radius:4px">
+        </label>
+        <p class="muted" style="margin:0;font-size:0.82rem">
+          For Teams: paste the incoming-webhook URL from your channel's
+          connector settings. For email: leave blank to use your account
+          email (${escape(user.email || '')}), or enter another address.
+        </p>
+        <div>
+          <button type="submit" class="btn btn-sm primary">Add channel</button>
+        </div>
+      </form>
+
+      <h2 style="margin-top:2rem">What to send</h2>
+      <p class="muted" style="margin-top:0">
+        Pick which events fire on which channel. Empty rows mean no
+        notification at all (the in-app bell still works).
+      </p>
+
+      <form method="post" action="/settings/notifications/prefs">
+        <table class="data" style="margin-top:0.5rem">
+          <thead>
+            <tr>
+              <th>Event</th>
+              ${channelTypes.map(ch => html`<th style="text-align:center">${escape(NOTIFICATION_CHANNEL_LABELS[ch])}</th>`)}
+            </tr>
+          </thead>
+          <tbody>
+            ${eventTypes.map(ev => html`
+              <tr>
+                <td>${escape(NOTIFICATION_EVENT_LABELS[ev] || ev)}</td>
+                ${channelTypes.map(ch => html`
+                  <td style="text-align:center">
+                    <input type="checkbox"
+                           name="enabled"
+                           value="${escape(ev)}|${escape(ch)}"
+                           ${prefMap[`${ev}|${ch}`] ? 'checked' : ''}>
+                  </td>
+                `)}
+              </tr>
+            `)}
+          </tbody>
+        </table>
+
+        <h3 style="margin-top:1.5rem">Daily digest timing</h3>
+        <div style="display:flex;align-items:baseline;gap:0.75rem;flex-wrap:wrap;max-width:560px">
+          <label style="flex:1">
+            <span style="display:block;font-size:0.85rem;color:var(--fg-muted)">Send at hour (local time)</span>
+            <select name="digest_hour_local">
+              ${Array.from({ length: 24 }, (_, h) => html`
+                <option value="${h}" ${h === digestHour ? 'selected' : ''}>
+                  ${h.toString().padStart(2, '0')}:00
+                </option>
+              `)}
+            </select>
+          </label>
+          <label style="flex:2">
+            <span style="display:block;font-size:0.85rem;color:var(--fg-muted)">Your timezone (IANA)</span>
+            <input type="text" name="timezone" value="${escape(tz)}"
+                   placeholder="America/New_York"
+                   style="width:100%;font:inherit;padding:0.4rem;border:1px solid var(--border);border-radius:4px">
+          </label>
+        </div>
+        <p class="muted" style="margin-top:0.4rem;font-size:0.82rem">
+          Daily digest is opt-in via the matrix above. The cron tick runs
+          hourly UTC and fires at <code>digest_hour_local</code> in your
+          timezone (default 04:00 America/New_York).
+        </p>
+
+        <div style="margin-top:1rem">
+          <button type="submit" class="btn btn-sm primary">Save changes</button>
+        </div>
+      </form>
+    </section>
+  `;
+
+  return htmlResponse(layout('Notifications', body, {
+    user,
+    env: data?.env,
+    activeNav: '/settings',
+    flash: readFlash(url),
+  }));
+}
+
+function truncate(s, n) {
+  if (!s) return '';
+  if (s.length <= n) return s;
+  return s.slice(0, n - 1) + '…';
+}
