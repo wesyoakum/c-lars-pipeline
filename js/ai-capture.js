@@ -46,7 +46,16 @@
       '  <div class="aii-capture-bar" style="margin:.6rem 0 .25rem;">',
       '    <button type="button" class="aii-capture-btn" data-act="record"><span class="aii-capture-btn-icon">🎤</span> Record audio</button>',
       '    <button type="button" class="aii-capture-btn" data-act="photo"><span class="aii-capture-btn-icon">📷</span> Take photo</button>',
+      '    <button type="button" class="aii-capture-btn" data-act="text"><span class="aii-capture-btn-icon">⌨</span> Type text</button>',
       '    <input type="file" accept="image/*" capture="environment" hidden data-role="photo-input">',
+      '  </div>',
+      '',
+      '  <div class="aii-cap-text-panel" data-role="text-panel" hidden>',
+      '    <textarea data-role="text-input" rows="6" placeholder="Type or paste your note. We\'ll create an entry from it and run extraction over the text."></textarea>',
+      '    <div class="aii-cap-text-actions">',
+      '      <button type="button" class="aii-rec-btn aii-rec-btn-primary" data-act="text-save">Save as entry</button>',
+      '      <button type="button" class="aii-rec-btn" data-act="text-cancel">Cancel</button>',
+      '    </div>',
       '  </div>',
       '',
       '  <div class="aii-cap-status" data-role="status"></div>',
@@ -115,6 +124,23 @@
       if (photoInput.files && photoInput.files[0]) uploadFile(photoInput.files[0]);
     });
 
+    // Type text — toggle the textarea panel.
+    const textPanel = $('[data-role="text-panel"]');
+    const textInput = $('[data-role="text-input"]');
+    $('[data-act="text"]').addEventListener('click', () => {
+      textPanel.hidden = false;
+      textInput.focus();
+    });
+    $('[data-act="text-cancel"]').addEventListener('click', () => {
+      textPanel.hidden = true;
+      textInput.value = '';
+    });
+    $('[data-act="text-save"]').addEventListener('click', () => {
+      const txt = (textInput.value || '').trim();
+      if (!txt) return;
+      uploadText(txt);
+    });
+
     return modalEl;
   }
 
@@ -143,12 +169,12 @@
     else if (kind === 'busy') el.classList.add('aii-cap-status-busy');
   }
 
-  async function uploadFile(file) {
-    if (!file || !target) return;
-    setStatus('busy', 'Uploading ' + (file.name || 'file') + '…');
+  async function postEntry(extras, busyLabel) {
+    if (!target) return;
+    setStatus('busy', busyLabel || 'Creating entry…');
     try {
       const fd = new FormData();
-      fd.append('file', file);
+      for (const [k, v] of Object.entries(extras || {})) fd.append(k, v);
       fd.append('associate_ref_type', target.refType);
       fd.append('associate_ref_id', target.refId);
       if (target.refLabel) fd.append('associate_ref_label', target.refLabel);
@@ -160,19 +186,35 @@
       });
       const j = await res.json();
       if (!j.ok) {
-        setStatus('error', 'Upload failed: ' + (j.detail || j.error || 'unknown'));
+        setStatus('error', 'Save failed: ' + (j.detail || j.error || 'unknown'));
         return;
       }
       setStatus('ok', 'Created — AI Inbox is processing the entry now.');
       const link = modalEl.querySelector('[data-role="open-link"]');
       link.href = j.detailUrl;
       link.hidden = false;
+      // Reset the text panel so a follow-up entry from the same modal
+      // session starts clean.
+      const textPanel = modalEl.querySelector('[data-role="text-panel"]');
+      const textInput = modalEl.querySelector('[data-role="text-input"]');
+      if (textPanel) textPanel.hidden = true;
+      if (textInput) textInput.value = '';
       if (target.onCreated) {
         try { target.onCreated(j); } catch (_) {}
       }
     } catch (e) {
-      setStatus('error', 'Upload failed: ' + (e.message || e));
+      setStatus('error', 'Save failed: ' + (e.message || e));
     }
+  }
+
+  function uploadFile(file) {
+    if (!file) return;
+    return postEntry({ file }, 'Uploading ' + (file.name || 'file') + '…');
+  }
+
+  function uploadText(text) {
+    if (!text) return;
+    return postEntry({ text }, 'Saving note…');
   }
 
   function close() {

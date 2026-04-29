@@ -90,6 +90,16 @@ function renderPage({ items, flash }) {
       .dz-big-title { font-size: 1rem; font-weight: 600; color: #2c3a55; }
       .dz-big-hint { font-size: .85rem; color: #666; margin-top: .35rem; }
       .dz-big-status { font-size: .85rem; color: #1f6feb; margin-top: .5rem; min-height: 1.2em; }
+
+      /* Type-text panel under the capture bar */
+      .aii-text-panel { margin: .75rem 0 1rem; padding: .85rem; background: #fafbfc; border: 1px solid #e1e4e8; border-radius: 6px; }
+      .aii-text-panel textarea { width: 100%; box-sizing: border-box; padding: .55rem .65rem; border: 1px solid #ccd; border-radius: 4px; font-family: inherit; font-size: .9rem; min-height: 6rem; resize: vertical; }
+      .aii-text-actions { display: flex; gap: .5rem; margin-top: .55rem; align-items: center; flex-wrap: wrap; }
+      .aii-text-status { font-size: .8rem; color: #1f6feb; }
+      .aii-btn { padding: .5rem 1rem; border: 1px solid #ccd; background: white; border-radius: 4px; cursor: pointer; font-size: .85rem; min-height: 36px; }
+      .aii-btn:hover { background: #f6f8ff; }
+      .aii-btn-primary { background: #1f6feb; color: white; border-color: #1f6feb; }
+      .aii-btn-primary:hover { background: #1858c4; }
       .ai-inbox-upload button {
         padding: .45rem 1.1rem; background: #1f6feb; color: white;
         border: 0; border-radius: 4px; cursor: pointer; font-weight: 600;
@@ -168,7 +178,20 @@ function renderPage({ items, flash }) {
         <button type="button" class="aii-capture-btn" id="aii-photo-new" title="Take or choose a photo">
           <span class="aii-capture-btn-icon">📷</span> Take photo
         </button>
+        <button type="button" class="aii-capture-btn" id="aii-text-new" title="Type or paste a note">
+          <span class="aii-capture-btn-icon">⌨</span> Type text
+        </button>
         <input type="file" id="aii-photo-input-new" accept="image/*" capture="environment" hidden>
+      </div>
+
+      <div class="aii-text-panel" id="aii-text-panel-new" hidden>
+        <textarea id="aii-text-input-new" rows="6"
+                  placeholder="Type or paste a note. Click Save to create an entry from it. The text becomes the entry's first attachment and runs through extraction."></textarea>
+        <div class="aii-text-actions">
+          <button type="button" class="aii-btn aii-btn-primary" id="aii-text-save-new">Save as entry</button>
+          <button type="button" class="aii-btn" id="aii-text-cancel-new">Cancel</button>
+          <span class="aii-text-status" id="aii-text-status-new"></span>
+        </div>
       </div>
 
       <script src="/js/dropzone.js"></script>
@@ -212,6 +235,44 @@ function renderPage({ items, flash }) {
               if (photoInput.files && photoInput.files[0]) {
                 uploadAsNewEntry(photoInput.files[0]);
               }
+            });
+          }
+
+          // Type-text panel: toggle, save → POSTs to /ai-inbox/new
+          // with a text form field instead of a file. The browser
+          // follows the 303 redirect to the new entry's detail page.
+          var textBtn    = document.getElementById('aii-text-new');
+          var textPanel  = document.getElementById('aii-text-panel-new');
+          var textInput  = document.getElementById('aii-text-input-new');
+          var textSave   = document.getElementById('aii-text-save-new');
+          var textCancel = document.getElementById('aii-text-cancel-new');
+          var textStatus = document.getElementById('aii-text-status-new');
+          if (textBtn && textPanel) {
+            textBtn.addEventListener('click', function () {
+              textPanel.hidden = false;
+              textInput.focus();
+            });
+            textCancel.addEventListener('click', function () {
+              textPanel.hidden = true;
+              textInput.value = '';
+              textStatus.textContent = '';
+            });
+            textSave.addEventListener('click', function () {
+              var txt = (textInput.value || '').trim();
+              if (!txt) return;
+              textStatus.textContent = 'Saving…';
+              var form = document.createElement('form');
+              form.method = 'POST';
+              form.action = '/ai-inbox/new';
+              form.enctype = 'multipart/form-data';
+              form.style.display = 'none';
+              var input = document.createElement('input');
+              input.type = 'hidden';
+              input.name = 'text';
+              input.value = txt;
+              form.appendChild(input);
+              document.body.appendChild(form);
+              form.submit();
             });
           }
         })();

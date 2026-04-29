@@ -81,8 +81,11 @@ export async function onRequestPost(context) {
   }
 
   // Accept either 'file' (the new generic name) or 'audio' (the legacy
-  // name kept so the existing inbox upload form still works).
+  // name kept so the existing inbox upload form still works), OR
+  // 'text' for text-only entries (in-context capture from a CRM page,
+  // or "type a note" on the inbox list).
   const file = formData.get('file') || formData.get('audio');
+  const textInput = formData.get('text') ? String(formData.get('text')).trim() : '';
   const userContext = (formData.get('user_context') || '').toString().trim() || null;
 
   // Optional auto-associate context: when the upload was kicked off
@@ -96,39 +99,71 @@ export async function onRequestPost(context) {
   const wantAssociate = associateRefType && associateRefId
     && ALLOWED_ASSOCIATE_REF_TYPES.has(associateRefType);
 
-  if (!file || typeof file === 'string' || file.size === 0) {
+  // A text-only submission is a valid path: no file, just typed text
+  // becomes the first attachment.
+  const hasFile = file && typeof file !== 'string' && file.size > 0;
+  if (!hasFile && !textInput) {
     return xhr
-      ? jsonResponse({ ok: false, error: 'no_file' }, 400)
-      : redirectWithFlash('/ai-inbox', 'No file selected.', 'error');
+      ? jsonResponse({ ok: false, error: 'no_file_or_text' }, 400)
+      : redirectWithFlash('/ai-inbox', 'No file or text provided.', 'error');
   }
 
-  const kind = inferKind(file);
-  const cap = kind === 'audio' ? MAX_AUDIO_BYTES : MAX_OTHER_BYTES;
-  if (file.size > cap) {
-    const msg = `File too large (${formatSize(file.size)}). Max for ${kind} is ${formatSize(cap)}.`;
-    return xhr
-      ? jsonResponse({ ok: false, error: 'file_too_large', detail: msg }, 400)
-      : redirectWithFlash('/ai-inbox', msg, 'error');
+  const MAX_TEXT_LEN = 50000;
+
+  // Branch by submission type. Text-only entries skip R2 entirely
+  // and create a kind='text' attachment with captured_text already
+  // populated; processItem will see status='ready' and skip its
+  // per-attachment processor for it, going straight to extract.
+  let kind, filename, ext, mime, r2Key, fileSize, capturedTextForInsert, attachmentStatus;
+
+  if (hasFile) {
+    kind = inferKind(file);
+    const cap = kind === 'audio' ? MAX_AUDIO_BYTES : MAX_OTHER_BYTES;
+    if (file.size > cap) {
+      const msg = `File too large (${formatSize(file.size)}). Max for ${kind} is ${formatSize(cap)}.`;
+      return xhr
+        ? jsonResponse({ ok: false, error: 'file_too_large', detail: msg }, 400)
+        : redirectWithFlash('/ai-inbox', msg, 'error');
+    }
+    filename = file.name || `attachment.${kind}`;
+    ext = (filename.split('.').pop() || '').toLowerCase();
+    mime = file.type || '';
+    fileSize = file.size;
+    capturedTextForInsert = null;
+    attachmentStatus = 'pending';
+  } else {
+    if (textInput.length > MAX_TEXT_LEN) {
+      const msg = `Text too long (${textInput.length} chars). Max ${MAX_TEXT_LEN}.`;
+      return xhr
+        ? jsonResponse({ ok: false, error: 'text_too_long', max: MAX_TEXT_LEN }, 400)
+        : redirectWithFlash('/ai-inbox', msg, 'error');
+    }
+    kind = 'text';
+    filename = 'note.txt';
+    ext = 'txt';
+    mime = null;
+    fileSize = textInput.length;
+    capturedTextForInsert = textInput;
+    attachmentStatus = 'ready';
   }
 
-  const filename = file.name || `attachment.${kind}`;
-  const ext = (filename.split('.').pop() || '').toLowerCase();
-  const mime = file.type || '';
   const entryId = uuid();
   const ts = now();
-  const r2Key = `ai-inbox/${entryId}/${uuid()}.${ext || 'bin'}`;
+  r2Key = hasFile ? `ai-inbox/${entryId}/${uuid()}.${ext || 'bin'}` : null;
 
-  try {
-    await uploadToR2(env.DOCS, r2Key, file, {
-      entryId,
-      kind,
-      uploadedBy: user.email,
-    });
-  } catch (e) {
-    const msg = `Upload failed: ${e.message || e}`;
-    return xhr
-      ? jsonResponse({ ok: false, error: 'upload_failed', detail: String(e.message || e) }, 500)
-      : redirectWithFlash('/ai-inbox', msg, 'error');
+  if (hasFile) {
+    try {
+      await uploadToR2(env.DOCS, r2Key, file, {
+        entryId,
+        kind,
+        uploadedBy: user.email,
+      });
+    } catch (e) {
+      const msg = `Upload failed: ${e.message || e}`;
+      return xhr
+        ? jsonResponse({ ok: false, error: 'upload_failed', detail: String(e.message || e) }, 500)
+        : redirectWithFlash('/ai-inbox', msg, 'error');
+    }
   }
 
   // For audio, also populate the legacy audio_* columns on the entry
@@ -138,6 +173,7 @@ export async function onRequestPost(context) {
   const isAudio = kind === 'audio';
   const attachmentId = uuid();
   const linkId = wantAssociate ? uuid() : null;
+  const sourceLabel = isAudio ? 'audio_upload' : (kind === 'text' ? 'text_input' : 'file_upload');
 
   const stmts = [
     stmt(env.DB,
@@ -146,19 +182,20 @@ export async function onRequestPost(context) {
           audio_r2_key, audio_mime_type, audio_size_bytes, audio_filename)
        VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?)`,
       [entryId, user.id, ts, ts,
-       isAudio ? 'audio_upload' : 'file_upload',
+       sourceLabel,
        userContext,
        isAudio ? r2Key : null,
        isAudio ? (mime || `audio/${ext || 'm4a'}`) : null,
-       isAudio ? file.size : null,
+       isAudio ? fileSize : null,
        isAudio ? filename : null]),
     stmt(env.DB,
       `INSERT INTO ai_inbox_attachments
          (id, entry_id, kind, sort_order, is_primary, include_in_context,
           r2_key, mime_type, size_bytes, filename,
-          status, created_at, updated_at)
-       VALUES (?, ?, ?, 0, 1, 1, ?, ?, ?, ?, 'pending', ?, ?)`,
-      [attachmentId, entryId, kind, r2Key, mime || null, file.size, filename, ts, ts]),
+          captured_text, captured_text_model, status, created_at, updated_at)
+       VALUES (?, ?, ?, 0, 1, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [attachmentId, entryId, kind, r2Key, mime || null, fileSize, filename,
+       capturedTextForInsert, capturedTextForInsert ? 'inline' : null, attachmentStatus, ts, ts]),
   ];
   if (wantAssociate) {
     const action_type = 'link_to_' + associateRefType;
