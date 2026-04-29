@@ -327,19 +327,36 @@ const WIZARD_MODAL_MARKUP = (
   ':placeholder="$store.wizard.smartStartPlaceholder()"></textarea>' +
   '<input type="file" accept="image/*" x-ref="smartstart_photo" hidden ' +
   '@change="$store.wizard.runSmartStartFromFile($event.target.files[0])">' +
+  // Generic file input — audio, PDF, DOCX, email, anything. The AI
+  // Inbox extraction pipeline handles all kinds (Whisper for audio,
+  // Claude vision for images, ConvertAPI for docs, etc.).
+  '<input type="file" x-ref="smartstart_file" hidden ' +
+  '@change="$store.wizard.runSmartStartFromFile($event.target.files[0])">' +
+
+  // Action row. DOM order: [Go, Photo, File] so keyboard Tab from
+  // textarea hits Go first (the primary action) — Tab+Enter from
+  // the textarea submits in two keystrokes. CSS uses row-reverse
+  // to position Go visually at the far right with the media
+  // buttons on the left. The Skip button is gone — AI extraction
+  // is now the standard path. Empty input still works (Go is
+  // disabled until the textarea has content OR a file is picked).
   '<div class="task-wizard-smartstart-actions">' +
-  '<button type="button" class="btn btn-sm" ' +
-  '@click="$refs.smartstart_photo && $refs.smartstart_photo.click()" ' +
-  ':disabled="$store.wizard.smartStartBusy">📷 Photo</button>' +
-  '<button type="button" class="btn btn-sm primary" ' +
+  '<button type="button" class="btn btn-sm primary task-wizard-smartstart-go" ' +
   '@click="$store.wizard.runSmartStart()" ' +
   ':disabled="$store.wizard.smartStartBusy || !($store.wizard.smartStartText && $store.wizard.smartStartText.trim())">' +
-  '<span x-show="!$store.wizard.smartStartBusy">Use AI</span>' +
+  '<span x-show="!$store.wizard.smartStartBusy">Go</span>' +
   '<span x-show="$store.wizard.smartStartBusy">Extracting…</span>' +
   '</button>' +
-  '<button type="button" class="btn btn-sm task-wizard-smartstart-skip" ' +
-  '@click="$store.wizard.skipSmartStart()" ' +
-  ':disabled="$store.wizard.smartStartBusy">Skip</button>' +
+  '<button type="button" class="btn btn-sm task-wizard-smartstart-media" ' +
+  'tabindex="-1" ' +
+  '@click="$refs.smartstart_photo && $refs.smartstart_photo.click()" ' +
+  ':disabled="$store.wizard.smartStartBusy" ' +
+  'title="Take a photo or pick from camera roll">📷</button>' +
+  '<button type="button" class="btn btn-sm task-wizard-smartstart-media" ' +
+  'tabindex="-1" ' +
+  '@click="$refs.smartstart_file && $refs.smartstart_file.click()" ' +
+  ':disabled="$store.wizard.smartStartBusy" ' +
+  'title="Attach a file (audio, PDF, DOCX, email, etc.)">📎</button>' +
   '</div>' +
   '<div class="task-wizard-smartstart-error" x-show="$store.wizard.smartStartError" x-text="$store.wizard.smartStartError"></div>' +
   '</div>' +

@@ -807,21 +807,27 @@ code {
   outline: 2px solid var(--accent, #2563eb);
   outline-offset: -1px;
 }
+/* Action row. The Go button is FIRST in DOM (for keyboard Tab from
+   the textarea — Tab + Enter submits in two keystrokes) but visually
+   reordered to the far right via CSS `order` + `margin-left: auto`.
+   Media buttons (📷 / 📎) sit on the left visually, with
+   tabindex="-1" so the keyboard skips them. Mouse / touch users
+   still hit them normally. */
 .task-wizard-smartstart-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
   align-items: center;
 }
-.task-wizard-smartstart-skip {
-  margin-left: auto;
-  background: transparent;
-  border-color: transparent;
-  color: var(--fg-muted);
-  text-decoration: underline;
+.task-wizard-smartstart-go {
+  order: 99;                     /* render last visually */
+  margin-left: auto;             /* push to the far right */
+  min-width: 4rem;
 }
-.task-wizard-smartstart-skip:hover:not(:disabled) {
-  color: var(--fg);
+.task-wizard-smartstart-media {
+  order: 1;                      /* render at the start */
+  font-size: 1.1rem;
+  padding: 0.3rem 0.55rem;
 }
 .task-wizard-smartstart-error {
   font-size: 0.85rem;
