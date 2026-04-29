@@ -14,11 +14,17 @@
 //   https://adaptivecards.io/explorer/AdaptiveCard.html
 // Teams webhook docs:
 //   https://learn.microsoft.com/microsoftteams/platform/webhooks-and-connectors/how-to/add-incoming-webhook
+//
+// The dispatcher (notify-external.js) imports the default export of
+// this module and inserts it into PROVIDERS at its own init time.
+// We deliberately do NOT call registerNotificationProvider here —
+// circular imports with ESM mean the dispatcher's `const PROVIDERS`
+// is still in TDZ when this module evaluates, so any auto-registration
+// would silently fail.
 
-import { registerNotificationProvider } from '../notify-external.js';
 import { renderTeamsCard } from './teams-templates.js';
 
-async function send(env, opts) {
+export async function send(env, opts) {
   const url = String(opts?.target || '').trim();
   if (!url || !/^https:\/\//i.test(url)) {
     return { status: 'failed', error: 'invalid_webhook_url' };
@@ -63,4 +69,4 @@ async function send(env, opts) {
   };
 }
 
-registerNotificationProvider('teams', { send });
+export default { send };

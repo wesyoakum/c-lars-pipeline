@@ -32,15 +32,11 @@
 
 import { all, one, run } from './db.js';
 import { uuid, now } from './ids.js';
-
-// Load provider modules so they self-register into PROVIDERS via
-// registerNotificationProvider() at module-load time. Imports are
-// after the registry definition (see end of file). The presence of
-// the import alone is what triggers registration — we don't use any
-// named exports from the provider modules here.
-import './notify-providers/teams.js';
-// Email provider (Phase 7c) lands here when wired:
-// import './notify-providers/email.js';
+// Provider modules export a default { send(env, opts) } shape. We
+// import them directly and compose PROVIDERS below — going through
+// a registerNotificationProvider() call from the providers would
+// trip on ESM circular-import + const-TDZ ordering.
+import teamsProvider from './notify-providers/teams.js';
 
 // Canonical event type list. Add new events here AND default rows
 // to user_notification_prefs (lazily, in the settings UI). Names
@@ -179,9 +175,15 @@ export async function sendTestNotification(env, channel, target) {
 }
 
 // --------------------------------------------------------------------
-// Provider registry — populated by Phase 7b (Teams) / 7c (email).
+// Provider registry. Composed at module init from imported provider
+// modules (each exports default { send(env, opts) }). The
+// registerNotificationProvider() helper is kept exported in case
+// future code wants to add providers dynamically (e.g. testing).
 
-const PROVIDERS = {};
+const PROVIDERS = {
+  teams: teamsProvider,
+  // Phase 7c: email: emailProvider,
+};
 
 export function registerNotificationProvider(channel, provider) {
   PROVIDERS[channel] = provider;
