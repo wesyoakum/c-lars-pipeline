@@ -10,6 +10,7 @@ import { one, all, stmt, batch } from '../../lib/db.js';
 import { auditStmt, diff } from '../../lib/audit.js';
 import { validateOpportunity } from '../../lib/validators.js';
 import { layout, htmlResponse, html, escape, raw } from '../../lib/layout.js';
+import { ICON_MIC } from '../../lib/icons.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 import { loadStageCatalog } from '../../lib/stages.js';
@@ -470,7 +471,7 @@ export async function onRequestGet(context) {
                instead of context-switching to /ai-inbox. -->
           ${user && user.email === 'wes.yoakum@c-lars.com' ? html`<button type="button" class="aii-page-capture-btn"
                   onclick="window.PipelineAICapture && window.PipelineAICapture.open({ refType: 'opportunity', refId: '${escape(opp.id)}', refLabel: 'OPP-${escape(opp.number)} — ${escape((opp.title || '').slice(0, 60))}' })">
-            <span class="aii-page-capture-icon">🎤</span> Capture
+            <span class="aii-page-capture-icon">${raw(ICON_MIC)}</span> Capture
           </button>` : ''}
           <!-- "New job" button paused per feedback 2026-04-17; jobs are
                now created automatically when an OC is issued. Keep the

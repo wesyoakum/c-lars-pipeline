@@ -6,6 +6,7 @@
 
 import { all, one } from '../../lib/db.js';
 import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
+import { ICON_MIC } from '../../lib/icons.js';
 import { redirectWithFlash, readFlash } from '../../lib/http.js';
 import { parseTransactionTypes } from '../../lib/validators.js';
 import { templateTypeForOC, templateManagerHtml } from '../../lib/template-catalog.js';
@@ -149,7 +150,7 @@ export async function onRequestGet(context) {
         ${user && user.email === 'wes.yoakum@c-lars.com' ? html`<div class="header-actions" style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">
           <button type="button" class="aii-page-capture-btn"
                   onclick="window.PipelineAICapture && window.PipelineAICapture.open({ refType: 'job', refId: '${escape(job.id)}', refLabel: '${escape(job.number)} — ${escape((job.title || '').slice(0, 60))}' })">
-            <span class="aii-page-capture-icon">🎤</span> Capture
+            <span class="aii-page-capture-icon">${raw(ICON_MIC)}</span> Capture
           </button>
         </div>` : ''}
       </div>

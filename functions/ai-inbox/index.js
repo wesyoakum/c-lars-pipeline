@@ -11,6 +11,7 @@
 import { all } from '../lib/db.js';
 import { layout, html, escape, htmlResponse, raw } from '../lib/layout.js';
 import { readFlash } from '../lib/http.js';
+import { ICON_MIC, ICON_CAMERA, ICON_KEYBOARD } from '../lib/icons.js';
 
 const STATUS_LABELS = {
   pending: 'Uploaded',
@@ -174,15 +175,15 @@ function renderPage({ items, flash }) {
       <div class="aii-capture-bar">
         <button type="button" class="aii-capture-btn" id="aii-record-new"
                 title="Record audio" aria-label="Record audio">
-          <span class="aii-capture-btn-icon">🎤</span>
+          <span class="aii-capture-btn-icon">${raw(ICON_MIC)}</span>
         </button>
         <button type="button" class="aii-capture-btn" id="aii-photo-new"
                 title="Add a photo (camera or library)" aria-label="Add a photo">
-          <span class="aii-capture-btn-icon">📷</span>
+          <span class="aii-capture-btn-icon">${raw(ICON_CAMERA)}</span>
         </button>
         <button type="button" class="aii-capture-btn" id="aii-text-new"
                 title="Type or paste a note" aria-label="Type or paste a note">
-          <span class="aii-capture-btn-icon">⌨</span>
+          <span class="aii-capture-btn-icon">${raw(ICON_KEYBOARD)}</span>
         </button>
         <input type="file" id="aii-photo-input-new" accept="image/*" hidden>
       </div>

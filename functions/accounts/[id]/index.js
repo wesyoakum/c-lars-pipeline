@@ -17,6 +17,7 @@ import {
   QUOTE_STATUS_LABELS,
 } from '../../lib/validators.js';
 import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
+import { ICON_MIC } from '../../lib/icons.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 import {
@@ -398,7 +399,7 @@ export async function onRequestGet(context) {
         <div class="header-actions" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
           ${user && user.email === 'wes.yoakum@c-lars.com' ? html`<button type="button" class="aii-page-capture-btn"
                   onclick="window.PipelineAICapture && window.PipelineAICapture.open({ refType: 'account', refId: '${escape(account.id)}', refLabel: '${escape((account.alias || account.name || '').slice(0, 60))}' })">
-            <span class="aii-page-capture-icon">🎤</span> Capture
+            <span class="aii-page-capture-icon">${raw(ICON_MIC)}</span> Capture
           </button>` : ''}
           <form method="post" action="/accounts/${escape(account.id)}/delete"
                 onsubmit="return window.Pipeline && Pipeline.confirmCascadeDelete(event, { entityType: 'account', entityId: '${escape(account.id)}', entityLabel: '${escape((account.alias || account.name || '').slice(0, 60))}' });"

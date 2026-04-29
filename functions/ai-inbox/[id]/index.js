@@ -7,8 +7,9 @@
 // to edit, blur or Enter to save (POST /ai-inbox/:id/edit).
 
 import { one, all } from '../../lib/db.js';
-import { layout, html, escape, htmlResponse } from '../../lib/layout.js';
+import { layout, html, escape, htmlResponse, raw } from '../../lib/layout.js';
 import { readFlash } from '../../lib/http.js';
+import { ICON_MIC, ICON_CAMERA, ICON_KEYBOARD, ICON_PAPERCLIP } from '../../lib/icons.js';
 
 const STATUS_LABELS = {
   pending: 'Uploaded',
@@ -1695,14 +1696,14 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
 
                 <div class="aii-q-answer-panel" x-show="answerPanel && answerPanel.idx === idx" x-cloak>
                   <div class="aii-q-answer-actions" x-show="answerPanel && !answerPanel.mode">
-                    <button type="button" class="aii-capture-btn" @click="answerByRecording(idx)">
-                      <span class="aii-capture-btn-icon">🎤</span> Record an answer
+                    <button type="button" class="aii-capture-btn aii-capture-btn-with-label" @click="answerByRecording(idx)">
+                      <span class="aii-capture-btn-icon">${raw(ICON_MIC)}</span> Record an answer
                     </button>
-                    <button type="button" class="aii-capture-btn" @click="answerPanel.mode = 'text'">
-                      <span class="aii-capture-btn-icon">⌨</span> Type an answer
+                    <button type="button" class="aii-capture-btn aii-capture-btn-with-label" @click="answerPanel.mode = 'text'">
+                      <span class="aii-capture-btn-icon">${raw(ICON_KEYBOARD)}</span> Type an answer
                     </button>
-                    <button type="button" class="aii-capture-btn" @click="answerByFile(idx, $el)">
-                      <span class="aii-capture-btn-icon">📎</span> Attach a file
+                    <button type="button" class="aii-capture-btn aii-capture-btn-with-label" @click="answerByFile(idx, $el)">
+                      <span class="aii-capture-btn-icon">${raw(ICON_PAPERCLIP)}</span> Attach a file
                     </button>
                     <input type="file" data-aii-q-file hidden>
                     <button type="button" class="aii-btn" @click="closeAnswer()">Cancel</button>
@@ -2069,11 +2070,11 @@ function renderAttachments({ item, attachments }) {
     <div class="aii-capture-bar">
       <button type="button" class="aii-capture-btn" data-aii-record
               title="Record audio" aria-label="Record audio">
-        <span class="aii-capture-btn-icon">🎤</span>
+        <span class="aii-capture-btn-icon">${raw(ICON_MIC)}</span>
       </button>
       <button type="button" class="aii-capture-btn" data-aii-photo
               title="Add a photo (camera or library)" aria-label="Add a photo">
-        <span class="aii-capture-btn-icon">📷</span>
+        <span class="aii-capture-btn-icon">${raw(ICON_CAMERA)}</span>
       </button>
       <input type="file" data-aii-photo-input accept="image/*" hidden>
       <span class="aii-capture-status" data-aii-capture-status></span>

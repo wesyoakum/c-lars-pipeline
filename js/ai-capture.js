@@ -21,6 +21,15 @@
 (function () {
   'use strict';
 
+  // Minimalist stroke SVG icons — mirror functions/lib/icons.js.
+  // Keep these in sync if either side changes.
+  // (See feedback_minimalist_icons.md — no emojis in UI affordances.)
+  var ICO = {
+    mic: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11v1a7 7 0 0 0 14 0v-1"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="8" y1="22" x2="16" y2="22"/></svg>',
+    camera: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h3l2-2h8l2 2h3a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1z"/><circle cx="12" cy="13.5" r="3.5"/></svg>',
+    keyboard: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><line x1="6" y1="10" x2="6.01" y2="10"/><line x1="10" y1="10" x2="10.01" y2="10"/><line x1="14" y1="10" x2="14.01" y2="10"/><line x1="18" y1="10" x2="18.01" y2="10"/><line x1="7" y1="14" x2="17" y2="14"/></svg>',
+  };
+
   let modalEl = null;
   let target = null;          // { refType, refId, refLabel, onCreated }
 
@@ -44,9 +53,9 @@
       '  </div>',
       '',
       '  <div class="aii-capture-bar" style="margin:.6rem 0 .25rem;">',
-      '    <button type="button" class="aii-capture-btn" data-act="record" title="Record audio" aria-label="Record audio"><span class="aii-capture-btn-icon">🎤</span></button>',
-      '    <button type="button" class="aii-capture-btn" data-act="photo" title="Add a photo (camera or library)" aria-label="Add a photo"><span class="aii-capture-btn-icon">📷</span></button>',
-      '    <button type="button" class="aii-capture-btn" data-act="text" title="Type or paste a note" aria-label="Type or paste a note"><span class="aii-capture-btn-icon">⌨</span></button>',
+      '    <button type="button" class="aii-capture-btn" data-act="record" title="Record audio" aria-label="Record audio"><span class="aii-capture-btn-icon">' + ICO.mic + '</span></button>',
+      '    <button type="button" class="aii-capture-btn" data-act="photo" title="Add a photo (camera or library)" aria-label="Add a photo"><span class="aii-capture-btn-icon">' + ICO.camera + '</span></button>',
+      '    <button type="button" class="aii-capture-btn" data-act="text" title="Type or paste a note" aria-label="Type or paste a note"><span class="aii-capture-btn-icon">' + ICO.keyboard + '</span></button>',
       '    <input type="file" accept="image/*" hidden data-role="photo-input">',
       '  </div>',
       '',

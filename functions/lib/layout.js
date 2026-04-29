@@ -82,6 +82,7 @@ function renderValue(value) {
 }
 
 import { VERSION } from './version.js';
+import { ICON_CAMERA, ICON_PAPERCLIP } from './icons.js';
 
 // T4.2 Phase 1 — in-app notifications.
 //
@@ -351,12 +352,14 @@ const WIZARD_MODAL_MARKUP = (
   'tabindex="-1" ' +
   '@click="$refs.smartstart_photo && $refs.smartstart_photo.click()" ' +
   ':disabled="$store.wizard.smartStartBusy" ' +
-  'title="Take a photo or pick from camera roll">📷</button>' +
+  'aria-label="Take a photo" ' +
+  'title="Take a photo or pick from camera roll">' + ICON_CAMERA + '</button>' +
   '<button type="button" class="btn btn-sm task-wizard-smartstart-media" ' +
   'tabindex="-1" ' +
   '@click="$refs.smartstart_file && $refs.smartstart_file.click()" ' +
   ':disabled="$store.wizard.smartStartBusy" ' +
-  'title="Attach a file (audio, PDF, DOCX, email, etc.)">📎</button>' +
+  'aria-label="Attach a file" ' +
+  'title="Attach a file (audio, PDF, DOCX, email, etc.)">' + ICON_PAPERCLIP + '</button>' +
   '</div>' +
   '<div class="task-wizard-smartstart-error" x-show="$store.wizard.smartStartError" x-text="$store.wizard.smartStartError"></div>' +
   '</div>' +

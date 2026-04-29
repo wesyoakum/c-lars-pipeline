@@ -810,9 +810,9 @@ code {
 /* Action row. The Go button is FIRST in DOM (for keyboard Tab from
    the textarea — Tab + Enter submits in two keystrokes) but visually
    reordered to the far right via CSS `order` + `margin-left: auto`.
-   Media buttons (📷 / 📎) sit on the left visually, with
-   tabindex="-1" so the keyboard skips them. Mouse / touch users
-   still hit them normally. */
+   Media buttons (camera + paperclip SVGs from lib/icons.js) sit on
+   the left visually, with tabindex="-1" so the keyboard skips them.
+   Mouse / touch users still hit them normally. */
 .task-wizard-smartstart-actions {
   display: flex;
   flex-wrap: wrap;
@@ -826,8 +826,17 @@ code {
 }
 .task-wizard-smartstart-media {
   order: 1;                      /* render at the start */
-  font-size: 1.1rem;
   padding: 0.3rem 0.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-muted);
+}
+.task-wizard-smartstart-media:hover:not(:disabled) {
+  color: var(--fg);
+}
+.task-wizard-smartstart-media svg {
+  display: block;
 }
 .task-wizard-smartstart-error {
   font-size: 0.85rem;
@@ -3595,9 +3604,28 @@ textarea.ie-input { width: 100%; min-width: 12rem; resize: vertical; }
   background: #d8dbe2;
 }
 .aii-capture-btn-icon {
-  font-size: 1.15rem;
+  /* Now houses an inline SVG (lib/icons.js). The font-size is
+     vestigial — leave it for any text fallback. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
   pointer-events: none;
+  color: var(--fg);
+}
+.aii-capture-btn-icon svg {
+  display: block;
+}
+/* Capture button rows that include a text label after the icon
+   (e.g. the open-question answer panel) need a small gap and the
+   icon to sit inline rather than centered. */
+.aii-capture-btn-with-label {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 0.4rem;
+  width: auto !important;
+  padding-left: 0.65rem !important;
+  padding-right: 0.85rem !important;
 }
 .aii-capture-btn-label { /* legacy — keep as visually-hidden helper */
   position: absolute;
@@ -3715,8 +3743,15 @@ textarea.ie-input { width: 100%; min-width: 12rem; resize: vertical; }
   text-decoration: none;
 }
 .aii-page-capture-btn .aii-page-capture-icon {
-  font-size: 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
+}
+.aii-page-capture-btn .aii-page-capture-icon svg {
+  display: block;
+  width: 16px;
+  height: 16px;
 }
 
 /* ---------- Detail pairs (side-by-side key-value) ---------- */
