@@ -886,7 +886,34 @@ export async function fillTemplate(env, templateKey, data) {
     nullGetter: () => '',
   });
 
-  doc.render(data);
+  // docxtemplater attaches per-placeholder details on the thrown
+  // Error's `properties.errors` array. Default `err.message` is just
+  // "Multi error" or similar — useless to a user. We unpack the
+  // explanations and ids into a single readable string so the flash
+  // message in the calling route surfaces something actionable
+  // (e.g. "Unclosed tag: Cost (line 12)").
+  try {
+    doc.render(data);
+  } catch (err) {
+    const inner = err?.properties?.errors;
+    if (Array.isArray(inner) && inner.length > 0) {
+      const parts = inner.slice(0, 5).map(e => {
+        const id   = e?.properties?.id || e?.name || 'error';
+        const exp  = e?.properties?.explanation
+                  || e?.message
+                  || JSON.stringify(e?.properties || {});
+        const ctx  = e?.properties?.xtag ? ` (tag: ${e.properties.xtag})` : '';
+        return `${id}${ctx}: ${exp}`;
+      });
+      const overflow = inner.length > parts.length
+        ? ` (+${inner.length - parts.length} more)`
+        : '';
+      const wrapped = new Error(parts.join(' · ') + overflow);
+      wrapped.docxErrors = inner;
+      throw wrapped;
+    }
+    throw err;
+  }
 
   return doc.getZip().generate({
     type: 'arraybuffer',
