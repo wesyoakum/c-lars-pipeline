@@ -98,20 +98,20 @@ function splitFullName(name) {
   return { first_name: parts[0], last_name: parts.slice(1).join(' ') };
 }
 
-// ----- contact-wizard planner --------------------------------------
+// ----- shared section builders -------------------------------------
 
-async function planContact(env, extracted) {
-  const personDetail = (extracted?.people_detail && extracted.people_detail[0]) || null;
-  const personName = (personDetail && personDetail.name)
-    || (extracted?.people && extracted.people[0])
-    || '';
+// Build an Account section: resolve the org name against existing
+// accounts, then either compose a "matched + push_candidates"
+// section (only emit candidates when proposed differs) or a
+// "proposed_new + push_candidates" section (emit all non-empty
+// extracted fields, all checked by default).
+//
+// Returns { matched, proposed_new, push_candidates } or null when
+// there's neither an org name nor any extracted org detail to act on.
+async function buildAccountSection(env, orgDetail, orgName) {
+  if (!orgName && !orgDetail) return null;
 
-  const orgDetail = (extracted?.organizations_detail && extracted.organizations_detail[0]) || null;
-  const orgName = (orgDetail && orgDetail.name)
-    || (extracted?.organizations && extracted.organizations[0])
-    || '';
-
-  // ---- Resolve org against accounts ----
+  // Resolve org → existing account
   let accountMatch = null;
   if (orgName) {
     const candidates = await resolveEntities(env.DB, {
@@ -119,8 +119,7 @@ async function planContact(env, extracted) {
       organizations: [orgName],
     });
     const top = candidates.find((c) => c.mention_kind === 'organization');
-    // Threshold for "this is the same account" — score >= 100 (exact)
-    // OR score >= 80 (prefix) if the gap to the next candidate is wide.
+    // score >= 80 = exact or prefix match (see entity-resolver.js)
     if (top && top.score >= 80) {
       accountMatch = await one(env.DB,
         `SELECT id, name, alias, segment, phone, website
@@ -129,34 +128,24 @@ async function planContact(env, extracted) {
     }
   }
 
-  // ---- Build account push candidates ----
-  // For NEW accounts: emit one row per non-empty extracted field
-  // (phone / website / address) so the user can deselect anything
-  // they don't want included on creation. current='' (nothing exists
-  // yet), checked=true by default.
-  // For MATCHED accounts: only emit rows where the proposed value
-  // differs from the existing one (and only check rows where target
-  // is empty).
-  const accountPushCandidates = [];
+  const pushCandidates = [];
   if (!accountMatch && orgDetail) {
+    // NEW account: emit every non-empty extracted field as a candidate
+    // (checked by default — user can deselect anything they don't want).
     if (orgDetail.phone) {
-      accountPushCandidates.push({
+      pushCandidates.push({
         field: 'phone', current: '', proposed: orgDetail.phone,
         conflict: false, checked: true,
       });
     }
     if (orgDetail.website) {
-      accountPushCandidates.push({
+      pushCandidates.push({
         field: 'website', current: '', proposed: orgDetail.website,
         conflict: false, checked: true,
       });
     }
     if (orgDetail.address) {
-      // Address rows carry separate Physical / Billing toggles instead
-      // of a single checked flag. The executor reads those to decide
-      // the kind ('physical' / 'billing' / 'both') or skip the row
-      // entirely when neither is set.
-      accountPushCandidates.push({
+      pushCandidates.push({
         field: 'address', current: '', proposed: orgDetail.address,
         conflict: false, checked: true,
         address_physical: true, address_billing: false,
@@ -164,22 +153,25 @@ async function planContact(env, extracted) {
     }
   }
   if (accountMatch && orgDetail) {
+    // EXISTING account: only emit candidates where the proposed value
+    // differs from the existing one. Auto-check empty-target rows;
+    // unchecked-by-default for conflicts so the user has to opt in.
     if (orgDetail.phone) {
       const matchPhone = normPhone(accountMatch.phone) === normPhone(orgDetail.phone);
       if (!matchPhone) {
-        accountPushCandidates.push({
+        pushCandidates.push({
           field: 'phone',
           current: accountMatch.phone || '',
           proposed: orgDetail.phone,
           conflict: !!accountMatch.phone,
-          checked: !accountMatch.phone,  // only auto-check when target is empty
+          checked: !accountMatch.phone,
         });
       }
     }
     if (orgDetail.website) {
       const matchUrl = normUrl(accountMatch.website) === normUrl(orgDetail.website);
       if (!matchUrl) {
-        accountPushCandidates.push({
+        pushCandidates.push({
           field: 'website',
           current: accountMatch.website || '',
           proposed: orgDetail.website,
@@ -194,11 +186,8 @@ async function planContact(env, extracted) {
         [accountMatch.id]);
       const dup = existing.some((a) => normAddress(a.address) === normAddress(orgDetail.address));
       if (!dup) {
-        accountPushCandidates.push({
+        pushCandidates.push({
           field: 'address',
-          // Show the "current" as a summary of what's already there,
-          // since address adds (rather than overwrites) — there's no
-          // real "current" to replace.
           current: existing.length > 0 ? `${existing.length} existing address(es)` : '',
           proposed: orgDetail.address,
           conflict: existing.length > 0,
@@ -210,14 +199,53 @@ async function planContact(env, extracted) {
     }
   }
 
+  const proposedNew = (!accountMatch && orgName) ? {
+    name: orgName,
+    alias: deriveAlias(orgName),
+    phone: orgDetail?.phone || '',
+    website: orgDetail?.website || '',
+    address: orgDetail?.address || '',
+  } : null;
+
+  // Empty section (no match, no proposal, no candidates) → null
+  if (!accountMatch && !proposedNew && pushCandidates.length === 0) return null;
+
+  return {
+    matched: accountMatch ? {
+      id: accountMatch.id,
+      name: accountMatch.name,
+      alias: accountMatch.alias,
+    } : null,
+    proposed_new: proposedNew,
+    push_candidates: pushCandidates,
+  };
+}
+
+// ----- contact-wizard planner --------------------------------------
+
+async function planContact(env, extracted) {
+  const personDetail = (extracted?.people_detail && extracted.people_detail[0]) || null;
+  const personName = (personDetail && personDetail.name)
+    || (extracted?.people && extracted.people[0])
+    || '';
+
+  const orgDetail = (extracted?.organizations_detail && extracted.organizations_detail[0]) || null;
+  const orgName = (orgDetail && orgDetail.name)
+    || (extracted?.organizations && extracted.organizations[0])
+    || '';
+
+  // ---- Account section ----
+  const accountSection = await buildAccountSection(env, orgDetail, orgName);
+  const accountMatchId = accountSection?.matched?.id || null;
+
   // ---- Resolve person against contacts at the matched account ----
   let contactMatch = null;
-  if (personName && accountMatch) {
+  if (personName && accountMatchId) {
     const rows = await all(env.DB,
       `SELECT id, first_name, last_name, title, email, phone, mobile,
               linkedin_url, linkedin_url_source
          FROM contacts WHERE account_id = ?`,
-      [accountMatch.id]);
+      [accountMatchId]);
     const target = personName.toLowerCase().trim();
     contactMatch = rows.find((c) => {
       const full = `${c.first_name || ''} ${c.last_name || ''}`.trim().toLowerCase();
@@ -316,14 +344,6 @@ async function planContact(env, extracted) {
   }
 
   // ---- Compose plan ----
-  const proposedNewAccount = (!accountMatch && orgName) ? {
-    name: orgName,
-    alias: deriveAlias(orgName),
-    phone: orgDetail?.phone || '',
-    website: orgDetail?.website || '',
-    address: orgDetail?.address || '',
-  } : null;
-
   const personParts = splitFullName(personName);
   const proposedNewContact = (!contactMatch && (personParts.first_name || personParts.last_name)) ? {
     first_name: personParts.first_name,
@@ -335,25 +355,38 @@ async function planContact(env, extracted) {
   } : null;
 
   return {
-    account: {
-      matched: accountMatch ? {
-        id: accountMatch.id,
-        name: accountMatch.name,
-        alias: accountMatch.alias,
-      } : null,
-      proposed_new: proposedNewAccount,
-      push_candidates: accountPushCandidates,
-    },
+    account: accountSection,
     contact: {
       matched: contactMatch ? {
         id: contactMatch.id,
         first_name: contactMatch.first_name,
         last_name: contactMatch.last_name,
-        account_id: accountMatch?.id || null,
+        account_id: accountMatchId,
       } : null,
       proposed_new: proposedNewContact,
       push_candidates: contactPushCandidates,
     },
+  };
+}
+
+// ----- account-wizard planner --------------------------------------
+//
+// Just dedup detection on the org. No contact section. The review
+// screen then shows: "Looks like you have Acme Corp (existing)" with
+// any push candidates for empty/different fields, OR "Will create
+// Acme Corp" with checkboxes for each captured field.
+
+async function planAccount(env, extracted) {
+  const orgDetail = (extracted?.organizations_detail && extracted.organizations_detail[0]) || null;
+  const orgName = (orgDetail && orgDetail.name)
+    || (extracted?.organizations && extracted.organizations[0])
+    || '';
+
+  const accountSection = await buildAccountSection(env, orgDetail, orgName);
+  if (!accountSection) return null;
+
+  return {
+    account: accountSection,
   };
 }
 
@@ -377,6 +410,13 @@ export async function onRequestPost(context) {
 
   if (wizardKey === 'contact') {
     const plan = await planContact(env, extracted);
+    plan.ai_inbox_entry_id = aiInboxEntryId;
+    return json({ ok: true, plan });
+  }
+
+  if (wizardKey === 'account') {
+    const plan = await planAccount(env, extracted);
+    if (!plan) return json({ ok: true, plan: null });
     plan.ai_inbox_entry_id = aiInboxEntryId;
     return json({ ok: true, plan });
   }

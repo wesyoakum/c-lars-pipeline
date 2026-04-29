@@ -929,6 +929,7 @@
           return 'First we’ll add the new account "' + acctLabel + '", then create "' + ctcLabel + '" as a contact at it.';
         }
         if (newAcct && !newCtc && !matchCtc) {
+          // Account wizard, new account
           return 'We’ll add the new account "' + acctLabel + '" with the captured fields below.';
         }
         if (matchAcct && newCtc) {
@@ -936,6 +937,13 @@
         }
         if (matchAcct && matchCtc) {
           return 'Updating existing contact "' + ctcLabel + '" at "' + acctLabel + '" with the captured fields below.';
+        }
+        if (matchAcct && !newCtc && !matchCtc) {
+          // Account wizard, existing account → push fields update
+          var hasUpdates = (acct.push_candidates || []).length > 0;
+          return hasUpdates
+            ? 'Looks like "' + acctLabel + '" already exists. Push the captured fields below to update it.'
+            : 'Looks like "' + acctLabel + '" already exists with all of these fields. Nothing to update.';
         }
         if (!matchAcct && !newAcct && newCtc) {
           // No org context — just a bare contact create. Caller probably

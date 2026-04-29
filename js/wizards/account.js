@@ -43,6 +43,13 @@
       placeholder: 'e.g. Mississippi Development Authority, P.O. Box 849, Jackson, MS 39205. www.mississippi.org. 601-359-3449',
     },
 
+    // Phase 5b-1: cascade planner. After Smart-start extraction, hit
+    // /wizards/plan to dedup the org against existing accounts. The
+    // review screen shows either "matched — push these field updates"
+    // or "will be created with these fields." /wizards/execute does
+    // the create / push / link in one D1 batch.
+    plan: true,
+
     steps: [
       {
         key: 'alias',

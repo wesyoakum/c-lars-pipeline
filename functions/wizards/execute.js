@@ -6,26 +6,15 @@
 // reviewed/edited by the user). All operations run in a single D1
 // batch so partial failure rolls back cleanly.
 //
-// Body (JSON, contact-shaped — Phase 5a):
+// Body (JSON):
 //   {
-//     wizard_key: 'contact',
+//     wizard_key: 'contact' | 'account' | …,
 //     ai_inbox_entry_id?: '<uuid>',
-//     plan: {
-//       account: {
-//         matched: { id } | null,
-//         proposed_new: { name, alias, phone, website, address } | null,
-//         push_candidates: [{ field, proposed, checked }],
-//       },
-//       contact: {
-//         matched: { id } | null,
-//         proposed_new: { first_name, last_name, title, email, phone, linkedin_url } | null,
-//         push_candidates: [{ field, proposed, checked }],
-//       },
-//     },
+//     plan: { /* see plan.js for shape */ },
 //   }
 //
 // Response:
-//   { ok: true, account_id, contact_id, redirect_url }
+//   { ok: true, account_id?, contact_id?, redirect_url, ... }
 //   { ok: false, error }
 
 import { stmt, batch } from '../lib/db.js';
@@ -47,6 +36,8 @@ const ACCOUNT_PUSH_COLUMNS = new Set([
   'phone', 'website', 'segment',
 ]);
 
+// ----- handler ----------------------------------------------------
+
 export async function onRequestPost(context) {
   const { env, data, request } = context;
   const user = data?.user;
@@ -57,10 +48,6 @@ export async function onRequestPost(context) {
   catch { return json({ ok: false, error: 'invalid_json' }, 400); }
 
   const wizardKey = String(body?.wizard_key || '').trim();
-  if (wizardKey !== 'contact') {
-    return json({ ok: false, error: 'unsupported_wizard_key' }, 400);
-  }
-
   const plan = body?.plan;
   if (!plan || typeof plan !== 'object') {
     return json({ ok: false, error: 'plan_required' }, 400);
@@ -68,33 +55,111 @@ export async function onRequestPost(context) {
 
   const ts = now();
   const statements = [];
+  const aiInboxEntryId = body?.ai_inbox_entry_id || plan.ai_inbox_entry_id || null;
 
-  // ---- Account: existing or new ----
-  let accountId = plan.account?.matched?.id || null;
-  let accountLabel = plan.account?.matched?.alias
-    || plan.account?.matched?.name
+  // ---- contact wizard: account (optional) → contact ----
+  if (wizardKey === 'contact') {
+    const acct = processAccountSection(env, plan, ts, user, statements);
+    if (acct.error) return json({ ok: false, error: acct.error }, 400);
+    const ctc = processContactSection(env, plan, acct.accountId, ts, user, statements);
+    if (ctc.error) return json({ ok: false, error: ctc.error }, 400);
+
+    if (aiInboxEntryId) {
+      statements.push(linkStmt(env.DB, aiInboxEntryId,
+        acct.createdNew ? 'create_account' : 'link_to_account',
+        'account', acct.accountId, acct.accountLabel, user));
+      if (ctc.createdNew) {
+        statements.push(linkStmt(env.DB, aiInboxEntryId,
+          'create_contact', 'contact', ctc.contactId, ctc.contactLabel, user));
+      }
+    }
+
+    await batch(env.DB, statements);
+
+    // Pick the destination: when the cascade created a brand-new
+    // account, land the user there — they'll see the new account in
+    // full context with the new contact under it (Contacts tab).
+    const redirect_url = acct.createdNew
+      ? '/accounts/' + encodeURIComponent(acct.accountId)
+      : '/contacts/' + encodeURIComponent(ctc.contactId);
+
+    return json({
+      ok: true,
+      account_id: acct.accountId,
+      account_label: acct.accountLabel,
+      contact_id: ctc.contactId,
+      contact_label: ctc.contactLabel,
+      created_new_account: acct.createdNew,
+      created_new_contact: ctc.createdNew,
+      redirect_url,
+    });
+  }
+
+  // ---- account wizard: account only ----
+  if (wizardKey === 'account') {
+    const acct = processAccountSection(env, plan, ts, user, statements);
+    if (acct.error) return json({ ok: false, error: acct.error }, 400);
+
+    if (aiInboxEntryId) {
+      statements.push(linkStmt(env.DB, aiInboxEntryId,
+        acct.createdNew ? 'create_account' : 'link_to_account',
+        'account', acct.accountId, acct.accountLabel, user));
+    }
+
+    await batch(env.DB, statements);
+
+    return json({
+      ok: true,
+      account_id: acct.accountId,
+      account_label: acct.accountLabel,
+      created_new_account: acct.createdNew,
+      redirect_url: '/accounts/' + encodeURIComponent(acct.accountId),
+    });
+  }
+
+  return json({ ok: false, error: 'unsupported_wizard_key' }, 400);
+}
+
+// ----- per-section processors -------------------------------------
+//
+// Each takes the plan + the running statements array and appends the
+// SQL statements needed to materialize that section. Returns an
+// object with the resulting entity id (so dependent sections can
+// reference it) plus a couple of metadata bits the handler needs.
+// On invalid plans returns { error: '<code>' } and the handler
+// surfaces that as a 400.
+
+function processAccountSection(env, plan, ts, user, statements) {
+  // The plan's `account` section may be missing entirely (e.g. a
+  // contact-only plan with a pinned account from the prefill — caller
+  // would already have an account_id and skip the section). For the
+  // account wizard this is invalid; for the contact wizard we just
+  // return null so the caller can decide what to do.
+  if (!plan.account) {
+    return { accountId: null, accountLabel: '', createdNew: false };
+  }
+
+  let accountId = plan.account.matched?.id || null;
+  let accountLabel = plan.account.matched?.alias
+    || plan.account.matched?.name
     || '';
-  let createdNewAccount = false;
+  let createdNew = false;
 
   if (!accountId) {
-    if (!plan.account?.proposed_new || !plan.account.proposed_new.name) {
-      return json({ ok: false, error: 'no_account_target' }, 400);
+    if (!plan.account.proposed_new || !plan.account.proposed_new.name) {
+      return { error: 'no_account_target' };
     }
     const a = plan.account.proposed_new;
     accountId = uuid();
     accountLabel = a.alias || a.name;
-    createdNewAccount = true;
+    createdNew = true;
+
     // Optional fields come from push_candidates only — unchecking
-    // means "don't include this on the new record." (This is why
-    // proposed_new also carries phone/website/address: it's a copy of
-    // what the LLM saw, but the executor doesn't read those — it
-    // reads push_candidates so unchecks actually stick.)
+    // means "don't include this on the new record."
     const addrCand = (plan.account.push_candidates || []).find((c) => c.field === 'address');
     const addressKind = pickAddressKind(addrCand);
     const addressForRow = addressKind ? addrCand.proposed : null;
-    // Mirror the address into the right denormalized column. 'both'
-    // (and physical-only) write to address_physical; billing-only to
-    // address_billing.
+    // Mirror the address into the right denormalized column.
     const addressBillingCol = (addressKind === 'billing' || addressKind === 'both') ? addrCand.proposed : null;
     const addressPhysicalCol = (addressKind === 'physical' || addressKind === 'both') ? addrCand.proposed : null;
     const phoneFromPlan = pickChecked(plan.account.push_candidates, 'phone');
@@ -108,8 +173,6 @@ export async function onRequestPost(context) {
        VALUES (?, ?, ?, NULL, ?, ?, ?, ?, NULL, ?, 1, ?, ?, ?)`,
       [accountId, a.name, a.alias || a.name, addressBillingCol, addressPhysicalCol, phoneFromPlan, websiteFromPlan, user.id, ts, ts, user.id]));
 
-    // Address row (separate table). Only insert when there's a chosen
-    // kind; the denormalized columns above mirror it.
     if (addressForRow) {
       statements.push(stmt(env.DB,
         `INSERT INTO account_addresses
@@ -131,10 +194,6 @@ export async function onRequestPost(context) {
     const updates = {};
     for (const c of (plan.account.push_candidates || [])) {
       if (c.field === 'address') {
-        // Address rows are gated by their own physical/billing
-        // toggles; add a new row in account_addresses (don't
-        // overwrite existing). Skip entirely when neither toggle is
-        // on.
         const kind = pickAddressKind(c);
         if (!kind) continue;
         statements.push(stmt(env.DB,
@@ -167,21 +226,31 @@ export async function onRequestPost(context) {
     }
   }
 
-  // ---- Contact: existing or new ----
-  let contactId = plan.contact?.matched?.id || null;
+  return { accountId, accountLabel, createdNew };
+}
+
+function processContactSection(env, plan, accountId, ts, user, statements) {
+  if (!plan.contact) {
+    return { contactId: null, contactLabel: '', createdNew: false };
+  }
+
+  let contactId = plan.contact.matched?.id || null;
   let contactLabel = '';
-  let createdNewContact = false;
+  let createdNew = false;
 
   if (!contactId) {
-    const c = plan.contact?.proposed_new;
+    const c = plan.contact.proposed_new;
     if (!c || (!c.first_name && !c.last_name)) {
-      return json({ ok: false, error: 'no_contact_target' }, 400);
+      return { error: 'no_contact_target' };
+    }
+    if (!accountId) {
+      // Can't create a contact without an account_id; the cascade
+      // upstream should have produced one.
+      return { error: 'no_account_for_contact' };
     }
     contactId = uuid();
     contactLabel = `${c.first_name || ''} ${c.last_name || ''}`.trim() || '(unnamed)';
-    createdNewContact = true;
-    // Optional fields come from push_candidates (same model as
-    // accounts above — unchecking strips the field from the INSERT).
+    createdNew = true;
     const titleCand = pickChecked(plan.contact.push_candidates, 'title');
     const emailCand = pickChecked(plan.contact.push_candidates, 'email');
     const phoneCand = pickChecked(plan.contact.push_candidates, 'phone');
@@ -216,13 +285,11 @@ export async function onRequestPost(context) {
     }));
   } else {
     contactLabel = `${plan.contact.matched.first_name || ''} ${plan.contact.matched.last_name || ''}`.trim();
-    // Apply checked push_candidates to existing contact.
     const updates = {};
     for (const c of (plan.contact.push_candidates || [])) {
       if (!c.checked) continue;
       if (CONTACT_PUSH_COLUMNS.has(c.field)) {
         updates[c.field] = c.proposed;
-        // LinkedIn carries a source flip when pushed from AI.
         if (c.field === 'linkedin_url') updates.linkedin_url_source = 'ai_suggested';
       }
     }
@@ -244,44 +311,10 @@ export async function onRequestPost(context) {
     }
   }
 
-  // ---- AI Inbox link rows ----
-  const aiInboxEntryId = body?.ai_inbox_entry_id || plan.ai_inbox_entry_id || null;
-  if (aiInboxEntryId) {
-    if (createdNewAccount) {
-      statements.push(linkStmt(env.DB, aiInboxEntryId, 'create_account', 'account', accountId, accountLabel, user));
-    } else {
-      statements.push(linkStmt(env.DB, aiInboxEntryId, 'link_to_account', 'account', accountId, accountLabel, user));
-    }
-    if (createdNewContact) {
-      statements.push(linkStmt(env.DB, aiInboxEntryId, 'create_contact', 'contact', contactId, contactLabel, user));
-    } else {
-      // We don't have a 'link_to_contact' action_type yet — record as
-      // a generic create_contact "link" (which is allowed). A follow-up
-      // pass can introduce link_to_contact if we want to distinguish.
-    }
-  }
-
-  await batch(env.DB, statements);
-
-  // Pick the destination: when the cascade created a brand-new
-  // account, land the user there — they'll see the new account in
-  // full context with the new contact under it (Contacts tab).
-  // Otherwise land on the contact page (the wizard's primary entity).
-  const redirect_url = createdNewAccount
-    ? '/accounts/' + encodeURIComponent(accountId)
-    : '/contacts/' + encodeURIComponent(contactId);
-
-  return json({
-    ok: true,
-    account_id: accountId,
-    account_label: accountLabel,
-    contact_id: contactId,
-    contact_label: contactLabel,
-    created_new_account: createdNewAccount,
-    created_new_contact: createdNewContact,
-    redirect_url,
-  });
+  return { contactId, contactLabel, createdNew };
 }
+
+// ----- helpers ----------------------------------------------------
 
 function pickChecked(candidates, field) {
   const c = (candidates || []).find((x) => x.field === field && x.checked);
@@ -290,10 +323,6 @@ function pickChecked(candidates, field) {
 
 // For an address candidate, return the chosen kind based on the
 // physical/billing toggles, or null if both are off (skip this row).
-//   { address_physical: true,  address_billing: false } → 'physical'
-//   { address_physical: false, address_billing: true  } → 'billing'
-//   { address_physical: true,  address_billing: true  } → 'both'
-//   { address_physical: false, address_billing: false } → null
 function pickAddressKind(candidate) {
   if (!candidate) return null;
   const phys = !!candidate.address_physical;
