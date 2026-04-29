@@ -82,6 +82,29 @@ export const ICON_CALCULATOR =
     <line x1="16" y1="17" x2="16.01" y2="17"/>
   </svg>`;
 
+/** PDF file. Outline document with the corner-fold + small "PDF"
+ * label in the lower half. Used on the quote detail page in place of
+ * the "Generate PDF" text button so the action row stays compact. */
+export const ICON_PDF =
+  `<svg ${COMMON_ATTRS}>
+    <path d="M6 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
+    <polyline points="14 2 14 6 18 6"/>
+    <text x="11" y="18" font-size="5.5" font-weight="700" text-anchor="middle"
+          font-family="system-ui,-apple-system,sans-serif"
+          stroke="none" fill="currentColor">PDF</text>
+  </svg>`;
+
+/** Word/DOCX file. Same document outline as ICON_PDF + "DOC" label.
+ * Used in place of the "Download Word" text button. */
+export const ICON_DOCX =
+  `<svg ${COMMON_ATTRS}>
+    <path d="M6 2h8l4 4v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
+    <polyline points="14 2 14 6 18 6"/>
+    <text x="11" y="18" font-size="5.5" font-weight="700" text-anchor="middle"
+          font-family="system-ui,-apple-system,sans-serif"
+          stroke="none" fill="currentColor">DOC</text>
+  </svg>`;
+
 /** Calculator + plus — same calculator with a small "+" badge in the
  * top-right corner. Used as the "create a new price build" affordance
  * on quote line rows that don't have one yet. The "+" sits inside a

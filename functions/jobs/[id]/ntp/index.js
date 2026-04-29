@@ -17,6 +17,7 @@
 import { all, one } from '../../../lib/db.js';
 import { layout, htmlResponse, html, raw, escape } from '../../../lib/layout.js';
 import { redirectWithFlash, readFlash } from '../../../lib/http.js';
+import { ICON_PDF, ICON_DOCX } from '../../../lib/icons.js';
 import { templateManagerHtml } from '../../../lib/template-catalog.js';
 import { getOcDocData } from '../../../lib/doc-generate.js';
 import { renderJobTabs } from '../../../lib/job-tabs.js';
@@ -126,10 +127,16 @@ export async function onRequestGet(context) {
             ` : ''}
             ${canGenerate ? html`
               <form method="post" action="/jobs/${escape(jobId)}/generate-ntp-pdf" class="inline-form">
-                <button class="btn" type="submit">Generate PDF</button>
+                <button class="btn btn-icon-doc" type="submit" title="Generate NTP PDF" aria-label="Generate NTP PDF"
+                        style="display:inline-flex;align-items:center;justify-content:center;padding:0.35rem 0.55rem">
+                  ${raw(ICON_PDF)}
+                </button>
               </form>
               <form method="post" action="/jobs/${escape(jobId)}/generate-ntp-docx" class="inline-form">
-                <button class="btn" type="submit">Download Word</button>
+                <button class="btn btn-icon-doc" type="submit" title="Download NTP Word document" aria-label="Download NTP Word"
+                        style="display:inline-flex;align-items:center;justify-content:center;padding:0.35rem 0.55rem">
+                  ${raw(ICON_DOCX)}
+                </button>
               </form>
             ` : ''}
           </div>

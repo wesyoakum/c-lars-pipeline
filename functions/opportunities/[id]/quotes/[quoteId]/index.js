@@ -18,7 +18,7 @@ import { auditStmt, diff } from '../../../../lib/audit.js';
 import { now } from '../../../../lib/ids.js';
 import { layout, htmlResponse, html, raw, escape } from '../../../../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../../../../lib/http.js';
-import { ICON_CALCULATOR, ICON_CALCULATOR_PLUS } from '../../../../lib/icons.js';
+import { ICON_CALCULATOR, ICON_CALCULATOR_PLUS, ICON_PDF, ICON_DOCX } from '../../../../lib/icons.js';
 import {
   validateQuote,
   allowedQuoteTypes,
@@ -241,10 +241,16 @@ export async function onRequestGet(context) {
               </form>
             ` : ''}
             <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/generate-pdf" class="inline-form">
-              <button class="btn" type="submit">Generate PDF</button>
+              <button class="btn btn-icon-doc" type="submit" title="Generate PDF" aria-label="Generate PDF"
+                      style="display:inline-flex;align-items:center;justify-content:center;padding:0.35rem 0.55rem">
+                ${raw(ICON_PDF)}
+              </button>
             </form>
             <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/generate-docx" class="inline-form">
-              <button class="btn" type="submit">Download Word</button>
+              <button class="btn btn-icon-doc" type="submit" title="Download Word document" aria-label="Download Word"
+                      style="display:inline-flex;align-items:center;justify-content:center;padding:0.35rem 0.55rem">
+                ${raw(ICON_DOCX)}
+              </button>
             </form>
             <div class="quote-settings" x-data="quoteSettings(${showDiscounts ? 'true' : 'false'})" @click.outside="open = false">
               <button type="button" class="quote-settings-btn" @click="open = !open" aria-label="Quote settings" title="Quote settings">
