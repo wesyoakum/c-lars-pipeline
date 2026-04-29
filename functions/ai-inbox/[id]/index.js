@@ -557,7 +557,10 @@ function renderDetail({ item, extracted, links, matches, user, attachments }) {
             const [kind, id] = sel.split(':');
             const target = targets.find(t => t.kind === kind && t.id === id);
             const targetLabel = target ? target.label : '(target)';
-            if (!confirm(`Append ${reqs.length} tech spec${reqs.length === 1 ? '' : 's'} to internal notes on ${targetLabel}?`)) {
+            const confirmMsg = 'Append ' + reqs.length + ' tech spec' +
+              (reqs.length === 1 ? '' : 's') + ' to internal notes on ' +
+              targetLabel + '?';
+            if (!confirm(confirmMsg)) {
               return;
             }
             this.saving = 'Pushing…';
@@ -570,7 +573,7 @@ function renderDetail({ item, extracted, links, matches, user, attachments }) {
               });
               const json = await res.json().catch(() => ({}));
               if (!res.ok || !json.ok) throw new Error(json.error || 'failed');
-              this.saving = `Pushed ${json.count}`;
+              this.saving = 'Pushed ' + json.count;
               setTimeout(() => { this.saving = ''; }, 2000);
             } catch (e) {
               this.saving = 'Push failed';
