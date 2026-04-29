@@ -117,12 +117,13 @@ export async function onRequestPost(context) {
     });
   }
 
-  // ---- opportunity wizard: account dedup, then continue to steps ----
+  // ---- opportunity / quote wizard: account dedup, then continue to steps ----
   // Process account section the same way, but instead of redirecting
   // we hand control back to the wizard's step UI with the account
-  // locked in answers. The user fills in title (prefilled) / type /
-  // value / etc. and submits via the standard opp create path.
-  if (wizardKey === 'opportunity') {
+  // locked in answers. The user fills in remaining required fields
+  // (type, value, etc. for opp; opportunity-pick + quote_type for
+  // quote) and submits via the standard create path.
+  if (wizardKey === 'opportunity' || wizardKey === 'quote') {
     const acct = processAccountSection(env, plan, ts, user, statements);
     if (acct.error) return json({ ok: false, error: acct.error }, 400);
 

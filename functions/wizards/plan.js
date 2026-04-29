@@ -417,6 +417,28 @@ async function planOpportunity(env, extracted) {
   };
 }
 
+// ----- quote-wizard planner ----------------------------------------
+//
+// Phase 5b-3: same shape as opportunity — dedup the account, then
+// hand off to the step UI where the user picks the opportunity and
+// quote_type. Title and description are prefilled via the wizard's
+// existing applyExtraction.
+
+async function planQuote(env, extracted) {
+  const orgDetail = (extracted?.organizations_detail && extracted.organizations_detail[0]) || null;
+  const orgName = (orgDetail && orgDetail.name)
+    || (extracted?.organizations && extracted.organizations[0])
+    || '';
+
+  const accountSection = await buildAccountSection(env, orgDetail, orgName);
+  if (!accountSection) return null;
+
+  return {
+    account: accountSection,
+    continue_to_steps: true,
+  };
+}
+
 // --------------------------------------------------------------------
 
 export async function onRequestPost(context) {
@@ -450,6 +472,13 @@ export async function onRequestPost(context) {
 
   if (wizardKey === 'opportunity') {
     const plan = await planOpportunity(env, extracted);
+    if (!plan) return json({ ok: true, plan: null });
+    plan.ai_inbox_entry_id = aiInboxEntryId;
+    return json({ ok: true, plan });
+  }
+
+  if (wizardKey === 'quote') {
+    const plan = await planQuote(env, extracted);
     if (!plan) return json({ ok: true, plan: null });
     plan.ai_inbox_entry_id = aiInboxEntryId;
     return json({ ok: true, plan });

@@ -61,6 +61,12 @@
       placeholder: 'e.g. ACME wants a quote on 4 spare valves identical to last year’s order, valid 30 days.',
     },
 
+    // Phase 5b-3: cascade the account dedup, then drop into the
+    // standard step UI so the user picks the opportunity (filtered
+    // by the resolved account) and quote_type. Title and description
+    // are prefilled from extraction via applyExtraction.
+    plan: true,
+
     steps: [
       {
         key: 'account',
