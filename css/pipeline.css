@@ -841,6 +841,116 @@ code {
   }
 }
 
+/* Review phase (Phase 5a — cascade planner). Shown between Smart-
+   start and the standard step UI when the wizard config has
+   `plan: true` and the planner returned a plan.
+
+   Layout: each entity (account / contact) gets its own section with a
+   header (kind + status pill + name) and a stack of push candidates
+   that are checkboxes. Conflict rows (existing value disagrees with
+   proposed) are subtly highlighted to slow the user down. */
+.task-wizard-review {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 0.25rem 0;
+}
+.task-wizard-review-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.6rem 0.75rem;
+  background: var(--bg);
+}
+.task-wizard-review-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.task-wizard-review-kind {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--fg-muted);
+}
+.task-wizard-review-status {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+.task-wizard-review-status.new strong { color: #0369a1; }       /* sky-700 */
+.task-wizard-review-status.existing strong { color: #166534; }   /* green-800 */
+.task-wizard-review-fields {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.task-wizard-review-field {
+  display: grid;
+  grid-template-columns: auto 5.5rem 1fr;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-size: 0.88rem;
+  cursor: pointer;
+  padding: 0.25rem 0.4rem;
+  border-radius: 4px;
+}
+.task-wizard-review-field:hover {
+  background: var(--bg-alt, #f5f7fa);
+}
+.task-wizard-review-field input[type="checkbox"] {
+  margin: 0;
+}
+.task-wizard-review-field-name {
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: capitalize;
+}
+.task-wizard-review-field-proposed {
+  word-break: break-word;
+}
+.task-wizard-review-field-current {
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+  grid-column: 2 / -1;       /* tuck the "current" line under the value */
+  margin-top: 0.05rem;
+}
+.task-wizard-review-field.conflict {
+  background: #fffbea;       /* amber-50 */
+  border-left: 3px solid #f59e0b;  /* amber-500 */
+  padding-left: 0.4rem;
+}
+.task-wizard-review-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.3rem;
+}
+.task-wizard-review-edit {
+  margin-right: auto;
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-muted);
+  text-decoration: underline;
+}
+.task-wizard-review-edit:hover:not(:disabled) {
+  color: var(--fg);
+}
+@media (max-width: 600px) {
+  .task-wizard-review-actions button {
+    min-height: 44px;
+  }
+  .task-wizard-review-edit {
+    margin-right: 0;
+    width: 100%;
+  }
+  .task-wizard-review-actions {
+    flex-wrap: wrap;
+  }
+}
+
 .task-wizard-actionbar {
   display: flex;
   align-items: center;

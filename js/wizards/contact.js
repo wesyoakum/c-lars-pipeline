@@ -50,6 +50,15 @@
     // on submit) so the user has a permanent audit trail.
     smartStart: true,
 
+    // Phase 5a: cascade planner. After Smart-start extraction, the
+    // engine hits /wizards/plan to compute what already exists in the
+    // CRM (account match, existing contact at that account, fields
+    // empty/different) and shows a Review screen with checkboxes.
+    // /wizards/execute does the multi-entity create/push in one D1
+    // batch. "Edit manually" drops to the standard step UI with
+    // prefilled answers.
+    plan: true,
+
     steps: [
       {
         key: 'first_name',

@@ -344,6 +344,90 @@ const WIZARD_MODAL_MARKUP = (
   '<div class="task-wizard-smartstart-error" x-show="$store.wizard.smartStartError" x-text="$store.wizard.smartStartError"></div>' +
   '</div>' +
 
+  // -------- Review phase (Phase 5a — cascade planner) ---------
+  // Shown when the wizard config has `plan: true` and /wizards/plan
+  // returned a structured plan. Lets the user toggle individual
+  // operations before hitting Confirm and Create.
+  '<div class="task-wizard-review" x-show="$store.wizard.phase === \'review\' && $store.wizard.plan" x-cloak>' +
+
+  // Account section
+  '<template x-if="$store.wizard.plan && $store.wizard.plan.account && ($store.wizard.plan.account.matched || $store.wizard.plan.account.proposed_new)">' +
+  '<div class="task-wizard-review-section">' +
+  '<div class="task-wizard-review-section-head">' +
+  '<span class="task-wizard-review-kind">Account</span>' +
+  '<template x-if="$store.wizard.plan.account.matched">' +
+  '<span class="task-wizard-review-status existing">' +
+  '<strong x-text="$store.wizard.plan.account.matched.alias || $store.wizard.plan.account.matched.name"></strong>' +
+  '<small class="muted">existing</small>' +
+  '</span>' +
+  '</template>' +
+  '<template x-if="$store.wizard.plan.account.proposed_new">' +
+  '<span class="task-wizard-review-status new">' +
+  '<strong x-text="$store.wizard.plan.account.proposed_new.name"></strong>' +
+  '<small class="muted">will be created</small>' +
+  '</span>' +
+  '</template>' +
+  '</div>' +
+  // Push candidates for the account
+  '<div class="task-wizard-review-fields" x-show="$store.wizard.plan.account.push_candidates.length > 0">' +
+  '<template x-for="(c, idx) in $store.wizard.plan.account.push_candidates" :key="\'a\' + idx">' +
+  '<label class="task-wizard-review-field" :class="{ conflict: c.conflict }">' +
+  '<input type="checkbox" :checked="c.checked" @change="$store.wizard.togglePushCandidate(\'account\', idx)">' +
+  '<span class="task-wizard-review-field-name" x-text="c.field"></span>' +
+  '<span class="task-wizard-review-field-proposed" x-text="c.proposed"></span>' +
+  '<span class="task-wizard-review-field-current" x-show="c.conflict">(current: <span x-text="c.current || \'(empty)\'"></span>)</span>' +
+  '</label>' +
+  '</template>' +
+  '</div>' +
+  '</div>' +
+  '</template>' +
+
+  // Contact section
+  '<template x-if="$store.wizard.plan && $store.wizard.plan.contact && ($store.wizard.plan.contact.matched || $store.wizard.plan.contact.proposed_new)">' +
+  '<div class="task-wizard-review-section">' +
+  '<div class="task-wizard-review-section-head">' +
+  '<span class="task-wizard-review-kind">Contact</span>' +
+  '<template x-if="$store.wizard.plan.contact.matched">' +
+  '<span class="task-wizard-review-status existing">' +
+  '<strong x-text="($store.wizard.plan.contact.matched.first_name || \'\') + \' \' + ($store.wizard.plan.contact.matched.last_name || \'\')"></strong>' +
+  '<small class="muted">existing</small>' +
+  '</span>' +
+  '</template>' +
+  '<template x-if="$store.wizard.plan.contact.proposed_new">' +
+  '<span class="task-wizard-review-status new">' +
+  '<strong x-text="($store.wizard.plan.contact.proposed_new.first_name || \'\') + \' \' + ($store.wizard.plan.contact.proposed_new.last_name || \'\')"></strong>' +
+  '<small class="muted">will be created</small>' +
+  '</span>' +
+  '</template>' +
+  '</div>' +
+  '<div class="task-wizard-review-fields" x-show="$store.wizard.plan.contact.push_candidates.length > 0">' +
+  '<template x-for="(c, idx) in $store.wizard.plan.contact.push_candidates" :key="\'c\' + idx">' +
+  '<label class="task-wizard-review-field" :class="{ conflict: c.conflict }">' +
+  '<input type="checkbox" :checked="c.checked" @change="$store.wizard.togglePushCandidate(\'contact\', idx)">' +
+  '<span class="task-wizard-review-field-name" x-text="c.field"></span>' +
+  '<span class="task-wizard-review-field-proposed" x-text="c.proposed"></span>' +
+  '<span class="task-wizard-review-field-current" x-show="c.conflict">(current: <span x-text="c.current || \'(empty)\'"></span>)</span>' +
+  '</label>' +
+  '</template>' +
+  '</div>' +
+  '</div>' +
+  '</template>' +
+
+  // Action bar
+  '<div class="task-wizard-review-actions">' +
+  '<button type="button" class="btn btn-sm task-wizard-review-edit" ' +
+  '@click="$store.wizard.editManually()" ' +
+  ':disabled="$store.wizard.executing">Edit manually</button>' +
+  '<button type="button" class="btn btn-sm primary task-wizard-review-confirm" ' +
+  '@click="$store.wizard.confirmPlan()" ' +
+  ':disabled="$store.wizard.executing">' +
+  '<span x-show="!$store.wizard.executing">Confirm and create</span>' +
+  '<span x-show="$store.wizard.executing">Creating…</span>' +
+  '</button>' +
+  '</div>' +
+
+  '</div>' +
+
   // -------- Steps phase ---------
   '<div x-show="$store.wizard.phase === \'steps\'">' +
 

@@ -366,15 +366,20 @@
       // Smart-start state (Phase 3 of wizard cleanup). When the wizard
       // config opts in via `smartStart: { ... }`, the modal opens in
       // capture mode: user pastes text or drops a photo, we POST it to
-      // /ai-inbox/new for extraction, then map the extracted fields
-      // into the wizard's answers and switch to the standard step UI.
+      // /ai-inbox/new for extraction, then either map the extracted
+      // fields into the wizard's answers and switch to the standard
+      // step UI (default) or — when config.plan === true — fetch a
+      // cascade plan from /wizards/plan and switch to the 'review'
+      // phase for confirmation before executing.
       // The AI Inbox entry id is held so we can link it to the
-      // newly-created record on submit.
-      phase: 'steps',                    // 'smart-start' | 'steps'
+      // newly-created record on submit / execute.
+      phase: 'steps',                    // 'smart-start' | 'review' | 'steps'
       smartStartText: '',
       smartStartBusy: false,
       smartStartError: null,
       aiInboxEntryId: null,              // id of the entry created via Smart-start (if any)
+      plan: null,                        // /wizards/plan response (Phase 5a)
+      executing: false,                  // /wizards/execute in flight
       inactiveFetched: false,
 
       // Whether the "Show inactive" checkbox should render at all on
@@ -714,6 +719,8 @@
         this.smartStartBusy = false;
         this.smartStartError = null;
         this.aiInboxEntryId = null;
+        this.plan = null;
+        this.executing = false;
 
         // Seed blank answers
         this.answers = (typeof config.blankAnswers === 'function')
@@ -800,19 +807,19 @@
         })
           .then(function (res) { return res.json().then(function (j) { return { ok: res.ok, j: j }; }); })
           .then(function (r) {
-            self.smartStartBusy = false;
             if (!r.ok || !r.j || !r.j.ok) {
+              self.smartStartBusy = false;
               self.smartStartError = (r.j && (r.j.detail || r.j.error)) || 'Extraction failed.';
               return;
             }
             self.aiInboxEntryId = r.j.id || null;
-            // Hand the extraction to the wizard's mapper. The mapper
-            // returns the same { locked, prefix, label } shape as
-            // applyPrefill so we honor the pinned-row affordance for
-            // any matched account / linked record the extractor found.
+            self._extracted = r.j.extracted || {};
+            // Hand the extraction to the wizard's mapper. This populates
+            // the answers so "Edit manually" / fall-through paths get
+            // prefilled values to confirm.
             if (self.config && typeof self.config.applyExtraction === 'function') {
               try {
-                var pinned = self.config.applyExtraction(self.answers, r.j.extracted || {}, self);
+                var pinned = self.config.applyExtraction(self.answers, self._extracted, self);
                 if (pinned && pinned.locked) {
                   self.pinnedPrefix = pinned.prefix || 'Linked to';
                   self.pinnedValue = pinned.label || '';
@@ -822,6 +829,16 @@
                 if (typeof console !== 'undefined') console.warn('applyExtraction failed:', e);
               }
             }
+
+            // Phase 5a: when the wizard opts in via `plan: true`, hit
+            // /wizards/plan to compute a cascade plan and show a review
+            // screen. Otherwise, fall through to the standard step UI
+            // immediately (Phase 3 behavior).
+            if (self.config && self.config.plan === true) {
+              return self._fetchPlan();
+            }
+
+            self.smartStartBusy = false;
             // Re-evaluate skippable steps now that prefill landed.
             while (self.shouldSkipStep(self.currentStep()) && self.stepIndex < self.steps().length) {
               self.stepIndex++;
@@ -833,6 +850,107 @@
           .catch(function (err) {
             self.smartStartBusy = false;
             self.smartStartError = (err && err.message) || 'Network error.';
+          });
+      },
+
+      // Hit /wizards/plan with the extracted JSON; switch to review
+      // phase on success or fall back to steps on no-plan.
+      _fetchPlan: function () {
+        var self = this;
+        return fetch('/wizards/plan', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            wizard_key: self.wizardKey,
+            extracted: self._extracted || {},
+            ai_inbox_entry_id: self.aiInboxEntryId,
+          }),
+        })
+          .then(function (res) { return res.json(); })
+          .then(function (j) {
+            self.smartStartBusy = false;
+            if (!j || !j.ok) {
+              self.smartStartError = (j && j.error) || 'Could not plan.';
+              return;
+            }
+            if (!j.plan) {
+              // No plan returned (other wizards, or extraction
+              // produced nothing planner-shaped) — fall through to
+              // the standard step UI.
+              while (self.shouldSkipStep(self.currentStep()) && self.stepIndex < self.steps().length) {
+                self.stepIndex++;
+              }
+              self.typedInput = self.currentTypedForStep();
+              self.phase = 'steps';
+              self.focusInput();
+              return;
+            }
+            self.plan = j.plan;
+            self.phase = 'review';
+          })
+          .catch(function (err) {
+            self.smartStartBusy = false;
+            self.smartStartError = (err && err.message) || 'Network error during plan.';
+          });
+      },
+
+      // Toggle a checkbox on a push_candidate. `which` is
+      // 'account' | 'contact'; idx is the candidate index.
+      togglePushCandidate: function (which, idx) {
+        if (!this.plan || !this.plan[which]) return;
+        var c = this.plan[which].push_candidates[idx];
+        if (!c) return;
+        c.checked = !c.checked;
+      },
+
+      // Drop from review to manual step UI with prefilled answers.
+      // Lets the user override the planner's interpretation when it
+      // got something wrong (e.g. matched the wrong account).
+      editManually: function () {
+        this.plan = null;
+        this.phase = 'steps';
+        this.typedInput = this.currentTypedForStep();
+        this.focusInput();
+      },
+
+      // Confirm the plan: hit /wizards/execute and redirect.
+      confirmPlan: function () {
+        var self = this;
+        if (self.executing || !self.plan) return;
+        self.executing = true;
+        self.error = null;
+        return fetch('/wizards/execute', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            wizard_key: self.wizardKey,
+            ai_inbox_entry_id: self.aiInboxEntryId,
+            plan: self.plan,
+          }),
+        })
+          .then(function (res) { return res.json().then(function (j) { return { status: res.status, j: j }; }); })
+          .then(function (r) {
+            self.executing = false;
+            if (!r.j || !r.j.ok) {
+              self.error = (r.j && r.j.error) || ('Could not execute (status ' + r.status + ').');
+              return;
+            }
+            self.closeModal();
+            // Smart-start already handled the AI Inbox link rows in
+            // /wizards/execute — no need for the submit-time link
+            // call. Just redirect to the contact (or whatever the
+            // executor returns).
+            if (r.j.redirect_url) {
+              window.location.href = r.j.redirect_url;
+            } else if (self.reloadOnSuccess) {
+              window.location.reload();
+            }
+          })
+          .catch(function (err) {
+            self.executing = false;
+            self.error = (err && err.message) || 'Network error during execute.';
           });
       },
       skipSmartStart: function () {
