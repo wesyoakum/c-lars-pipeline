@@ -23,10 +23,12 @@
   //   1. Daily auto-task sweep — 14:00 UTC = 09:00 America/Chicago.
   //      One tick per day is plenty; each sweep's window bucket is a
   //      UTC day, so running more often just hits the dedup gate.
-  //   2. Notifications tick — every 5 minutes. Drives task_reminder
-  //      firing (Phase 7d) and any other near-real-time scans we add
-  //      later. The Pages endpoint uses notification_log idempotency
-  //      keys so re-runs are safe.
+  //   2. Notifications tick — every 1 minute (during Phase 7
+  //      testing). Drives task_reminder firing and any other
+  //      near-real-time scans. The Pages endpoint uses
+  //      notification_log idempotency keys so re-runs are safe.
+  //      Bump back to */5 once testing is done — the 1-min cadence
+  //      is fine cost-wise but generates a lot of log noise.
   // The Worker dispatches based on event.cron — see src/index.js.
   "name": "c-lars-pms-cron",
   "main": "src/index.js",
@@ -34,7 +36,7 @@
   "triggers": {
     "crons": [
       "0 14 * * *",      // daily sweep
-      "*/5 * * * *"      // notifications tick
+      "* * * * *"        // notifications tick — every minute (testing)
     ]
   },
   "vars": {

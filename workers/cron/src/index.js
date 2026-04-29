@@ -28,16 +28,20 @@
 
 export default {
   async scheduled(event, env, ctx) {
-    // Two cron schedules — dispatch by cron string. The 5-min tick
-    // hits the notifications endpoint; the daily one hits the sweep
-    // endpoint as before.
-    if (event.cron === '*/5 * * * *') {
-      ctx.waitUntil(callPipeline(env, '/api/cron/notifications', 'notifications').catch((err) => {
-        console.error('cron notifications run failed:', err?.message || err);
-      }));
-    } else {
+    // Two cron schedules. The daily sweep is the once-per-day tick
+    // (`0 14 * * *`); anything else (currently `* * * * *`, was
+    // `*/5 * * * *`) is the notifications tick. Matching by the
+    // exact daily cron string instead of the notifications one means
+    // we don't have to update this file when the notifications
+    // cadence changes.
+    const isDailySweep = event.cron === '0 14 * * *';
+    if (isDailySweep) {
       ctx.waitUntil(callPipeline(env, '/api/cron/sweep', 'sweep').catch((err) => {
         console.error('cron sweep run failed:', err?.message || err);
+      }));
+    } else {
+      ctx.waitUntil(callPipeline(env, '/api/cron/notifications', 'notifications').catch((err) => {
+        console.error('cron notifications run failed:', err?.message || err);
       }));
     }
   },
