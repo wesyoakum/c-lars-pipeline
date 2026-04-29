@@ -1114,7 +1114,10 @@ const BOARD_RIGHT_MARKUP = (
     'aria-label="Whiteboard sidebar">' +
 
     // ---------- Zone 1a: To-Do (overdue + today + tomorrow) ----------
+    // x-show ties to the user's show_todo_widget pref. Server-rendered
+    // (no flicker) via display:none inline when the pref is off.
     '<section class="board-zone board-zone-tasks" ' +
+      'x-show="window.Pipeline && window.Pipeline.userPrefs && window.Pipeline.userPrefs.show_todo_widget" ' +
       ':class="$store.board.showCompleted ? \'board-tasks-show-done\' : \'\'">' +
       // Hide button \u2014 small chevron pointing right (toward the edge
       // the board collapses into). Lives on the topmost task card and
@@ -1156,7 +1159,8 @@ const BOARD_RIGHT_MARKUP = (
     '</section>' +
 
     // ---------- Zone 1b: Coming Soon (2\u20137 days out) ----------
-    '<section class="board-zone board-zone-tasks">' +
+    '<section class="board-zone board-zone-tasks" ' +
+      'x-show="window.Pipeline && window.Pipeline.userPrefs && window.Pipeline.userPrefs.show_coming_soon_widget">' +
       '<h3 class="board-zone-heading">Coming Soon</h3>' +
       '<template x-if="$store.board.comingSoonTasks.length === 0">' +
         '<p class="board-zone-empty">Nothing in the next week.</p>' +
@@ -1183,7 +1187,8 @@ const BOARD_RIGHT_MARKUP = (
     '</section>' +
 
     // ---------- Zone 2: Notes (sticky note pad) ----------
-    '<section class="board-zone board-zone-notes">' +
+    '<section class="board-zone board-zone-notes" ' +
+      'x-show="window.Pipeline && window.Pipeline.userPrefs && window.Pipeline.userPrefs.show_postits_widget">' +
 
       // Compose stack — five blank colored cards, or the active composer
       '<div class="board-notes-stack" x-show="!$store.board.composer.open">' +
@@ -1647,6 +1652,14 @@ function displayPrefsBootScript(user) {
   const showAlias = user && user.show_alias ? 1 : 0;
   const groupRollup = user && user.group_rollup ? 1 : 0;
   const activeOnly = user && user.active_only ? 1 : 0;
+  // Sidebar widget toggles — default to 1 when the column is missing
+  // (older session reads) so the widgets stay visible by default.
+  const showTodo = user && user.show_todo_widget != null
+    ? (user.show_todo_widget ? 1 : 0) : 1;
+  const showComingSoon = user && user.show_coming_soon_widget != null
+    ? (user.show_coming_soon_widget ? 1 : 0) : 1;
+  const showPostits = user && user.show_postits_widget != null
+    ? (user.show_postits_widget ? 1 : 0) : 1;
   // list_table_prefs is a JSON blob keyed by list-table storageKey.
   // When present, listScript() uses it as a first-load seed for pages
   // where localStorage has no entry yet. See migration 0039.
@@ -1665,7 +1678,10 @@ function displayPrefsBootScript(user) {
     "window.Pipeline = window.Pipeline || {};\n" +
     "window.Pipeline.userPrefs = { show_alias: " + showAlias +
       ", group_rollup: " + groupRollup +
-      ", active_only: " + activeOnly + " };\n" +
+      ", active_only: " + activeOnly +
+      ", show_todo_widget: " + showTodo +
+      ", show_coming_soon_widget: " + showComingSoon +
+      ", show_postits_widget: " + showPostits + " };\n" +
     "window.Pipeline.listTableSiteDefaults = " + listPrefsJson + ";\n"
   );
 }

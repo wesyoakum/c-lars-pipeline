@@ -43,9 +43,14 @@ export async function onRequestGet(context) {
   // accurate but this future-proofs us against drift).
   const prefs = (await one(
     env.DB,
-    'SELECT show_alias, group_rollup, active_only FROM users WHERE id = ?',
+    `SELECT show_alias, group_rollup, active_only,
+            show_todo_widget, show_coming_soon_widget, show_postits_widget
+       FROM users WHERE id = ?`,
     [user.id]
-  )) || { show_alias: 0, group_rollup: 0, active_only: 0 };
+  )) || {
+    show_alias: 0, group_rollup: 0, active_only: 0,
+    show_todo_widget: 1, show_coming_soon_widget: 1, show_postits_widget: 1,
+  };
 
   // Admin-only: per-quote-type validity days for the editor below.
   let validityDays = null;
@@ -68,11 +73,14 @@ export async function onRequestGet(context) {
   const sa = prefs.show_alias ? 1 : 0;
   const gr = prefs.group_rollup ? 1 : 0;
   const ao = prefs.active_only ? 1 : 0;
+  const tw = prefs.show_todo_widget        != null ? (prefs.show_todo_widget        ? 1 : 0) : 1;
+  const cw = prefs.show_coming_soon_widget != null ? (prefs.show_coming_soon_widget ? 1 : 0) : 1;
+  const pw = prefs.show_postits_widget     != null ? (prefs.show_postits_widget     ? 1 : 0) : 1;
 
   const body = html`
     ${settingsSubNav('preferences', isAdmin)}
 
-    <section class="card" x-data="settingsPrefs(${sa}, ${gr}, ${ao}, ${isAdmin ? 'true' : 'false'})">
+    <section class="card" x-data="settingsPrefs(${sa}, ${gr}, ${ao}, ${isAdmin ? 'true' : 'false'}, ${tw}, ${cw}, ${pw})">
       <div class="card-header">
         <h1>Preferences</h1>
       </div>
@@ -110,6 +118,48 @@ export async function onRequestGet(context) {
           </div>
           <label class="toggle-switch" :class="{ 'toggle-switch--on': activeOnly }">
             <input type="checkbox" :checked="activeOnly" @change="save('active_only', $event.target.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <h3 style="margin-top:1.5rem;font-size:0.9rem;color:var(--fg-muted);font-weight:600;text-transform:uppercase;letter-spacing:0.05em">
+          Right-rail widgets
+        </h3>
+        <p class="muted" style="margin-top:0;font-size:0.85rem">
+          Each toggle below hides one of the floating panels on the right
+          side of every page. The data still loads — turning a panel back
+          on shows it without a refresh.
+        </p>
+
+        <div class="settings-pref-row">
+          <div class="settings-pref-label">
+            <strong>Show To-Do widget</strong>
+            <span class="muted">Open tasks assigned to you, grouped by due date. Lives in the top half of the right rail.</span>
+          </div>
+          <label class="toggle-switch" :class="{ 'toggle-switch--on': showTodoWidget }">
+            <input type="checkbox" :checked="showTodoWidget" @change="save('show_todo_widget', $event.target.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="settings-pref-row">
+          <div class="settings-pref-label">
+            <strong>Show Coming Soon widget</strong>
+            <span class="muted">Tasks due within the next two weeks. Sits below the To-Do panel.</span>
+          </div>
+          <label class="toggle-switch" :class="{ 'toggle-switch--on': showComingSoonWidget }">
+            <input type="checkbox" :checked="showComingSoonWidget" @change="save('show_coming_soon_widget', $event.target.checked)">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="settings-pref-row">
+          <div class="settings-pref-label">
+            <strong>Show Post-Its widget</strong>
+            <span class="muted">Free-form sticky-note pad in the right rail. Useful for parking thoughts; turn it off if it's a distraction.</span>
+          </div>
+          <label class="toggle-switch" :class="{ 'toggle-switch--on': showPostitsWidget }">
+            <input type="checkbox" :checked="showPostitsWidget" @change="save('show_postits_widget', $event.target.checked)">
             <span class="toggle-slider"></span>
           </label>
         </div>
@@ -276,18 +326,24 @@ export async function onRequestGet(context) {
 // new values immediately.
 const SETTINGS_PREFS_SCRIPT = `
 document.addEventListener('alpine:init', function () {
-  Alpine.data('settingsPrefs', function (showAlias, groupRollup, activeOnly, isAdmin) {
+  Alpine.data('settingsPrefs', function (showAlias, groupRollup, activeOnly, isAdmin, showTodoWidget, showComingSoonWidget, showPostitsWidget) {
     return {
       showAlias: !!showAlias,
       groupRollup: !!groupRollup,
       activeOnly: !!activeOnly,
       isAdmin: !!isAdmin,
+      showTodoWidget: showTodoWidget == null ? true : !!showTodoWidget,
+      showComingSoonWidget: showComingSoonWidget == null ? true : !!showComingSoonWidget,
+      showPostitsWidget: showPostitsWidget == null ? true : !!showPostitsWidget,
       busy: false,
       save: function (key, next) {
         var self = this;
         var prop = key === 'show_alias' ? 'showAlias'
                  : key === 'group_rollup' ? 'groupRollup'
                  : key === 'active_only'  ? 'activeOnly'
+                 : key === 'show_todo_widget'        ? 'showTodoWidget'
+                 : key === 'show_coming_soon_widget' ? 'showComingSoonWidget'
+                 : key === 'show_postits_widget'     ? 'showPostitsWidget'
                  : null;
         if (!prop) return;
         var prev = self[prop];

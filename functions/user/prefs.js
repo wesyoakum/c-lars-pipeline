@@ -74,6 +74,17 @@ export async function onRequestPatch(context) {
     params.push(f);
   }
 
+  // Sidebar widget toggles (migration 0059). Three booleans, one per
+  // right-rail widget. Default 1 in DB; users opt out per widget.
+  for (const key of ['show_todo_widget', 'show_coming_soon_widget', 'show_postits_widget']) {
+    if (key in payload) {
+      const f = toFlag(payload[key]);
+      if (f === null) return json({ ok: false, error: `${key} must be boolean.` }, 400);
+      sets.push(`${key} = ?`);
+      params.push(f);
+    }
+  }
+
   if (sets.length === 0) {
     return json({ ok: false, error: 'No recognised prefs in payload.' }, 400);
   }
