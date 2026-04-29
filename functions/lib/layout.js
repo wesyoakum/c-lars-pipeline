@@ -307,6 +307,8 @@ const WIZARD_MODAL_MARKUP = (
   '<div class="task-modal task-modal-wizard" @click.stop>' +
   '<div class="task-modal-header">' +
   '<h3 x-text="$store.wizard.title()"></h3>' +
+  '<span class="task-wizard-step-indicator" x-text="$store.wizard.stepProgressLabel()" ' +
+  'x-show="$store.wizard.stepProgressLabel()"></span>' +
   '<button type="button" class="task-modal-close" @click="$store.wizard.closeModal()" aria-label="Close">&times;</button>' +
   '</div>' +
   '<div class="task-modal-body">' +
@@ -388,17 +390,21 @@ const WIZARD_MODAL_MARKUP = (
 
   '</div>' + // /.task-wizard-input-wrap
 
-  // Action bar: hint on the left, Back + submit on the right.
+  // Action bar: hint on the left, Back + Next/Submit on the right.
+  // The primary button auto-flips between "Next" (advance) and the
+  // wizard's submit label (e.g. "Create contact") on the last step.
+  // Tab/Enter still work for keyboard users \u2014 these buttons are the
+  // touch equivalent.
   '<div class="task-wizard-actionbar">' +
   '<span class="task-wizard-help" x-text="$store.wizard.currentHint()"></span>' +
   '<div class="task-wizard-actions">' +
-  '<button type="button" class="btn btn-sm" @click="$store.wizard.goBack()" ' +
+  '<button type="button" class="btn btn-sm task-wizard-back-btn" @click="$store.wizard.goBack()" ' +
   ':disabled="$store.wizard.stepIndex === 0 || $store.wizard.submitting" ' +
   'x-show="$store.wizard.stepIndex > 0">Back</button>' +
-  '<button type="button" class="btn btn-sm primary" ' +
-  '@click="$store.wizard.submit()" ' +
-  ':disabled="!$store.wizard.canSubmit() || $store.wizard.submitting">' +
-  '<span x-show="!$store.wizard.submitting" x-text="$store.wizard.submitLabel()"></span>' +
+  '<button type="button" class="btn btn-sm primary task-wizard-primary-btn" ' +
+  '@click="$store.wizard.primaryAction()" ' +
+  ':disabled="$store.wizard.primaryDisabled()">' +
+  '<span x-show="!$store.wizard.submitting" x-text="$store.wizard.primaryButtonLabel()"></span>' +
   '<span x-show="$store.wizard.submitting">Saving\u2026</span>' +
   '</button>' +
   '</div>' +

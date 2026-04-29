@@ -425,6 +425,60 @@
       title: function () { return (this.config && this.config.title) || 'New'; },
       submitLabel: function () { return (this.config && this.config.submitLabel) || 'Create'; },
 
+      // True when there are no further non-skipped steps after the
+      // current one — i.e. the primary action button should say
+      // "Create" / "Save" instead of "Next".
+      isLastStep: function () {
+        var steps = this.steps();
+        for (var i = this.stepIndex + 1; i < steps.length; i++) {
+          if (!this.shouldSkipStep(steps[i])) return false;
+        }
+        return true;
+      },
+
+      // Label for the primary "advance" button: "Next" on intermediate
+      // steps, the wizard's submit label on the last step.
+      primaryButtonLabel: function () {
+        return this.isLastStep() ? this.submitLabel() : 'Next';
+      },
+
+      // {current, total} for the step indicator. Counts only
+      // non-skipped steps, and current is 1-based among visible steps.
+      // Returns null if there's only one visible step (no point
+      // showing "1 of 1").
+      stepProgress: function () {
+        var steps = this.steps();
+        var visible = [];
+        for (var i = 0; i < steps.length; i++) {
+          if (!this.shouldSkipStep(steps[i])) visible.push(i);
+        }
+        if (visible.length <= 1) return null;
+        var pos = visible.indexOf(this.stepIndex);
+        if (pos < 0) return null;
+        return { current: pos + 1, total: visible.length };
+      },
+
+      stepProgressLabel: function () {
+        var p = this.stepProgress();
+        return p ? (p.current + ' of ' + p.total) : '';
+      },
+
+      // Primary footer button behavior. Mid-wizard the button advances
+      // (same as Tab); on the last step it submits. The label flips
+      // accordingly (see primaryButtonLabel). Tab/Enter still work for
+      // keyboard users — this is the touch-friendly equivalent.
+      primaryAction: function () {
+        if (this.isLastStep()) this.submit();
+        else this.advance();
+      },
+      primaryDisabled: function () {
+        if (this.submitting) return true;
+        // On the last step the button is the submit; gate it on the
+        // existing canSubmit() check (all required fields filled).
+        if (this.isLastStep() && !this.canSubmit()) return true;
+        return false;
+      },
+
       // Is every required, non-skipped step answered?
       canSubmit: function () {
         var steps = this.steps();

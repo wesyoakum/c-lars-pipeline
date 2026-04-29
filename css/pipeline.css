@@ -505,13 +505,29 @@ code {
 .task-modal-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 0.6rem;
   padding: 0.9rem 1.1rem;
   border-bottom: 1px solid var(--border);
 }
 .task-modal-header h3 {
   margin: 0;
   font-size: 1.05rem;
+}
+/* "Step 2 of 4" indicator — small muted pill that sits between the
+   title and the close button. Push the close button to the right with
+   margin-left:auto on the indicator (or, when the indicator is hidden
+   via x-show, on the close button itself). */
+.task-wizard-step-indicator {
+  font-size: 0.78rem;
+  color: var(--fg-muted);
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.task-modal-close {
+  margin-left: auto;
 }
 .task-modal-close {
   background: transparent;
@@ -705,6 +721,23 @@ code {
 .task-wizard-suggestion.active {
   background: var(--bg-muted, #f4f6f8);
 }
+@media (max-width: 600px) {
+  /* Bigger taps on mobile — suggestions stay scannable but each row is
+     a comfortable thumb target. */
+  .task-wizard-suggestion {
+    padding: 0.7rem 0.75rem;
+    font-size: 1rem;
+    min-height: 44px;
+  }
+  /* Modal uses more screen real estate on phones so prompts/inputs
+     are bigger and easier to read. */
+  .task-modal-overlay {
+    padding: 1.5rem 0.5rem 0.5rem;
+  }
+  .task-modal {
+    max-width: none;
+  }
+}
 .task-wizard-suggestion-type {
   font-size: 0.65rem;
   font-weight: 600;
@@ -751,6 +784,37 @@ code {
   display: flex;
   gap: 0.4rem;
   flex-shrink: 0;
+}
+/* Touch-friendly Back / Next-Submit buttons. The desktop hint text
+   stays inline; mobile hides the hint and stretches the buttons full
+   width so both are easy thumb targets. */
+.task-wizard-back-btn,
+.task-wizard-primary-btn {
+  min-height: 36px;
+  padding-left: 0.9rem;
+  padding-right: 0.9rem;
+}
+@media (max-width: 600px) {
+  .task-wizard-actionbar {
+    flex-wrap: wrap;
+  }
+  /* Hide the keyboard-hint text on mobile — the buttons themselves
+     communicate the action; hint text is desktop-only ergonomics. */
+  .task-wizard-help {
+    display: none;
+  }
+  .task-wizard-actions {
+    width: 100%;
+    gap: 0.5rem;
+  }
+  .task-wizard-back-btn,
+  .task-wizard-primary-btn {
+    flex: 1;
+    min-height: 44px;       /* iOS recommended tap target */
+    font-size: 0.95rem;
+  }
+  /* When Back is hidden (step 0), the primary button takes the full
+     width by virtue of flex:1 on the only child. */
 }
 
 /* "Show inactive" override, only rendered when the global active_only
