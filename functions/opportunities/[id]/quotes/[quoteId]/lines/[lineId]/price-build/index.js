@@ -418,9 +418,14 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
         if (n === null || n === undefined || isNaN(n)) return '\u2014';
         return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
       }
+      // Format a 0-1 ratio as a percentage. Mirrors the server-side
+      // helper in lib/pricing.js \u2014 earlier we omitted the *100 here,
+      // so the GM card displayed "$121,097 (0.3%)" for a real margin
+      // of 28.5%. The threshold-status hint ("Good (> 0.3%)") used the
+      // same broken helper. All callers in this file pass ratios.
       function fmtPct(n, d) {
         if (n === null || n === undefined || isNaN(n)) return '\u2014';
-        return Number(n).toFixed(d !== undefined ? d : 1) + '%';
+        return (Number(n) * 100).toFixed(d !== undefined ? d : 1) + '%';
       }
 
       function collectPayload() {
