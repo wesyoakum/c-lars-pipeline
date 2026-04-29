@@ -54,7 +54,27 @@ export async function onRequestPost(context) {
   // Daily-digest timing. Hour 0-23, timezone IANA-style string.
   const hourRaw = parseInt(String(input.digest_hour_local || ''), 10);
   const digestHour = Number.isFinite(hourRaw) && hourRaw >= 0 && hourRaw <= 23 ? hourRaw : 4;
-  const tz = String(input.timezone || '').trim() || 'America/New_York';
+
+  // Timezone — validate via Intl.DateTimeFormat. Cloudflare Workers
+  // ship full ICU, so any IANA tz name (America/New_York, Europe/Paris,
+  // Asia/Singapore, …) works. A typo like "America/NewYork" or
+  // "Foo/Bar" throws RangeError; we catch + reject the save with a
+  // flash so the prefs page doesn't silently store a string that
+  // breaks the digest cron's per-user time math.
+  const rawTz = String(input.timezone || '').trim();
+  const tz = rawTz || 'America/New_York';
+  if (rawTz) {
+    try {
+      // Side-effect: throws RangeError on a bad tz name.
+      new Intl.DateTimeFormat('en-US', { timeZone: rawTz });
+    } catch (_e) {
+      return redirectWithFlash(
+        '/settings/notifications',
+        `"${rawTz}" is not a valid IANA timezone. Try America/New_York, Europe/London, Asia/Singapore, etc.`,
+        'error'
+      );
+    }
+  }
 
   // Self-action notifications: a single per-user toggle. Form sends
   // 'on' (or unset) for the checkbox; we store 1 / 0.
