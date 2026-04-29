@@ -906,15 +906,36 @@
 
       // Label for the Confirm button on the review screen.
       // - "Confirm and continue" when the cascade hands off to the
-      //   step UI (opportunity wizard)
+      //   step UI (quote wizard, etc.)
       // - "Confirm and create" / "Confirm and save" otherwise
       confirmButtonLabel: function () {
         if (!this.plan) return 'Confirm';
         if (this.plan.continue_to_steps) return 'Confirm and continue';
-        // Pure update path (matched account, no proposed-new anywhere
-        // and no new contact)
-        var hasAnyCreate = !!(this.plan.account?.proposed_new || this.plan.contact?.proposed_new);
+        var hasAnyCreate = !!(
+          this.plan.account?.proposed_new
+          || this.plan.contact?.proposed_new
+          || this.plan.opportunity?.proposed_new
+          || this.plan.quote?.proposed_new
+        );
         return hasAnyCreate ? 'Confirm and create' : 'Confirm and save';
+      },
+
+      // Validate required fields on editable sections (opp / quote
+      // need title + type before the Confirm button activates).
+      confirmDisabled: function () {
+        if (this.executing) return true;
+        if (!this.plan) return true;
+        var opp = this.plan.opportunity?.proposed_new;
+        if (opp) {
+          if (!String(opp.title || '').trim()) return true;
+          if (!String(opp.transaction_type || '').trim()) return true;
+        }
+        var qt = this.plan.quote?.proposed_new;
+        if (qt) {
+          if (!String(qt.title || '').trim()) return true;
+          if (!String(qt.quote_type || '').trim()) return true;
+        }
+        return false;
       },
 
       // One-line narrative summary of the plan, shown above the
@@ -940,8 +961,8 @@
           : (ctc.matched ? ((ctc.matched.first_name || '') + ' ' + (ctc.matched.last_name || '')).trim() : '');
 
         // Wizard-specific framing for plans that continue to the step
-        // UI after the cascade resolves the prerequisites (e.g. opp
-        // wizard cascades the account, then steps for type/value).
+        // UI after the cascade resolves the prerequisites (e.g. quote
+        // wizard cascades the account, then steps for opp + type).
         if (continueAfter) {
           var entity = (this.config && this.config.title) || 'record';
           // Strip the leading "New " from "New opportunity" → "opportunity"
@@ -952,6 +973,18 @@
           if (matchAcct) {
             return 'Looks like "' + acctLabel + '" already exists. Confirm and continue to ' + entity + ' details.';
           }
+        }
+
+        // Full opportunity cascade (Phase 5c-1): account section + opp
+        // editable form. Both terminal — confirm creates everything.
+        if (p.opportunity?.proposed_new) {
+          if (newAcct) {
+            return 'First we’ll add the new account "' + acctLabel + '", then create a new opportunity at it.';
+          }
+          if (matchAcct) {
+            return 'Adding a new opportunity at the existing account "' + acctLabel + '".';
+          }
+          return 'Creating a new opportunity. Pick the account below.';
         }
 
         if (newAcct && newCtc) {

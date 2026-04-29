@@ -436,6 +436,43 @@ const WIZARD_MODAL_MARKUP = (
   '</div>' +
   '</template>' +
 
+  // Opportunity section (Phase 5c-1) — editable form fields, not
+  // checkbox-style. Bound directly to plan.opportunity.proposed_new
+  // via x-model. Title and transaction_type are required —
+  // confirmDisabled() guards the Confirm button until both are set.
+  '<template x-if="$store.wizard.plan && $store.wizard.plan.opportunity && $store.wizard.plan.opportunity.proposed_new">' +
+  '<div class="task-wizard-review-section">' +
+  '<div class="task-wizard-review-section-head">' +
+  '<span class="task-wizard-review-kind">Opportunity</span>' +
+  '<span class="task-wizard-review-status new"><strong>will be created</strong></span>' +
+  '</div>' +
+  '<div class="task-wizard-review-form">' +
+  '<label class="task-wizard-review-input-row">' +
+  '<span>Title <em class="req">*</em></span>' +
+  '<input type="text" x-model="$store.wizard.plan.opportunity.proposed_new.title" required>' +
+  '</label>' +
+  '<label class="task-wizard-review-input-row">' +
+  '<span>Type <em class="req">*</em></span>' +
+  '<select x-model="$store.wizard.plan.opportunity.proposed_new.transaction_type" required>' +
+  '<option value="">— Pick a type —</option>' +
+  '<option value="spares">Spares</option>' +
+  '<option value="eps">Engineered Product (EPS)</option>' +
+  '<option value="refurb">Refurbishment</option>' +
+  '<option value="service">Service</option>' +
+  '</select>' +
+  '</label>' +
+  '<label class="task-wizard-review-input-row">' +
+  '<span>Value (USD)</span>' +
+  '<input type="text" x-model="$store.wizard.plan.opportunity.proposed_new.estimated_value_usd" placeholder="optional">' +
+  '</label>' +
+  '<label class="task-wizard-review-input-row">' +
+  '<span>Description</span>' +
+  '<textarea x-model="$store.wizard.plan.opportunity.proposed_new.description" rows="3" placeholder="optional"></textarea>' +
+  '</label>' +
+  '</div>' +
+  '</div>' +
+  '</template>' +
+
   // Action bar
   '<div class="task-wizard-review-actions">' +
   '<button type="button" class="btn btn-sm task-wizard-review-edit" ' +
@@ -443,7 +480,7 @@ const WIZARD_MODAL_MARKUP = (
   ':disabled="$store.wizard.executing">Edit manually</button>' +
   '<button type="button" class="btn btn-sm primary task-wizard-review-confirm" ' +
   '@click="$store.wizard.confirmPlan()" ' +
-  ':disabled="$store.wizard.executing">' +
+  ':disabled="$store.wizard.confirmDisabled()">' +
   '<span x-show="!$store.wizard.executing" x-text="$store.wizard.confirmButtonLabel()"></span>' +
   '<span x-show="$store.wizard.executing">Working…</span>' +
   '</button>' +

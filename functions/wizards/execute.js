@@ -17,9 +17,9 @@
 //   { ok: true, account_id?, contact_id?, redirect_url, ... }
 //   { ok: false, error }
 
-import { stmt, batch } from '../lib/db.js';
+import { stmt, batch, one, run } from '../lib/db.js';
 import { auditStmt } from '../lib/audit.js';
-import { uuid, now } from '../lib/ids.js';
+import { uuid, now, nextSequenceValue } from '../lib/ids.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -117,13 +117,84 @@ export async function onRequestPost(context) {
     });
   }
 
-  // ---- opportunity / quote wizard: account dedup, then continue to steps ----
-  // Process account section the same way, but instead of redirecting
-  // we hand control back to the wizard's step UI with the account
-  // locked in answers. The user fills in remaining required fields
-  // (type, value, etc. for opp; opportunity-pick + quote_type for
-  // quote) and submits via the standard create path.
-  if (wizardKey === 'opportunity' || wizardKey === 'quote') {
+  // ---- opportunity wizard: account → opp (full cascade) ----
+  if (wizardKey === 'opportunity') {
+    const acct = processAccountSection(env, plan, ts, user, statements);
+    if (acct.error) return json({ ok: false, error: acct.error }, 400);
+
+    // Opp number is allocated outside the batch (D1 sequence bumps
+    // are async/non-batchable). Same approach as
+    // /opportunities POST.
+    const opp = plan.opportunity?.proposed_new;
+    if (!opp || !opp.title || !opp.transaction_type) {
+      return json({ ok: false, error: 'opp_title_and_type_required' }, 400);
+    }
+    const oppId = uuid();
+    const oppSeq = await nextSequenceValue(env.DB, 'opportunity');
+    const oppNumber = String(oppSeq).padStart(5, '0');
+    const valueRaw = (opp.estimated_value_usd || '').toString().replace(/[$,\s]/g, '').trim();
+    const valueNum = valueRaw ? Number(valueRaw) : null;
+
+    statements.push(stmt(env.DB,
+      `INSERT INTO opportunities
+         (id, number, account_id, primary_contact_id, title, description,
+          transaction_type, stage, stage_entered_at, probability,
+          estimated_value_usd, currency, expected_close_date,
+          owner_user_id, salesperson_user_id,
+          created_at, updated_at, created_by_user_id)
+       VALUES (?, ?, ?, NULL, ?, ?,
+               ?, 'lead', ?, 10,
+               ?, 'USD', ?,
+               ?, ?,
+               ?, ?, ?)`,
+      [
+        oppId, oppNumber, acct.accountId,
+        opp.title.trim(),
+        opp.description ? opp.description.trim() : null,
+        opp.transaction_type,
+        ts,
+        Number.isFinite(valueNum) ? valueNum : null,
+        opp.expected_close_date || null,
+        user.id, user.id,
+        ts, ts, user.id,
+      ]));
+
+    statements.push(auditStmt(env.DB, {
+      entityType: 'opportunity',
+      entityId: oppId,
+      eventType: 'created',
+      user,
+      summary: `Created opportunity "${opp.title}" via Smart-start`,
+      changes: { title: { from: null, to: opp.title }, source: { from: null, to: 'wizard_smart_start' } },
+    }));
+
+    if (aiInboxEntryId) {
+      statements.push(linkStmt(env.DB, aiInboxEntryId,
+        acct.createdNew ? 'create_account' : 'link_to_account',
+        'account', acct.accountId, acct.accountLabel, user));
+      statements.push(linkStmt(env.DB, aiInboxEntryId,
+        'create_opportunity', 'opportunity', oppId, `${oppNumber} · ${opp.title}`, user));
+    }
+
+    await batch(env.DB, statements);
+
+    return json({
+      ok: true,
+      account_id: acct.accountId,
+      account_label: acct.accountLabel,
+      opportunity_id: oppId,
+      opportunity_number: oppNumber,
+      created_new_account: acct.createdNew,
+      // Land on the new opp's detail page — that's the "thing
+      // created" by this wizard.
+      redirect_url: '/opportunities/' + encodeURIComponent(oppId),
+    });
+  }
+
+  // ---- quote wizard: still account-only cascade for now (5b-3) ----
+  // Phase 5c-2 will add the full opp+quote cascade. Until then the
+  // quote wizard drops to the step UI after the account is resolved.
+  if (wizardKey === 'quote') {
     const acct = processAccountSection(env, plan, ts, user, statements);
     if (acct.error) return json({ ok: false, error: acct.error }, 400);
 

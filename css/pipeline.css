@@ -897,6 +897,53 @@ code {
   flex-direction: column;
   gap: 0.35rem;
 }
+/* Editable form within a review section (opp / quote — Phase 5c).
+   Used when the section is for a brand-new entity whose fields are
+   user-editable in the review (rather than checkbox-style push
+   candidates). */
+.task-wizard-review-form {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.task-wizard-review-input-row {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  gap: 0.5rem;
+  align-items: baseline;
+  font-size: 0.9rem;
+}
+.task-wizard-review-input-row > span {
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.task-wizard-review-input-row > span .req {
+  color: #b42318;
+  font-style: normal;
+  margin-left: 0.1rem;
+}
+.task-wizard-review-input-row input,
+.task-wizard-review-input-row select,
+.task-wizard-review-input-row textarea {
+  width: 100%;
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+}
+.task-wizard-review-input-row textarea {
+  resize: vertical;
+  min-height: 3.5rem;
+}
+@media (max-width: 600px) {
+  .task-wizard-review-input-row {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+}
 .task-wizard-review-field {
   display: grid;
   grid-template-columns: auto 5.5rem 1fr;

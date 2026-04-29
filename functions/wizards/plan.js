@@ -409,11 +409,26 @@ async function planOpportunity(env, extracted) {
   const accountSection = await buildAccountSection(env, orgDetail, orgName);
   if (!accountSection) return null;
 
+  // Opportunity section is always "proposed_new" — the cascade is
+  // about creating an opp, never matching one. The review renders
+  // editable inputs bound to these fields (title and
+  // transaction_type are required; the rest are optional).
+  // estimated_value_usd / expected_close_date / transaction_type
+  // aren't extracted by the LLM today; leaving empty for the user
+  // to fill is fine.
+  const opportunitySection = {
+    proposed_new: {
+      title: String(extracted?.title || '').trim(),
+      description: String(extracted?.summary || '').trim(),
+      transaction_type: '',
+      estimated_value_usd: '',
+      expected_close_date: '',
+    },
+  };
+
   return {
     account: accountSection,
-    // No contact / opportunity sections — those happen in the
-    // standard step UI after the cascade resolves the account.
-    continue_to_steps: true,
+    opportunity: opportunitySection,
   };
 }
 
