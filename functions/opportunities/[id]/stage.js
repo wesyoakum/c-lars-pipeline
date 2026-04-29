@@ -16,6 +16,7 @@ import { uuid, now, nextNumber, currentYear } from '../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../lib/http.js';
 import { stageDef, stagesFor, evaluateGate, loadGateContext, GATE_MODE } from '../../lib/stages.js';
 import { notifyStmt } from '../../lib/notify.js';
+import { notifyExternal, NOTIFICATION_EVENTS } from '../../lib/notify-external.js';
 import { checkInactivateBlockers, summarizeBlockers } from '../../lib/inactivate-blocker.js';
 import { fireEvent } from '../../lib/auto-tasks.js';
 
@@ -211,6 +212,32 @@ export async function onRequestPost(context) {
     }
   } catch (err) {
     console.error('stage-change notify fan-out failed:', err?.message || err);
+  }
+
+  // Phase 7d-2 — fire the external (Teams / email) notification to
+  // the opportunity owner. Skip-self protection is applied inside
+  // notifyExternal() based on the recipient's notify_self_actions
+  // setting; the actor (user.id) is passed so the dispatcher can
+  // make that decision. Owner missing or equal to actor with default
+  // settings → no-op. Wrapped in waitUntil so the user-facing
+  // redirect doesn't block on outbound HTTP.
+  if (opp.owner_user_id) {
+    context.waitUntil(
+      notifyExternal(env, {
+        userId: opp.owner_user_id,
+        actorUserId: user?.id || null,
+        eventType: NOTIFICATION_EVENTS.OPP_STAGE_CHANGED,
+        data: {
+          opp_label: `${opp.number}: ${opp.title}`,
+          previous_stage: opp.stage,
+          new_stage: targetDef.label || targetDef.stage_key,
+          actor: user?.display_name || user?.email || 'Someone',
+          link: `/opportunities/${oppId}`,
+        },
+        context: { ref_type: 'opportunity', ref_id: oppId },
+        idempotencyKey: `opp_stage_changed:${oppId}:${ts}`,
+      }).catch(err => console.error('notifyExternal(opp_stage_changed) failed:', err?.message || err))
+    );
   }
 
   // Auto-tasks Phase 1 — fire opportunity.stage_changed into the rules

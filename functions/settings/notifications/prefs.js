@@ -56,6 +56,13 @@ export async function onRequestPost(context) {
   const digestHour = Number.isFinite(hourRaw) && hourRaw >= 0 && hourRaw <= 23 ? hourRaw : 4;
   const tz = String(input.timezone || '').trim() || 'America/New_York';
 
+  // Self-action notifications: a single per-user toggle. Form sends
+  // 'on' (or unset) for the checkbox; we store 1 / 0.
+  const notifySelf = input.notify_self_actions === 'on'
+                  || input.notify_self_actions === '1'
+                  || input.notify_self_actions === 1
+                  ? 1 : 0;
+
   const stmts = [
     stmt(env.DB,
       `DELETE FROM user_notification_prefs WHERE user_id = ?`,
@@ -66,8 +73,9 @@ export async function onRequestPost(context) {
        VALUES (?, ?, ?, ?, ?)`,
       row)),
     stmt(env.DB,
-      `UPDATE users SET timezone = ?, digest_hour_local = ? WHERE id = ?`,
-      [tz, digestHour, user.id]),
+      `UPDATE users SET timezone = ?, digest_hour_local = ?, notify_self_actions = ?
+        WHERE id = ?`,
+      [tz, digestHour, notifySelf, user.id]),
   ];
   await batch(env.DB, stmts);
 

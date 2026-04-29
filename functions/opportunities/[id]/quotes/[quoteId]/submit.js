@@ -22,6 +22,7 @@ import {
 } from '../../../../lib/filename-templates.js';
 import { fireEvent, reportError } from '../../../../lib/auto-tasks.js';
 import { getEffectiveValidityDays } from '../../../../lib/quote-term-defaults.js';
+import { notifyQuoteStatusChange } from '../../../../lib/notify-external.js';
 
 export async function onRequestPost(context) {
   const { env, data, params } = context;
@@ -88,6 +89,19 @@ export async function onRequestPost(context) {
   ];
 
   await batch(env.DB, statements);
+
+  // Phase 7d-2 — fire external notification to the quote creator.
+  // Skip-self enforced downstream by notify_self_actions setting.
+  context.waitUntil(
+    notifyQuoteStatusChange(env, {
+      quote: { ...quote, status: targetStatus },
+      previous_status: quote.status,
+      new_status:      targetStatus,
+      actorUserId:     user?.id || null,
+      actor:           user?.display_name || user?.email || 'Someone',
+      ts,
+    }).catch(err => console.error('notifyQuoteStatusChange (submit) failed:', err?.message || err))
+  );
 
   // Auto-tasks Phase 1 — fire quote.issued event into the rules engine.
   // waitUntil keeps rule evaluation off the critical path; failures

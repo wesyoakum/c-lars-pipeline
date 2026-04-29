@@ -13,6 +13,13 @@
 // Single API:
 //   await notifyExternal(env, {
 //     userId,                 // who is the recipient
+//     actorUserId,            // optional — who triggered the event;
+//                             //   when equal to userId AND the recipient
+//                             //   has notify_self_actions = 0 (default),
+//                             //   the send is skipped with reason
+//                             //   'self_action'. Pass null/undefined for
+//                             //   system-triggered events (cron etc.) so
+//                             //   the recipient always gets it.
 //     eventType,              // one of NOTIFICATION_EVENTS
 //     data,                   // event-specific payload
 //     context: { ref_type, ref_id },   // optional CRM context
@@ -95,8 +102,32 @@ export const NOTIFICATION_CHANNEL_LABELS = Object.freeze({
 export async function notifyExternal(env, opts) {
   const userId = opts?.userId;
   const eventType = opts?.eventType;
+  const actorUserId = opts?.actorUserId || null;
   if (!userId || !eventType) {
     return [{ channel: null, status: 'skipped', error: 'missing_user_or_event' }];
+  }
+
+  // Skip-self check. When the actor (who triggered the event) is the
+  // same user as the recipient, only fire if the user has explicitly
+  // opted in via notify_self_actions = 1. Default is 0 (skip), which
+  // matches the user-coaching feedback: "the changes I want to see
+  // are when other people do things." Logged once per call regardless
+  // of channel count — this isn't a per-channel decision.
+  if (actorUserId && actorUserId === userId) {
+    const recipient = await one(env.DB,
+      `SELECT notify_self_actions FROM users WHERE id = ?`,
+      [userId]);
+    if (!recipient?.notify_self_actions) {
+      await logExternal(env, {
+        user_id: userId, event_type: eventType, channel: null,
+        target: null, status: 'skipped',
+        error_message: 'self_action',
+        idempotency_key: opts.idempotencyKey || null,
+        ref_type: opts.context?.ref_type || null,
+        ref_id: opts.context?.ref_id || null,
+      });
+      return [{ channel: null, status: 'skipped', reason: 'self_action' }];
+    }
   }
 
   const rows = await all(env.DB,
@@ -169,6 +200,40 @@ export async function notifyExternal(env, opts) {
   }
 
   return results;
+}
+
+/**
+ * Convenience wrapper: fire `quote_status_changed` to the quote's
+ * creator. Centralized so every quote-status handler (submit / accept
+ * / reject / revise / expire / etc.) doesn't have to duplicate the
+ * same boilerplate. Recipient is `quote.created_by_user_id`; actor
+ * is whoever clicked the button (`user.id`). Skip-self is enforced
+ * downstream by `notifyExternal()`.
+ *
+ * Caller should still wrap this in `context.waitUntil()` so the
+ * outbound webhook doesn't slow down the redirect.
+ */
+export async function notifyQuoteStatusChange(env, opts) {
+  const quote = opts.quote || {};
+  const recipientId = quote.created_by_user_id;
+  if (!recipientId) return [{ channel: null, status: 'skipped', reason: 'no_creator' }];
+
+  const oppId = quote.opportunity_id;
+  return notifyExternal(env, {
+    userId:      recipientId,
+    actorUserId: opts.actorUserId || null,
+    eventType:   NOTIFICATION_EVENTS.QUOTE_STATUS_CHANGED,
+    data: {
+      quote_number:    quote.number || '',
+      quote_label:     [quote.title, opts.opp_label].filter(Boolean).join(' — '),
+      previous_status: opts.previous_status,
+      new_status:      opts.new_status,
+      actor:           opts.actor || '',
+      link:            oppId ? `/opportunities/${oppId}/quotes/${quote.id}` : '',
+    },
+    context: { ref_type: 'quote', ref_id: quote.id },
+    idempotencyKey: `quote_status_changed:${quote.id}:${opts.new_status}:${opts.ts || Date.now()}`,
+  });
 }
 
 /**

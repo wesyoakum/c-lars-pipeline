@@ -15,6 +15,7 @@ import { redirectWithFlash } from './http.js';
 import { INACTIVE_QUOTE_STATUSES } from './activeness.js';
 import { checkInactivateBlockers, summarizeBlockers } from './inactivate-blocker.js';
 import { fireEvent } from './auto-tasks.js';
+import { notifyQuoteStatusChange } from './notify-external.js';
 
 function isAjaxRequest(request, input) {
   if (input && (input.source === 'wizard' || input.source === 'modal')) return true;
@@ -155,6 +156,23 @@ export async function transitionQuote(context, opts) {
         err?.message || err
       );
     }
+  }
+
+  // Phase 7d-2: external notification to the quote's creator. Skip-self
+  // is enforced inside notifyQuoteStatusChange → notifyExternal based on
+  // the recipient's notify_self_actions toggle. Same fire-and-forget
+  // pattern as auto-tasks below.
+  if (context.waitUntil) {
+    context.waitUntil(
+      notifyQuoteStatusChange(env, {
+        quote: { ...quote, status: to },  // give the helper the post-update view
+        previous_status: quote.status,
+        new_status:      to,
+        actorUserId:     user?.id || null,
+        actor:           user?.display_name || user?.email || 'Someone',
+        ts,
+      }).catch(err => console.error('notifyQuoteStatusChange failed:', err?.message || err))
+    );
   }
 
   // Auto-tasks fan-out. Kept off the critical path via waitUntil so a

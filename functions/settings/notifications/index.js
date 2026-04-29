@@ -60,12 +60,14 @@ export async function onRequestGet(context) {
     prefMap[`${r.event_type}|${r.channel}`] = !!r.enabled;
   }
 
-  // Load current digest timing
+  // Load current digest timing + self-action toggle
   const userRow = await one(env.DB,
-    `SELECT timezone, digest_hour_local FROM users WHERE id = ?`,
+    `SELECT timezone, digest_hour_local, notify_self_actions
+       FROM users WHERE id = ?`,
     [user.id]);
   const tz = userRow?.timezone || 'America/New_York';
   const digestHour = userRow?.digest_hour_local ?? 4;
+  const notifySelf = !!userRow?.notify_self_actions;
 
   const eventTypes = Object.values(NOTIFICATION_EVENTS);
   const channelTypes = Object.values(NOTIFICATION_CHANNELS);
@@ -164,9 +166,9 @@ export async function onRequestGet(context) {
       <p class="muted" style="margin-top:0">
         Pick which events fire on which channel. Empty rows mean no
         external notification at all — the in-app bell still works.
-        For now these fire on every matching event, including things
-        you do yourself; a "changes by other people only" toggle is
-        on the roadmap.
+        By default, your own actions don't trigger notifications to
+        yourself (you already know you did it). Flip the toggle below
+        if you want to see them anyway — useful for testing.
       </p>
 
       <form method="post" action="/settings/notifications/prefs">
@@ -215,6 +217,22 @@ export async function onRequestGet(context) {
           real event triggers. Save your channel selections first if
           you've just changed them.
         </p>
+
+        <h3 style="margin-top:1.5rem">Self-action notifications</h3>
+        <label style="display:flex;align-items:flex-start;gap:0.55rem;max-width:560px;cursor:pointer">
+          <input type="checkbox" name="notify_self_actions"
+                 ${notifySelf ? 'checked' : ''}
+                 style="margin-top:0.2rem">
+          <span>
+            <span style="display:block;font-weight:600">Notify me about my own actions</span>
+            <span class="muted" style="display:block;font-size:0.82rem;margin-top:0.1rem">
+              Off by default. When off, you skip notifications for events
+              you triggered yourself (assigning yourself a task, changing
+              your own opportunity's stage, etc.). Other people's actions
+              on your stuff still fire normally.
+            </span>
+          </span>
+        </label>
 
         <h3 style="margin-top:1.5rem">Daily digest timing</h3>
         <div style="display:flex;align-items:baseline;gap:0.75rem;flex-wrap:wrap;max-width:560px">

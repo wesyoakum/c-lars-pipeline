@@ -385,15 +385,18 @@ export async function onRequestPost(context) {
     }),
   ]);
 
-  // Phase 7b: external notification when a task is assigned to
-  // someone OTHER than the creator. Fire-and-forget — failures land
-  // in notification_log; the task is already saved.
-  if (type === 'task' && assignedUserId && assignedUserId !== user?.id) {
+  // Phase 7b: external notification when a task is assigned to a
+  // user. Skip-self is now handled inside notifyExternal() based on
+  // the recipient's notify_self_actions toggle (Phase 7d-2). Fire-
+  // and-forget — failures land in notification_log; the task is
+  // already saved.
+  if (type === 'task' && assignedUserId) {
     try {
       const link = oppId ? `/opportunities/${oppId}` : '/activities';
       const linkLabel = await getLinkLabel(env, oppId, accountId, quoteId);
       await notifyExternal(env, {
         userId: assignedUserId,
+        actorUserId: user?.id || null,
         eventType: NOTIFICATION_EVENTS.TASK_ASSIGNED,
         data: {
           task: {

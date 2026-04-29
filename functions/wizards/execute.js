@@ -382,25 +382,26 @@ export async function onRequestPost(context) {
 
     await batch(env.DB, statements);
 
-    // Phase 7b parity: if the assignee isn't the creator, fire the
-    // task_assigned external notification. (Same skip-self rule as
-    // /activities POST.)
-    if (assignee !== user.id) {
-      try {
-        const { notifyExternal, NOTIFICATION_EVENTS } = await import('../lib/notify-external.js');
-        await notifyExternal(env, {
-          userId: assignee,
-          eventType: NOTIFICATION_EVENTS.TASK_ASSIGNED,
-          data: {
-            task: { body: subject, due_at: dueAt },
-            assignedBy: { display_name: user.display_name || user.email || 'Someone' },
-            link: '/activities',
-          },
-          context: oppId ? { ref_type: 'opportunity', ref_id: oppId } : null,
-          idempotencyKey: 'task_assigned:' + taskId,
-        });
-      } catch (e) { /* fire-and-forget */ }
-    }
+    // Phase 7b parity: fire the task_assigned external notification.
+    // Pass actorUserId so the dispatcher can apply the user's
+    // notify_self_actions setting — when assignee === user.id and
+    // the recipient hasn't opted in, the dispatcher logs as
+    // 'self_action' and short-circuits.
+    try {
+      const { notifyExternal, NOTIFICATION_EVENTS } = await import('../lib/notify-external.js');
+      await notifyExternal(env, {
+        userId: assignee,
+        actorUserId: user?.id || null,
+        eventType: NOTIFICATION_EVENTS.TASK_ASSIGNED,
+        data: {
+          task: { body: subject, due_at: dueAt },
+          assignedBy: { display_name: user.display_name || user.email || 'Someone' },
+          link: '/activities',
+        },
+        context: oppId ? { ref_type: 'opportunity', ref_id: oppId } : null,
+        idempotencyKey: 'task_assigned:' + taskId,
+      });
+    } catch (e) { /* fire-and-forget */ }
 
     return json({
       ok: true,
