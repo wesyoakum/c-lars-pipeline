@@ -144,6 +144,10 @@ export function templateManagerHtml(templateType, { html, escape } = {}) {
       </summary>
       <div style="margin:0.35rem 0 0 1rem;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
         <a href="/templates/${templateType}/download" class="btn btn-sm">Download Template</a>
+        <a href="/templates/${templateType}/inspect"
+           class="btn btn-sm"
+           title="Diagnose blank-output bugs: list every placeholder the .docx uses and which ones the server fills"
+           target="_blank">Inspect placeholders</a>
         <form method="post" action="/templates/${templateType}/upload"
               enctype="multipart/form-data" class="inline-form"
               style="display:flex;align-items:center;gap:0.35rem">

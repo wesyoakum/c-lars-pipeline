@@ -310,6 +310,11 @@ export async function getQuoteDocData(env, quoteId) {
   // Add WFM PascalCase aliases to each already-formatted line. Uses the
   // base object from fmtLine (which we pre-computed above) and attaches
   // the description from the raw line.
+  //
+  // Plus: a generous set of common-spelling aliases (Item / Title /
+  // Qty / Price / LineAmount / etc.) so user-uploaded templates work
+  // regardless of which naming convention they used for the loop body
+  // placeholders.
   const addWfmAliases = (base, line) => ({
     ...base,
     // WFM-compatible aliases
@@ -320,6 +325,32 @@ export async function getQuoteDocData(env, quoteId) {
     Rate: base.unitPrice,
     Amount: base.amount,
     Code: base.partNumber,
+
+    // Common alt-spellings (camel + Pascal). Templates pick whichever
+    // they use; missing keys silently render '' via nullGetter.
+    Item:        base.title,
+    item:        base.title,
+    ItemName:    base.title,
+    itemName:    base.title,
+    Title:       base.title,
+    description: line.description || '',
+    note:        base.note,
+    PartNumber:  base.partNumber,
+    Part:        base.partNumber,
+    code:        base.partNumber,
+    Qty:         base.quantity,
+    qty:         base.quantity,
+    quantity:    base.quantity,    // explicit (already inherited from base)
+    Unit:        base.unit,
+    unit:        base.unit,
+    Price:       base.unitPrice,
+    UnitPrice:   base.unitPrice,
+    LinePrice:   base.amount,
+    LineAmount:  base.amount,
+    Total:       base.amount,
+    Extended:    base.amount,
+    ExtendedPrice: base.amount,
+
     // Line discount (Phase 2) — templates that want to render a
     // "was X" or "discount -Y" alongside each line can use these.
     HasLineDiscount: base.hasLineDiscount,
@@ -576,7 +607,69 @@ export async function getQuoteDocData(env, quoteId) {
     _number: quote.number,
     _revision: quote.revision,
     _quoteType: quote.quote_type,
+
+    // ── Defensive placeholder aliases ──
+    // Templates uploaded by users may use slightly different naming
+    // conventions than ours. Rather than hunt down whichever variant
+    // they used, we provide every common spelling for each field. The
+    // total cost is small (a few extra string fields per render) and
+    // it makes "I uploaded my template and it shows blanks" a non-bug.
+    //
+    // Fields covered: address, date, delivery, line items array,
+    // payment terms, and a numeric-only total for templates that
+    // hard-code the "$" prefix.
+    Address:           billingAddr?.address || '',
+    address:           billingAddr?.address || '',
+    BillingAddress:    billingAddr?.address || '',
+    billingAddress:    billingAddr?.address || '',
+    ClientCity:        '',  // legacy; addresses are single-field now
+    ClientCountry:     '',  // legacy
+
+    date:              fmtDate(quote.submitted_at) || fmtDate(new Date().toISOString()),
+    DocumentDate:      fmtDate(quote.submitted_at) || fmtDate(new Date().toISOString()),
+    IssueDate:         fmtDate(quote.submitted_at) || fmtDate(new Date().toISOString()),
+
+    Delivery:          quote.delivery_estimate || '',
+    deliveryEstimate:  quote.delivery_estimate || '',
+    DeliveryEstimate:  quote.delivery_estimate || '',
+    delivery_estimate: quote.delivery_estimate || '',
+
+    LineItems:         formattedLines,
+    lineItems:         formattedLines,
+    Items:             formattedLines,
+    items:             formattedLines,
+
+    Terms:             quote.payment_terms || '',
+    terms:             quote.payment_terms || '',
+    PaymentTerms:      quote.payment_terms || '',
+    paymentTerms:      quote.payment_terms || '',
+    QuoteTerms:        quote.payment_terms || '',
+    payment_terms:     quote.payment_terms || '',
+    EpsTerms:          quote.payment_terms || '',
+    EPSTerms:          quote.payment_terms || '',
+    PaymentSchedule:   quote.payment_terms || '',
+    paymentSchedule:   quote.payment_terms || '',
+
+    DeliveryTerms:     quote.delivery_terms || '',
+    delivery_terms:    quote.delivery_terms || '',
+
+    // Numeric-only totals for templates that hardcode the "$" prefix.
+    // (Otherwise users get "$$1,234,567.00" because both the template
+    // and fmtDollar add a "$".)
+    QuoteTotalAmount:    fmtAmount(quote.total_price),
+    quoteTotalAmount:    fmtAmount(quote.total_price),
+    TotalAmount:         fmtAmount(quote.total_price),
+    QuoteSubtotalAmount: fmtAmount(subtotalDisplayed),
+    QuoteTaxAmount:      fmtAmount(quote.tax_amount),
   };
+}
+
+/** Number-only formatter — returns '1,234.56' (no '$' prefix). Used to
+ * provide '*Amount' aliases that pair with templates whose .docx
+ * markup hardcodes the dollar sign. */
+function fmtAmount(n) {
+  if (n === null || n === undefined || Number.isNaN(Number(n))) return '';
+  return Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // ── Load OC data ────────────────────────────────────────────────────
