@@ -38,9 +38,13 @@ const ALLOWED_ACTION_TYPES = new Set([
   'create_task',
   'create_account',
   'create_contact',
+  'create_opportunity',
+  'create_quote',
+  'create_job',
   'create_reminder',
   'link_to_account',
   'link_to_opportunity',
+  'link_to_quote',
   'archive',
 ]);
 

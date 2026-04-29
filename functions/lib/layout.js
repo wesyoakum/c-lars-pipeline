@@ -320,11 +320,11 @@ const WIZARD_MODAL_MARKUP = (
   // wizard's answers and switches to the standard step UI.
   '<div class="task-wizard-smartstart" x-show="$store.wizard.phase === \'smart-start\'">' +
   '<p class="task-wizard-smartstart-title">Quick start <small class="muted">(optional)</small></p>' +
-  '<p class="task-wizard-smartstart-hint">Paste a name + email + phone, drop in an email signature, or upload a photo of a business card. AI will extract the fields and walk you through to confirm.</p>' +
+  '<p class="task-wizard-smartstart-hint" x-text="$store.wizard.smartStartHint()"></p>' +
   '<textarea class="task-wizard-smartstart-text" x-model="$store.wizard.smartStartText" ' +
   'rows="4" autocomplete="off" ' +
   ':disabled="$store.wizard.smartStartBusy" ' +
-  'placeholder="e.g. Jane Doe, Director of Procurement at Acme Corp. j.doe@acme.com  555-987-6543"></textarea>' +
+  ':placeholder="$store.wizard.smartStartPlaceholder()"></textarea>' +
   '<input type="file" accept="image/*" x-ref="smartstart_photo" hidden ' +
   '@change="$store.wizard.runSmartStartFromFile($event.target.files[0])">' +
   '<div class="task-wizard-smartstart-actions">' +

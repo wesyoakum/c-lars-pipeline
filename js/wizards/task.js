@@ -36,6 +36,16 @@
     title: 'New task',
     submitLabel: 'Create task',
 
+    // Smart-start (Phase 4): natural-language task entry.
+    // "Remind me to call ACME about valves Friday at 3pm" → AI pulls
+    // out the body and the due date (the LLM resolves "Friday at 3pm"
+    // against today's date in the extraction prompt). Assignee and
+    // link are still user-picked — those need explicit decisions.
+    smartStart: {
+      hint: 'Type the task in plain English — "Call Bob at ACME tomorrow about the spare valves order". AI will pull out the action and the due date; you confirm the rest.',
+      placeholder: 'e.g. Email Aggie at MDA Friday with the EPS proposal',
+    },
+
     steps: [
       {
         key: 'body',
@@ -146,6 +156,37 @@
         };
         if (prefill.link_label) {
           return { locked: true, prefix: 'Linked to', label: prefill.link_label };
+        }
+      }
+      return null;
+    },
+
+    // Smart-start mapper: turn the AI Inbox extraction into a task.
+    // The extraction has action_items[] when the LLM detected concrete
+    // todos; otherwise we fall back to the title/summary so the user
+    // can still type freeform "remind me to ..." and have it picked
+    // up. The LLM resolves relative dates like "Friday at 3pm" against
+    // today's date (injected into the extraction prompt as
+    // "Today is YYYY-MM-DD"), so action_items[0].due is already an
+    // ISO string ready to feed to the date step's parseIso helper.
+    applyExtraction: function (answers, extracted /*, ctx */) {
+      if (!extracted) return null;
+      var first = (extracted.action_items && extracted.action_items[0]) || null;
+      var body = '';
+      if (first && first.task) body = first.task;
+      else if (extracted.title) body = extracted.title;
+      else if (extracted.summary) body = extracted.summary;
+      if (body && !answers.body) answers.body = String(body).trim();
+      // Due date — only when the extraction surfaced one.
+      if (first && first.due && !answers.due) {
+        var s = String(first.due);
+        var d = new Date(s);
+        if (isNaN(d.getTime())) {
+          var m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+          if (m) d = new Date(+m[1], +m[2] - 1, +m[3], 9, 0, 0);
+        }
+        if (!isNaN(d.getTime())) {
+          answers.due = { raw: s, parsed: d };
         }
       }
       return null;

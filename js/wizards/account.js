@@ -34,6 +34,15 @@
     title: 'New account',
     submitLabel: 'Create account',
 
+    // Smart-start (Phase 4): Quick-start panel that takes a freeform
+    // description, a website URL on a card, or a logo/letterhead photo
+    // and pulls out the legal name + website + address. The AI Inbox
+    // entry is back-linked to the new account on submit.
+    smartStart: {
+      hint: 'Paste a website, an email address from someone at the company, or upload a logo / letterhead. AI will pull out the company name (and address / website / phone if present) and walk you through to confirm.',
+      placeholder: 'e.g. Mississippi Development Authority, P.O. Box 849, Jackson, MS 39205. www.mississippi.org. 601-359-3449',
+    },
+
     steps: [
       {
         key: 'alias',
@@ -41,14 +50,15 @@
         prompt: 'Short name for lists?',
         hint: 'Optional. Tab to skip — we\'ll derive one from the legal name.',
         placeholder: 'e.g. Helix Robotics',
-        // Skip this step entirely when the caller pre-filled the legal
-        // name (e.g. AI Inbox business-card flow). The alias gets
-        // derived from the legal name on submit, and the user can edit
-        // it later from the accounts list — no point asking up front
-        // when the name is already known and the user just wants to
-        // confirm it.
+        // Skip this step entirely when the legal name is already known
+        // — either from a pre-filled openPrefill (AI Inbox business-
+        // card flow) or after Smart-start extraction populated it.
+        // The alias gets derived from the legal name on submit, and
+        // the user can edit it later from the accounts list.
         skipWhen: function (answers, ctx) {
-          return !!(ctx && ctx.openPrefill && ctx.openPrefill.name);
+          if (ctx && ctx.openPrefill && ctx.openPrefill.name) return true;
+          if (answers && answers.name) return true;
+          return false;
         }
       },
       {
@@ -92,6 +102,24 @@
       if (!prefill) return null;
       if (prefill.name) answers.name = String(prefill.name);
       if (prefill.alias) answers.alias = String(prefill.alias);
+      return null;
+    },
+
+    // Smart-start mapper: pull the first organization from the AI
+    // Inbox extraction into the legal-name step. When details are
+    // present (website / phone / address), they don't have wizard
+    // steps to populate — but the AI Inbox entry that gets back-
+    // linked carries them as captured context, and the user can fill
+    // them in via inline-edit on the new account's detail page.
+    applyExtraction: function (answers, extracted /*, ctx */) {
+      if (!extracted) return null;
+      var orgDetail = (extracted.organizations_detail && extracted.organizations_detail[0]) || null;
+      var orgName = (orgDetail && orgDetail.name)
+        || (extracted.organizations && extracted.organizations[0])
+        || '';
+      if (orgName && !answers.name) {
+        answers.name = String(orgName).trim();
+      }
       return null;
     },
 

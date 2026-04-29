@@ -476,6 +476,21 @@
         return p ? (p.current + ' of ' + p.total) : '';
       },
 
+      // Smart-start config readers — let each wizard tailor the
+      // Quick-start panel's hint text and textarea placeholder. Falls
+      // back to a generic contact-shaped pitch when the config doesn't
+      // override.
+      smartStartHint: function () {
+        var s = this.config && this.config.smartStart;
+        if (s && typeof s === 'object' && s.hint) return s.hint;
+        return 'Paste a name + email + phone, drop in an email signature, or upload a photo of a business card. AI will extract the fields and walk you through to confirm.';
+      },
+      smartStartPlaceholder: function () {
+        var s = this.config && this.config.smartStart;
+        if (s && typeof s === 'object' && s.placeholder) return s.placeholder;
+        return 'e.g. Jane Doe, Director of Procurement at Acme Corp. j.doe@acme.com  555-987-6543';
+      },
+
       // Primary footer button behavior. Mid-wizard the button advances
       // (same as Tab); on the last step it submits. The label flips
       // accordingly (see primaryButtonLabel). Tab/Enter still work for
@@ -1268,7 +1283,14 @@
             // /links/record endpoint. Fire and forget — a network blip
             // here shouldn't block the wizard's success flow; the
             // entry just stays unlinked in AI Inbox.
+            //
+            // wizardKey -> ref_type is 1:1 except for 'task', whose
+            // underlying record type is 'activity' (tasks live in the
+            // activities table). Keep this in sync with
+            // ALLOWED_REF_TYPES on the server.
             if (self.aiInboxEntryId && result.id && self.wizardKey) {
+              var refTypeMap = { task: 'activity' };
+              var refType = refTypeMap[self.wizardKey] || self.wizardKey;
               try {
                 fetch('/ai-inbox/' + encodeURIComponent(self.aiInboxEntryId) + '/links/record', {
                   method: 'POST',
@@ -1276,9 +1298,9 @@
                   headers: { 'content-type': 'application/json' },
                   body: JSON.stringify({
                     action_type: 'create_' + self.wizardKey,
-                    ref_type: self.wizardKey,
+                    ref_type: refType,
                     ref_id: result.id,
-                    ref_label: result.name || result.subject || '',
+                    ref_label: result.name || result.subject || result.title || '',
                   }),
                 });
               } catch (e) { /* best-effort */ }

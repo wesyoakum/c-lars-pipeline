@@ -52,6 +52,15 @@
     title: 'New quote',
     submitLabel: 'Create quote',
 
+    // Smart-start (Phase 4): paste a customer's quote-request email or
+    // describe what they want. AI pulls out a title (most useful here)
+    // and a description. Account / opportunity / quote_type are still
+    // user-picked — those are core decisions the wizard insists on.
+    smartStart: {
+      hint: 'Paste a quote-request email or describe what the customer needs. AI will draft a title and notes; you pick the account, opportunity, and quote type.',
+      placeholder: 'e.g. ACME wants a quote on 4 spare valves identical to last year’s order, valid 30 days.',
+    },
+
     steps: [
       {
         key: 'account',
@@ -206,6 +215,21 @@
       }
       if (prefill.account_id && prefill.account_label) {
         return { locked: true, prefix: 'Account', label: prefill.account_label };
+      }
+      return null;
+    },
+
+    // Smart-start mapper: drop the extraction title into the quote
+    // title and the summary into the description. Account / opp /
+    // quote_type stay user-picked — the wizard's existing required
+    // steps enforce that.
+    applyExtraction: function (answers, extracted /*, ctx */) {
+      if (!extracted) return null;
+      if (extracted.title && !answers.title) {
+        answers.title = String(extracted.title).trim();
+      }
+      if (extracted.summary && !answers.description) {
+        answers.description = String(extracted.summary).trim();
       }
       return null;
     },

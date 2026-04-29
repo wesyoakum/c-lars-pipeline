@@ -46,6 +46,16 @@
     title: 'New opportunity',
     submitLabel: 'Create opportunity',
 
+    // Smart-start (Phase 4): paste an RFQ email or quote request,
+    // upload a photo of a printed RFQ, or describe the opportunity in
+    // plain English. AI pulls out the title, customer, and any value
+    // / due-date hints. Type isn't auto-picked — the user still
+    // chooses (the wizard's existing select step).
+    smartStart: {
+      hint: 'Paste an RFQ email, an inquiry, or describe the work in plain English. AI will pull out a working title and the customer name; you confirm the rest.',
+      placeholder: 'e.g. ACME Corp emailed asking for spares quote on the pump skid replacement. They want it by end of Q2.',
+    },
+
     steps: [
       {
         key: 'title',
@@ -148,6 +158,23 @@
         if (prefill.account_label) {
           return { locked: true, prefix: 'Account', label: prefill.account_label };
         }
+      }
+      return null;
+    },
+
+    // Smart-start mapper: use the extraction's title (the LLM's
+    // 1-line summary of what was captured) as the opportunity title,
+    // and any extracted summary as the description. We deliberately
+    // skip auto-picking the account / type / value — those are the
+    // user's deliberate decisions and the wizard's required steps
+    // make the user confirm them.
+    applyExtraction: function (answers, extracted /*, ctx */) {
+      if (!extracted) return null;
+      if (extracted.title && !answers.title) {
+        answers.title = String(extracted.title).trim();
+      }
+      if (extracted.summary && !answers.description) {
+        answers.description = String(extracted.summary).trim();
       }
       return null;
     },
