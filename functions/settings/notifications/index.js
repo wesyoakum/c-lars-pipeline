@@ -160,6 +160,7 @@ export async function onRequestGet(context) {
             <tr>
               <th>Event</th>
               ${channelTypes.map(ch => html`<th style="text-align:center">${escape(NOTIFICATION_CHANNEL_LABELS[ch])}</th>`)}
+              <th style="text-align:center">Test</th>
             </tr>
           </thead>
           <tbody>
@@ -174,10 +175,25 @@ export async function onRequestGet(context) {
                            ${prefMap[`${ev}|${ch}`] ? 'checked' : ''}>
                   </td>
                 `)}
+                <td style="text-align:center">
+                  <button type="submit"
+                          formaction="/settings/notifications/sample"
+                          formnovalidate
+                          name="event_type"
+                          value="${escape(ev)}"
+                          class="btn btn-xs"
+                          title="Fire a sample of this event through your enabled channels">Send sample</button>
+                </td>
               </tr>
             `)}
           </tbody>
         </table>
+        <p class="muted" style="font-size:0.82rem;margin-top:0.4rem">
+          <strong>Send sample</strong> fires a placeholder version of the
+          event through whatever channels you've enabled for that row —
+          useful for previewing the card / email look before going live.
+          (Save changes if you've ticked a new box first.)
+        </p>
 
         <h3 style="margin-top:1.5rem">Daily digest timing</h3>
         <div style="display:flex;align-items:baseline;gap:0.75rem;flex-wrap:wrap;max-width:560px">
