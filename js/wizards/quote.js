@@ -192,9 +192,14 @@
       {
         key: 'description',
         type: 'textarea',
-        prompt: 'Any notes for the quote?',
-        hint: 'Optional. Press Tab to create the quote.',
-        placeholder: 'Context, scope, customer asks\u2026'
+        // The quote's description is customer-facing \u2014 it lands on
+        // the generated PDF the customer reads. Coaching language
+        // here nudges the user to write sales copy, not internal
+        // shorthand. (Internal context lives in the yellow "Internal
+        // notes" box on the quote detail page after creation.)
+        prompt: 'What should the customer see at the top of the quote PDF?',
+        hint: 'Customer-facing. Write it like the opening of a quote letter, not internal notes. Optional \u2014 press Tab to skip.',
+        placeholder: 'e.g. Provision of replacement seals and consumables for the customer\u2019s pump station, per RFQ #1234. Lead time 8\u201310 weeks ARO.'
       },
     ],
 
