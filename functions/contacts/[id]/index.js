@@ -92,14 +92,25 @@ export async function onRequestGet(context) {
   const url = new URL(request.url);
   const contactId = params.id;
 
-  const contact = await one(
-    env.DB,
-    `SELECT c.*, a.name AS account_name
-       FROM contacts c
-       LEFT JOIN accounts a ON a.id = c.account_id
-      WHERE c.id = ?`,
-    [contactId]
-  );
+  let contact;
+  try {
+    contact = await one(
+      env.DB,
+      `SELECT c.*, a.name AS account_name
+         FROM contacts c
+         LEFT JOIN accounts a ON a.id = c.account_id
+        WHERE c.id = ?`,
+      [contactId]
+    );
+  } catch (e) {
+    console.error('contact-detail SELECT failed:', e?.message || e, e?.stack);
+    return htmlResponse(
+      layout('Contact load error',
+        `<section class="card"><h1>Contact load failed</h1><pre>${String(e?.message || e)}</pre></section>`,
+        { user, env: data?.env, activeNav: '/accounts' }),
+      { status: 500 }
+    );
+  }
   if (!contact) {
     return htmlResponse(
       layout('Contact not found',
@@ -113,16 +124,34 @@ export async function onRequestGet(context) {
     [contact.first_name, contact.last_name].filter(Boolean).join(' ') || '(no name)';
 
   // Audit trail
-  const events = await all(
-    env.DB,
-    `SELECT ae.event_type, ae.at, ae.summary, ae.changes_json,
-            u.email AS user_email, u.display_name AS user_name
-       FROM audit_events ae
-       LEFT JOIN users u ON u.id = ae.user_id
-      WHERE ae.entity_type = 'contact' AND ae.entity_id = ?
-      ORDER BY ae.at DESC LIMIT 50`,
-    [contactId]
-  );
+  let events = [];
+  try {
+    events = await all(
+      env.DB,
+      `SELECT ae.event_type, ae.at, ae.summary, ae.changes_json,
+              u.email AS user_email, u.display_name AS user_name
+         FROM audit_events ae
+         LEFT JOIN users u ON u.id = ae.user_id
+        WHERE ae.entity_type = 'contact' AND ae.entity_id = ?
+        ORDER BY ae.at DESC LIMIT 50`,
+      [contactId]
+    );
+  } catch (e) {
+    console.error('contact-detail audit SELECT failed:', e?.message || e);
+  }
+
+  // Pre-render the LinkedIn cell once with a fallback so a rendering
+  // bug there can't 1101 the whole page.
+  let linkedinCellHtml;
+  try {
+    linkedinCellHtml = renderLinkedinCell(contact.linkedin_url, contact.linkedin_url_source);
+  } catch (e) {
+    console.error('renderLinkedinCell failed for contact', contact.id,
+                  'linkedin_url=', JSON.stringify(contact.linkedin_url),
+                  'source=', JSON.stringify(contact.linkedin_url_source),
+                  'err=', e?.message || e, e?.stack);
+    linkedinCellHtml = raw('<span class="muted">—</span>');
+  }
 
   const body = html`
     <section class="card" x-data="contactInline('${escape(contact.id)}')">
@@ -167,7 +196,7 @@ export async function onRequestGet(context) {
         <div class="detail-pair">
           <span class="detail-label">LinkedIn</span>
           <span class="detail-value detail-value-linkedin">
-            ${renderLinkedinCell(contact.linkedin_url, contact.linkedin_url_source)}
+            ${linkedinCellHtml}
           </span>
         </div>
         <div class="detail-pair">
