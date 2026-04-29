@@ -33,6 +33,15 @@
 import { all, one, run } from './db.js';
 import { uuid, now } from './ids.js';
 
+// Load provider modules so they self-register into PROVIDERS via
+// registerNotificationProvider() at module-load time. Imports are
+// after the registry definition (see end of file). The presence of
+// the import alone is what triggers registration — we don't use any
+// named exports from the provider modules here.
+import './notify-providers/teams.js';
+// Email provider (Phase 7c) lands here when wired:
+// import './notify-providers/email.js';
+
 // Canonical event type list. Add new events here AND default rows
 // to user_notification_prefs (lazily, in the settings UI). Names
 // are stable PKs on user_notification_prefs.

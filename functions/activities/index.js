@@ -11,6 +11,7 @@ import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
 import { isActiveOnly } from '../lib/activeness.js';
+import { notifyExternal, NOTIFICATION_EVENTS } from '../lib/notify-external.js';
 
 const TYPE_LABELS = {
   task: 'Task',
@@ -384,6 +385,35 @@ export async function onRequestPost(context) {
     }),
   ]);
 
+  // Phase 7b: external notification when a task is assigned to
+  // someone OTHER than the creator. Fire-and-forget — failures land
+  // in notification_log; the task is already saved.
+  if (type === 'task' && assignedUserId && assignedUserId !== user?.id) {
+    try {
+      const link = oppId ? `/opportunities/${oppId}` : '/activities';
+      const linkLabel = await getLinkLabel(env, oppId, accountId, quoteId);
+      await notifyExternal(env, {
+        userId: assignedUserId,
+        eventType: NOTIFICATION_EVENTS.TASK_ASSIGNED,
+        data: {
+          task: {
+            body: subject,
+            due_at: dueAt,
+            link_label: linkLabel,
+          },
+          assignedBy: { display_name: user?.display_name || user?.email || 'Someone' },
+          link,
+        },
+        context: oppId ? { ref_type: 'opportunity', ref_id: oppId }
+                : accountId ? { ref_type: 'account', ref_id: accountId }
+                : null,
+        idempotencyKey: 'task_assigned:' + id,
+      });
+    } catch (e) {
+      // notifyExternal already swallows; this is belt-and-suspenders.
+    }
+  }
+
   if (ajax) {
     return jsonResponse({ ok: true, id, subject });
   }
@@ -391,4 +421,25 @@ export async function onRequestPost(context) {
   const flashMsg = `Created ${TYPE_LABELS[type] ?? type}: ${subject}`;
   if (returnTo) return redirectWithFlash(returnTo, flashMsg);
   return redirectWithFlash('/activities', flashMsg);
+}
+
+/** Resolve a short label for the linked entity (used in the Teams
+ *  card's "Linked to" facet). Best-effort — empty when unlinked. */
+async function getLinkLabel(env, oppId, accountId, quoteId) {
+  if (oppId) {
+    const r = await one(env.DB,
+      `SELECT number, title FROM opportunities WHERE id = ?`, [oppId]);
+    if (r) return `${r.number || ''} · ${r.title || ''}`.trim();
+  }
+  if (accountId) {
+    const r = await one(env.DB,
+      `SELECT name, alias FROM accounts WHERE id = ?`, [accountId]);
+    if (r) return r.alias || r.name || '';
+  }
+  if (quoteId) {
+    const r = await one(env.DB,
+      `SELECT number, title FROM quotes WHERE id = ?`, [quoteId]);
+    if (r) return `${r.number || ''} · ${r.title || ''}`.trim();
+  }
+  return '';
 }
