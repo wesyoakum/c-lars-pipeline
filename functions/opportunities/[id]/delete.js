@@ -36,6 +36,11 @@ export async function onRequestPost(context) {
   const user = data?.user;
   const oppId = params.id;
   const ajax = isAjaxRequest(request);
+  const url = new URL(request.url);
+  // cascade=1 also deletes attached jobs (and their change_orders,
+  // documents, activities — all of which CASCADE via FK once the
+  // jobs row goes away).
+  const cascade = url.searchParams.get('cascade') === '1';
 
   const opp = await one(
     env.DB,
@@ -48,36 +53,52 @@ export async function onRequestPost(context) {
   }
 
   // Job gate — jobs don't cascade on opportunity delete, so we'd hit
-  // an FK error anyway. Report it nicely instead of letting D1 error
-  // out mid-batch.
+  // an FK error anyway. Without cascade=1, refuse with a helpful
+  // summary; with it, we delete the jobs explicitly first.
   const jobs = await all(
     env.DB,
-    'SELECT id, number, status FROM jobs WHERE opportunity_id = ?',
+    'SELECT id, number, title, status FROM jobs WHERE opportunity_id = ?',
     [oppId]
   );
-  if (jobs.length > 0) {
+  if (jobs.length > 0 && !cascade) {
     const summary = jobs.map(j => `${j.number} (${j.status})`).join(', ');
-    const msg = `Cannot delete ${opp.number}: ${jobs.length} job${jobs.length === 1 ? '' : 's'} still attached — ${summary}. Cancel or delete the job(s) first.`;
+    const msg = `Cannot delete ${opp.number}: ${jobs.length} job${jobs.length === 1 ? '' : 's'} still attached — ${summary}. Use cascade=1 to delete them too.`;
     if (ajax) return jsonResponse({ ok: false, error: msg, blockers: jobs }, 409);
     return redirectWithFlash(`/opportunities/${oppId}`, msg, 'error');
   }
 
-  // Pre-write the deletion audit event so it survives past the opp
-  // row. auditStmt inserts into audit_events which is append-only.
-  await batch(env.DB, [
-    auditStmt(env.DB, {
-      entityType: 'opportunity',
-      entityId: oppId,
-      eventType: 'deleted',
-      user,
-      summary: `Deleted opportunity ${opp.number} (${opp.title || 'no title'})`,
-    }),
-    // Cascade does the rest: quotes + quote_lines, cost_builds +
-    // cost_lines, activities, documents, external_artifacts,
-    // opp_contacts. Supporting tables with their own ON DELETE
-    // CASCADE chains trickle further from there.
-    stmt(env.DB, 'DELETE FROM opportunities WHERE id = ?', [oppId]),
-  ]);
+  // Pre-write deletion audit events so they survive past the rows.
+  const statements = [];
+  if (cascade) {
+    for (const j of jobs) {
+      statements.push(auditStmt(env.DB, {
+        entityType: 'job',
+        entityId: j.id,
+        eventType: 'deleted',
+        user,
+        summary: `Job ${j.number || ''} removed (parent opportunity cascade-deleted)`,
+      }));
+    }
+    for (const j of jobs) {
+      statements.push(stmt(env.DB, 'DELETE FROM jobs WHERE id = ?', [j.id]));
+    }
+  }
+  statements.push(auditStmt(env.DB, {
+    entityType: 'opportunity',
+    entityId: oppId,
+    eventType: 'deleted',
+    user,
+    summary: cascade && jobs.length > 0
+      ? `Deleted opportunity ${opp.number} (cascade: ${jobs.length} job(s))`
+      : `Deleted opportunity ${opp.number} (${opp.title || 'no title'})`,
+  }));
+  // Cascade does the rest: quotes + quote_lines, cost_builds +
+  // cost_lines, activities, documents, external_artifacts,
+  // opp_contacts. Supporting tables with their own ON DELETE
+  // CASCADE chains trickle further from there.
+  statements.push(stmt(env.DB, 'DELETE FROM opportunities WHERE id = ?', [oppId]));
+
+  await batch(env.DB, statements);
 
   if (ajax) return jsonResponse({ ok: true, id: oppId });
   return redirectWithFlash(

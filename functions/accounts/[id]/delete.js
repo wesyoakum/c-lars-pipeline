@@ -35,6 +35,12 @@ export async function onRequestPost(context) {
   const user = data?.user;
   const accountId = params.id;
   const json = wantsJson(request);
+  const url = new URL(request.url);
+  // Cascade flag: also delete this account's opportunities (and their
+  // jobs, quotes, cost_builds, activities, documents). Without it
+  // the delete refuses with 409 + a child-count summary so the
+  // cascade-delete modal can warn the user.
+  const cascade = url.searchParams.get('cascade') === '1';
 
   const account = await one(
     env.DB,
@@ -53,16 +59,14 @@ export async function onRequestPost(context) {
     );
   }
 
-  // Refuse if any opportunities are tied to this account — P0 keeps the
-  // commercial history immutable rather than cascading.
-  const oppCount = await one(
+  const opps = await all(
     env.DB,
-    `SELECT COUNT(*) AS n FROM opportunities WHERE account_id = ?`,
+    `SELECT id, number, title FROM opportunities WHERE account_id = ?`,
     [accountId]
   );
-  if (oppCount?.n > 0) {
-    const msg = `Cannot delete: ${oppCount.n} opportunit${oppCount.n === 1 ? 'y' : 'ies'} reference this account.`;
-    if (json) return jsonResponse({ ok: false, error: msg }, 409);
+  if (opps.length > 0 && !cascade) {
+    const msg = `Cannot delete: ${opps.length} opportunit${opps.length === 1 ? 'y' : 'ies'} reference this account. Use cascade=1 to delete them too.`;
+    if (json) return jsonResponse({ ok: false, error: msg, opportunity_count: opps.length }, 409);
     return redirectWithFlash(`/accounts/${accountId}`, msg, 'error');
   }
 
@@ -71,6 +75,18 @@ export async function onRequestPost(context) {
     `SELECT id, first_name, last_name FROM contacts WHERE account_id = ?`,
     [accountId]
   );
+
+  // Cascade case: load all jobs under this account's opps so we can
+  // delete them explicitly (opp→job FK is RESTRICT, doesn't cascade).
+  // Quotes, cost_builds, activities, documents all CASCADE via FK
+  // when their parent opp / job goes away — no manual delete needed.
+  const jobs = cascade && opps.length > 0
+    ? await all(env.DB,
+        `SELECT j.id, j.number, j.title FROM jobs j
+           JOIN opportunities o ON o.id = j.opportunity_id
+          WHERE o.account_id = ?`,
+        [accountId])
+    : [];
 
   // Write audits BEFORE the delete so FK cascades don't orphan them
   // (audit_events has no FK back to the entities — deliberate).
@@ -87,13 +103,44 @@ export async function onRequestPost(context) {
       })
     );
   }
+  if (cascade) {
+    for (const j of jobs) {
+      statements.push(auditStmt(env.DB, {
+        entityType: 'job',
+        entityId: j.id,
+        eventType: 'deleted',
+        user,
+        summary: `Job "${j.number || ''} · ${j.title || ''}" removed (parent account cascade-deleted)`,
+      }));
+    }
+    for (const o of opps) {
+      statements.push(auditStmt(env.DB, {
+        entityType: 'opportunity',
+        entityId: o.id,
+        eventType: 'deleted',
+        user,
+        summary: `Opportunity "${o.number || ''} · ${o.title || ''}" removed (parent account cascade-deleted)`,
+      }));
+    }
+    // Delete jobs first (FK RESTRICT on opp→job), then opps (FK
+    // RESTRICT on account→opp), then the account (cascades the
+    // remaining children automatically).
+    for (const j of jobs) {
+      statements.push(stmt(env.DB, `DELETE FROM jobs WHERE id = ?`, [j.id]));
+    }
+    for (const o of opps) {
+      statements.push(stmt(env.DB, `DELETE FROM opportunities WHERE id = ?`, [o.id]));
+    }
+  }
   statements.push(
     auditStmt(env.DB, {
       entityType: 'account',
       entityId: accountId,
       eventType: 'deleted',
       user,
-      summary: `Deleted account "${account.name}"`,
+      summary: cascade && opps.length > 0
+        ? `Deleted account "${account.name}" (cascade: ${opps.length} opp(s), ${jobs.length} job(s))`
+        : `Deleted account "${account.name}"`,
     })
   );
   statements.push(

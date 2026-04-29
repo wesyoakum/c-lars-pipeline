@@ -1189,6 +1189,71 @@ code {
    button, and animation already match the wizard. This just adds
    the list + inline task-complete row styles. */
 
+/* Cascade-delete modal (Phase 6). Reuses .task-modal-overlay shell
+   for sizing/centering/animation; adds its own list + warning
+   styles. Lives alongside the wizard and blocker modals. */
+.cascade-delete-modal {
+  max-width: 520px;
+}
+.cascade-delete-busy,
+.cascade-delete-error {
+  margin: 0 0 0.75rem;
+  font-size: 0.9rem;
+}
+.cascade-delete-error {
+  color: #b42318;
+  background: #fef3f2;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius);
+  padding: 0.55rem 0.75rem;
+}
+.cascade-delete-warning {
+  margin: 0 0 0.6rem;
+  font-size: 0.92rem;
+  background: #fffbea;
+  border-left: 3px solid #f59e0b;
+  border-radius: 4px;
+  padding: 0.55rem 0.75rem;
+}
+.cascade-delete-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 45vh;
+  overflow-y: auto;
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+.cascade-delete-list li {
+  padding: 0.4rem 0.6rem;
+  background: var(--bg-alt, #f5f7fa);
+  border-radius: 4px;
+}
+.cascade-delete-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+.cascade-delete-actions .danger {
+  background: #b42318;
+  border-color: #b42318;
+  color: #fff;
+}
+.cascade-delete-actions .danger:hover:not(:disabled) {
+  background: #991b1b;
+  border-color: #991b1b;
+}
+@media (max-width: 600px) {
+  .cascade-delete-actions button {
+    min-height: 44px;
+    flex: 1;
+  }
+}
+
 .blocker-modal {
   max-width: 520px;
 }

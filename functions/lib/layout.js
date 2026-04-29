@@ -692,6 +692,71 @@ const WIZARD_MODAL_MARKUP = (
   '</div>'   // /.task-modal-overlay
 );
 
+// Cascade-delete modal (Phase 6) — replaces the existing
+// onsubmit="confirm(...)" delete prompts with a richer view of
+// what's about to be cascaded. The store + helper live in
+// /js/cascade-delete.js (loaded as a separate <script>).
+const CASCADE_DELETE_MODAL_MARKUP = (
+  '<div class="task-modal-overlay cascade-delete-overlay" x-data ' +
+  'x-show="$store.cascadeDelete.open" x-cloak ' +
+  '@keydown.escape.window="$store.cascadeDelete.closeModal()" ' +
+  '@click.self="$store.cascadeDelete.closeModal()" style="display:none">' +
+  '<div class="task-modal cascade-delete-modal" @click.stop>' +
+  '<div class="task-modal-header">' +
+  '<h3>Delete <span x-text="$store.cascadeDelete.entity.label || $store.cascadeDelete.entity.type || \'this record\'"></span>?</h3>' +
+  '<button type="button" class="task-modal-close" @click="$store.cascadeDelete.closeModal()" aria-label="Close">&times;</button>' +
+  '</div>' +
+  '<div class="task-modal-body">' +
+  '<p class="cascade-delete-busy" x-show="$store.cascadeDelete.busy">Loading…</p>' +
+  '<p class="cascade-delete-error" x-show="$store.cascadeDelete.previewError" ' +
+  'x-text="$store.cascadeDelete.previewError"></p>' +
+
+  // Empty state — no children
+  '<template x-if="$store.cascadeDelete.preview && $store.cascadeDelete.preview.children.length === 0">' +
+  '<p>No related records will be affected. This is permanent.</p>' +
+  '</template>' +
+
+  // Populated state — list children
+  '<template x-if="$store.cascadeDelete.preview && $store.cascadeDelete.preview.children.length > 0">' +
+  '<div>' +
+  '<p class="cascade-delete-warning"><strong>This is permanent.</strong> The following will also be deleted:</p>' +
+  '<ul class="cascade-delete-list">' +
+  '<template x-for="(c, idx) in $store.cascadeDelete.preview.children" :key="idx">' +
+  '<li>' +
+  '<strong x-text="c.count"></strong>' +
+  '<span x-text="\' \' + c.kind"></span>' +
+  '<span class="muted" x-show="c.items && c.items.length > 0"> — ' +
+  '<template x-for="(it, j) in c.items" :key="j">' +
+  '<span><span x-text="it"></span><span x-show="j < c.items.length - 1">, </span></span>' +
+  '</template>' +
+  '<span x-show="c.count > c.items.length"> + ' +
+  '<span x-text="c.count - c.items.length"></span> more' +
+  '</span>' +
+  '</span>' +
+  '</li>' +
+  '</template>' +
+  '</ul>' +
+  '</div>' +
+  '</template>' +
+
+  // Actions
+  '<div class="cascade-delete-actions">' +
+  '<button type="button" class="btn btn-sm" ' +
+  '@click="$store.cascadeDelete.closeModal()" ' +
+  ':disabled="$store.cascadeDelete.submitting">Cancel</button>' +
+  '<button type="button" class="btn btn-sm danger" ' +
+  '@click="$store.cascadeDelete.confirm()" ' +
+  ':disabled="$store.cascadeDelete.busy || $store.cascadeDelete.submitting">' +
+  '<span x-show="!$store.cascadeDelete.submitting">Delete everything</span>' +
+  '<span x-show="$store.cascadeDelete.submitting">Deleting…</span>' +
+  '</button>' +
+  '</div>' +
+
+  '</div>' + // /.task-modal-body
+  '</div>' + // /.task-modal
+  '</div>'   // /.task-modal-overlay
+);
+
 // Blocker modal — surfaces when a status-change that would inactivate
 // an entity is refused by the server because the entity has pending
 // tasks or active downstream objects (migration 0035 rule).
@@ -1385,6 +1450,7 @@ export function layout(title, body, opts = {}) {
   <script defer src="/js/wizards/opportunity.js"></script>
   <script defer src="/js/wizards/quote.js"></script>
   <script defer src="/js/wizards/job.js"></script>
+  <script defer src="/js/cascade-delete.js"></script>
   ${user ? '<script defer src="/js/board-sidebar.js"></script>' : ''}
   <script defer src="/js/alpine.min.js"></script>
   <script defer src="/js/live-calc.js"></script>
@@ -1442,6 +1508,7 @@ export function layout(title, body, opts = {}) {
   </div>
   ${WIZARD_MODAL_MARKUP}
   ${BLOCKER_MODAL_MARKUP}
+  ${CASCADE_DELETE_MODAL_MARKUP}
   ${user._sitePrefs?.messaging_enabled ? BOARD_LEFT_MARKUP : ''}
   ${BOARD_RIGHT_MARKUP}` : ''}
   ${flash ? `<div class="flash flash-${escape(flash.kind ?? 'info')}">${escape(flash.message)}</div>` : ''}

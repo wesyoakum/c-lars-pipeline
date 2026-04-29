@@ -401,7 +401,7 @@ export async function onRequestGet(context) {
             <span class="aii-page-capture-icon">🎤</span> Capture
           </button>` : ''}
           <form method="post" action="/accounts/${escape(account.id)}/delete"
-                onsubmit="return confirm('Delete ${escape(account.name)} and all its contacts? This cannot be undone.');"
+                onsubmit="return window.Pipeline && Pipeline.confirmCascadeDelete(event, { entityType: 'account', entityId: '${escape(account.id)}', entityLabel: '${escape((account.alias || account.name || '').slice(0, 60))}' });"
                 style="display:inline">
             <button type="submit" class="btn danger">Delete</button>
           </form>

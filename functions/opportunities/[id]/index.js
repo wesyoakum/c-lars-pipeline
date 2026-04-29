@@ -481,13 +481,7 @@ export async function onRequestGet(context) {
           </button>
           <form method="post" action="/opportunities/${escape(opp.id)}/delete"
                 style="display:inline"
-                data-opp-number="${escape(opp.number)}"
-                data-quote-count="${escape(String(deleteCounts?.quotes ?? 0))}"
-                data-cost-build-count="${escape(String(deleteCounts?.cost_builds ?? 0))}"
-                data-activity-count="${escape(String(deleteCounts?.activities ?? 0))}"
-                data-doc-count="${escape(String(deleteCounts?.documents ?? 0))}"
-                data-job-count="${escape(String(deleteCounts?.jobs ?? 0))}"
-                onsubmit="return window.confirmDeleteOpp(this);">
+                onsubmit="return window.Pipeline && Pipeline.confirmCascadeDelete(event, { entityType: 'opportunity', entityId: '${escape(opp.id)}', entityLabel: '${escape((opp.number || '') + ' · ' + (opp.title || ''))}' });">
             <button class="icon-btn danger" type="submit" title="Delete opportunity">
               <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 17 6"/><path d="M8 6V4a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v2"/><path d="M5 6l1 11a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2l1-11"/><line x1="9" y1="10" x2="9" y2="15"/><line x1="11" y1="10" x2="11" y2="15"/></svg>
             </button>
@@ -1187,9 +1181,12 @@ export async function onRequestGet(context) {
   const captureScripts = (user && user.email === 'wes.yoakum@c-lars.com')
     ? html`<script defer src="/js/audio-recorder.js"></script><script defer src="/js/ai-capture.js"></script>`
     : '';
+  // Phase 6: cascade-delete modal replaces the legacy
+  // confirmDeleteOppScript prompt (still defined below as dead code,
+  // can be removed in a follow-up cleanup).
   const scripts = (tab === 'overview' || tab === 'docs')
-    ? html`<script>${raw(inlineEditScript())}</script><script>${raw(confirmDeleteOppScript())}</script>${captureScripts}`
-    : html`<script>${raw(confirmDeleteOppScript())}</script>${captureScripts}`;
+    ? html`<script>${raw(inlineEditScript())}</script>${captureScripts}`
+    : captureScripts;
 
   return htmlResponse(
     layout(`${opp.number} — ${opp.title}`, html`${body}${scripts}`, {
