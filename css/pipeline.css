@@ -3132,6 +3132,82 @@ textarea.ie-input { width: 100%; min-width: 12rem; resize: vertical; }
   text-align: center;
 }
 
+/* ---------- AI Capture modal (js/ai-capture.js) ---------- */
+.aii-cap-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 20, 30, 0.55);
+  z-index: 5500;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+.aii-cap-card {
+  background: white;
+  border-radius: 8px;
+  padding: 1.4rem 1.5rem 1.25rem;
+  max-width: 540px;
+  width: 100%;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
+}
+.aii-cap-title { margin: 0 0 0.35rem; font-size: 1.05rem; }
+.aii-cap-msg   { margin: 0 0 0.85rem; color: #555; font-size: 0.85rem; line-height: 1.4; }
+.aii-cap-card .ai-inbox-droppanel { margin: 0 0 0.5rem; }
+.aii-cap-status {
+  font-size: 0.85rem;
+  margin: 0.5rem 0 0.25rem;
+  min-height: 1.2em;
+  text-align: center;
+}
+.aii-cap-status-busy { color: #1f6feb; }
+.aii-cap-status-ok   { color: #1a7f37; }
+.aii-cap-status-err  { color: #cf222e; }
+.aii-cap-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 0.85rem;
+  flex-wrap: wrap;
+}
+.aii-cap-actions .aii-rec-btn { padding: 0.55rem 1rem; }
+
+@media (max-width: 480px) {
+  .aii-cap-card {
+    padding: 1.1rem 1rem 1rem;
+    max-width: 100%;
+  }
+  .aii-cap-actions .aii-rec-btn {
+    flex: 1 1 calc(50% - 0.25rem);
+    min-width: 0;
+  }
+}
+
+/* ---------- "Capture" button shown on entity detail pages ---------- */
+.aii-page-capture-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.85rem;
+  border: 1px solid #c8d4ff;
+  background: #f0f4ff;
+  color: #2451b8;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-decoration: none;
+  min-height: 36px;
+}
+.aii-page-capture-btn:hover {
+  background: #dbe5ff;
+  text-decoration: none;
+}
+.aii-page-capture-btn .aii-page-capture-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
 /* ---------- Detail pairs (side-by-side key-value) ---------- */
 
 .detail-grid {

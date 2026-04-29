@@ -462,7 +462,16 @@ export async function onRequestGet(context) {
               </span>
           </p>
         </div>
-        <div style="display:flex;gap:0.4rem">
+        <div style="display:flex;gap:0.4rem;flex-wrap:wrap;align-items:center">
+          <!-- AI Inbox in-context capture: opens a modal that lets the
+               user drop a file, record audio, or take a photo. The
+               result becomes a new AI Inbox entry pre-linked to this
+               opportunity so the rep can keep working on the deal page
+               instead of context-switching to /ai-inbox. -->
+          ${user && user.email === 'wes.yoakum@c-lars.com' ? html`<button type="button" class="aii-page-capture-btn"
+                  onclick="window.PipelineAICapture && window.PipelineAICapture.open({ refType: 'opportunity', refId: '${escape(opp.id)}', refLabel: 'OPP-${escape(opp.number)} — ${escape((opp.title || '').slice(0, 60))}' })">
+            <span class="aii-page-capture-icon">🎤</span> Capture
+          </button>` : ''}
           <!-- "New job" button paused per feedback 2026-04-17; jobs are
                now created automatically when an OC is issued. Keep the
                wizard prefill in case we restore this later. -->
@@ -1175,9 +1184,12 @@ export async function onRequestGet(context) {
   }`;
 
   // Inline-edit + carousel scripts
+  const captureScripts = (user && user.email === 'wes.yoakum@c-lars.com')
+    ? html`<script defer src="/js/audio-recorder.js"></script><script defer src="/js/ai-capture.js"></script>`
+    : '';
   const scripts = (tab === 'overview' || tab === 'docs')
-    ? html`<script>${raw(inlineEditScript())}</script><script>${raw(confirmDeleteOppScript())}</script>`
-    : html`<script>${raw(confirmDeleteOppScript())}</script>`;
+    ? html`<script>${raw(inlineEditScript())}</script><script>${raw(confirmDeleteOppScript())}</script>${captureScripts}`
+    : html`<script>${raw(confirmDeleteOppScript())}</script>${captureScripts}`;
 
   return htmlResponse(
     layout(`${opp.number} — ${opp.title}`, html`${body}${scripts}`, {

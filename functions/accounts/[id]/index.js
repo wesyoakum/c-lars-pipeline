@@ -394,7 +394,11 @@ export async function onRequestGet(context) {
               </div>`
             : ''}
         </div>
-        <div class="header-actions">
+        <div class="header-actions" style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+          ${user && user.email === 'wes.yoakum@c-lars.com' ? html`<button type="button" class="aii-page-capture-btn"
+                  onclick="window.PipelineAICapture && window.PipelineAICapture.open({ refType: 'account', refId: '${escape(account.id)}', refLabel: '${escape((account.alias || account.name || '').slice(0, 60))}' })">
+            <span class="aii-page-capture-icon">🎤</span> Capture
+          </button>` : ''}
           <form method="post" action="/accounts/${escape(account.id)}/delete"
                 onsubmit="return confirm('Delete ${escape(account.name)} and all its contacts? This cannot be undone.');"
                 style="display:inline">
@@ -936,8 +940,15 @@ export async function onRequestGet(context) {
     </script>
   `;
 
+  // AI Inbox in-context capture: load the recorder + capture modal
+  // scripts on this page so the "Capture" button works. Gated to the
+  // same user as /ai-inbox itself.
+  const captureScripts = (user && user.email === 'wes.yoakum@c-lars.com')
+    ? html`<script defer src="/js/audio-recorder.js"></script><script defer src="/js/ai-capture.js"></script>`
+    : '';
+
   return htmlResponse(
-    layout(account.name, body, {
+    layout(account.name, html`${body}${captureScripts}`, {
       user,
       env: data?.env,
       activeNav: '/accounts',

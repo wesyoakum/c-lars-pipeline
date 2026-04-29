@@ -29,6 +29,25 @@ const DOCUMENT_EXTS = new Set([
   'json', 'xml', 'html', 'ppt', 'pptx', 'xls', 'xlsx',
 ]);
 
+const ALLOWED_ASSOCIATE_REF_TYPES = new Set([
+  'account', 'contact', 'opportunity', 'quote', 'job',
+]);
+
+function wantsJson(request) {
+  const accept = request.headers.get('accept') || '';
+  if (accept.includes('application/json') && !accept.includes('text/html')) return true;
+  const xrw = request.headers.get('x-requested-with');
+  if (xrw && xrw.toLowerCase() === 'xmlhttprequest') return true;
+  return false;
+}
+
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+  });
+}
+
 /**
  * Infer attachment kind from a File. Looks at MIME first, falls back
  * to extension, defaults to 'document' for unknown types so the file
@@ -50,12 +69,15 @@ function inferKind(file) {
 export async function onRequestPost(context) {
   const { env, data, request } = context;
   const user = data?.user;
+  const xhr = wantsJson(request);
 
   let formData;
   try {
     formData = await request.formData();
   } catch {
-    return redirectWithFlash('/ai-inbox', 'Invalid form data.', 'error');
+    return xhr
+      ? jsonResponse({ ok: false, error: 'invalid_form_data' }, 400)
+      : redirectWithFlash('/ai-inbox', 'Invalid form data.', 'error');
   }
 
   // Accept either 'file' (the new generic name) or 'audio' (the legacy
@@ -63,18 +85,30 @@ export async function onRequestPost(context) {
   const file = formData.get('file') || formData.get('audio');
   const userContext = (formData.get('user_context') || '').toString().trim() || null;
 
+  // Optional auto-associate context: when the upload was kicked off
+  // from a CRM detail page (opportunity / account / quote / job /
+  // contact), the client passes ref_type + ref_id so the new entry
+  // is linked back to that record automatically. The link is written
+  // alongside the entry and attachment in the same batch.
+  const associateRefType = String(formData.get('associate_ref_type') || '').trim().toLowerCase();
+  const associateRefId = String(formData.get('associate_ref_id') || '').trim();
+  const associateRefLabel = String(formData.get('associate_ref_label') || '').trim().slice(0, 200);
+  const wantAssociate = associateRefType && associateRefId
+    && ALLOWED_ASSOCIATE_REF_TYPES.has(associateRefType);
+
   if (!file || typeof file === 'string' || file.size === 0) {
-    return redirectWithFlash('/ai-inbox', 'No file selected.', 'error');
+    return xhr
+      ? jsonResponse({ ok: false, error: 'no_file' }, 400)
+      : redirectWithFlash('/ai-inbox', 'No file selected.', 'error');
   }
 
   const kind = inferKind(file);
   const cap = kind === 'audio' ? MAX_AUDIO_BYTES : MAX_OTHER_BYTES;
   if (file.size > cap) {
-    return redirectWithFlash(
-      '/ai-inbox',
-      `File too large (${formatSize(file.size)}). Max for ${kind} is ${formatSize(cap)}.`,
-      'error'
-    );
+    const msg = `File too large (${formatSize(file.size)}). Max for ${kind} is ${formatSize(cap)}.`;
+    return xhr
+      ? jsonResponse({ ok: false, error: 'file_too_large', detail: msg }, 400)
+      : redirectWithFlash('/ai-inbox', msg, 'error');
   }
 
   const filename = file.name || `attachment.${kind}`;
@@ -91,7 +125,10 @@ export async function onRequestPost(context) {
       uploadedBy: user.email,
     });
   } catch (e) {
-    return redirectWithFlash('/ai-inbox', `Upload failed: ${e.message || e}`, 'error');
+    const msg = `Upload failed: ${e.message || e}`;
+    return xhr
+      ? jsonResponse({ ok: false, error: 'upload_failed', detail: String(e.message || e) }, 500)
+      : redirectWithFlash('/ai-inbox', msg, 'error');
   }
 
   // For audio, also populate the legacy audio_* columns on the entry
@@ -100,7 +137,9 @@ export async function onRequestPost(context) {
   // them null — only the attachment row matters going forward.
   const isAudio = kind === 'audio';
   const attachmentId = uuid();
-  await batch(env.DB, [
+  const linkId = wantAssociate ? uuid() : null;
+
+  const stmts = [
     stmt(env.DB,
       `INSERT INTO ai_inbox_items
          (id, user_id, created_at, updated_at, status, source, user_context,
@@ -120,7 +159,17 @@ export async function onRequestPost(context) {
           status, created_at, updated_at)
        VALUES (?, ?, ?, 0, 1, 1, ?, ?, ?, ?, 'pending', ?, ?)`,
       [attachmentId, entryId, kind, r2Key, mime || null, file.size, filename, ts, ts]),
-  ]);
+  ];
+  if (wantAssociate) {
+    const action_type = 'link_to_' + associateRefType;
+    stmts.push(stmt(env.DB,
+      `INSERT INTO ai_inbox_links
+         (id, item_id, action_type, ref_type, ref_id, ref_label, created_at, created_by_user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [linkId, entryId, action_type, associateRefType, associateRefId,
+       associateRefLabel || null, ts, user.id]));
+  }
+  await batch(env.DB, stmts);
 
   // Run the pipeline synchronously. If it fails, the entry's status is
   // set to 'error' inside processItem and the user lands on the detail
@@ -132,6 +181,14 @@ export async function onRequestPost(context) {
     // to the detail page so the user can see what happened.
   }
 
+  if (xhr) {
+    return jsonResponse({
+      ok: true,
+      id: entryId,
+      detailUrl: '/ai-inbox/' + entryId,
+      associated: wantAssociate ? { ref_type: associateRefType, ref_id: associateRefId, link_id: linkId } : null,
+    });
+  }
   return redirect(`/ai-inbox/${entryId}`);
 }
 
