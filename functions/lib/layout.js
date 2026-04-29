@@ -350,6 +350,12 @@ const WIZARD_MODAL_MARKUP = (
   // operations before hitting Confirm and Create.
   '<div class="task-wizard-review" x-show="$store.wizard.phase === \'review\' && $store.wizard.plan" x-cloak>' +
 
+  // Plan summary — one-line narrative ("First we'll add the new
+  // account ... then create ... as a contact at it.") so the user
+  // sees the cascade ordering in plain language at a glance.
+  '<p class="task-wizard-review-summary" x-text="$store.wizard.planSummary()" ' +
+  'x-show="$store.wizard.planSummary()"></p>' +
+
   // Account section
   '<template x-if="$store.wizard.plan && $store.wizard.plan.account && ($store.wizard.plan.account.matched || $store.wizard.plan.account.proposed_new)">' +
   '<div class="task-wizard-review-section">' +

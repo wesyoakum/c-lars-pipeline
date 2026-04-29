@@ -263,6 +263,14 @@ export async function onRequestPost(context) {
 
   await batch(env.DB, statements);
 
+  // Pick the destination: when the cascade created a brand-new
+  // account, land the user there — they'll see the new account in
+  // full context with the new contact under it (Contacts tab).
+  // Otherwise land on the contact page (the wizard's primary entity).
+  const redirect_url = createdNewAccount
+    ? '/accounts/' + encodeURIComponent(accountId)
+    : '/contacts/' + encodeURIComponent(contactId);
+
   return json({
     ok: true,
     account_id: accountId,
@@ -271,7 +279,7 @@ export async function onRequestPost(context) {
     contact_label: contactLabel,
     created_new_account: createdNewAccount,
     created_new_contact: createdNewContact,
-    redirect_url: '/contacts/' + encodeURIComponent(contactId),
+    redirect_url,
   });
 }
 

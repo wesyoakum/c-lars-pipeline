@@ -904,6 +904,47 @@
         c.checked = !c.checked;
       },
 
+      // One-line narrative summary of the plan, shown above the
+      // review-screen sections. Surfaces the cascade ordering
+      // ("first the account, then the contact") in plain language so
+      // the user understands what's about to happen.
+      planSummary: function () {
+        var p = this.plan;
+        if (!p) return '';
+        var acct = p.account || {};
+        var ctc = p.contact || {};
+        var newAcct = !!acct.proposed_new;
+        var matchAcct = !!acct.matched;
+        var newCtc = !!ctc.proposed_new;
+        var matchCtc = !!ctc.matched;
+
+        var acctLabel = acct.proposed_new
+          ? acct.proposed_new.name
+          : (acct.matched ? (acct.matched.alias || acct.matched.name) : '');
+        var ctcLabel = ctc.proposed_new
+          ? ((ctc.proposed_new.first_name || '') + ' ' + (ctc.proposed_new.last_name || '')).trim()
+          : (ctc.matched ? ((ctc.matched.first_name || '') + ' ' + (ctc.matched.last_name || '')).trim() : '');
+
+        if (newAcct && newCtc) {
+          return 'First we’ll add the new account "' + acctLabel + '", then create "' + ctcLabel + '" as a contact at it.';
+        }
+        if (newAcct && !newCtc && !matchCtc) {
+          return 'We’ll add the new account "' + acctLabel + '" with the captured fields below.';
+        }
+        if (matchAcct && newCtc) {
+          return 'Adding "' + ctcLabel + '" as a new contact at the existing account "' + acctLabel + '".';
+        }
+        if (matchAcct && matchCtc) {
+          return 'Updating existing contact "' + ctcLabel + '" at "' + acctLabel + '" with the captured fields below.';
+        }
+        if (!matchAcct && !newAcct && newCtc) {
+          // No org context — just a bare contact create. Caller probably
+          // already pinned an account via prefill (account_id locked).
+          return 'Creating contact "' + ctcLabel + '" with the captured fields below.';
+        }
+        return '';
+      },
+
       // Drop from review to manual step UI with prefilled answers.
       // Lets the user override the planner's interpretation when it
       // got something wrong (e.g. matched the wrong account).
