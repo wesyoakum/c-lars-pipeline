@@ -200,7 +200,16 @@ Rules:
   owner when a specific other person is named ("Bob will reply").
 - Confidence reflects your confidence in the extraction overall, not in any one field.
 - Do not invent people/organizations/dates that the transcript does not contain.
-- No prose, no markdown fences, no additional top-level fields.`;
+- No prose, no markdown fences, no additional top-level fields.
+
+Industry terms — preserve verbatim, do not expand or substitute:
+- "VOO" or "vessel of opportunity" — a boat / ship / vessel that
+  hasn't been chosen yet (or could vary). Used when a quote is for
+  equipment going on a vessel TBD. If the user writes "VOO", keep
+  "VOO". If they write "vessel of opportunity", keep that. Don't
+  guess a specific vessel name to fill in.
+- Other capitalized acronyms (EPS, ROV, OC, RFQ, etc.) — preserve
+  case exactly as the user wrote them.`;
 
 function buildExtractionPrompt(contextType) {
   const focusGuidance = {
