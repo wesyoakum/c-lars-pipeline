@@ -608,6 +608,18 @@ export async function getQuoteDocData(env, quoteId) {
     _revision: quote.revision,
     _quoteType: quote.quote_type,
 
+    // ── Specific aliases requested by templates in the wild ──
+    // From /templates/quote-eps/inspect: the user's template uses these
+    // exact PascalCase / camel-mix names. Provided as a separate group
+    // from the more-defensive alias block below so future similar
+    // requests are easy to spot and add.
+    ClientPostalAddressText: billingAddr?.address || '',
+    QuoteDate:               fmtDate(quote.submitted_at) || fmtDate(new Date().toISOString()),
+    QuotedDelivery:          quote.delivery_estimate || '',
+    QuoteNotesExternal:      quote.notes_customer || '',
+    QuoteOptionExplanation:  '',
+    PreferenceOptionHeading: 'Preferred Options',
+
     // ── Defensive placeholder aliases ──
     // Templates uploaded by users may use slightly different naming
     // conventions than ours. Rather than hunt down whichever variant

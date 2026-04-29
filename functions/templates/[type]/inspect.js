@@ -94,16 +94,52 @@ export async function onRequestGet(context) {
   } catch (_) { /* best-effort; provided list may be empty */ }
 
   const providedSet = new Set(providedKeys);
-  const matched = placeholders.filter(p => {
-    // For loop tags `#name` / `/name` / `^name`, the underlying key
-    // is `name`. Strip the prefix.
-    const k = p.replace(/^[#\/^]/, '');
-    return providedSet.has(k);
-  });
-  const unmatched = placeholders.filter(p => {
-    const k = p.replace(/^[#\/^]/, '');
-    return !providedSet.has(k);
-  });
+
+  // Discover loop arrays in the provided data so we can recognize when
+  // a placeholder is "inside a loop" (and would resolve against the
+  // array element, not the top-level object). E.g. {Amount} inside
+  // {TableStart:Cost}…{TableEnd:Cost} maps to Cost[i].Amount, which
+  // the top-level set wouldn't include.
+  let arrayElementKeys = new Set();
+  try {
+    if (params.type.startsWith('quote-')) {
+      // We already pulled `sample` for provided keys; reuse it.
+      // But sample isn't accessible from this scope — re-derive.
+    }
+    // Inspect a sample of the provided data to find array values and
+    // their first-element keys.
+    const sample = params.type.startsWith('quote-')
+      ? (sampleId ? await getQuoteDocData(env, sampleId) : null)
+      : (sampleId ? await getOcDocData(env, sampleId) : null);
+    if (sample) {
+      for (const [k, v] of Object.entries(sample)) {
+        if (Array.isArray(v) && v.length > 0 && typeof v[0] === 'object') {
+          for (const innerKey of Object.keys(v[0])) {
+            if (!innerKey.startsWith('_')) arrayElementKeys.add(innerKey);
+          }
+        }
+      }
+    }
+  } catch (_) { /* best-effort */ }
+
+  // Resolve each placeholder name. We strip:
+  //   - `{#name}` / `{/name}` / `{^name}` loop markers
+  //   - `{TableStart:name}` / `{TableEnd:name}` table-loop markers
+  // After stripping, we check both the top-level provided keys and
+  // the array-element keys (so `{Amount}` inside a loop doesn't
+  // mis-flag).
+  function resolveBaseName(p) {
+    let s = p.trim();
+    if (/^TableStart:/i.test(s)) return s.replace(/^TableStart:/i, '');
+    if (/^TableEnd:/i.test(s))   return s.replace(/^TableEnd:/i, '');
+    return s.replace(/^[#\/^]/, '');
+  }
+  function isMatched(p) {
+    const k = resolveBaseName(p);
+    return providedSet.has(k) || arrayElementKeys.has(k);
+  }
+  const matched = placeholders.filter(isMatched);
+  const unmatched = placeholders.filter(p => !isMatched(p));
 
   if (wantsJson(request)) {
     return new Response(JSON.stringify({
