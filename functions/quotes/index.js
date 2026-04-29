@@ -69,7 +69,17 @@ export async function onRequestGet(context) {
     { key: 'valid_until',  label: 'Valid until',   sort: 'date',   filter: 'text',   default: true },
     { key: 'updated',      label: 'Updated',      sort: 'date',   filter: 'text',   default: true },
     { key: 'created',      label: 'Created',      sort: 'date',   filter: 'text',   default: false },
+    // Delete affordance \u2014 only renders the button for draft / revision-
+    // draft rows; other statuses get a hyphen. Server-side route blocks
+    // the destructive action on locked statuses regardless.
+    { key: 'actions',      label: '',              sort: null,     filter: null,    default: true },
   ];
+
+  // Quote statuses we offer a delete button for. Mirrors the LOCKED_FOR_DELETE
+  // set in functions/opportunities/[id]/quotes/[quoteId]/delete.js \u2014 anything
+  // not in the deletable set is server-rejected anyway, but we hide the
+  // button so the user doesn't get a misleading affordance.
+  const DELETABLE_STATUSES = new Set(['draft', 'revision_draft']);
 
   const rowData = rows.map(r => {
     const acct = r.account_id
@@ -171,6 +181,19 @@ export async function onRequestGet(context) {
                     </td>
                     <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
                     <td class="col-created" data-col="created"><small class="muted">${escape(r.created)}</small></td>
+                    <td class="col-actions" data-col="actions" style="text-align:right;white-space:nowrap">
+                      ${DELETABLE_STATUSES.has(r.status) ? html`
+                        <form method="post"
+                              action="/opportunities/${escape(r.opp_id)}/quotes/${escape(r.id)}/delete"
+                              style="display:inline;margin:0"
+                              onsubmit="return confirm('Delete quote ${escape(r.number)} Rev ${escape(r.revision || 'v1')}? This removes the draft and all its lines. This cannot be undone.');">
+                          <button type="submit"
+                                  class="btn-ghost-x"
+                                  title="Delete this draft quote"
+                                  aria-label="Delete quote ${escape(r.number)}">&times;</button>
+                        </form>
+                      ` : html`<span class="muted" title="Only Draft / Revision Draft quotes can be deleted from this list">—</span>`}
+                    </td>
                   </tr>
                 `)}
               </tbody>

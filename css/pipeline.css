@@ -3835,6 +3835,24 @@ textarea.ie-input { width: 100%; min-width: 12rem; resize: vertical; }
   height: 18px;
 }
 
+/* Ghost ✕ button — small, transparent until hovered, then turns
+ * red. Used for inline delete affordances on list-table rows
+ * (quotes, AI Inbox cards, etc.) where a full danger-styled .btn
+ * would dominate the row visually. */
+.btn-ghost-x {
+  background: transparent;
+  border: 0;
+  color: #999;
+  cursor: pointer;
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  font-size: 1.05rem;
+  line-height: 1;
+  padding: 0;
+}
+.btn-ghost-x:hover { background: #fadddd; color: #cf222e; }
+
 /* ---------- Detail pairs (side-by-side key-value) ---------- */
 
 .detail-grid {
