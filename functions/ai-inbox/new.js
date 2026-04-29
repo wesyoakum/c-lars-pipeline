@@ -211,8 +211,9 @@ export async function onRequestPost(context) {
   // Run the pipeline synchronously. If it fails, the entry's status is
   // set to 'error' inside processItem and the user lands on the detail
   // page where they can see the error message.
+  let extracted = null;
   try {
-    await processItem(env, entryId);
+    extracted = await processItem(env, entryId);
   } catch (e) {
     // processItem already wrote 'error' status + message; just continue
     // to the detail page so the user can see what happened.
@@ -224,6 +225,11 @@ export async function onRequestPost(context) {
       id: entryId,
       detailUrl: '/ai-inbox/' + entryId,
       associated: wantAssociate ? { ref_type: associateRefType, ref_id: associateRefId, link_id: linkId } : null,
+      // Surface the extraction so callers (the wizard Smart-start
+      // panel, in particular) can map structured fields straight into
+      // their form without re-reading the DB. Null when extraction
+      // failed or hasn't run.
+      extracted,
     });
   }
   return redirect(`/ai-inbox/${entryId}`);

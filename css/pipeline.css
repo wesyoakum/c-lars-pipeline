@@ -767,6 +767,80 @@ code {
   flex: 1 1 auto;
 }
 
+/* Smart-start panel — shown as the wizard's optional Phase 0 when the
+   wizard config opts in via `smartStart: true`. User pastes / drops a
+   business card photo / types a description; AI extracts the fields
+   and we transition to the standard step UI for confirmation. */
+.task-wizard-smartstart {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.25rem 0;
+}
+.task-wizard-smartstart-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.task-wizard-smartstart-title small {
+  font-weight: 400;
+  font-size: 0.85em;
+}
+.task-wizard-smartstart-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--fg-muted);
+  line-height: 1.4;
+}
+.task-wizard-smartstart-text {
+  width: 100%;
+  font: inherit;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  resize: vertical;
+  min-height: 90px;
+}
+.task-wizard-smartstart-text:focus {
+  outline: 2px solid var(--accent, #2563eb);
+  outline-offset: -1px;
+}
+.task-wizard-smartstart-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+.task-wizard-smartstart-skip {
+  margin-left: auto;
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-muted);
+  text-decoration: underline;
+}
+.task-wizard-smartstart-skip:hover:not(:disabled) {
+  color: var(--fg);
+}
+.task-wizard-smartstart-error {
+  font-size: 0.85rem;
+  color: #b42318;
+  background: #fef3f2;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius);
+  padding: 0.4rem 0.6rem;
+}
+@media (max-width: 600px) {
+  .task-wizard-smartstart-actions button {
+    min-height: 44px;
+  }
+  .task-wizard-smartstart-skip {
+    margin-left: 0;     /* stack below the action buttons on mobile */
+    width: 100%;
+  }
+}
+
 .task-wizard-actionbar {
   display: flex;
   align-items: center;

@@ -154,6 +154,11 @@ export async function processItem(env, entryId, fromStep = 'attachments') {
       console.warn(`[ai-inbox] entity resolver failed for ${entryId}:`, e?.message || e);
     }
   }
+
+  // Return the extraction so callers (e.g. the wizard's Smart-start
+  // panel) can map it to their own form fields without re-reading
+  // from the DB. Existing callers ignore the return — additive.
+  return extracted;
 }
 
 // ---------------------------------------------------------------------

@@ -362,6 +362,19 @@
       //     with ?include_inactive=1 the first time the user opts in,
       //     so inactive records actually exist in the local store.
       showInactive: false,
+
+      // Smart-start state (Phase 3 of wizard cleanup). When the wizard
+      // config opts in via `smartStart: { ... }`, the modal opens in
+      // capture mode: user pastes text or drops a photo, we POST it to
+      // /ai-inbox/new for extraction, then map the extracted fields
+      // into the wizard's answers and switch to the standard step UI.
+      // The AI Inbox entry id is held so we can link it to the
+      // newly-created record on submit.
+      phase: 'steps',                    // 'smart-start' | 'steps'
+      smartStartText: '',
+      smartStartBusy: false,
+      smartStartError: null,
+      aiInboxEntryId: null,              // id of the entry created via Smart-start (if any)
       inactiveFetched: false,
 
       // Whether the "Show inactive" checkbox should render at all on
@@ -677,6 +690,16 @@
         // pull based on showInactive + the active_only pref.
         this.showInactive = false;
 
+        // Smart-start: open in capture mode when the wizard config opts
+        // in (and the caller hasn't bypassed it via skipSmartStart in
+        // the prefill — used when chaining wizards where the upstream
+        // already extracted everything).
+        this.phase = (config.smartStart && !prefill.skipSmartStart) ? 'smart-start' : 'steps';
+        this.smartStartText = '';
+        this.smartStartBusy = false;
+        this.smartStartError = null;
+        this.aiInboxEntryId = null;
+
         // Seed blank answers
         this.answers = (typeof config.blankAnswers === 'function')
           ? config.blankAnswers()
@@ -725,6 +748,82 @@
         this.parentStack = [];
         this.open = false;
         this.error = null;
+      },
+
+      // ---- Smart-start (Phase 3) ----
+      // Submit the typed text or selected file to /ai-inbox/new for
+      // extraction, then map the structured output into the wizard's
+      // answers via the per-wizard config.applyExtraction callback,
+      // and switch to the standard step UI for confirmation/edit.
+      runSmartStart: function () {
+        var self = this;
+        var text = (self.smartStartText || '').trim();
+        if (!text) { self.smartStartError = 'Type or paste something first.'; return; }
+        if (self.smartStartBusy) return;
+        self.smartStartBusy = true;
+        self.smartStartError = null;
+        var fd = new FormData();
+        fd.append('text', text);
+        return self._sendSmartStart(fd);
+      },
+      runSmartStartFromFile: function (file) {
+        var self = this;
+        if (!file || self.smartStartBusy) return;
+        self.smartStartBusy = true;
+        self.smartStartError = null;
+        var fd = new FormData();
+        fd.append('file', file);
+        return self._sendSmartStart(fd);
+      },
+      _sendSmartStart: function (fd) {
+        var self = this;
+        return fetch('/ai-inbox/new', {
+          method: 'POST',
+          credentials: 'same-origin',
+          body: fd,
+          headers: { accept: 'application/json' },
+        })
+          .then(function (res) { return res.json().then(function (j) { return { ok: res.ok, j: j }; }); })
+          .then(function (r) {
+            self.smartStartBusy = false;
+            if (!r.ok || !r.j || !r.j.ok) {
+              self.smartStartError = (r.j && (r.j.detail || r.j.error)) || 'Extraction failed.';
+              return;
+            }
+            self.aiInboxEntryId = r.j.id || null;
+            // Hand the extraction to the wizard's mapper. The mapper
+            // returns the same { locked, prefix, label } shape as
+            // applyPrefill so we honor the pinned-row affordance for
+            // any matched account / linked record the extractor found.
+            if (self.config && typeof self.config.applyExtraction === 'function') {
+              try {
+                var pinned = self.config.applyExtraction(self.answers, r.j.extracted || {}, self);
+                if (pinned && pinned.locked) {
+                  self.pinnedPrefix = pinned.prefix || 'Linked to';
+                  self.pinnedValue = pinned.label || '';
+                }
+              } catch (e) {
+                /* eslint-disable-next-line no-console */
+                if (typeof console !== 'undefined') console.warn('applyExtraction failed:', e);
+              }
+            }
+            // Re-evaluate skippable steps now that prefill landed.
+            while (self.shouldSkipStep(self.currentStep()) && self.stepIndex < self.steps().length) {
+              self.stepIndex++;
+            }
+            self.typedInput = self.currentTypedForStep();
+            self.phase = 'steps';
+            self.focusInput();
+          })
+          .catch(function (err) {
+            self.smartStartBusy = false;
+            self.smartStartError = (err && err.message) || 'Network error.';
+          });
+      },
+      skipSmartStart: function () {
+        this.phase = 'steps';
+        this.typedInput = this.currentTypedForStep();
+        this.focusInput();
       },
 
       focusInput: function () {
@@ -1161,6 +1260,29 @@
             if (!result || !result.ok) {
               self.error = (result && result.error) || 'Could not save.';
               return;
+            }
+            // Smart-start: if the wizard was opened with a Quick-start
+            // capture, the AI Inbox entry was created without an
+            // association (since the new record didn't exist yet).
+            // Now that we have the id, record a link via the generic
+            // /links/record endpoint. Fire and forget — a network blip
+            // here shouldn't block the wizard's success flow; the
+            // entry just stays unlinked in AI Inbox.
+            if (self.aiInboxEntryId && result.id && self.wizardKey) {
+              try {
+                fetch('/ai-inbox/' + encodeURIComponent(self.aiInboxEntryId) + '/links/record', {
+                  method: 'POST',
+                  credentials: 'same-origin',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({
+                    action_type: 'create_' + self.wizardKey,
+                    ref_type: self.wizardKey,
+                    ref_id: result.id,
+                    ref_label: result.name || result.subject || '',
+                  }),
+                });
+              } catch (e) { /* best-effort */ }
+              self.aiInboxEntryId = null;
             }
             // Nested case: pop back to the parent wizard and feed it
             // the new entity instead of redirecting/reloading.

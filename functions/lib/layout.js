@@ -308,10 +308,44 @@ const WIZARD_MODAL_MARKUP = (
   '<div class="task-modal-header">' +
   '<h3 x-text="$store.wizard.title()"></h3>' +
   '<span class="task-wizard-step-indicator" x-text="$store.wizard.stepProgressLabel()" ' +
-  'x-show="$store.wizard.stepProgressLabel()"></span>' +
+  'x-show="$store.wizard.phase === \'steps\' && $store.wizard.stepProgressLabel()"></span>' +
   '<button type="button" class="task-modal-close" @click="$store.wizard.closeModal()" aria-label="Close">&times;</button>' +
   '</div>' +
   '<div class="task-modal-body">' +
+
+  // -------- Smart-start phase ---------
+  // Only rendered when the active wizard config has `smartStart: true`.
+  // Captures unstructured input (text now; photo coming next), POSTs
+  // to /ai-inbox/new for extraction, then maps the result into the
+  // wizard's answers and switches to the standard step UI.
+  '<div class="task-wizard-smartstart" x-show="$store.wizard.phase === \'smart-start\'">' +
+  '<p class="task-wizard-smartstart-title">Quick start <small class="muted">(optional)</small></p>' +
+  '<p class="task-wizard-smartstart-hint">Paste a name + email + phone, drop in an email signature, or upload a photo of a business card. AI will extract the fields and walk you through to confirm.</p>' +
+  '<textarea class="task-wizard-smartstart-text" x-model="$store.wizard.smartStartText" ' +
+  'rows="4" autocomplete="off" ' +
+  ':disabled="$store.wizard.smartStartBusy" ' +
+  'placeholder="e.g. Jane Doe, Director of Procurement at Acme Corp. j.doe@acme.com  555-987-6543"></textarea>' +
+  '<input type="file" accept="image/*" x-ref="smartstart_photo" hidden ' +
+  '@change="$store.wizard.runSmartStartFromFile($event.target.files[0])">' +
+  '<div class="task-wizard-smartstart-actions">' +
+  '<button type="button" class="btn btn-sm" ' +
+  '@click="$refs.smartstart_photo && $refs.smartstart_photo.click()" ' +
+  ':disabled="$store.wizard.smartStartBusy">📷 Photo</button>' +
+  '<button type="button" class="btn btn-sm primary" ' +
+  '@click="$store.wizard.runSmartStart()" ' +
+  ':disabled="$store.wizard.smartStartBusy || !($store.wizard.smartStartText && $store.wizard.smartStartText.trim())">' +
+  '<span x-show="!$store.wizard.smartStartBusy">Use AI</span>' +
+  '<span x-show="$store.wizard.smartStartBusy">Extracting…</span>' +
+  '</button>' +
+  '<button type="button" class="btn btn-sm task-wizard-smartstart-skip" ' +
+  '@click="$store.wizard.skipSmartStart()" ' +
+  ':disabled="$store.wizard.smartStartBusy">Skip</button>' +
+  '</div>' +
+  '<div class="task-wizard-smartstart-error" x-show="$store.wizard.smartStartError" x-text="$store.wizard.smartStartError"></div>' +
+  '</div>' +
+
+  // -------- Steps phase ---------
+  '<div x-show="$store.wizard.phase === \'steps\'">' +
 
   // Pinned row (e.g. "Linked to: <record>") — only shown if the wizard
   // config's applyPrefill returned { locked: true, label: ... }.
@@ -410,7 +444,9 @@ const WIZARD_MODAL_MARKUP = (
   '</div>' +
   '</div>' +
 
-  // Error message
+  '</div>' + // /steps phase wrapper
+
+  // Error message (visible in either phase)
   '<div class="task-modal-error" x-show="$store.wizard.error" x-text="$store.wizard.error"></div>' +
 
   '</div>' + // /.task-modal-body

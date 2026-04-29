@@ -41,6 +41,15 @@
     title: 'New contact',
     submitLabel: 'Create contact',
 
+    // Smart-start (Phase 3): show a Quick-start panel before the wizard
+    // steps. User can paste an email signature, type a description,
+    // or upload a business-card photo. AI extracts the fields, the
+    // wizard's applyExtraction maps them to answers, and the user
+    // confirms via the standard step flow. The captured source is
+    // persisted as an AI Inbox entry (back-linked to the new contact
+    // on submit) so the user has a permanent audit trail.
+    smartStart: true,
+
     steps: [
       {
         key: 'first_name',
@@ -129,6 +138,39 @@
           return { locked: true, prefix: 'Account', label: prefill.account_label };
         }
       }
+      return null;
+    },
+
+    // Smart-start mapper: Phase 3 of wizard cleanup. Receives the AI
+    // Inbox extraction result and writes it into the wizard's answers.
+    // Strategy: take the FIRST person in people_detail (the source
+    // material is usually a single business card / signature / quick
+    // note). Split the name into first / last best-effort. Map title
+    // and email straight across. Don't auto-pick the account — leave
+    // that step for the user, who'll see the org name as a hint and
+    // can confirm via the existing account search.
+    applyExtraction: function (answers, extracted /*, ctx */) {
+      if (!extracted) return null;
+      var detail = (extracted.people_detail && extracted.people_detail[0]) || null;
+      var fullName = (detail && detail.name)
+        || (extracted.people && extracted.people[0])
+        || '';
+      if (fullName && !answers.first_name && !answers.last_name) {
+        var parts = String(fullName).trim().split(/\s+/);
+        if (parts.length === 1) {
+          answers.first_name = parts[0];
+        } else {
+          answers.first_name = parts[0];
+          answers.last_name = parts.slice(1).join(' ');
+        }
+      }
+      if (detail) {
+        if (detail.title && !answers.title) answers.title = String(detail.title);
+        if (detail.email && !answers.email) answers.email = String(detail.email);
+      }
+      // We don't auto-set the account here — the user picks via the
+      // existing entity-search step. The org name is shown as a hint
+      // in the surrounding pinned row when present.
       return null;
     },
 
