@@ -82,7 +82,7 @@ function renderValue(value) {
 }
 
 import { VERSION } from './version.js';
-import { ICON_CAMERA, ICON_PAPERCLIP } from './icons.js';
+import { ICON_CAMERA, ICON_PAPERCLIP, ICON_DROPZONE } from './icons.js';
 
 // T4.2 Phase 1 — in-app notifications.
 //
@@ -316,10 +316,29 @@ const WIZARD_MODAL_MARKUP = (
 
   // -------- Smart-start phase ---------
   // Only rendered when the active wizard config has `smartStart: true`.
-  // Captures unstructured input (text now; photo coming next), POSTs
-  // to /ai-inbox/new for extraction, then maps the result into the
-  // wizard's answers and switches to the standard step UI.
-  '<div class="task-wizard-smartstart" x-show="$store.wizard.phase === \'smart-start\'">' +
+  // Captures unstructured input (paste, photo, file, drag-drop),
+  // POSTs to /ai-inbox/new for extraction, then maps the result into
+  // the wizard's answers (and the cascade plan, if applicable) for
+  // confirmation.
+  //
+  // The whole panel is also a drop zone: dragging a file over it
+  // shows a translucent overlay with the drop-zone icon; releasing
+  // fires runSmartStartFromFile() exactly like the [📎] button.
+  '<div class="task-wizard-smartstart" x-show="$store.wizard.phase === \'smart-start\'" ' +
+  '@dragenter.prevent="$store.wizard.smartStartDragOver = true" ' +
+  '@dragover.prevent="$store.wizard.smartStartDragOver = true" ' +
+  '@dragleave.self="$store.wizard.smartStartDragOver = false" ' +
+  '@drop.prevent="$store.wizard.handleSmartStartDrop($event)">' +
+
+  // Drop-zone overlay — visible only while a file is being dragged
+  // over the panel. Click-through events pass to children when the
+  // overlay isn't shown.
+  '<div class="task-wizard-smartstart-dropoverlay" ' +
+  'x-show="$store.wizard.smartStartDragOver" x-cloak>' +
+  '<div class="task-wizard-smartstart-droplabel">' + ICON_DROPZONE +
+  '<span>Drop to attach</span></div>' +
+  '</div>' +
+
   '<p class="task-wizard-smartstart-title">Quick start <small class="muted">(optional)</small></p>' +
   '<p class="task-wizard-smartstart-hint" x-text="$store.wizard.smartStartHint()"></p>' +
   '<textarea class="task-wizard-smartstart-text" x-model="$store.wizard.smartStartText" ' +

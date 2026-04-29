@@ -377,6 +377,7 @@
       smartStartText: '',
       smartStartBusy: false,
       smartStartError: null,
+      smartStartDragOver: false,         // true while a file is being dragged over the panel
       aiInboxEntryId: null,              // id of the entry created via Smart-start (if any)
       plan: null,                        // /wizards/plan response (Phase 5a)
       executing: false,                  // /wizards/execute in flight
@@ -718,6 +719,7 @@
         this.smartStartText = '';
         this.smartStartBusy = false;
         this.smartStartError = null;
+        this.smartStartDragOver = false;
         this.aiInboxEntryId = null;
         this.plan = null;
         this.executing = false;
@@ -796,6 +798,21 @@
         var fd = new FormData();
         fd.append('file', file);
         return self._sendSmartStart(fd);
+      },
+
+      // Drag-and-drop handler for the Smart-start panel. Accepts the
+      // first file from the drop event and treats it the same as
+      // clicking [📎] then picking that file. Skipping the
+      // dragOver=false reset on success/error is intentional — the
+      // overlay disappears when phase flips to 'steps' / 'review'
+      // after extraction; if extraction fails, the panel stays in
+      // smart-start and the next dragleave clears the flag.
+      handleSmartStartDrop: function (event) {
+        this.smartStartDragOver = false;
+        if (this.smartStartBusy) return;
+        var files = (event && event.dataTransfer && event.dataTransfer.files) || [];
+        if (files.length === 0) return;
+        this.runSmartStartFromFile(files[0]);
       },
       _sendSmartStart: function (fd) {
         var self = this;

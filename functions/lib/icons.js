@@ -55,3 +55,13 @@ export const ICON_KEYBOARD =
     <line x1="18" y1="10" x2="18.01" y2="10"/>
     <line x1="7" y1="14" x2="17" y2="14"/>
   </svg>`;
+
+/** Drop zone — arrow into a tray. Reads as "drop here" without
+ * being too literal. Used as a hint affordance on drag-and-drop
+ * surfaces (wizard smart-start, future capture sites). */
+export const ICON_DROPZONE =
+  `<svg ${COMMON_ATTRS}>
+    <path d="M3 16.5V20a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1v-3.5"/>
+    <polyline points="7 10 12 15 17 10"/>
+    <line x1="12" y1="3" x2="12" y2="15"/>
+  </svg>`;
