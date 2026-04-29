@@ -400,11 +400,23 @@ function renderChanges(changesJson) {
   if (!changesJson) return '';
   let changes;
   try { changes = JSON.parse(changesJson); } catch { return ''; }
+  if (!changes || typeof changes !== 'object') return '';
   const keys = Object.keys(changes);
   if (keys.length === 0) return '';
   const rows = keys.map(k => {
     const c = changes[k];
-    return `<tr><td><code>${escapeHtml(k)}</code></td><td class="muted">${escapeHtml(String(c.from ?? ''))}</td><td>${escapeHtml(String(c.to ?? ''))}</td></tr>`;
+    // Some legacy audit rows store the value directly (e.g. a string
+    // describing the change) instead of {from, to}. Coerce both shapes
+    // into "from"/"to" so a malformed row can't 1101 the page.
+    let from = '';
+    let to = '';
+    if (c && typeof c === 'object') {
+      from = c.from ?? '';
+      to = c.to ?? '';
+    } else if (c !== null && c !== undefined) {
+      to = c;
+    }
+    return `<tr><td><code>${escapeHtml(k)}</code></td><td class="muted">${escapeHtml(String(from))}</td><td>${escapeHtml(String(to))}</td></tr>`;
   }).join('');
   return `<table class="changes"><thead><tr><th>Field</th><th>From</th><th>To</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
