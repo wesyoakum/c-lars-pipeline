@@ -18,6 +18,7 @@ const FIELDS = [
   'email',
   'phone',
   'mobile',
+  'linkedin_url',
   'is_primary',
   'notes',
 ];
@@ -47,6 +48,40 @@ function inlineCheckbox(field, value) {
       ${value ? raw('<span class="pill pill-success">Yes</span>') : raw('<span class="muted">No</span>')}
     </span>
   </span>`;
+}
+
+// LinkedIn cell: combines an inline-edit-able URL field with a small
+// recommendation panel when the URL is AI-suggested. The user can:
+//   - Click the link → opens LinkedIn in a new tab
+//   - Click the cell whitespace → enters edit mode (any manual edit
+//     auto-flips source to 'user' via patch.js)
+//   - Click ✓ → confirms (flips source to 'user' without changing URL)
+//   - Click ✕ → dismisses (clears the URL entirely)
+function renderLinkedinCell(linkedin, source) {
+  const hasValue = !!(linkedin && linkedin.trim());
+  const displayText = hasValue
+    ? linkedin.replace(/^https?:\/\/(www\.)?/, '')
+    : '—';
+  const displayClass = hasValue ? '' : 'muted';
+  const isSuggest = hasValue && source === 'ai_suggested';
+
+  const ieInner = hasValue
+    ? html`<a href="${escape(linkedin)}" target="_blank" rel="noopener noreferrer">${escape(displayText)}</a>`
+    : raw(displayText);
+
+  return html`<span class="ie ie-linkedin" data-field="linkedin_url" data-type="text" data-input-type="url">
+    <span class="ie-display ${displayClass}">${ieInner}</span>
+    <span class="ie-raw" hidden>${escape(hasValue ? linkedin : '')}</span>
+  </span>${isSuggest ? html`
+    <span class="li-suggest-controls">
+      <span class="li-suggest-pill" title="AI Inbox suggested this URL">Recommended</span>
+      <button type="button" class="li-confirm-btn"
+              @click="confirmLinkedin()"
+              title="Confirm — keep this URL as user-verified">✓</button>
+      <button type="button" class="li-dismiss-btn"
+              @click="dismissLinkedin()"
+              title="Dismiss — clear the suggestion">×</button>
+    </span>` : ''}`;
 }
 
 // ---- GET handler — detail page with inline editing ----------------------
@@ -128,6 +163,12 @@ export async function onRequestGet(context) {
         <div class="detail-pair">
           <span class="detail-label">Mobile</span>
           <span class="detail-value">${inlineText('mobile', contact.mobile, { placeholder: '—', inputType: 'tel' })}</span>
+        </div>
+        <div class="detail-pair">
+          <span class="detail-label">LinkedIn</span>
+          <span class="detail-value detail-value-linkedin">
+            ${renderLinkedinCell(contact.linkedin_url, contact.linkedin_url_source)}
+          </span>
         </div>
         <div class="detail-pair">
           <span class="detail-label">Primary contact</span>
@@ -265,6 +306,38 @@ export async function onRequestGet(context) {
             setTimeout(() => el.classList.remove('ie-error'), 2000);
           } finally {
             el.classList.remove('ie-saving');
+          }
+        },
+        // Confirm an AI-suggested LinkedIn URL — flips source to 'user'
+        // without changing the URL itself, and removes the suggestion
+        // controls from the DOM.
+        async confirmLinkedin() {
+          try {
+            await fetch(patchUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ field: 'linkedin_url_source', value: 'user' }),
+            });
+            const ctrls = this.$el.querySelector('.li-suggest-controls');
+            if (ctrls) ctrls.remove();
+          } catch (err) {
+            alert('Could not confirm LinkedIn URL.');
+          }
+        },
+        // Dismiss the AI suggestion — clears the URL and the source
+        // marker (patch.js handles both side-effects when the value is
+        // cleared). Reloads so the muted "—" placeholder is shown.
+        async dismissLinkedin() {
+          if (!confirm('Remove the suggested LinkedIn URL?')) return;
+          try {
+            await fetch(patchUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ field: 'linkedin_url', value: '' }),
+            });
+            window.location.reload();
+          } catch (err) {
+            alert('Could not dismiss LinkedIn URL.');
           }
         },
         deactivate(el, input) {

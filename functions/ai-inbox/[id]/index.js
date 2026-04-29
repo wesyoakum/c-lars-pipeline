@@ -100,7 +100,13 @@ export async function onRequestGet(context) {
               END AS target_mobile,
               CASE m.ref_type
                 WHEN 'contact'     THEN c.title
-              END AS target_title
+              END AS target_title,
+              CASE m.ref_type
+                WHEN 'contact'     THEN c.linkedin_url
+              END AS target_linkedin,
+              CASE m.ref_type
+                WHEN 'contact'     THEN c.linkedin_url_source
+              END AS target_linkedin_source
          FROM ai_inbox_entity_matches m
          LEFT JOIN contacts c ON c.id = m.ref_id AND m.ref_type = 'contact'
          LEFT JOIN accounts a ON a.id = m.ref_id AND m.ref_type = 'account'
@@ -655,6 +661,19 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
             if (field === 'email') {
               return a.toLowerCase() === b.toLowerCase();
             }
+            if (field === 'linkedin') {
+              // Mirror the server-side normalizer: lowercase, strip
+              // protocol + www./m. + trailing slash + query/fragment.
+              const norm = (s) => {
+                let v = s.toLowerCase().trim();
+                v = v.replace(/^https?:\\/\\//, '');
+                v = v.replace(/^(www\\.|m\\.)/, '');
+                v = v.split('?')[0].split('#')[0];
+                v = v.replace(/\\/+$/, '');
+                return v;
+              };
+              return norm(a) === norm(b);
+            }
             return a === b;
           },
 
@@ -750,7 +769,7 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
           hasAnyDetail(kind, idx) {
             const d = this.detailFor(kind, idx);
             if (!d) return false;
-            return !!(d.title || d.email || d.phone || d.website || d.address || d.organization);
+            return !!(d.title || d.email || d.phone || d.linkedin || d.website || d.address || d.organization);
           },
 
           // v3: init() runs once when Alpine instantiates the component.
@@ -1550,6 +1569,18 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
                               :title="'Push phone onto ' + bestMatch('person', idx)?.ref_label"
                               @click="pushDetail('person', idx, 'phone')">↑ push</button>
                       <span class="aii-push-done" x-show="isPushed('person', idx, 'phone')" title="Pushed">✓</span>
+                    </span>
+                  </template>
+                  <template x-if="detailFor('person', idx)?.linkedin">
+                    <span class="aii-detail-row">
+                      <strong>LinkedIn</strong>
+                      <a :href="detailFor('person', idx).linkedin" target="_blank" rel="noopener noreferrer"
+                         x-text="detailFor('person', idx).linkedin.replace(/^https?:\\/\\/(www\\.)?/, '')"></a>
+                      <button type="button" class="aii-push-btn"
+                              x-show="shouldShowPush('person', idx, 'linkedin') && bestMatch('person', idx)?.ref_type === 'contact'"
+                              :title="'Push LinkedIn URL onto ' + bestMatch('person', idx)?.ref_label"
+                              @click="pushDetail('person', idx, 'linkedin')">↑ push</button>
+                      <span class="aii-push-done" x-show="isPushed('person', idx, 'linkedin')" title="Pushed">✓</span>
                     </span>
                   </template>
                   <template x-if="detailFor('person', idx)?.organization && !bestMatch('person', idx)">

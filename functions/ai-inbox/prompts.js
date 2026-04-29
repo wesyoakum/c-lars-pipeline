@@ -149,6 +149,7 @@ const COMMON_SCHEMA_BLOCK = `Return strict JSON with this exact shape:
       "title": "string or empty",
       "email": "string or empty",
       "phone": "string or empty",
+      "linkedin": "string or empty — full LinkedIn profile URL if mentioned",
       "organization": "string or empty — name of the org they belong to, if mentioned"
     }
   ],
@@ -184,6 +185,11 @@ Rules:
 - Phone/email/title: only fill when the source text explicitly states
   them. Do not invent or guess. A business card or email signature is
   the most common source.
+- LinkedIn URL: only include when the source text contains an
+  explicit LinkedIn reference (e.g. "linkedin.com/in/jane-doe",
+  "/in/jdoe", or a full URL on a business card). Format as a full URL
+  starting with "https://www.linkedin.com/in/". Do not guess or
+  generate URLs from a person's name alone — high confidence only.
 - Use ISO 8601 dates (YYYY-MM-DD) when a date is mentioned. Resolve
   relative phrases ("next week", "Friday", "tomorrow", "in two weeks")
   using the "Today is …" line in the user message as the anchor.
@@ -221,6 +227,37 @@ function buildExtractionPrompt(contextType) {
   ].join('\n');
 }
 
+// Normalize a LinkedIn URL the LLM returned. Accepts:
+//   - full URLs (https://www.linkedin.com/in/jane-doe[?...])
+//   - shorthand starting with "linkedin.com/in/jane-doe"
+//   - partial slugs starting with "/in/jane-doe"
+//   - bare slugs ("jane-doe") — REJECTED, too risky to autocomplete
+// Strips query strings and trailing slashes for stable comparison.
+// Returns '' if the input doesn't look like a LinkedIn profile URL.
+function normalizeLinkedinUrl(s) {
+  if (!s) return '';
+  let v = String(s).trim();
+  if (!v) return '';
+  // Drop the protocol if present so the matching is uniform.
+  v = v.replace(/^https?:\/\//i, '');
+  // Strip leading "www." or "m." subdomains.
+  v = v.replace(/^(www\.|m\.)/i, '');
+  // Normalize the path-only forms (linkedin.com/in/x) and the
+  // already-stripped "/in/x" form.
+  let slug = '';
+  if (/^linkedin\.com\/in\//i.test(v)) {
+    slug = v.replace(/^linkedin\.com\/in\//i, '');
+  } else if (/^\/in\//i.test(v)) {
+    slug = v.replace(/^\/in\//i, '');
+  } else {
+    return ''; // not a recognizable LinkedIn profile URL
+  }
+  // Drop query string + fragment + trailing slashes.
+  slug = slug.split('?')[0].split('#')[0].replace(/\/+$/, '');
+  if (!slug) return '';
+  return 'https://www.linkedin.com/in/' + slug;
+}
+
 function normalizeExtraction(raw) {
   const arr = (v) => (Array.isArray(v) ? v.filter(Boolean) : []);
   const str = (v) => (typeof v === 'string' ? v.trim() : '');
@@ -243,8 +280,9 @@ function normalizeExtraction(raw) {
     title: str(p?.title),
     email: str(p?.email),
     phone: str(p?.phone),
+    linkedin: normalizeLinkedinUrl(str(p?.linkedin)),
     organization: str(p?.organization),
-  })).filter((p) => p.name && (p.title || p.email || p.phone || p.organization));
+  })).filter((p) => p.name && (p.title || p.email || p.phone || p.linkedin || p.organization));
 
   const orgsDetail = arr(raw?.organizations_detail).map((o) => ({
     name: str(o?.name),

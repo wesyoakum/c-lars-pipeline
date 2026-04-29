@@ -9,6 +9,10 @@ import { now } from '../../lib/ids.js';
 
 const PATCHABLE = new Set([
   'first_name', 'last_name', 'title', 'email', 'phone', 'mobile', 'is_primary', 'notes',
+  // LinkedIn: linkedin_url is the URL, linkedin_url_source marks
+  // whether it was AI-suggested or user-confirmed. Patching either
+  // field has special-case behavior in the handler below.
+  'linkedin_url', 'linkedin_url_source',
 ]);
 
 export async function onRequestPost(context) {
@@ -32,6 +36,15 @@ export async function onRequestPost(context) {
   let newValue;
   if (field === 'is_primary') {
     newValue = rawValue === '1' || rawValue === true || rawValue === 1 ? 1 : 0;
+  } else if (field === 'linkedin_url_source') {
+    // Only 'user' (confirm) is a meaningful patch from the UI. Any
+    // other value is rejected — 'ai_suggested' is set server-side by
+    // /push/linkedin only.
+    const v = (typeof rawValue === 'string' ? rawValue.trim() : '');
+    if (v !== 'user') {
+      return json({ ok: false, error: 'linkedin_url_source must be "user"' }, 400);
+    }
+    newValue = 'user';
   } else {
     newValue = (typeof rawValue === 'string' ? rawValue.trim() : rawValue) || null;
   }
@@ -42,17 +55,47 @@ export async function onRequestPost(context) {
     changes[field] = { from: contact[field], to: newValue };
   }
 
-  const stmts = [
-    stmt(env.DB, `UPDATE contacts SET ${field} = ?, updated_at = ? WHERE id = ?`, [newValue, ts, contactId]),
-    auditStmt(env.DB, {
-      entityType: 'contact',
-      entityId: contactId,
-      eventType: 'updated',
-      user,
-      summary: `Updated contact ${field}: ${contact.first_name} ${contact.last_name}`,
-      changes,
-    }),
-  ];
+  const stmts = [];
+
+  // linkedin_url has special multi-column update logic:
+  //   - cleared (newValue=null): also clear linkedin_url_source
+  //   - manually set: flip linkedin_url_source to 'user' (manual entry
+  //     counts as user-confirmed, even if the value happens to match
+  //     a previously-suggested one)
+  if (field === 'linkedin_url') {
+    if (newValue === null) {
+      stmts.push(stmt(env.DB,
+        `UPDATE contacts
+            SET linkedin_url = NULL, linkedin_url_source = NULL, updated_at = ?
+          WHERE id = ?`,
+        [ts, contactId]));
+      if (contact.linkedin_url_source !== null) {
+        changes.linkedin_url_source = { from: contact.linkedin_url_source, to: null };
+      }
+    } else {
+      stmts.push(stmt(env.DB,
+        `UPDATE contacts
+            SET linkedin_url = ?, linkedin_url_source = 'user', updated_at = ?
+          WHERE id = ?`,
+        [newValue, ts, contactId]));
+      if (contact.linkedin_url_source !== 'user') {
+        changes.linkedin_url_source = { from: contact.linkedin_url_source, to: 'user' };
+      }
+    }
+  } else {
+    stmts.push(stmt(env.DB,
+      `UPDATE contacts SET ${field} = ?, updated_at = ? WHERE id = ?`,
+      [newValue, ts, contactId]));
+  }
+
+  stmts.push(auditStmt(env.DB, {
+    entityType: 'contact',
+    entityId: contactId,
+    eventType: 'updated',
+    user,
+    summary: `Updated contact ${field}: ${contact.first_name} ${contact.last_name}`,
+    changes,
+  }));
 
   // If setting is_primary = 1, clear other primaries on the same account
   if (field === 'is_primary' && newValue === 1) {

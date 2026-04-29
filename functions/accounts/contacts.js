@@ -17,6 +17,26 @@ const PRIMARY_OPTIONS = [
   { value: '1', label: 'Yes' },
 ];
 
+// Render a LinkedIn URL cell that's both inline-editable AND clickable.
+// The inline-edit script (list-inline-edit.js) lets clicks on <a>
+// elements pass through to the link; clicks on whitespace open the
+// editor. When linkedin_url_source = 'ai_suggested', a small
+// "Recommended" pill is shown next to the URL — clicking through to
+// the contact detail page gives the user a confirm/dismiss UX.
+function ieLinkedinCell(value, source) {
+  const hasValue = !!(value && value.trim());
+  const display = hasValue ? value.replace(/^https?:\/\/(www\.)?/, '') : '—';
+  const displayClass = hasValue ? '' : 'muted';
+  const isSuggest = hasValue && source === 'ai_suggested';
+  const inner = hasValue
+    ? html`<a href="${escape(value)}" target="_blank" rel="noopener noreferrer">${escape(display)}</a>`
+    : html`<span>${raw(display)}</span>`;
+  return html`<span class="ie ie-linkedin" data-field="linkedin_url" data-type="text" data-input-type="url">
+    <span class="ie-display ${displayClass}">${inner}${isSuggest ? raw(' <span class="li-suggest-pill" title="AI-suggested. Open contact to confirm or dismiss.">AI</span>') : ''}</span>
+    <span class="ie-raw" hidden>${escape(hasValue ? value : '')}</span>
+  </span>`;
+}
+
 export async function onRequestGet(context) {
   const { env, data, request } = context;
   const user = data?.user;
@@ -36,6 +56,8 @@ export async function onRequestGet(context) {
             c.email,
             c.phone,
             c.mobile,
+            c.linkedin_url,
+            c.linkedin_url_source,
             c.is_primary,
             c.updated_at,
             a.name AS account_name
@@ -55,6 +77,7 @@ export async function onRequestGet(context) {
     { key: 'email',        label: 'Email',        sort: 'text',   filter: 'text',   default: true },
     { key: 'phone',        label: 'Phone',        sort: 'text',   filter: 'text',   default: true },
     { key: 'mobile',       label: 'Mobile',       sort: 'text',   filter: 'text',   default: false },
+    { key: 'linkedin',     label: 'LinkedIn',     sort: 'text',   filter: 'text',   default: true },
     { key: 'is_primary',   label: 'Primary',      sort: 'text',   filter: 'select', default: true },
     { key: 'updated',      label: 'Updated',      sort: 'date',   filter: 'text',   default: true },
     { key: 'delete',       label: '',             sort: null,     filter: null,     default: true },
@@ -70,6 +93,8 @@ export async function onRequestGet(context) {
     email: r.email ?? '',
     phone: r.phone ?? '',
     mobile: r.mobile ?? '',
+    linkedin: r.linkedin_url ?? '',
+    linkedin_source: r.linkedin_url_source ?? '',
     // is_primary stored as string '0'/'1' so the inline-edit select and
     // the select-filter dropdown handle it uniformly; the patch handler
     // coerces back to 0/1 for storage.
@@ -131,6 +156,9 @@ export async function onRequestGet(context) {
                     </td>
                     <td class="col-mobile" data-col="mobile">
                       ${ieText('mobile', r.mobile, { inputType: 'tel' })}
+                    </td>
+                    <td class="col-linkedin" data-col="linkedin">
+                      ${ieLinkedinCell(r.linkedin, r.linkedin_source)}
                     </td>
                     <td class="col-is_primary" data-col="is_primary">
                       ${ieSelect('is_primary', r.is_primary, PRIMARY_OPTIONS)}
