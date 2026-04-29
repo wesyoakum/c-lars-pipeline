@@ -541,6 +541,18 @@
         if (step.type === 'entity-select') return !v || !v.id;
         return false;
       },
+
+      // True when at least one step has a meaningful pre-filled
+      // answer (used by openModal to skip the smart-start phase
+      // when the caller already supplied the data).
+      _hasPrefilledAnswers: function () {
+        var steps = this.steps();
+        for (var i = 0; i < steps.length; i++) {
+          var step = steps[i];
+          if (!this.isEmptyAnswer(step, this.answers[step.key])) return true;
+        }
+        return false;
+      },
       shouldSkipStep: function (step) {
         if (!step) return false;
         if (typeof step.skipWhen === 'function') {
@@ -712,9 +724,11 @@
         this.showInactive = false;
 
         // Smart-start: open in capture mode when the wizard config opts
-        // in (and the caller hasn't bypassed it via skipSmartStart in
-        // the prefill — used when chaining wizards where the upstream
-        // already extracted everything).
+        // in. Bypass when the prefill already carries meaningful answer
+        // data — caller has the data; smart-start would be a confusing
+        // empty-textarea detour. Detection happens AFTER applyPrefill
+        // runs (further down). Provisional default is the smartStart
+        // mode; we may flip to 'steps' below.
         this.phase = (config.smartStart && !prefill.skipSmartStart) ? 'smart-start' : 'steps';
         this.smartStartText = '';
         this.smartStartBusy = false;
@@ -740,6 +754,18 @@
             this.pinnedPrefix = r.prefix || 'Linked to';
             this.pinnedValue = r.label || '';
           }
+        }
+
+        // Auto-bypass smart-start when applyPrefill produced real
+        // answer data. Without this, callers like AI Inbox's
+        // "Apply as task" or the chained "Create contact at Acme"
+        // landed users at an empty smart-start textarea even though
+        // the data was already filled in — confusing because the
+        // Skip button was removed in v0.347. If the wizard has any
+        // non-empty answer for any of its steps, we treat it as
+        // "user already has the data" and go straight to steps.
+        if (this.phase === 'smart-start' && this._hasPrefilledAnswers()) {
+          this.phase = 'steps';
         }
 
         // Decide whether any step needs picker data (users / entities).
