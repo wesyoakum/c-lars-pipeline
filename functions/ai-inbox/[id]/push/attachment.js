@@ -68,21 +68,21 @@ export async function onRequestPost(context) {
   const oppId = refType === 'opportunity' ? refId : null;
   const accountId = refType === 'account' ? refId : null;
   const contactId = refType === 'contact' ? refId : null;
+  const quoteId = refType === 'quote' ? refId : null;
 
   const docId = uuid();
   const ts = now();
   const docTitle = (att.filename || `attachment-${attachmentId}`);
 
-  // Detect what columns the documents table actually has. The schema
-  // varies across deployments; we'll INSERT the canonical fields and
-  // let the DB ignore any optional extras via NULL defaults.
+  // documents has nullable polymorphic FKs; we set whichever matches
+  // the chosen target.
   const sql = `
     INSERT INTO documents (
       id, opportunity_id, account_id, contact_id, quote_id, job_id,
       title, kind, r2_key, mime_type, size_bytes, original_filename,
       uploaded_at, uploaded_by_user_id
     )
-    VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   const alreadyAssoc = await isAlreadyAssociated(env.DB, params.id, refType, refId);
@@ -96,7 +96,7 @@ export async function onRequestPost(context) {
 
   const stmts = [
     stmt(env.DB, sql, [
-      docId, oppId, accountId, contactId,
+      docId, oppId, accountId, contactId, quoteId,
       docTitle, att.kind, att.r2_key, att.mime_type, att.size_bytes, att.filename,
       ts, user.id,
     ]),

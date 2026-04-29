@@ -87,6 +87,7 @@ export async function onRequestPost(context) {
   const oppId = refType === 'opportunity' ? refId : null;
   const accountId = refType === 'account' ? refId : null;
   const contactId = refType === 'contact' ? refId : null;
+  const quoteId = refType === 'quote' ? refId : null;
 
   const alreadyAssoc = await isAlreadyAssociated(env.DB, params.id, refType, refId);
   const pushAction = `push_task_to_${refType}`;
@@ -104,8 +105,8 @@ export async function onRequestPost(context) {
          direction, status, due_at, remind_at, assigned_user_id,
          created_at, updated_at, created_by_user_id
        )
-       VALUES (?, ?, ?, ?, NULL, 'task', ?, ?, NULL, 'pending', ?, NULL, ?, ?, ?, ?)`,
-      [activityId, oppId, accountId, contactId, subject, taskBody, dueAt, user.id, ts, ts, user.id]),
+       VALUES (?, ?, ?, ?, ?, 'task', ?, ?, NULL, 'pending', ?, NULL, ?, ?, ?, ?)`,
+      [activityId, oppId, accountId, contactId, quoteId, subject, taskBody, dueAt, user.id, ts, ts, user.id]),
     auditStmt(env.DB, {
       entityType: 'activity',
       entityId: activityId,

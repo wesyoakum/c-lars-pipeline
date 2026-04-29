@@ -144,6 +144,17 @@ export async function loadPushContext(env, user, entry_id, ref_type, ref_id) {
     if (!target) return { error: 'opportunity_not_found', status: 404 };
     const acctPart = target.account_name ? ` · ${(user?.show_alias && target.account_alias) ? target.account_alias : target.account_name}` : '';
     refLabel = `OPP-${target.number}${target.title ? ' · ' + target.title : ''}${acctPart}`;
+  } else if (ref_type === 'quote') {
+    target = await one(env.DB,
+      `SELECT q.id, q.number, q.title, q.opportunity_id,
+              o.number AS opp_number, a.name AS account_name, a.alias AS account_alias
+         FROM quotes q
+         LEFT JOIN opportunities o ON o.id = q.opportunity_id
+         LEFT JOIN accounts a ON a.id = o.account_id
+        WHERE q.id = ?`, [ref_id]);
+    if (!target) return { error: 'quote_not_found', status: 404 };
+    const acctPart = target.account_name ? ` · ${(user?.show_alias && target.account_alias) ? target.account_alias : target.account_name}` : '';
+    refLabel = `${target.number}${target.title ? ' · ' + target.title : ''}${acctPart}`;
   } else {
     return { error: 'bad_ref_type', status: 400 };
   }

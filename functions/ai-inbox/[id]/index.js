@@ -67,9 +67,15 @@ export async function onRequestGet(context) {
   // v2: Load action history (links) and entity matches in parallel.
   // v3: also load attachments for the new attachments-list panel.
   const [links, matches, attachments] = await Promise.all([
+    // Links + parent_opportunity_id for quote links (so the client
+    // can build the nested /opportunities/<opp>/quotes/<quote> URL).
     all(env.DB,
-      `SELECT id, action_type, ref_type, ref_id, ref_label, created_at
-         FROM ai_inbox_links WHERE item_id = ? ORDER BY created_at DESC`,
+      `SELECT l.id, l.action_type, l.ref_type, l.ref_id, l.ref_label, l.created_at,
+              q.opportunity_id AS parent_opportunity_id
+         FROM ai_inbox_links l
+         LEFT JOIN quotes q ON q.id = l.ref_id AND l.ref_type = 'quote'
+        WHERE l.item_id = ?
+        ORDER BY l.created_at DESC`,
       [params.id]),
     // v3 push-aware enrichment: pull each match together with the
     // current values of the fields a user might push onto it
@@ -451,18 +457,19 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
           itemId: itemId,
           // Action types we have a form for; others render as
           // greyed-out coming-soon buttons.
-          handledActions: ['create_task', 'link_to_account', 'link_to_opportunity'],
+          handledActions: ['create_task', 'link_to_account', 'link_to_opportunity', 'link_to_quote'],
           // Always-visible action buttons (regardless of which ones the
           // LLM listed in suggested_destinations). The LLM's suggestions
           // get a small "suggested" indicator but every handled action
           // is reachable from the entry, always.
-          allActions: ['create_task', 'link_to_account', 'link_to_opportunity'],
+          allActions: ['create_task', 'link_to_account', 'link_to_opportunity', 'link_to_quote'],
           destLabels: {
             keep_as_note: 'Keep as note',
             create_task: 'Create task',
             create_reminder: 'Create reminder',
             link_to_account: 'Link to account',
             link_to_opportunity: 'Link to opportunity',
+            link_to_quote: 'Link to quote',
             archive: 'Archive',
             create_account: 'Create account',
             create_contact: 'Create contact',
@@ -792,15 +799,41 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
               // org if any, otherwise the most-recent active opps. Gives
               // the user something to click without having to type.
               this.searchEntities('opportunity', '', accountId);
+            } else if (kind === 'link_to_quote') {
+              this.actionForm = {
+                kind, busy: false, error: '',
+                quote_id: '',
+                quote_label: '',
+              };
+              // Scope the initial picker to the entry's resolved opp
+              // first (most relevant), falling back to the resolved
+              // org. Empty query returns the N most-recently-updated
+              // active quotes that match the scope.
+              const oppId = this.preferredOpportunityId();
+              this.searchEntities('quote', '', oppId || accountId);
             }
           },
           closeAction() { this.actionForm = null; this.typeahead = null; },
+
+          // Map an action kind to its route path. Route filenames use
+          // a shorter form (link-account.js) than the action_type
+          // strings stored in ai_inbox_links (link_to_account), so a
+          // naive _ → - replace would point at the wrong URL.
+          actionRoutePath(kind) {
+            const map = {
+              create_task: 'create-task',
+              link_to_account: 'link-account',
+              link_to_opportunity: 'link-opportunity',
+              link_to_quote: 'link-quote',
+            };
+            return map[kind] || kind.replace(/_/g, '-');
+          },
 
           async submitAction() {
             if (!this.actionForm) return;
             const f = this.actionForm;
             f.busy = true; f.error = '';
-            const path = f.kind.replace(/_/g, '-');
+            const path = this.actionRoutePath(f.kind);
             try {
               const payload = {};
               if (f.kind === 'create_task') {
@@ -814,6 +847,9 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
               } else if (f.kind === 'link_to_opportunity') {
                 payload.opportunity_id = f.opportunity_id || '';
                 if (!payload.opportunity_id) { f.busy = false; f.error = 'Pick an opportunity first.'; return; }
+              } else if (f.kind === 'link_to_quote') {
+                payload.quote_id = f.quote_id || '';
+                if (!payload.quote_id) { f.busy = false; f.error = 'Pick a quote first.'; return; }
               }
               const res = await fetch('/ai-inbox/' + encodeURIComponent(this.itemId)
                           + '/actions/' + path, {
@@ -850,6 +886,7 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
             const path = kind === 'account' ? '/ai-inbox/_search/accounts'
                        : kind === 'contact' ? '/ai-inbox/_search/contacts'
                        : kind === 'opportunity' ? '/ai-inbox/_search/opportunities'
+                       : kind === 'quote' ? '/ai-inbox/_search/quotes'
                        : null;
             if (!path) {
               this.typeahead.loading = false;
@@ -875,6 +912,12 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
             if (!this.actionForm) return;
             this.actionForm.opportunity_id = r.ref_id;
             this.actionForm.opportunity_label = (r.sub ? (r.label + ' — ' + r.sub) : r.label);
+            this.typeahead = null;
+          },
+          pickQuote(r) {
+            if (!this.actionForm) return;
+            this.actionForm.quote_id = r.ref_id;
+            this.actionForm.quote_label = (r.sub ? (r.label + ' — ' + r.sub) : r.label);
             this.typeahead = null;
           },
           clearTypeahead() { this.typeahead = null; },
@@ -949,6 +992,16 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
             if (l.ref_type === 'account') return '/accounts/' + encodeURIComponent(l.ref_id);
             if (l.ref_type === 'contact') return '/accounts/' + encodeURIComponent(l.ref_id);
             if (l.ref_type === 'opportunity') return '/opportunities/' + encodeURIComponent(l.ref_id);
+            if (l.ref_type === 'quote') {
+              if (l.parent_opportunity_id) {
+                return '/opportunities/' + encodeURIComponent(l.parent_opportunity_id)
+                  + '/quotes/' + encodeURIComponent(l.ref_id);
+              }
+              // Quote was deleted or its parent opp is missing —
+              // there's no per-quote URL, so fall back to /opportunities.
+              return '/opportunities';
+            }
+            if (l.ref_type === 'job') return '/jobs/' + encodeURIComponent(l.ref_id);
             return '#';
           },
           async confirmMatch(kind, idx, mentionText, refType, refId) {
@@ -1251,6 +1304,17 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
           },
 
           // ----- helpers -----
+          // The "preferred" parent for the quote picker: any
+          // opportunity already linked to this entry takes priority,
+          // falling back to whichever opportunity the resolver matched
+          // an organization to (rare).
+          preferredOpportunityId() {
+            const link = (this.links || []).find(
+              (l) => l.ref_type === 'opportunity' && l.action_type === 'link_to_opportunity'
+            );
+            if (link) return link.ref_id;
+            return '';
+          },
           preferredAccountId() {
             const m = this.matches.find(
               x => x.mention_kind === 'organization' &&
@@ -1640,6 +1704,33 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
           <div class="aii-form-actions">
             <button type="button" class="aii-btn aii-btn-primary" @click="submitAction()" :disabled="!(actionForm && actionForm.opportunity_id) || (actionForm && actionForm.busy)">Link</button>
             <button type="button" class="aii-btn" @click="openOpportunityWizardForLink()" title="Open the opportunity wizard pre-filled from this entry">+ New opportunity</button>
+            <button type="button" class="aii-btn" @click="closeAction()">Cancel</button>
+            <span x-show="actionForm && actionForm.error" class="aii-err-inline" x-text="actionForm && actionForm.error"></span>
+          </div>
+        </div>
+
+        <!-- Inline form: link_to_quote -->
+        <div x-show="actionForm && actionForm.kind === 'link_to_quote'" class="aii-action-form" x-cloak>
+          <h3>Link to quote</h3>
+          <label class="aii-form-row">
+            <span>Quote</span>
+            <span class="aii-typeahead-wrap">
+              <input type="text" x-model="actionForm && actionForm.quote_label"
+                     placeholder="Type to search quotes (number or title)…"
+                     @input.debounce.250ms="searchEntities('quote', $event.target.value, preferredOpportunityId() || preferredAccountId()); if (actionForm) actionForm.quote_id = ''"
+                     @focus="searchEntities('quote', actionForm && actionForm.quote_label, preferredOpportunityId() || preferredAccountId())">
+              <ul class="aii-typeahead" x-show="typeahead && typeahead.kind === 'quote' && typeahead.results.length > 0" x-cloak>
+                <template x-for="r in (typeahead ? typeahead.results : [])" :key="r.ref_id">
+                  <li @click="pickQuote(r)">
+                    <span x-text="r.label"></span>
+                    <small x-text="r.sub" x-show="r.sub"></small>
+                  </li>
+                </template>
+              </ul>
+            </span>
+          </label>
+          <div class="aii-form-actions">
+            <button type="button" class="aii-btn aii-btn-primary" @click="submitAction()" :disabled="!(actionForm && actionForm.quote_id) || (actionForm && actionForm.busy)">Link</button>
             <button type="button" class="aii-btn" @click="closeAction()">Cancel</button>
             <span x-show="actionForm && actionForm.error" class="aii-err-inline" x-text="actionForm && actionForm.error"></span>
           </div>
