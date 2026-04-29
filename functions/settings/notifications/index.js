@@ -20,6 +20,7 @@ import { settingsSubNav } from '../../lib/settings-subnav.js';
 import {
   NOTIFICATION_EVENTS,
   NOTIFICATION_EVENT_LABELS,
+  NOTIFICATION_EVENT_DESCRIPTIONS,
   NOTIFICATION_CHANNELS,
   NOTIFICATION_CHANNEL_LABELS,
 } from '../../lib/notify-external.js';
@@ -77,11 +78,17 @@ export async function onRequestGet(context) {
         <h1>External notifications</h1>
       </div>
       <p class="muted" style="margin-top:0">
-        Get pinged outside the app for the things you care about. The in-app
-        notifications bell stays on regardless — these are additive.
+        Get pinged outside the app for the things that matter. The in-app
+        bell at the top of every page is always on — these channels add
+        on top of it (Teams card, email, etc.).
       </p>
 
-      <h2 style="margin-top:1.25rem">Channels</h2>
+      <h2 style="margin-top:1.25rem">Where to send</h2>
+      <p class="muted" style="margin-top:0;font-size:0.85rem">
+        Each channel is a destination — a Teams webhook URL or an email
+        address. You can have several. Use <strong>Test</strong> to send
+        a one-off ping to confirm the wiring is right.
+      </p>
 
       ${channels.length === 0
         ? html`<p class="muted">No channels configured yet — add one below.</p>`
@@ -121,52 +128,65 @@ export async function onRequestGet(context) {
           </table>
         `}
 
-      <h3 style="margin-top:1.25rem">Add a channel</h3>
+      <h3 style="margin-top:1.25rem">Add a destination</h3>
       <form method="post" action="/settings/notifications/channels"
             class="stacked"
             style="display:flex;flex-direction:column;gap:0.5rem;max-width:560px">
         <label>
-          <span style="display:block;font-size:0.85rem;color:var(--fg-muted)">Channel</span>
+          <span style="display:block;font-size:0.85rem;color:var(--fg-muted)">Type</span>
           <select name="channel" required>
             <option value="teams">Microsoft Teams (incoming webhook)</option>
-            <option value="email">Email</option>
+            <option value="email">Email (coming soon)</option>
           </select>
         </label>
         <label>
-          <span style="display:block;font-size:0.85rem;color:var(--fg-muted)">Target</span>
+          <span style="display:block;font-size:0.85rem;color:var(--fg-muted)">Where it goes</span>
           <input type="text" name="target"
-                 placeholder="Teams webhook URL OR email address"
+                 placeholder="Teams webhook URL — or an email address"
                  required style="width:100%;font:inherit;padding:0.4rem;border:1px solid var(--border);border-radius:4px">
         </label>
         <p class="muted" style="margin:0;font-size:0.82rem">
-          For Teams: paste the incoming-webhook URL from your channel's
-          connector settings. For email: leave blank to use your account
-          email (${escape(user.email || '')}), or enter another address.
+          <strong>Teams:</strong> paste the incoming-webhook URL from
+          your channel's connector settings (Channel → … → Manage channel →
+          Connectors → Incoming Webhook → Configure).<br>
+          <strong>Email:</strong> leave blank to use your account email
+          (<code>${escape(user.email || '')}</code>), or enter another
+          address. Email delivery isn't wired up yet — but you can save
+          the destination now and it'll start working once the email
+          provider lands.
         </p>
         <div>
-          <button type="submit" class="btn btn-sm primary">Add channel</button>
+          <button type="submit" class="btn btn-sm primary">Add destination</button>
         </div>
       </form>
 
       <h2 style="margin-top:2rem">What to send</h2>
       <p class="muted" style="margin-top:0">
         Pick which events fire on which channel. Empty rows mean no
-        notification at all (the in-app bell still works).
+        external notification at all — the in-app bell still works.
+        For now these fire on every matching event, including things
+        you do yourself; a "changes by other people only" toggle is
+        on the roadmap.
       </p>
 
       <form method="post" action="/settings/notifications/prefs">
-        <table class="data" style="margin-top:0.5rem">
+        <table class="data notif-matrix" style="margin-top:0.5rem">
           <thead>
             <tr>
-              <th>Event</th>
-              ${channelTypes.map(ch => html`<th style="text-align:center">${escape(NOTIFICATION_CHANNEL_LABELS[ch])}</th>`)}
-              <th style="text-align:center">Test</th>
+              <th style="min-width:18rem">Event</th>
+              ${channelTypes.map(ch => html`<th style="text-align:center;width:8rem">${escape(NOTIFICATION_CHANNEL_LABELS[ch])}</th>`)}
+              <th style="text-align:center;width:8rem">Preview</th>
             </tr>
           </thead>
           <tbody>
             ${eventTypes.map(ev => html`
               <tr>
-                <td>${escape(NOTIFICATION_EVENT_LABELS[ev] || ev)}</td>
+                <td>
+                  <div style="font-weight:600">${escape(NOTIFICATION_EVENT_LABELS[ev] || ev)}</div>
+                  ${NOTIFICATION_EVENT_DESCRIPTIONS[ev]
+                    ? html`<div class="muted" style="font-size:0.82rem;margin-top:0.1rem">${escape(NOTIFICATION_EVENT_DESCRIPTIONS[ev])}</div>`
+                    : ''}
+                </td>
                 ${channelTypes.map(ch => html`
                   <td style="text-align:center">
                     <input type="checkbox"
@@ -182,7 +202,7 @@ export async function onRequestGet(context) {
                           name="event_type"
                           value="${escape(ev)}"
                           class="btn btn-xs"
-                          title="Fire a sample of this event through your enabled channels">Send sample</button>
+                          title="Send a sample of this event through your enabled channels">Send sample</button>
                 </td>
               </tr>
             `)}
@@ -190,9 +210,10 @@ export async function onRequestGet(context) {
         </table>
         <p class="muted" style="font-size:0.82rem;margin-top:0.4rem">
           <strong>Send sample</strong> fires a placeholder version of the
-          event through whatever channels you've enabled for that row —
-          useful for previewing the card / email look before going live.
-          (Save changes if you've ticked a new box first.)
+          event through whatever channels you've ticked for that row —
+          useful for previewing the card or email layout before any
+          real event triggers. Save your channel selections first if
+          you've just changed them.
         </p>
 
         <h3 style="margin-top:1.5rem">Daily digest timing</h3>

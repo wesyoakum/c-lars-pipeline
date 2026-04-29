@@ -53,12 +53,27 @@ export const NOTIFICATION_EVENTS = Object.freeze({
 
 export const NOTIFICATION_EVENT_LABELS = Object.freeze({
   task_assigned:        'Task assigned to me',
-  task_reminder_fired:  'Reminder I set on a task fires',
-  task_due_soon:        'Task due in the next 24 hours',
-  mention:              '@mention in a note',
-  opp_stage_changed:    'Opportunity stage changed (one I own)',
-  quote_status_changed: 'Quote status changed (one I created)',
-  daily_digest:         'Daily digest summary',
+  task_reminder_fired:  'Task reminder fires',
+  task_due_soon:        'Task due soon',
+  mention:              '@mention',
+  opp_stage_changed:    'Stage change on my opportunity',
+  quote_status_changed: 'Status change on my quote',
+  daily_digest:         'Daily digest',
+});
+
+// One-line help text rendered beneath each event name in the matrix.
+// Keep these short — the matrix is dense and the description is just a
+// disambiguator, not a full explanation. Phase 7d-2 will add a "skip
+// self-actions" scope toggle; until then these notifications fire even
+// for things you do yourself.
+export const NOTIFICATION_EVENT_DESCRIPTIONS = Object.freeze({
+  task_assigned:        'When a teammate assigns a task to you.',
+  task_reminder_fired:  'When the remind-at time you set on a task arrives.',
+  task_due_soon:        'When a task you own is due within the next 24 hours.',
+  mention:              'When someone @mentions you in a note or comment.',
+  opp_stage_changed:    'When the stage changes on an opportunity you own.',
+  quote_status_changed: 'When the status changes on a quote you created.',
+  daily_digest:         'A once-a-day summary, sent at the local hour you pick below.',
 });
 
 export const NOTIFICATION_CHANNELS = Object.freeze({
@@ -67,7 +82,7 @@ export const NOTIFICATION_CHANNELS = Object.freeze({
 });
 
 export const NOTIFICATION_CHANNEL_LABELS = Object.freeze({
-  teams: 'Teams',
+  teams: 'Microsoft Teams',
   email: 'Email',
 });
 

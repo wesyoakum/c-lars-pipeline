@@ -213,6 +213,30 @@ const NAV_TOGGLE_SCRIPT = (
   "})();\n"
 );
 
+// Auto-dismiss the layout-level flash message after a kind-dependent
+// delay, plus wire up the manual ✕ close. Success / info fade out at
+// 4s; warnings at 8s; errors stick around (user usually needs to act
+// on them) — the close button still works on every flash regardless.
+// The fade itself is a CSS transition triggered by the .flash-dismissing
+// class; we remove the node from the DOM after the transition ends so
+// the "max-height collapse" reflows the page cleanly.
+const FLASH_AUTODISMISS_SCRIPT = (
+  "(function () {\n" +
+  "  var flash = document.querySelector('.flash[data-flash-kind]');\n" +
+  "  if (!flash) return;\n" +
+  "  function dismiss() {\n" +
+  "    if (flash.classList.contains('flash-dismissing')) return;\n" +
+  "    flash.classList.add('flash-dismissing');\n" +
+  "    setTimeout(function () { if (flash.parentNode) flash.parentNode.removeChild(flash); }, 500);\n" +
+  "  }\n" +
+  "  var btn = flash.querySelector('.flash-close');\n" +
+  "  if (btn) btn.addEventListener('click', dismiss);\n" +
+  "  var kind = flash.getAttribute('data-flash-kind') || 'info';\n" +
+  "  var ms = (kind === 'error') ? 0 : (kind === 'warning' || kind === 'warn') ? 8000 : 4000;\n" +
+  "  if (ms > 0) setTimeout(dismiss, ms);\n" +
+  "})();\n"
+);
+
 const NOTIFICATION_STORE_SCRIPT = (
   "document.addEventListener('alpine:init', function () {\n" +
   "  Alpine.store('notifications', {\n" +
@@ -1587,7 +1611,7 @@ export function layout(title, body, opts = {}) {
   ${CASCADE_DELETE_MODAL_MARKUP}
   ${user._sitePrefs?.messaging_enabled ? BOARD_LEFT_MARKUP : ''}
   ${BOARD_RIGHT_MARKUP}` : ''}
-  ${flash ? `<div class="flash flash-${escape(flash.kind ?? 'info')}">${escape(flash.message)}</div>` : ''}
+  ${flash ? `<div class="flash flash-${escape(flash.kind ?? 'info')}" data-flash-kind="${escape(flash.kind ?? 'info')}" role="status" aria-live="polite">${escape(flash.message)}<button type="button" class="flash-close" aria-label="Dismiss">&times;</button></div>` : ''}
   ${user ? `<script>${displayPrefsBootScript(user)}</script>` : ''}
   <main class="site-main">
 ${breadcrumbHtml}
@@ -1602,6 +1626,7 @@ ${body}
   </button>
   <script>${BACK_TO_TOP_SCRIPT}</script>
   <script>${NAV_TOGGLE_SCRIPT}</script>
+  ${flash ? `<script>${FLASH_AUTODISMISS_SCRIPT}</script>` : ''}
   ${user ? `<script>${NOTIFICATION_STORE_SCRIPT}</script>` : ''}
   ${user ? `<script>${BLOCKER_MODAL_STORE_SCRIPT}</script>` : ''}
 </body>

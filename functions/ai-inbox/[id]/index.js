@@ -124,19 +124,15 @@ export async function onRequestGet(context) {
       [params.id]),
   ]);
 
-  const body = renderDetail({ item, extracted, flash, links, matches, user, attachments });
-  return htmlResponse(layout('AI Inbox · Item', body, { user }));
+  const body = renderDetail({ item, extracted, links, matches, user, attachments });
+  return htmlResponse(layout('AI Inbox · Item', body, { user, flash }));
 }
 
-function renderDetail({ item, extracted, flash, links, matches, user, attachments }) {
+function renderDetail({ item, extracted, links, matches, user, attachments }) {
   const statusLabel = STATUS_LABELS[item.status] || item.status;
   const statusColor = STATUS_COLORS[item.status] || '#888';
   const ctxLabel = item.context_type ? (CONTEXT_TYPE_LABELS[item.context_type] || item.context_type) : null;
   const created = formatDate(item.created_at);
-
-  const flashHtml = flash
-    ? html`<div class="flash flash-${flash.kind}">${flash.message}</div>`
-    : '';
 
   // Pre-encode JSON for Alpine x-data. The replace() neutralizes any
   // </script> attempt; escape() (applied at the call site below)
@@ -386,13 +382,16 @@ function renderDetail({ item, extracted, flash, links, matches, user, attachment
     <div class="aii-wrap">
       <a class="aii-back" href="/ai-inbox">← Back to AI Inbox</a>
 
-      <div class="aii-head">
+      <div class="aii-head" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap">
         <span class="status-pill" style="background:${escape(statusColor)};">${escape(statusLabel)}</span>
         ${ctxLabel ? html`<span class="ctx-pill">${escape(ctxLabel)}</span>` : ''}
         <span>${escape(created)}</span>
+        <form method="post" action="/ai-inbox/${escape(item.id)}/delete"
+              style="margin-left:auto;display:inline"
+              onsubmit="return confirm('Delete this AI Inbox entry? This removes the captured files and any extracted info. This cannot be undone.');">
+          <button type="submit" class="btn btn-sm danger">Delete entry</button>
+        </form>
       </div>
-
-      ${flashHtml}
 
       ${item.status === 'error' && item.error_message
         ? html`<div class="aii-err"><strong>Error:</strong> ${escape(item.error_message)}</div>`

@@ -57,15 +57,11 @@ export async function onRequestGet(context) {
     [user.id]
   );
 
-  const body = renderPage({ items, flash });
-  return htmlResponse(layout('AI Inbox', body, { user }));
+  const body = renderPage({ items });
+  return htmlResponse(layout('AI Inbox', body, { user, flash }));
 }
 
-function renderPage({ items, flash }) {
-  const flashHtml = flash
-    ? html`<div class="flash flash-${flash.kind}">${flash.message}</div>`
-    : '';
-
+function renderPage({ items }) {
   return html`
     <style>
       .ai-inbox-wrap { max-width: 960px; margin: 0 auto; padding: 1.5rem 1rem; }
@@ -108,12 +104,22 @@ function renderPage({ items, flash }) {
       .ai-inbox-upload button:hover { background: #1657c8; }
       .ai-inbox-upload .help { font-size: .8rem; color: #666; margin-top: .35rem; }
       .ai-inbox-list { display: flex; flex-direction: column; gap: .5rem; }
+      .ai-inbox-card-wrap { position: relative; }
       .ai-inbox-card {
-        display: block; padding: .85rem 1rem; border: 1px solid #e1e4e8;
+        display: block; padding: .85rem 2.4rem .85rem 1rem; border: 1px solid #e1e4e8;
         border-radius: 6px; text-decoration: none; color: inherit;
         background: white;
       }
       .ai-inbox-card:hover { border-color: #1f6feb; background: #f6f8ff; }
+      .ai-inbox-card-del {
+        position: absolute; top: .35rem; right: .35rem; margin: 0;
+      }
+      .ai-inbox-card-del button {
+        background: transparent; border: 0; color: #999; cursor: pointer;
+        width: 28px; height: 28px; border-radius: 4px; font-size: 1.1rem;
+        line-height: 1; padding: 0;
+      }
+      .ai-inbox-card-del button:hover { background: #fadddd; color: #cf222e; }
       .ai-inbox-card .head {
         display: flex; align-items: center; gap: .6rem;
         font-size: .85rem; color: #666; margin-bottom: .15rem;
@@ -133,10 +139,6 @@ function renderPage({ items, flash }) {
         text-align: center; padding: 2.5rem 1rem; color: #888;
         border: 1px dashed #ddd; border-radius: 6px;
       }
-      .flash { padding: .65rem .9rem; border-radius: 4px; margin-bottom: 1rem; }
-      .flash-success { background: #d4ecdb; color: #1a3d24; }
-      .flash-error { background: #fadddd; color: #6a1a20; }
-
       /* Mobile (≤ 640px): tighter padding and the drop panel takes
          less vertical space so the recent-items list is visible
          above the fold. */
@@ -157,8 +159,6 @@ function renderPage({ items, flash }) {
         capture lives as an Entry — permanent, with one or more
         attachments.
       </p>
-
-      ${flashHtml}
 
       <div class="ai-inbox-droppanel" data-dropzone-big id="aii-drop-new">
         <form method="post" action="/ai-inbox/new" enctype="multipart/form-data" data-dz-form>
@@ -312,19 +312,26 @@ function renderCard(item) {
   const created = formatDate(item.created_at);
 
   return html`
-    <a class="ai-inbox-card" href="/ai-inbox/${escape(item.id)}">
-      <div class="head">
-        <span class="status-pill" style="background:${escape(statusColor)};">${escape(statusLabel)}</span>
-        ${ctxLabel ? html`<span class="ctx-pill">${escape(ctxLabel)}</span>` : ''}
-        <span>${escape(created)}</span>
-      </div>
-      <div class="title">${escape(title)}</div>
-      ${item.status === 'error' && item.error_message
-        ? html`<div class="err">${escape(item.error_message)}</div>`
-        : summary
-          ? html`<div class="summary">${escape(truncate(summary, 220))}</div>`
-          : ''}
-    </a>
+    <div class="ai-inbox-card-wrap">
+      <a class="ai-inbox-card" href="/ai-inbox/${escape(item.id)}">
+        <div class="head">
+          <span class="status-pill" style="background:${escape(statusColor)};">${escape(statusLabel)}</span>
+          ${ctxLabel ? html`<span class="ctx-pill">${escape(ctxLabel)}</span>` : ''}
+          <span>${escape(created)}</span>
+        </div>
+        <div class="title">${escape(title)}</div>
+        ${item.status === 'error' && item.error_message
+          ? html`<div class="err">${escape(item.error_message)}</div>`
+          : summary
+            ? html`<div class="summary">${escape(truncate(summary, 220))}</div>`
+            : ''}
+      </a>
+      <form method="post" action="/ai-inbox/${escape(item.id)}/delete"
+            class="ai-inbox-card-del"
+            onsubmit="return confirm('Delete this AI Inbox entry? Attachments and links will be removed too.');">
+        <button type="submit" title="Delete entry" aria-label="Delete entry">&times;</button>
+      </form>
+    </div>
   `;
 }
 
