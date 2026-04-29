@@ -95,6 +95,20 @@ function sampleDataFor(eventType, user) {
         context: { ref_type: 'opportunity', ref_id: 'sample-opp-id' },
       };
 
+    case NOTIFICATION_EVENTS.TASK_REMINDER_FIRED:
+      return {
+        data: {
+          task: {
+            subject: '[SAMPLE] Send the spares quote to John at Trendsetter',
+            body: '[SAMPLE] Send the spares quote to John at Trendsetter — he asked for it by EOD Friday and we said we\'d include the optional refurb add-on.',
+            due_at: tomorrow(),
+            link_label: '12345 · Spares for pump skid',
+          },
+          link: '/activities',
+        },
+        context: { ref_type: 'opportunity', ref_id: 'sample-opp-id' },
+      };
+
     case NOTIFICATION_EVENTS.TASK_DUE_SOON:
       return {
         data: {

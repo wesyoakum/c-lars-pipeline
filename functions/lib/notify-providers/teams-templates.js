@@ -10,6 +10,7 @@ const SITE_BASE = 'https://c-lars-pms.pages.dev';   // for "Open in C-LARS" acti
 export function renderTeamsCard(eventType, data, context) {
   if (eventType === 'test') return testCard(data);
   if (eventType === 'task_assigned') return taskAssignedCard(data, context);
+  if (eventType === 'task_reminder_fired') return taskReminderCard(data, context);
   if (eventType === 'task_due_soon') return taskDueSoonCard(data, context);
   if (eventType === 'mention') return mentionCard(data, context);
   if (eventType === 'opp_stage_changed') return oppStageCard(data, context);
@@ -102,6 +103,22 @@ function taskAssignedCard(data, context) {
     body.push(pair('Linked to', data.task.link_label));
   }
 
+  const actions = [];
+  if (data.link) actions.push(openAction('Open task', data.link));
+  return envelope(body, actions);
+}
+
+function taskReminderCard(data, context) {
+  // The reminder content IS the message — body of the task is what
+  // the user wrote when they set the reminder ("call Bob about the
+  // valves"). Card title is just "Reminder" so the body shines.
+  const body = [
+    header('Reminder'),
+    text(data.task?.body || data.task?.subject || '(no description)', { weight: 'Bolder', size: 'Medium' }),
+  ];
+  const dueFact = pair('Due', formatDue(data.task?.due_at));
+  if (dueFact) body.push(dueFact);
+  if (data.task?.link_label) body.push(pair('On', data.task.link_label));
   const actions = [];
   if (data.link) actions.push(openAction('Open task', data.link));
   return envelope(body, actions);

@@ -28,9 +28,18 @@
 
 export default {
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(runSweep(env).catch((err) => {
-      console.error('cron scheduled run failed:', err?.message || err);
-    }));
+    // Two cron schedules — dispatch by cron string. The 5-min tick
+    // hits the notifications endpoint; the daily one hits the sweep
+    // endpoint as before.
+    if (event.cron === '*/5 * * * *') {
+      ctx.waitUntil(callPipeline(env, '/api/cron/notifications', 'notifications').catch((err) => {
+        console.error('cron notifications run failed:', err?.message || err);
+      }));
+    } else {
+      ctx.waitUntil(callPipeline(env, '/api/cron/sweep', 'sweep').catch((err) => {
+        console.error('cron sweep run failed:', err?.message || err);
+      }));
+    }
   },
 
   async fetch(request, env) {
@@ -40,7 +49,7 @@ export default {
       return jsonResponse({
         ok: true,
         name: 'c-lars-pms-cron',
-        message: 'Sidecar cron Worker. POST /__run with x-cron-secret to fire a sweep.',
+        message: 'Sidecar cron Worker. POST /__run (sweep) or /__run-notifications with x-cron-secret to fire manually.',
       });
     }
 
@@ -49,7 +58,16 @@ export default {
       if (!secretsMatch(provided, env.CRON_SECRET || '')) {
         return new Response('Unauthorized', { status: 401 });
       }
-      const result = await runSweep(env);
+      const result = await callPipeline(env, '/api/cron/sweep', 'sweep');
+      return jsonResponse(result, result.ok ? 200 : 502);
+    }
+
+    if (request.method === 'POST' && url.pathname === '/__run-notifications') {
+      const provided = request.headers.get('x-cron-secret') || '';
+      if (!secretsMatch(provided, env.CRON_SECRET || '')) {
+        return new Response('Unauthorized', { status: 401 });
+      }
+      const result = await callPipeline(env, '/api/cron/notifications', 'notifications');
       return jsonResponse(result, result.ok ? 200 : 502);
     }
 
@@ -57,20 +75,25 @@ export default {
   },
 };
 
-async function runSweep(env) {
+/**
+ * POST a cron-triggered request to a Pages endpoint with the shared
+ * secret. Used for both the daily sweep and the 5-min notifications
+ * tick — different endpoint, same plumbing.
+ */
+async function callPipeline(env, endpointPath, label) {
   const pipelineUrl = (env.PIPELINE_URL || '').replace(/\/$/, '');
   if (!pipelineUrl) {
-    const msg = 'PIPELINE_URL is not configured — refusing to sweep.';
+    const msg = 'PIPELINE_URL is not configured — refusing to call.';
     console.error(msg);
     return { ok: false, error: msg };
   }
   if (!env.CRON_SECRET) {
-    const msg = 'CRON_SECRET is not configured on this Worker — refusing to sweep.';
+    const msg = 'CRON_SECRET is not configured on this Worker — refusing to call.';
     console.error(msg);
     return { ok: false, error: msg };
   }
 
-  const target = `${pipelineUrl}/api/cron/sweep`;
+  const target = `${pipelineUrl}${endpointPath}`;
   const startedAt = new Date().toISOString();
 
   let res;
@@ -83,24 +106,17 @@ async function runSweep(env) {
       },
     });
   } catch (err) {
-    console.error('cron fetch failed:', err?.message || err);
+    console.error(label + ' cron fetch failed:', err?.message || err);
     return { ok: false, target, startedAt, error: err?.message || String(err) };
   }
 
-  // Read once as text, then try to parse — res.body can only be consumed
-  // one time, so fetch-then-fallback would throw "Body has already been used".
   const text = await res.text();
   let body;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    body = { raw: text };
-  }
+  try { body = JSON.parse(text); } catch { body = { raw: text }; }
 
-  // Log a compact summary to `wrangler tail` so it's easy to confirm
-  // the sweep fired and see the per-trigger counts at a glance.
   console.log(JSON.stringify({
     cron: 'c-lars-pms-cron',
+    label,
     startedAt,
     target,
     status: res.status,

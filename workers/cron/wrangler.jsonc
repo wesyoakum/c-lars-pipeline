@@ -19,16 +19,23 @@
   //   curl -X POST https://c-lars-pms-cron.<account>.workers.dev/__run \
   //     -H "x-cron-secret: $CRON_SECRET"
   //
-  // Schedule: once per day at 14:00 UTC = 09:00 America/Chicago (CST).
-  // One daily tick is plenty — each sweep's window bucket is a UTC day,
-  // so running more often just hits the dedup gate. If we ever want
-  // sub-daily cadence (e.g. hourly expiring-soon scans for a last-day
-  // quote), change the bucket key too.
+  // Two scheduled triggers:
+  //   1. Daily auto-task sweep — 14:00 UTC = 09:00 America/Chicago.
+  //      One tick per day is plenty; each sweep's window bucket is a
+  //      UTC day, so running more often just hits the dedup gate.
+  //   2. Notifications tick — every 5 minutes. Drives task_reminder
+  //      firing (Phase 7d) and any other near-real-time scans we add
+  //      later. The Pages endpoint uses notification_log idempotency
+  //      keys so re-runs are safe.
+  // The Worker dispatches based on event.cron — see src/index.js.
   "name": "c-lars-pms-cron",
   "main": "src/index.js",
   "compatibility_date": "2026-04-17",
   "triggers": {
-    "crons": ["0 14 * * *"]
+    "crons": [
+      "0 14 * * *",      // daily sweep
+      "*/5 * * * *"      // notifications tick
+    ]
   },
   "vars": {
     // The public URL of the Pages deployment. The Worker POSTs to

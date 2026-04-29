@@ -43,6 +43,7 @@ import teamsProvider from './notify-providers/teams.js';
 // are stable PKs on user_notification_prefs.
 export const NOTIFICATION_EVENTS = Object.freeze({
   TASK_ASSIGNED:        'task_assigned',
+  TASK_REMINDER_FIRED:  'task_reminder_fired',
   TASK_DUE_SOON:        'task_due_soon',
   MENTION:              'mention',
   OPP_STAGE_CHANGED:    'opp_stage_changed',
@@ -52,6 +53,7 @@ export const NOTIFICATION_EVENTS = Object.freeze({
 
 export const NOTIFICATION_EVENT_LABELS = Object.freeze({
   task_assigned:        'Task assigned to me',
+  task_reminder_fired:  'Reminder I set on a task fires',
   task_due_soon:        'Task due in the next 24 hours',
   mention:              '@mention in a note',
   opp_stage_changed:    'Opportunity stage changed (one I own)',
