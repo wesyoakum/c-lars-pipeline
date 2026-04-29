@@ -65,3 +65,38 @@ export const ICON_DROPZONE =
     <polyline points="7 10 12 15 17 10"/>
     <line x1="12" y1="3" x2="12" y2="15"/>
   </svg>`;
+
+/** Calculator — used for the per-line Price Build affordance on the
+ * quote-detail page. Outline rectangle with a screen across the top
+ * and a 3×4 grid of dots for the keypad. Reads as "calculator" at
+ * 18×18 without getting busy. */
+export const ICON_CALCULATOR =
+  `<svg ${COMMON_ATTRS}>
+    <rect x="4" y="2" width="16" height="20" rx="2"/>
+    <rect x="7" y="5" width="10" height="4"/>
+    <line x1="8"  y1="13" x2="8.01"  y2="13"/>
+    <line x1="12" y1="13" x2="12.01" y2="13"/>
+    <line x1="16" y1="13" x2="16.01" y2="13"/>
+    <line x1="8"  y1="17" x2="8.01"  y2="17"/>
+    <line x1="12" y1="17" x2="12.01" y2="17"/>
+    <line x1="16" y1="17" x2="16.01" y2="17"/>
+  </svg>`;
+
+/** Calculator + plus — same calculator with a small "+" badge in the
+ * top-right corner. Used as the "create a new price build" affordance
+ * on quote line rows that don't have one yet. The "+" sits inside a
+ * filled circle so it reads as an action affordance even at 18×18. */
+export const ICON_CALCULATOR_PLUS =
+  `<svg ${COMMON_ATTRS}>
+    <rect x="3" y="4" width="14" height="18" rx="2"/>
+    <rect x="6" y="7" width="8" height="3"/>
+    <line x1="7"  y1="14" x2="7.01"  y2="14"/>
+    <line x1="10" y1="14" x2="10.01" y2="14"/>
+    <line x1="13" y1="14" x2="13.01" y2="14"/>
+    <line x1="7"  y1="18" x2="7.01"  y2="18"/>
+    <line x1="10" y1="18" x2="10.01" y2="18"/>
+    <line x1="13" y1="18" x2="13.01" y2="18"/>
+    <circle cx="19" cy="5" r="3" fill="currentColor" stroke="none"/>
+    <line x1="19" y1="3.5" x2="19" y2="6.5" stroke="white" stroke-width="1.5"/>
+    <line x1="17.5" y1="5" x2="20.5" y2="5" stroke="white" stroke-width="1.5"/>
+  </svg>`;

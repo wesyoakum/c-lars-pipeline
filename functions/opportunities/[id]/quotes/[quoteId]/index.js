@@ -18,6 +18,7 @@ import { auditStmt, diff } from '../../../../lib/audit.js';
 import { now } from '../../../../lib/ids.js';
 import { layout, htmlResponse, html, raw, escape } from '../../../../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../../../../lib/http.js';
+import { ICON_CALCULATOR, ICON_CALCULATOR_PLUS } from '../../../../lib/icons.js';
 import {
   validateQuote,
   allowedQuoteTypes,
@@ -606,12 +607,22 @@ export async function onRequestGet(context) {
               </td>
               <td class="col-build">
                 ${l.price_build_label
-                  ? html`<a href="${pbUrl(l.id)}" class="pill ${l.price_build_status === 'locked' ? 'pill-locked' : ''}" style="font-size:0.8rem">${escape(l.build_number || l.price_build_label)}</a>`
+                  ? html`<a href="${pbUrl(l.id)}"
+                            class="pill pill-build ${l.price_build_status === 'locked' ? 'pill-locked' : ''}"
+                            style="display:inline-flex;align-items:center;gap:0.3rem;font-size:0.8rem"
+                            title="Open price build ${escape(l.build_number || l.price_build_label || '')}">
+                            <span class="pill-icon" style="display:inline-flex;align-items:center">${raw(ICON_CALCULATOR)}</span>
+                            <span>${escape(l.build_number || l.price_build_label)}</span>
+                          </a>`
                   : (!readOnly ? html`
                       <form method="post" action="${pbUrl(l.id)}" class="inline-form" style="display:inline">
                         <input type="hidden" name="_action" value="create">
                         <input type="hidden" name="label" value="${escape(l.description || l.title || 'Price build')}">
-                        <button class="btn small" type="submit" title="Create price build for this line">+</button>
+                        <button class="btn-icon" type="submit"
+                                title="Add a new price build for this line"
+                                style="display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--border);border-radius:4px;padding:0.25rem 0.4rem;cursor:pointer;color:var(--fg)">
+                          ${raw(ICON_CALCULATOR_PLUS)}
+                        </button>
                       </form>` : html`<span class="muted">\u2014</span>`)}
                 ${!readOnly ? html`
                   <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}/delete" class="inline-form" style="display:inline">
