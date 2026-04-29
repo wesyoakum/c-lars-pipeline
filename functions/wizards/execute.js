@@ -191,27 +191,151 @@ export async function onRequestPost(context) {
     });
   }
 
-  // ---- quote wizard: still account-only cascade for now (5b-3) ----
-  // Phase 5c-2 will add the full opp+quote cascade. Until then the
-  // quote wizard drops to the step UI after the account is resolved.
+  // ---- quote wizard: account → opp (existing or new) → quote ----
   if (wizardKey === 'quote') {
     const acct = processAccountSection(env, plan, ts, user, statements);
     if (acct.error) return json({ ok: false, error: acct.error }, 400);
+
+    // Resolve the opportunity: either pick an existing one, or
+    // create a new one inline (same shape as Phase 5c-1).
+    const oppPlan = plan.opportunity;
+    if (!oppPlan) {
+      return json({ ok: false, error: 'no_opportunity_target' }, 400);
+    }
+    let oppId = oppPlan.selected_id || null;
+    let oppNumber = null;
+    let oppCreatedNew = false;
+    if (oppId) {
+      // Existing opp: load its number for the quote's number prefix.
+      const row = await one(env.DB,
+        `SELECT id, number, account_id FROM opportunities WHERE id = ?`,
+        [oppId]);
+      if (!row) return json({ ok: false, error: 'opp_not_found' }, 400);
+      if (row.account_id !== acct.accountId) {
+        // Belt-and-suspenders: the opp picker only shows opps at the
+        // matched account, but if the user changes accounts the
+        // selected_id could become stale.
+        return json({ ok: false, error: 'opp_account_mismatch' }, 400);
+      }
+      oppNumber = row.number;
+    } else {
+      const newOpp = oppPlan.proposed_new;
+      if (!newOpp || !newOpp.title || !newOpp.transaction_type) {
+        return json({ ok: false, error: 'opp_title_and_type_required' }, 400);
+      }
+      oppId = uuid();
+      oppCreatedNew = true;
+      const oppSeq = await nextSequenceValue(env.DB, 'opportunity');
+      oppNumber = String(oppSeq).padStart(5, '0');
+      const valueRaw = (newOpp.estimated_value_usd || '').toString().replace(/[$,\s]/g, '').trim();
+      const valueNum = valueRaw ? Number(valueRaw) : null;
+
+      statements.push(stmt(env.DB,
+        `INSERT INTO opportunities
+           (id, number, account_id, primary_contact_id, title, description,
+            transaction_type, stage, stage_entered_at, probability,
+            estimated_value_usd, currency, expected_close_date,
+            owner_user_id, salesperson_user_id,
+            created_at, updated_at, created_by_user_id)
+         VALUES (?, ?, ?, NULL, ?, ?,
+                 ?, 'lead', ?, 10,
+                 ?, 'USD', ?,
+                 ?, ?,
+                 ?, ?, ?)`,
+        [
+          oppId, oppNumber, acct.accountId,
+          newOpp.title.trim(),
+          newOpp.description ? newOpp.description.trim() : null,
+          newOpp.transaction_type, ts,
+          Number.isFinite(valueNum) ? valueNum : null,
+          newOpp.expected_close_date || null,
+          user.id, user.id,
+          ts, ts, user.id,
+        ]));
+
+      statements.push(auditStmt(env.DB, {
+        entityType: 'opportunity',
+        entityId: oppId,
+        eventType: 'created',
+        user,
+        summary: `Created opportunity "${newOpp.title}" via Smart-start (quote cascade)`,
+        changes: { title: { from: null, to: newOpp.title }, source: { from: null, to: 'wizard_smart_start' } },
+      }));
+    }
+
+    // Quote.
+    const qt = plan.quote?.proposed_new;
+    if (!qt || !qt.title || !qt.quote_type) {
+      return json({ ok: false, error: 'quote_title_and_type_required' }, 400);
+    }
+    const quoteId = uuid();
+    // Allocate quote_seq within the opp. For a brand-new opp it's 1.
+    let quoteSeq = 1;
+    if (!oppCreatedNew) {
+      const sib = await one(env.DB,
+        `SELECT MAX(quote_seq) AS max_seq FROM quotes WHERE opportunity_id = ?`,
+        [oppId]);
+      quoteSeq = (sib?.max_seq || 0) + 1;
+    }
+    const quoteNumber = `Q${oppNumber}-${quoteSeq}`;
+
+    statements.push(stmt(env.DB,
+      `INSERT INTO quotes
+         (id, number, opportunity_id, revision, quote_seq, quote_type,
+          change_order_id, status, title, description, valid_until,
+          currency, subtotal_price, tax_amount, total_price,
+          incoterms, payment_terms, delivery_terms, delivery_estimate,
+          cost_build_id, notes_internal, notes_customer, show_discounts,
+          created_at, updated_at, created_by_user_id)
+       VALUES (?, ?, ?, 'v1', ?, ?,
+               NULL, 'draft', ?, ?, NULL,
+               'USD', 0, 0, 0,
+               NULL, NULL, NULL, NULL,
+               NULL, NULL, NULL, 0,
+               ?, ?, ?)`,
+      [
+        quoteId, quoteNumber, oppId, quoteSeq, qt.quote_type,
+        qt.title.trim(),
+        qt.description ? qt.description.trim() : null,
+        ts, ts, user.id,
+      ]));
+
+    statements.push(auditStmt(env.DB, {
+      entityType: 'quote',
+      entityId: quoteId,
+      eventType: 'created',
+      user,
+      summary: `Created quote "${qt.title}" via Smart-start`,
+      changes: { title: { from: null, to: qt.title }, source: { from: null, to: 'wizard_smart_start' } },
+    }));
 
     if (aiInboxEntryId) {
       statements.push(linkStmt(env.DB, aiInboxEntryId,
         acct.createdNew ? 'create_account' : 'link_to_account',
         'account', acct.accountId, acct.accountLabel, user));
+      if (oppCreatedNew) {
+        statements.push(linkStmt(env.DB, aiInboxEntryId,
+          'create_opportunity', 'opportunity', oppId, `${oppNumber} · ${plan.opportunity.proposed_new.title}`, user));
+      }
+      statements.push(linkStmt(env.DB, aiInboxEntryId,
+        'create_quote', 'quote', quoteId, `${quoteNumber} · ${qt.title}`, user));
     }
 
     await batch(env.DB, statements);
 
     return json({
       ok: true,
-      mode: 'continue',
       account_id: acct.accountId,
       account_label: acct.accountLabel,
+      opportunity_id: oppId,
+      opportunity_number: oppNumber,
+      quote_id: quoteId,
+      quote_number: quoteNumber,
       created_new_account: acct.createdNew,
+      created_new_opportunity: oppCreatedNew,
+      // Land on the opp page (where the new quote shows in the
+      // Quotes tab) — gives the user the most useful context.
+      redirect_url: '/opportunities/' + encodeURIComponent(oppId),
     });
   }
 

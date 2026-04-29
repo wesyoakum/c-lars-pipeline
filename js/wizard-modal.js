@@ -925,10 +925,23 @@
       confirmDisabled: function () {
         if (this.executing) return true;
         if (!this.plan) return true;
-        var opp = this.plan.opportunity?.proposed_new;
-        if (opp) {
-          if (!String(opp.title || '').trim()) return true;
-          if (!String(opp.transaction_type || '').trim()) return true;
+        var oppPlan = this.plan.opportunity;
+        if (oppPlan) {
+          // Quote-wizard picker case: existing array present. If
+          // user picked an existing opp, no validation needed on the
+          // proposed_new fields. If they picked "create new"
+          // (selected_id empty), validate the embedded form.
+          if (Array.isArray(oppPlan.existing)) {
+            if (!oppPlan.selected_id) {
+              var n = oppPlan.proposed_new || {};
+              if (!String(n.title || '').trim()) return true;
+              if (!String(n.transaction_type || '').trim()) return true;
+            }
+          } else if (oppPlan.proposed_new) {
+            // Opp-wizard simple case: always require title + type.
+            if (!String(oppPlan.proposed_new.title || '').trim()) return true;
+            if (!String(oppPlan.proposed_new.transaction_type || '').trim()) return true;
+          }
         }
         var qt = this.plan.quote?.proposed_new;
         if (qt) {
@@ -973,6 +986,24 @@
           if (matchAcct) {
             return 'Looks like "' + acctLabel + '" already exists. Confirm and continue to ' + entity + ' details.';
           }
+        }
+
+        // Full quote cascade (Phase 5c-2): account + opportunity
+        // picker + quote sections.
+        if (p.quote?.proposed_new) {
+          var oppPlan = p.opportunity || {};
+          var fileUnderExisting = !!oppPlan.selected_id;
+          var existingCount = (oppPlan.existing || []).length;
+          var nbase = matchAcct
+            ? 'Filing a new quote at the existing account "' + acctLabel + '"'
+            : 'First we’ll add the new account "' + acctLabel + '", then file a new quote';
+          if (fileUnderExisting) {
+            return nbase + ' under the chosen opportunity below.';
+          }
+          if (existingCount > 0) {
+            return nbase + '. Pick an opportunity (or create new) below.';
+          }
+          return nbase + ' under a brand-new opportunity (no existing opps at this account).';
         }
 
         // Full opportunity cascade (Phase 5c-1): account section + opp

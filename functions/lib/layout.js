@@ -440,7 +440,9 @@ const WIZARD_MODAL_MARKUP = (
   // checkbox-style. Bound directly to plan.opportunity.proposed_new
   // via x-model. Title and transaction_type are required —
   // confirmDisabled() guards the Confirm button until both are set.
-  '<template x-if="$store.wizard.plan && $store.wizard.plan.opportunity && $store.wizard.plan.opportunity.proposed_new">' +
+  // Only used when the plan does NOT carry an `existing` array
+  // (that's the quote-wizard picker variant rendered below).
+  '<template x-if="$store.wizard.plan && $store.wizard.plan.opportunity && $store.wizard.plan.opportunity.proposed_new && !Array.isArray($store.wizard.plan.opportunity.existing)">' +
   '<div class="task-wizard-review-section">' +
   '<div class="task-wizard-review-section-head">' +
   '<span class="task-wizard-review-kind">Opportunity</span>' +
@@ -468,6 +470,98 @@ const WIZARD_MODAL_MARKUP = (
   '<label class="task-wizard-review-input-row">' +
   '<span>Description</span>' +
   '<textarea x-model="$store.wizard.plan.opportunity.proposed_new.description" rows="3" placeholder="optional"></textarea>' +
+  '</label>' +
+  '</div>' +
+  '</div>' +
+  '</template>' +
+
+  // Opportunity picker (Phase 5c-2 — quote wizard). Shows when the
+  // plan has an opportunity section with `existing` or
+  // `proposed_new` and is NOT the simple "create only" shape from
+  // Phase 5c-1 (which has only proposed_new and no existing array).
+  '<template x-if="$store.wizard.plan && $store.wizard.plan.opportunity && Array.isArray($store.wizard.plan.opportunity.existing)">' +
+  '<div class="task-wizard-review-section">' +
+  '<div class="task-wizard-review-section-head">' +
+  '<span class="task-wizard-review-kind">Opportunity</span>' +
+  '<span class="task-wizard-review-status" x-show="$store.wizard.plan.opportunity.selected_id">' +
+  '<small class="muted">file under existing</small>' +
+  '</span>' +
+  '<span class="task-wizard-review-status new" x-show="!$store.wizard.plan.opportunity.selected_id">' +
+  '<strong>create new</strong>' +
+  '</span>' +
+  '</div>' +
+
+  // Picker: existing opps as radios, plus a "Create new" toggle.
+  '<div class="task-wizard-review-opp-picker">' +
+  '<template x-for="opp in $store.wizard.plan.opportunity.existing" :key="opp.id">' +
+  '<label class="task-wizard-review-opp-row">' +
+  '<input type="radio" :value="opp.id" x-model="$store.wizard.plan.opportunity.selected_id">' +
+  '<span class="task-wizard-review-opp-num" x-text="opp.number"></span>' +
+  '<span class="task-wizard-review-opp-title" x-text="opp.title"></span>' +
+  '<span class="task-wizard-review-opp-stage muted" x-text="opp.stage"></span>' +
+  '</label>' +
+  '</template>' +
+  '<label class="task-wizard-review-opp-row">' +
+  '<input type="radio" value="" x-model="$store.wizard.plan.opportunity.selected_id">' +
+  '<span class="task-wizard-review-opp-new">+ Create new opportunity</span>' +
+  '</label>' +
+  '</div>' +
+
+  // Embedded new-opp form when "Create new" is selected
+  '<div class="task-wizard-review-form" x-show="!$store.wizard.plan.opportunity.selected_id" x-cloak>' +
+  '<label class="task-wizard-review-input-row">' +
+  '<span>Title <em class="req">*</em></span>' +
+  '<input type="text" x-model="$store.wizard.plan.opportunity.proposed_new.title">' +
+  '</label>' +
+  '<label class="task-wizard-review-input-row">' +
+  '<span>Type <em class="req">*</em></span>' +
+  '<select x-model="$store.wizard.plan.opportunity.proposed_new.transaction_type">' +
+  '<option value="">— Pick a type —</option>' +
+  '<option value="spares">Spares</option>' +
+  '<option value="eps">Engineered Product (EPS)</option>' +
+  '<option value="refurb">Refurbishment</option>' +
+  '<option value="service">Service</option>' +
+  '</select>' +
+  '</label>' +
+  '<label class="task-wizard-review-input-row">' +
+  '<span>Value (USD)</span>' +
+  '<input type="text" x-model="$store.wizard.plan.opportunity.proposed_new.estimated_value_usd" placeholder="optional">' +
+  '</label>' +
+  '<label class="task-wizard-review-input-row">' +
+  '<span>Description</span>' +
+  '<textarea x-model="$store.wizard.plan.opportunity.proposed_new.description" rows="2" placeholder="optional"></textarea>' +
+  '</label>' +
+  '</div>' +
+  '</div>' +
+  '</template>' +
+
+  // Quote section (Phase 5c-2). Always rendered when plan.quote
+  // is present; same editable-form shape as the opp section.
+  '<template x-if="$store.wizard.plan && $store.wizard.plan.quote && $store.wizard.plan.quote.proposed_new">' +
+  '<div class="task-wizard-review-section">' +
+  '<div class="task-wizard-review-section-head">' +
+  '<span class="task-wizard-review-kind">Quote</span>' +
+  '<span class="task-wizard-review-status new"><strong>will be created</strong></span>' +
+  '</div>' +
+  '<div class="task-wizard-review-form">' +
+  '<label class="task-wizard-review-input-row">' +
+  '<span>Title <em class="req">*</em></span>' +
+  '<input type="text" x-model="$store.wizard.plan.quote.proposed_new.title">' +
+  '</label>' +
+  '<label class="task-wizard-review-input-row">' +
+  '<span>Type <em class="req">*</em></span>' +
+  '<select x-model="$store.wizard.plan.quote.proposed_new.quote_type">' +
+  '<option value="">— Pick a type —</option>' +
+  '<option value="spares">Spares</option>' +
+  '<option value="eps">EPS</option>' +
+  '<option value="service">Service</option>' +
+  '<option value="refurb_baseline">Refurb — Baseline</option>' +
+  '<option value="refurb_modified">Refurb — Modified</option>' +
+  '</select>' +
+  '</label>' +
+  '<label class="task-wizard-review-input-row">' +
+  '<span>Description</span>' +
+  '<textarea x-model="$store.wizard.plan.quote.proposed_new.description" rows="2" placeholder="optional"></textarea>' +
   '</label>' +
   '</div>' +
   '</div>' +

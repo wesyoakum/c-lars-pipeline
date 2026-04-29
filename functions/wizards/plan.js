@@ -434,10 +434,12 @@ async function planOpportunity(env, extracted) {
 
 // ----- quote-wizard planner ----------------------------------------
 //
-// Phase 5b-3: same shape as opportunity — dedup the account, then
-// hand off to the step UI where the user picks the opportunity and
-// quote_type. Title and description are prefilled via the wizard's
-// existing applyExtraction.
+// Phase 5c-2: full cascade. Resolve the account, list existing
+// opportunities at it (picker), and seed an editable Quote section
+// with title + description from extraction. The user picks an
+// existing opp (most common — they're filing a quote under an
+// already-tracked deal) or toggles to "Create new opportunity"
+// which embeds the same editable opp form as Phase 5c-1.
 
 async function planQuote(env, extracted) {
   const orgDetail = (extracted?.organizations_detail && extracted.organizations_detail[0]) || null;
@@ -448,9 +450,55 @@ async function planQuote(env, extracted) {
   const accountSection = await buildAccountSection(env, orgDetail, orgName);
   if (!accountSection) return null;
 
+  // Existing opps at the matched account, if any. Active opps only —
+  // closed/dead opps shouldn't be the default target for a new quote.
+  let existingOpps = [];
+  if (accountSection.matched?.id) {
+    existingOpps = await all(env.DB,
+      `SELECT id, number, title, stage, transaction_type
+         FROM opportunities
+        WHERE account_id = ?
+          AND stage NOT IN ('closed_won','closed_lost','dead','dormant')
+        ORDER BY created_at DESC
+        LIMIT 12`,
+      [accountSection.matched.id]);
+  }
+
+  // Default pick: first existing opp (most recent). User can change
+  // or toggle to "Create new" via the markup. Empty string means
+  // "create new".
+  const defaultSelected = existingOpps.length > 0 ? existingOpps[0].id : '';
+
+  const opportunitySection = {
+    existing: existingOpps.map((o) => ({
+      id: o.id,
+      number: o.number,
+      title: o.title,
+      stage: o.stage,
+      transaction_type: o.transaction_type,
+    })),
+    selected_id: defaultSelected,
+    proposed_new: {
+      title: String(extracted?.title || '').trim(),
+      description: String(extracted?.summary || '').trim(),
+      transaction_type: '',
+      estimated_value_usd: '',
+      expected_close_date: '',
+    },
+  };
+
+  const quoteSection = {
+    proposed_new: {
+      title: String(extracted?.title || '').trim(),
+      description: String(extracted?.summary || '').trim(),
+      quote_type: '',
+    },
+  };
+
   return {
     account: accountSection,
-    continue_to_steps: true,
+    opportunity: opportunitySection,
+    quote: quoteSection,
   };
 }
 

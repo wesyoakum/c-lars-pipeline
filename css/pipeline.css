@@ -897,6 +897,49 @@ code {
   flex-direction: column;
   gap: 0.35rem;
 }
+/* Opportunity picker in the quote-wizard cascade (Phase 5c-2).
+   Stacked radio rows for existing opps + a "Create new" toggle. */
+.task-wizard-review-opp-picker {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.task-wizard-review-opp-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.task-wizard-review-opp-row:hover {
+  background: var(--bg-alt, #f5f7fa);
+}
+.task-wizard-review-opp-row input[type="radio"] {
+  margin: 0;
+}
+.task-wizard-review-opp-num {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.82rem;
+  color: var(--fg-muted);
+}
+.task-wizard-review-opp-title {
+  font-weight: 500;
+}
+.task-wizard-review-opp-stage {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.task-wizard-review-opp-new {
+  grid-column: 2 / -1;
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
 /* Editable form within a review section (opp / quote — Phase 5c).
    Used when the section is for a brand-new entity whose fields are
    user-editable in the review (rather than checkbox-style push
