@@ -339,7 +339,88 @@ export async function onRequestPost(context) {
     });
   }
 
+  // ---- task wizard: single-form review → activities INSERT ----
+  if (wizardKey === 'task') {
+    const t = plan.task?.proposed_new;
+    if (!t || !String(t.body || '').trim()) {
+      return json({ ok: false, error: 'task_body_required' }, 400);
+    }
+
+    const taskId = uuid();
+    const subject = deriveSubject(t.body);
+    const assignee = String(t.assignee_id || '').trim() || user.id;
+    const dueAt = String(t.due_at || '').trim() || null;
+
+    // Optional pinned link — opportunity / quote / account / contact.
+    const link = t.link || null;
+    const oppId = link?.kind === 'opportunity' ? link.id : null;
+    const quoteId = link?.kind === 'quote' ? link.id : null;
+    const accountId = link?.kind === 'account' ? link.id : null;
+
+    statements.push(stmt(env.DB,
+      `INSERT INTO activities
+         (id, opportunity_id, account_id, quote_id, type, subject, body,
+          direction, status, due_at, remind_at, assigned_user_id,
+          created_at, updated_at, created_by_user_id)
+       VALUES (?, ?, ?, ?, 'task', ?, ?, NULL, 'pending', ?, NULL, ?,
+               ?, ?, ?)`,
+      [taskId, oppId, accountId, quoteId, subject, t.body.trim(),
+       dueAt, assignee, ts, ts, user.id]));
+
+    statements.push(auditStmt(env.DB, {
+      entityType: 'activity',
+      entityId: taskId,
+      eventType: 'created',
+      user,
+      summary: `Created task: ${subject}`,
+    }));
+
+    if (aiInboxEntryId) {
+      statements.push(linkStmt(env.DB, aiInboxEntryId,
+        'create_task', 'activity', taskId, subject, user));
+    }
+
+    await batch(env.DB, statements);
+
+    // Phase 7b parity: if the assignee isn't the creator, fire the
+    // task_assigned external notification. (Same skip-self rule as
+    // /activities POST.)
+    if (assignee !== user.id) {
+      try {
+        const { notifyExternal, NOTIFICATION_EVENTS } = await import('../lib/notify-external.js');
+        await notifyExternal(env, {
+          userId: assignee,
+          eventType: NOTIFICATION_EVENTS.TASK_ASSIGNED,
+          data: {
+            task: { body: subject, due_at: dueAt },
+            assignedBy: { display_name: user.display_name || user.email || 'Someone' },
+            link: '/activities',
+          },
+          context: oppId ? { ref_type: 'opportunity', ref_id: oppId } : null,
+          idempotencyKey: 'task_assigned:' + taskId,
+        });
+      } catch (e) { /* fire-and-forget */ }
+    }
+
+    return json({
+      ok: true,
+      activity_id: taskId,
+      // Land where the user expects to see the task: linked entity
+      // if any, otherwise the activities list.
+      redirect_url: oppId ? '/opportunities/' + encodeURIComponent(oppId)
+                  : accountId ? '/accounts/' + encodeURIComponent(accountId)
+                  : '/activities',
+    });
+  }
+
   return json({ ok: false, error: 'unsupported_wizard_key' }, 400);
+}
+
+// Mirror the deriveSubject() in functions/activities/index.js — first
+// 80 chars of the body, trimmed, with newlines collapsed.
+function deriveSubject(body) {
+  const s = String(body || '').replace(/\s+/g, ' ').trim();
+  return s.length > 80 ? s.slice(0, 77) + '…' : s;
 }
 
 // ----- per-section processors -------------------------------------

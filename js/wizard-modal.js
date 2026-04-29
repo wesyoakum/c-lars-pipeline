@@ -857,6 +857,10 @@
       // phase on success or fall back to steps on no-plan.
       _fetchPlan: function () {
         var self = this;
+        // Forward the original openPrefill so per-wizard planners can
+        // honor pinned context (task wizard pinned link, contact
+        // wizard pinned account, etc.).
+        var pinnedLink = (self.answers && self.answers.link) || null;
         return fetch('/wizards/plan', {
           method: 'POST',
           credentials: 'same-origin',
@@ -865,6 +869,7 @@
             wizard_key: self.wizardKey,
             extracted: self._extracted || {},
             ai_inbox_entry_id: self.aiInboxEntryId,
+            pinned_link: pinnedLink,
           }),
         })
           .then(function (res) { return res.json(); })
@@ -948,6 +953,10 @@
           if (!String(qt.title || '').trim()) return true;
           if (!String(qt.quote_type || '').trim()) return true;
         }
+        var tk = this.plan.task?.proposed_new;
+        if (tk) {
+          if (!String(tk.body || '').trim()) return true;
+        }
         return false;
       },
 
@@ -1004,6 +1013,16 @@
             return nbase + '. Pick an opportunity (or create new) below.';
           }
           return nbase + ' under a brand-new opportunity (no existing opps at this account).';
+        }
+
+        // Task wizard review (Phase 7 add-on): single Task section,
+        // no cascade. Just a one-line description of what'll be created.
+        if (p.task?.proposed_new) {
+          var bodyPreview = String(p.task.proposed_new.body || '').slice(0, 60);
+          if (bodyPreview.length === 60) bodyPreview += '…';
+          return bodyPreview
+            ? 'Creating task: "' + bodyPreview + '"'
+            : 'Creating a new task — fill in the body below.';
         }
 
         // Full opportunity cascade (Phase 5c-1): account section + opp

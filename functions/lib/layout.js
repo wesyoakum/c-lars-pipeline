@@ -567,6 +567,43 @@ const WIZARD_MODAL_MARKUP = (
   '</div>' +
   '</template>' +
 
+  // Task section — single editable form (Phase 7 add-on). Same
+  // pattern as opp/quote sections but no cascade, just one entity
+  // being created. Body required; due/assignee/link optional.
+  '<template x-if="$store.wizard.plan && $store.wizard.plan.task && $store.wizard.plan.task.proposed_new">' +
+  '<div class="task-wizard-review-section">' +
+  '<div class="task-wizard-review-section-head">' +
+  '<span class="task-wizard-review-kind">Task</span>' +
+  '<span class="task-wizard-review-status new"><strong>will be created</strong></span>' +
+  '</div>' +
+  '<div class="task-wizard-review-form">' +
+  '<label class="task-wizard-review-input-row">' +
+  '<span>Body <em class="req">*</em></span>' +
+  '<textarea x-model="$store.wizard.plan.task.proposed_new.body" rows="3"></textarea>' +
+  '</label>' +
+  '<label class="task-wizard-review-input-row">' +
+  '<span>Due</span>' +
+  '<input type="text" x-model="$store.wizard.plan.task.proposed_new.due_at" ' +
+  'placeholder="YYYY-MM-DD or blank">' +
+  '</label>' +
+  '<label class="task-wizard-review-input-row">' +
+  '<span>Assignee</span>' +
+  '<select x-model="$store.wizard.plan.task.proposed_new.assignee_id">' +
+  '<template x-for="u in $store.wizard.users" :key="u.id">' +
+  '<option :value="u.id" x-text="u.display_name || u.email"></option>' +
+  '</template>' +
+  '</select>' +
+  '</label>' +
+  '<template x-if="$store.wizard.plan.task.proposed_new.link">' +
+  '<div class="task-wizard-review-input-row">' +
+  '<span>Linked to</span>' +
+  '<span class="muted" x-text="$store.wizard.plan.task.proposed_new.link.label || \'\'"></span>' +
+  '</div>' +
+  '</template>' +
+  '</div>' +
+  '</div>' +
+  '</template>' +
+
   // Action bar
   '<div class="task-wizard-review-actions">' +
   '<button type="button" class="btn btn-sm task-wizard-review-edit" ' +

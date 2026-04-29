@@ -432,6 +432,41 @@ async function planOpportunity(env, extracted) {
   };
 }
 
+// ----- task-wizard planner -----------------------------------------
+//
+// No cascade — just lifts the user's typed/extracted blob into an
+// editable Task section. The review screen lets them tweak body
+// + due + assignee in one form before hitting Confirm. "Edit
+// manually" escape hatch falls through to the standard step UI.
+
+async function planTask(env, extracted, opts) {
+  // Body comes from extracted action_items[0].task (most precise) or
+  // falls back to title/summary. Due likewise.
+  const first = (extracted?.action_items && extracted.action_items[0]) || null;
+  const body = (first && first.task)
+    || extracted?.title
+    || extracted?.summary
+    || '';
+  const dueAt = (first && first.due) || '';
+
+  return {
+    task: {
+      proposed_new: {
+        body: String(body).trim(),
+        due_at: String(dueAt).trim(),
+        // Default assignee: the requesting user. Can be changed in
+        // the review screen via the assignee dropdown (engine's
+        // pre-loaded users list backs it).
+        assignee_id: opts?.userId || '',
+        // Pinned link (if the wizard was opened with one in the
+        // prefill — e.g. "+ New task" from an opp page). Read-only
+        // in the review; user uses Edit Manually to change.
+        link: opts?.pinnedLink || null,
+      },
+    },
+  };
+}
+
 // ----- quote-wizard planner ----------------------------------------
 //
 // Phase 5c-2: full cascade. Resolve the account, list existing
@@ -543,6 +578,19 @@ export async function onRequestPost(context) {
   if (wizardKey === 'quote') {
     const plan = await planQuote(env, extracted);
     if (!plan) return json({ ok: true, plan: null });
+    plan.ai_inbox_entry_id = aiInboxEntryId;
+    return json({ ok: true, plan });
+  }
+
+  if (wizardKey === 'task') {
+    // Task wizard's planner doesn't need DB — just shapes the
+    // extracted data. We DO need the user id for the default
+    // assignee + the pinned link from the prefill (if any).
+    const data = context.data;
+    const plan = await planTask(env, extracted, {
+      userId: data?.user?.id,
+      pinnedLink: body?.pinned_link || null,
+    });
     plan.ai_inbox_entry_id = aiInboxEntryId;
     return json({ ok: true, plan });
   }

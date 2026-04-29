@@ -46,6 +46,14 @@
       placeholder: 'e.g. Email Aggie at MDA Friday with the EPS proposal',
     },
 
+    // Phase 7 add-on: same review-screen pattern as the contact /
+    // account / opp / quote wizards. After Smart-start extraction
+    // (or skip), shows a single Task section with editable body /
+    // due / assignee, plus a read-only "Linked to" line if the
+    // wizard was opened with a pinned link. Confirm posts to
+    // /wizards/execute → INSERTs into activities.
+    plan: true,
+
     steps: [
       {
         key: 'body',
