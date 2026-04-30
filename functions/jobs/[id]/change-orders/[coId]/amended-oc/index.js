@@ -88,6 +88,7 @@ export async function onRequestGet(context) {
     `SELECT id, original_filename, size_bytes, kind, uploaded_at
        FROM documents
       WHERE job_id = ? AND kind = 'oc_pdf'
+        AND superseded_at IS NULL
       ORDER BY uploaded_at DESC`,
     [jobId]
   );

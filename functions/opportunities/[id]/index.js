@@ -180,7 +180,7 @@ export async function onRequestGet(context) {
        (SELECT COUNT(*) FROM quotes       WHERE opportunity_id = ?) AS quotes,
        (SELECT COUNT(*) FROM cost_builds  WHERE opportunity_id = ?) AS cost_builds,
        (SELECT COUNT(*) FROM activities   WHERE opportunity_id = ?) AS activities,
-       (SELECT COUNT(*) FROM documents    WHERE opportunity_id = ?) AS documents,
+       (SELECT COUNT(*) FROM documents    WHERE opportunity_id = ? AND superseded_at IS NULL) AS documents,
        (SELECT COUNT(*) FROM jobs         WHERE opportunity_id = ?) AS jobs`,
     [oppId, oppId, oppId, oppId, oppId]
   );
@@ -306,6 +306,7 @@ export async function onRequestGet(context) {
          FROM documents d
          LEFT JOIN users u ON u.id = d.uploaded_by_user_id
         WHERE d.opportunity_id = ?
+          AND d.superseded_at IS NULL
         ORDER BY d.uploaded_at DESC`,
       [oppId]
     );

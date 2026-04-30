@@ -170,6 +170,7 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
        FROM documents d
        LEFT JOIN users u ON u.id = d.uploaded_by_user_id
       WHERE d.cost_build_id = ?
+        AND d.superseded_at IS NULL
       ORDER BY d.uploaded_at DESC`,
     [buildId]
   );

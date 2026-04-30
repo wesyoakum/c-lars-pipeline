@@ -255,6 +255,7 @@ export async function onRequestGet(context) {
                                JOIN opportunities o2 ON o2.id = q2.opportunity_id
                               WHERE o2.account_id = ?))
           AND d.activity_id IS NULL
+          AND d.superseded_at IS NULL
         ORDER BY d.uploaded_at DESC
         LIMIT 100`,
       [accountId, accountId, accountId]

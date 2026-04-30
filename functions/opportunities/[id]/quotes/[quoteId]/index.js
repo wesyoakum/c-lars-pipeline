@@ -114,6 +114,7 @@ export async function onRequestGet(context) {
     `SELECT id, kind, original_filename, size_bytes, uploaded_at
        FROM documents
       WHERE quote_id = ? AND kind IN ('quote_pdf', 'quote_docx')
+        AND superseded_at IS NULL
       ORDER BY uploaded_at DESC`,
     [quoteId]
   );
