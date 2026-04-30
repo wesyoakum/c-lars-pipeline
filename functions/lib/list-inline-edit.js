@@ -156,6 +156,13 @@ export function listInlineEditScript(patchUrlTemplate, opts = {}) {
     var DOUBLE_CLICK_MS = 260;
     var pendingNavTimer = null;
     var lastClickWasIe = false;
+    // Timestamp of the last inline-edit close (set in deactivate).
+    // The row-click handler swallows clicks within ~200ms of a close
+    // because the very click that triggered the editor's blur also
+    // bubbles up here — without this, clicking out of an editor
+    // immediately navigates the user away (and the save POST races
+    // the navigation, often losing the user's edit visually).
+    var lastEditCloseTs = 0;
 
     function shouldBailFromRowNav(target) {
       if (!target || !target.closest) return true;
@@ -181,6 +188,11 @@ export function listInlineEditScript(patchUrlTemplate, opts = {}) {
 
     tbody.addEventListener('click', function(e) {
       if (shouldBailFromRowNav(e.target)) return;
+
+      // Just blurred-and-saved an inline-edit? Swallow this click — the
+      // user was committing the edit, not navigating. Without this guard
+      // their blur-out click immediately navigates the page away.
+      if (Date.now() - lastEditCloseTs < 200) return;
 
       var tr = e.target.closest('tr[data-row-id]');
       if (!tr || !tbody.contains(tr)) return;
@@ -476,6 +488,9 @@ export function listInlineEditScript(patchUrlTemplate, opts = {}) {
       if (input && input.parentNode === el) el.removeChild(input);
       var display = el.querySelector('.ie-display');
       if (display) display.style.display = '';
+      // Stamp so the row-click navigation handler can ignore the
+      // blur-out click that bubbles up after we remove the input.
+      lastEditCloseTs = Date.now();
     }
   } catch (err) {
     console.error('list inline-edit init failed:', err);
