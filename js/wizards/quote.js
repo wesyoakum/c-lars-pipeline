@@ -186,6 +186,7 @@
         prompt: 'What\u2019s this quote for?',
         hint: 'A short title. Tab to continue.',
         placeholder: 'e.g. Spare seals for pump station',
+        placeholderKind: 'quote_title',
         required: true,
         requiredError: 'Title is required.'
       },

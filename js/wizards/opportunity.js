@@ -91,6 +91,7 @@
         prompt: 'What\u2019s the opportunity title?',
         hint: 'A short description of what the customer wants. Tab to continue.',
         placeholder: 'e.g. Spare control valves for pump station',
+        placeholderKind: 'opportunity_title',
         required: true,
         requiredError: 'Title is required.'
       },

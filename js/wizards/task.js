@@ -61,6 +61,8 @@
         prompt: 'What needs to be done?',
         hint: 'Press Tab when you are done. Shift+Tab goes back.',
         placeholder: 'Type your task\u2026',
+        placeholderKind: 'task_body',
+        placeholderPrefix: '',
         required: true,
         requiredError: 'Please enter task details.'
       },

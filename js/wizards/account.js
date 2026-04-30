@@ -57,6 +57,7 @@
         prompt: 'Short name for lists?',
         hint: 'Optional. Tab to skip — we\'ll derive one from the legal name.',
         placeholder: 'e.g. Helix Robotics',
+        placeholderKind: 'account_name',
         // Skip this step entirely when the legal name is already known
         // — either from a pre-filled openPrefill (AI Inbox business-
         // card flow) or after Smart-start extraction populated it.
@@ -74,6 +75,7 @@
         prompt: 'Full legal name?',
         hint: 'Press Tab to continue. Shift+Tab goes back.',
         placeholder: 'e.g. Helix Robotics, Inc.',
+        placeholderKind: 'account_name',
         required: true,
         requiredError: 'Account name is required.'
       },

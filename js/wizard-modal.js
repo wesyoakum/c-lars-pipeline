@@ -27,6 +27,40 @@
   'use strict';
 
   // ---------------------------------------------------------------
+  // Fake-names catalog (admin-managed, migration 0060)
+  //
+  // Lazy-fetched on first use into window.Pipeline.fakeNames. Wizard
+  // configs that want a friendlier placeholder set
+  // `placeholderKind: 'opportunity_title'` (etc.) on a step; the
+  // engine resolves it via pipelinePickFakeName() at render time.
+  // First call kicks off the network fetch; subsequent steps reuse
+  // the in-memory cache.
+  function pipelinePickFakeName(kind) {
+    window.Pipeline = window.Pipeline || {};
+    var cache = window.Pipeline.fakeNames;
+    if (cache && cache[kind] && cache[kind].length > 0) {
+      var arr = cache[kind];
+      return arr[Math.floor(Math.random() * arr.length)];
+    }
+    // Kick off fetch if we haven't started one. Returns null this
+    // call; the next render (after the fetch resolves) will pick up.
+    if (!window.Pipeline.__fakeNamesFetching) {
+      window.Pipeline.__fakeNamesFetching = true;
+      fetch('/api/fake-names', { credentials: 'same-origin', headers: { accept: 'application/json' } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (j) {
+          if (j && j.ok && j.byKind) {
+            window.Pipeline.fakeNames = j.byKind;
+          } else {
+            window.Pipeline.fakeNames = window.Pipeline.fakeNames || {};
+          }
+        })
+        .catch(function () { window.Pipeline.fakeNames = window.Pipeline.fakeNames || {}; });
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------
   // Date parsing helpers
   // ---------------------------------------------------------------
 
@@ -418,6 +452,14 @@
       currentPlaceholder: function () {
         var s = this.currentStep();
         if (!s) return '';
+        // placeholderKind: pull a random example from the admin-managed
+        // fake-names catalog (loaded lazily on first use into
+        // window.Pipeline.fakeNames). Falls back to s.placeholder when
+        // the catalog isn't ready or has no entries for this kind.
+        if (s.placeholderKind) {
+          var picked = pipelinePickFakeName(s.placeholderKind);
+          if (picked) return (s.placeholderPrefix || 'e.g. ') + picked;
+        }
         if (s.placeholder) return s.placeholder;
         if (s.type === 'user-select' || s.type === 'entity-select') return 'Start typing\u2026';
         if (s.type === 'date') return 'tomorrow 5pm';

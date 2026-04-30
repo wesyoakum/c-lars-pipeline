@@ -65,14 +65,16 @@
         type: 'text',
         prompt: 'First name?',
         hint: 'Tab to continue. Shift+Tab goes back.',
-        placeholder: 'e.g. Jane'
+        placeholder: 'e.g. Jane',
+        placeholderKind: 'first_name'
       },
       {
         key: 'last_name',
         type: 'text',
         prompt: 'Last name?',
         hint: 'Tab to continue. At least one of first or last name is required.',
-        placeholder: 'e.g. Smith'
+        placeholder: 'e.g. Smith',
+        placeholderKind: 'last_name'
       },
       {
         key: 'account',
@@ -117,7 +119,8 @@
         type: 'text',
         prompt: 'Email?',
         hint: 'Optional. Press Tab to create the contact.',
-        placeholder: 'e.g. jane@example.com'
+        placeholder: 'e.g. jane@example.com',
+        placeholderKind: 'email'
       }
     ],
 
