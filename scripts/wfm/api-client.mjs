@@ -133,23 +133,46 @@ function getConfig() {
   };
 }
 
-// Pull the org / account ID out of the JWT payload. BlueRock's auth
-// article calls it "Org ID" / "Organisation ID" but doesn't say which
-// claim name they use. We try the common ones in order.
+// Pull the org / account ID out of the JWT payload. BlueRock's
+// rebranded API actually emits `org_ids` (plural, array) — the user
+// can belong to multiple WFM tenants under one set of credentials.
+// We pick the first; if there's more than one, log a warning so the
+// user knows to pin WFM_TENANT_ID explicitly. Singular keys are kept
+// as fallbacks for older Xero-era tokens or any future shape changes.
 function extractOrgIdFromJwt(payload) {
   if (!payload || typeof payload !== 'object') return '';
-  const candidates = [
+
+  // Plural / array-shaped claims — what BlueRock actually emits.
+  const arrayCandidates = [
+    'org_ids', 'orgIds', 'organization_ids', 'organisationIds',
+    'account_ids', 'tenant_ids',
+  ];
+  for (const k of arrayCandidates) {
+    const v = payload[k];
+    if (Array.isArray(v) && v.length > 0) {
+      if (v.length > 1) {
+        console.warn(`[wfm] JWT claim "${k}" has ${v.length} values; using ${v[0]}. Set WFM_TENANT_ID in .env.local to pin a specific one.`);
+      }
+      return String(v[0]);
+    }
+  }
+
+  // Singular string claims (legacy / fallback).
+  const stringCandidates = [
     'org_id', 'orgId', 'organization_id', 'organisationId',
     'account_id', 'accountId', 'tenant_id', 'tenantId', 'tid',
   ];
-  for (const k of candidates) {
+  for (const k of stringCandidates) {
     if (payload[k]) return String(payload[k]);
   }
-  // Some OAuth providers nest the org under a custom claim. Look for
-  // any string-shaped value whose key looks org-shaped, as a last resort.
+
+  // Last resort: fuzzy match on key name + an array-or-string value
+  // that's at least 8 chars (filters out booleans, small numbers).
   for (const [k, v] of Object.entries(payload)) {
-    if (/org|tenant|account/i.test(k) && typeof v === 'string' && v.length >= 8) {
-      return v;
+    if (!/org|tenant|account/i.test(k)) continue;
+    if (typeof v === 'string' && v.length >= 8) return v;
+    if (Array.isArray(v) && v.length > 0 && typeof v[0] === 'string' && v[0].length >= 8) {
+      return v[0];
     }
   }
   return '';
