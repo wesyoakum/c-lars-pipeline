@@ -443,7 +443,7 @@ function renderDetail({ item, extracted, links, matches, user, attachments }) {
       // v2 extends the v1 component with: links (action history),
       // matches (entity resolver output), actionForm (currently-open
       // inline form), typeahead (entity picker state).
-      window.aiInboxInit = function (initial, itemId, links, matches) {
+      window.aiInboxInit = function (initial, itemId, links, matches, currentUserId, currentUserName) {
         return {
           fields: initial || {
             title: '', summary: '',
@@ -462,6 +462,13 @@ function renderDetail({ item, extracted, links, matches, user, attachments }) {
           tagInput: '',
           saving: '',
           itemId: itemId,
+          // v3 Phase A.4: the recorder is the implicit owner of any
+          // action item the LLM left blank (per the extraction prompt
+          // rule). openTaskWizard() uses these to pre-pin the wizard's
+          // assignee step when the row's owner is empty or matches
+          // the recorder's display name.
+          currentUserId: currentUserId || '',
+          currentUserName: currentUserName || '',
           // Action types we have a form for; others render as
           // greyed-out coming-soon buttons.
           handledActions: ['create_task', 'link_to_account', 'link_to_opportunity', 'link_to_quote'],
@@ -862,6 +869,7 @@ function renderDetail({ item, extracted, links, matches, user, attachments }) {
               this.openTaskWizard({
                 body,
                 due_at: (firstAction && firstAction.due) || '',
+                owner: (firstAction && firstAction.owner) || '',
                 account_id: accountId,
                 account_label: accountLabel,
                 source_action_idx: -1,  // -1 means "from suggested_destinations, not from a specific action item row"
@@ -1265,6 +1273,20 @@ function renderDetail({ item, extracted, links, matches, user, attachments }) {
                 action_idx: typeof opts.source_action_idx === 'number' ? opts.source_action_idx : -1,
               },
             };
+            // v3 Phase A.4: when the LLM left owner empty (or the user
+            // typed their own name into the field), the recorder is
+            // the implicit owner. Pre-pin the wizard's assignee step
+            // to the current user so "Apply as task" lands the task
+            // in the recorder's queue without a second click.
+            const ownerRaw = (opts.owner || '').trim();
+            const meRaw = (this.currentUserName || '').trim();
+            const isImplicitMe = !ownerRaw
+              || (meRaw && ownerRaw.toLowerCase() === meRaw.toLowerCase())
+              || /^(me|i|myself)$/i.test(ownerRaw);
+            if (isImplicitMe && this.currentUserId) {
+              prefill.assigned_user_id = this.currentUserId;
+              prefill.assigned_user_label = this.currentUserName || '';
+            }
             window.Pipeline.openWizard('task', prefill);
           },
 
@@ -1555,15 +1577,18 @@ function renderDetail({ item, extracted, links, matches, user, attachments }) {
 
 function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
   const userName = user?.display_name || user?.first_name || 'You';
-  // Display name only used as the placeholder for the action-item Owner
-  // field — when the LLM left owner blank, it means "the recorder", and
-  // showing the recorder's own name makes that explicit.
+  const userId = user?.id || '';
+  // Display name placeholder for the action-item Owner field — when
+  // the LLM left owner blank, it means "the recorder", and showing
+  // the recorder's own name makes that explicit. The id+name also
+  // get passed into aiInboxInit so the wizard's assignee step can be
+  // pre-pinned when "Apply as task" runs from an empty-owner row.
   // JSON-into-attribute pattern. Each value was already JSON.stringify'd
   // and had < neutralized; escape() handles the attribute boundary. The
   // browser decodes the attribute and Alpine evaluates it as JS.
   return html`
     <section class="aii-section"
-             x-data="aiInboxInit(${escape(extractedRaw)}, '${escape(item.id)}', ${escape(linksRaw)}, ${escape(matchesRaw)})">
+             x-data="aiInboxInit(${escape(extractedRaw)}, '${escape(item.id)}', ${escape(linksRaw)}, ${escape(matchesRaw)}, '${escape(userId)}', '${escape(userName)}')">
       <h2>Extracted <span class="aii-saving" x-text="saving"></span></h2>
 
       <div class="aii-field">
@@ -1732,7 +1757,7 @@ function renderExtracted(item, extractedRaw, linksRaw, matchesRaw, user) {
             <button type="button" class="aii-apply-btn"
                     :disabled="!a.task"
                     title="Open the task wizard pre-filled with this action item"
-                    @click="openTaskWizard({ body: a.task, due_at: a.due, account_id: preferredAccountId(), account_label: preferredAccountLabel(), source_action_idx: idx })">Apply as task</button>
+                    @click="openTaskWizard({ body: a.task, due_at: a.due, owner: a.owner, account_id: preferredAccountId(), account_label: preferredAccountLabel(), source_action_idx: idx })">Apply as task</button>
             <button type="button" class="aii-rm-btn" @click="removeAction(idx)">×</button>
           </div>
         </template>
