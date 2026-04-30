@@ -126,7 +126,7 @@ export async function onRequestGet(context) {
           + '\\n  ' + lastPlan.deleteJobIds.length + ' job(s)'
           + '\\n  ' + lastPlan.deleteCoIds.length + ' change order(s)'
           + '\\n  + cascading children (quotes, line items, activities, docs, contacts, addresses)'
-          + '\\n\\nHave you taken a backup with `wrangler d1 export`?';
+          + '\\n\\nHave you taken a backup with the wrangler d1 export command?';
         if (!confirm(msg)) return;
         var phrase = prompt('Type DELETE EVERYTHING NOT KEPT to confirm:');
         if (phrase !== 'DELETE EVERYTHING NOT KEPT') {
