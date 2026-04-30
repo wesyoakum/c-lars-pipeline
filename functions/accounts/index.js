@@ -101,7 +101,6 @@ export async function onRequestGet(context) {
   ];
 
   const columns = [
-    { key: 'open',          label: '\u2197',    sort: 'text',   filter: null,     default: true },
     { key: 'name',          label: 'Name',      sort: 'text',   filter: 'text',   default: true },
     { key: 'alias',         label: 'Alias',     sort: 'text',   filter: 'text',   default: true },
     { key: 'parent_group',  label: 'Group',     sort: 'text',   filter: 'select', default: false },
@@ -238,13 +237,11 @@ export async function onRequestGet(context) {
               <tbody data-role="rows">
                 ${rowData.map(r => html`
                   <tr data-row-id="${escape(r.id)}"
+                      data-row-href="${escape(r.open_href)}"
                       data-name_display="${escape(r.name_display)}"
                       data-combined-name="name_display alias parent_group"
                       ${r.is_group ? raw('data-is-group="1"') : ''}
                       ${raw(rowDataAttrs(columns, r))}>
-                    <td class="col-open" data-col="open">
-                      <a class="row-open-link" href="${escape(r.open_href)}" title="${r.is_group ? 'Open group' : 'Open account'}" aria-label="${r.is_group ? 'Open group' : 'Open account'}">\u2197</a>
-                    </td>
                     <td class="col-name" data-col="name">
                       ${r.is_group
                         ? html`<span class="ie-display">${escape(r.name_display)}</span>`

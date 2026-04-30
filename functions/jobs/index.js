@@ -82,7 +82,6 @@ export async function onRequestGet(context) {
   );
 
   const columns = [
-    { key: 'open',         label: '\u2197',   sort: 'text',   filter: null,     default: true },
     { key: 'number',       label: 'Job #',    sort: 'text',   filter: 'text',   default: true },
     { key: 'title',        label: 'Title',    sort: 'text',   filter: 'text',   default: true },
     { key: 'account_name', label: 'Account',  sort: 'text',   filter: 'text',   default: true },
@@ -135,10 +134,8 @@ export async function onRequestGet(context) {
               <tbody data-role="rows">
                 ${rowData.map(r => html`
                   <tr data-row-id="${escape(r.id)}"
+                      data-row-href="/jobs/${escape(r.id)}"
                       ${raw(rowDataAttrs(columns, r))}>
-                    <td class="col-open" data-col="open">
-                      <a class="row-open-link" href="/jobs/${escape(r.id)}" title="Open job" aria-label="Open job">\u2197</a>
-                    </td>
                     <td class="col-number" data-col="number"><a href="/jobs/${escape(r.id)}"><strong>${escape(r.number)}</strong></a></td>
                     <td class="col-title" data-col="title">
                       ${ieText('title', r.title)}

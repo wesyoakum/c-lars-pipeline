@@ -218,6 +218,19 @@ export function listInlineEditScript(patchUrlTemplate, opts = {}) {
         pendingNavTimer = null;
       }
 
+      // Modifier-click and middle-click → new tab / new window, the
+      // way a real anchor would. Mirrors the open-link anchor's
+      // historical behavior so cmd+click on any row opens in a new tab.
+      var isModifier = e.metaKey || e.ctrlKey || e.shiftKey || e.button === 1;
+
+      if (isModifier) {
+        e.preventDefault();
+        // Shift-click historically opens in a new window; treat the same
+        // as new tab for our use case (browsers handle the difference).
+        window.open(href, '_blank', 'noopener');
+        return;
+      }
+
       if (clickIsOnEditableCell) {
         // Defer navigation so a follow-up dblclick can take over and
         // open the editor instead.
@@ -226,11 +239,22 @@ export function listInlineEditScript(patchUrlTemplate, opts = {}) {
           window.location.href = href;
         }, DOUBLE_CLICK_MS);
       } else {
-        // Plain cell — navigate immediately. New-tab / cmd-click
-        // already works via the row-open-link anchor (which is in
-        // the bail-list above).
+        // Plain cell — navigate immediately.
         window.location.href = href;
       }
+    });
+
+    // Middle-click → open in new tab. Browsers fire `auxclick` (not
+    // `click`) for non-primary buttons, so wire it explicitly.
+    tbody.addEventListener('auxclick', function(e) {
+      if (e.button !== 1) return;
+      if (shouldBailFromRowNav(e.target)) return;
+      var tr = e.target.closest('tr[data-row-id]');
+      if (!tr || !tbody.contains(tr)) return;
+      var href = rowNavHref(tr);
+      if (!href) return;
+      e.preventDefault();
+      window.open(href, '_blank', 'noopener');
     });
 
     tbody.addEventListener('dblclick', function(e) {

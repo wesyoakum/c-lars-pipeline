@@ -86,7 +86,6 @@ export async function onRequestGet(context) {
 
   const columns = [
     { key: 'done',          label: '\u2713',       sort: 'text',   filter: null,     default: true },
-    { key: 'open',          label: '\u2197',      sort: 'text',   filter: null,     default: true },
     { key: 'subject',       label: 'Subject',     sort: 'text',   filter: 'text',   default: true },
     { key: 'type_label',    label: 'Type',         sort: 'text',   filter: 'select', default: true },
     { key: 'opp_number',    label: 'Opportunity',  sort: 'text',   filter: 'text',   default: true },
@@ -162,6 +161,7 @@ export async function onRequestGet(context) {
               <tbody data-role="rows">
                 ${rowData.map(r => html`
                   <tr data-row-id="${escape(r.id)}"
+                      data-row-href="/activities/${escape(r.id)}"
                       ${raw(rowDataAttrs(columns, r))}
                       class="${r.isCompleted ? 'row-muted' : ''} ${r.isOverdue ? 'row-overdue' : ''}">
                     <td class="col-done" data-col="done">
@@ -169,9 +169,6 @@ export async function onRequestGet(context) {
                               class="task-complete-toggle ${r.isCompleted ? 'is-completed' : ''}"
                               title="${r.isCompleted ? 'Mark pending' : 'Mark complete'}"
                               aria-label="${r.isCompleted ? 'Mark pending' : 'Mark complete'}"></button>
-                    </td>
-                    <td class="col-open" data-col="open">
-                      <a class="row-open-link" href="/activities/${escape(r.id)}" title="Open activity" aria-label="Open activity">\u2197</a>
                     </td>
                     <td class="col-subject" data-col="subject">
                       ${ieText('subject', r.subject, { placeholder: '(no subject)' })}
