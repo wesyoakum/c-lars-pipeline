@@ -61,7 +61,7 @@ export async function onRequestGet(context) {
     category_label: CATEGORIES[r.category] || r.category || 'Other',
     size: r.size_bytes || 0,
     size_display: formatSize(r.size_bytes),
-    uploaded: (r.uploaded_at || '').slice(0, 10),
+    uploaded: (r.uploaded_at || '').slice(0, 16).replace('T', ' '),
     uploaded_by: r.uploaded_by_name || r.uploaded_by_email || '\u2014',
     actions: '',
   }));

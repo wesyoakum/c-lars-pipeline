@@ -105,7 +105,7 @@ export async function onRequestGet(context) {
       attached_url: attachedUrl,
       size: d.size_bytes || 0,
       size_display: formatSize(d.size_bytes),
-      date: (d.uploaded_at || '').slice(0, 10),
+      date: (d.uploaded_at || '').slice(0, 16).replace('T', ' '),
       uploaded_by: d.uploaded_by_name || d.uploaded_by_email || '',
       actions: '',
     };

@@ -335,7 +335,7 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
                 <td><a href="/documents/${escape(d.id)}/download">${escape(d.title || d.original_filename)}</a></td>
                 <td><span class="pill" style="font-size:0.8em">${escape(d.kind)}</span></td>
                 <td class="muted">${formatSize(d.size_bytes)}</td>
-                <td class="muted"><small>${escape((d.uploaded_at || '').slice(0, 10))}</small></td>
+                <td class="muted"><small>${escape((d.uploaded_at || '').slice(0, 16).replace('T', ' '))}</small></td>
                 <td class="row-actions">
                   <form method="post" action="/documents/${escape(d.id)}/delete" style="display:inline"
                         onsubmit="return confirm('Delete this document?')">

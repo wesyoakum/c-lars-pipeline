@@ -348,7 +348,7 @@ export async function onRequestGet(context) {
       title: d.title || d.original_filename || '(untitled)',
       filename: d.original_filename ?? '',
       size: formatSize(d.size_bytes),
-      uploaded: (d.uploaded_at ?? '').slice(0, 10),
+      uploaded: (d.uploaded_at ?? '').slice(0, 16).replace('T', ' '),
       linkedTo,
       linkedHref,
     };

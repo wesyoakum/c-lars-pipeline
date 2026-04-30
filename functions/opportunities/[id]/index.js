@@ -874,7 +874,7 @@ export async function onRequestGet(context) {
                 </td>
                 <td><span class="pill">${escape(DOC_KIND_LABELS[d.kind] ?? d.kind)}</span></td>
                 <td><small>${escape(fmtSize(d.size_bytes))}</small></td>
-                <td><small class="muted">${escape((d.uploaded_at ?? '').slice(0, 10))}</small></td>
+                <td><small class="muted">${escape((d.uploaded_at ?? '').slice(0, 16).replace('T', ' '))}</small></td>
                 <td class="row-actions">
                   <a class="btn small" href="/documents/${escape(d.id)}/download?download=1" title="Force download">Download</a>
                 </td>
@@ -1123,7 +1123,7 @@ export async function onRequestGet(context) {
                   </span>
                 </td>
                 <td><small>${escape(fmtSize(d.size_bytes))}</small></td>
-                <td><small class="muted">${escape((d.uploaded_at ?? '').slice(0, 10))}</small></td>
+                <td><small class="muted">${escape((d.uploaded_at ?? '').slice(0, 16).replace('T', ' '))}</small></td>
                 <td><small>${escape(d.uploaded_by_name ?? d.uploaded_by_email ?? '—')}</small></td>
                 <td class="row-actions">
                   <a class="btn small" href="/documents/${escape(d.id)}/download" target="_blank" rel="noopener" title="Open in a new tab">Open</a>

@@ -50,7 +50,7 @@ export async function onRequestGet(context) {
           ...entry,
           exists: !!obj,
           size: obj?.size ?? 0,
-          uploaded: obj?.uploaded?.toISOString?.()?.slice(0, 10) ?? '',
+          uploaded: obj?.uploaded?.toISOString?.()?.slice(0, 16).replace('T', ' ') ?? '',
           uploadedBy: obj?.customMetadata?.uploadedBy ?? '',
           originalFilename: obj?.customMetadata?.originalFilename ?? '',
           customLabel: obj?.customMetadata?.customLabel ?? '',
