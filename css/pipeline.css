@@ -3011,7 +3011,8 @@ table.data.compact td {
   background: var(--bg-muted, #f6f8fa);
 }
 .quote-banner-logo {
-  height: 56px;
+  /* Larger logo to read closer to the PDF presentation. */
+  height: 96px;
   width: auto;
   object-fit: contain;
 }
@@ -3124,15 +3125,28 @@ table.data.compact td {
   box-sizing: border-box;
 }
 
-/* Address in client info */
+/* Address in client info — flat, no gray box, to match how it
+   reads on the printed quote PDF (plain stacked lines under the
+   account name). */
 .client-info pre.addr {
   font-family: var(--font);
-  font-size: 0.9em;
-  background: var(--bg-alt);
-  padding: 0.35rem 0.5rem;
-  border-radius: var(--radius);
-  border: 1px solid var(--border);
+  font-size: 0.95em;
+  background: transparent;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
   white-space: pre-wrap;
+  margin: 0.15rem 0 0;
+}
+/* Account name on the quote-detail header should read as plain
+   text (matches the PDF treatment) but stay clickable. Override the
+   default anchor color so it doesn't pop blue. */
+.client-info a {
+  color: var(--fg);
+  text-decoration: none;
+}
+.client-info a:hover {
+  text-decoration: underline;
 }
 
 /* Line items table — Item column layout. */
