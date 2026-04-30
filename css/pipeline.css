@@ -2306,9 +2306,12 @@ fieldset.qualification-box select {
   display: none;
 }
 .opp-list[data-view-mode="card"] .opp-list-table tbody {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
-  gap: 0.65rem;
+  /* Single column, full-width cards. (Was a responsive grid in
+     v0.390; the user prefers a stacked feed where each card gets
+     the page width.) */
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
   padding: 0.25rem 0;
 }
 .opp-list[data-view-mode="card"] .opp-list-table tbody tr[data-row-id] {
