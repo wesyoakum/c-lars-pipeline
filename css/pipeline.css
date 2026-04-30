@@ -2171,6 +2171,28 @@ fieldset.qualification-box select {
   min-width: 260px;
 }
 
+/* Table / Card view toggle in the list toolbar. Two icon buttons
+   pinned together; the active one gets a soft background. */
+.opp-list-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.opp-list-view-toggle .icon-btn {
+  border: 0;
+  border-radius: 0;
+  padding: 0.3rem 0.45rem;
+}
+.opp-list-view-toggle .icon-btn + .icon-btn {
+  border-left: 1px solid var(--border);
+}
+.opp-list-view-toggle .icon-btn.is-active {
+  background: var(--bg-alt);
+  color: var(--accent);
+}
+
 .opp-list-columns { position: relative; }
 .opp-list-columns summary {
   list-style: none;
@@ -2253,6 +2275,78 @@ fieldset.qualification-box select {
   z-index: 4;
   background: var(--bg-alt);
 }
+
+/* ============================================================
+   Card view (data-view-mode="card" on .opp-list)
+   ============================================================
+   Restyles the same <table> as a flowing grid of cards. No new
+   markup — each <tr> becomes a card via display: block, each <td>
+   stacks beneath the first (header-zone) cell, and column-resize
+   widths are dropped since cards don't share a column rhythm.
+   Sort, filter, and inline-edit all keep working because the
+   underlying rows / data attributes are unchanged.
+
+   Tradeoff vs table: less easy to compare values across rows, but
+   the user gets more breathing room per item. Toggle in the
+   toolbar flips between modes per-page; choice persists in
+   localStorage alongside the existing sort / filter / column state.
+*/
+.opp-list[data-view-mode="card"] .opp-list-hscroll { display: none; }
+.opp-list[data-view-mode="card"] .opp-list-table {
+  display: block;
+  table-layout: auto !important;
+  width: 100% !important;
+  border-collapse: separate;
+  /* Drop the global table border-bottom (looks weird against cards). */
+  border-bottom: 0;
+}
+.opp-list[data-view-mode="card"] .opp-list-table colgroup,
+.opp-list[data-view-mode="card"] .opp-list-table col,
+.opp-list[data-view-mode="card"] .opp-list-table thead {
+  display: none;
+}
+.opp-list[data-view-mode="card"] .opp-list-table tbody {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 0.65rem;
+  padding: 0.25rem 0;
+}
+.opp-list[data-view-mode="card"] .opp-list-table tbody tr[data-row-id] {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.opp-list[data-view-mode="card"] .opp-list-table tbody tr[data-row-id]:hover {
+  background: var(--bg);
+  border-color: var(--accent);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+}
+.opp-list[data-view-mode="card"] .opp-list-table tbody tr[data-row-id] td {
+  display: block;
+  padding: 0;
+  border: 0;
+  width: auto !important;
+  /* Reset min-width so column-resize values don't apply. */
+  min-width: 0 !important;
+  white-space: normal;
+}
+/* Empty cells in card mode are noisy — collapse them. The :empty
+   selector matches td with no content (most common in card mode
+   when a column was empty in this row). */
+.opp-list[data-view-mode="card"] .opp-list-table tbody tr[data-row-id] td:empty {
+  display: none;
+}
+/* Hidden columns: listScript sets style.display='none' inline on
+   the <td> when a column is unchecked in the columns menu. Inline
+   style beats class-based selectors, so those cells stay hidden in
+   card mode without any extra CSS — but we leave a comment here
+   so it's not surprising. */
 
 /* Single-click anywhere on a row navigates to the row's detail page;
    double-click on an inline-edit cell activates the editor. The

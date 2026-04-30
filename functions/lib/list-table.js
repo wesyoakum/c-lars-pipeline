@@ -85,6 +85,24 @@ export function listToolbar({ id, count, columns = null, newHref, newOnClick, ne
         <input type="search" id="${id}-quicksearch" data-role="quicksearch" placeholder="Search...">
       </div>
       <span class="muted" data-role="count" style="font-size:0.8em;white-space:nowrap">${count}</span>
+      <!-- Table / Card view toggle. Default is table; client persists
+           the choice per-list-page in localStorage and applies via a
+           data-view-mode attribute on .opp-list. CSS does the rest. -->
+      <div class="opp-list-view-toggle" data-role="view-toggle" role="group" aria-label="View mode">
+        <button type="button" class="icon-btn" data-view="table" title="Table view" aria-label="Table view">
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <rect x="3" y="3" width="14" height="14" rx="1"/>
+            <line x1="3" y1="8"  x2="17" y2="8"/>
+            <line x1="3" y1="13" x2="17" y2="13"/>
+          </svg>
+        </button>
+        <button type="button" class="icon-btn" data-view="card" title="Card view" aria-label="Card view">
+          <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <rect x="3" y="3" width="14" height="6" rx="1"/>
+            <rect x="3" y="11" width="14" height="6" rx="1"/>
+          </svg>
+        </button>
+      </div>
       ${showMenu ? html`
         <details class="opp-list-columns" data-role="columns-menu" style="display:inline-block">
           <summary class="icon-btn" title="Columns">
@@ -203,6 +221,10 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       visible: {},
       widths: {},
       sort: { key: '${defaultSortKey}', dir: '${defaultSortDir}' },
+      // viewMode: 'table' (default) or 'card'. Persists alongside
+      // the rest of the per-list state. CSS in pipeline.css gates
+      // visibility based on data-view-mode on the .opp-list host.
+      viewMode: 'table',
     };
     columns.forEach(function(c) { state.visible[c.key] = c.default !== false; });
 
@@ -250,6 +272,9 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         if (saved.filters && typeof saved.filters === 'object') {
           savedFilters = saved.filters;
         }
+        if (saved.viewMode === 'table' || saved.viewMode === 'card') {
+          state.viewMode = saved.viewMode;
+        }
       }
     } catch (e) {}
 
@@ -261,6 +286,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
           widths: state.widths,
           sort: state.sort,
           filters: filterState,
+          viewMode: state.viewMode,
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
       } catch (e) {}
@@ -1060,6 +1086,34 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     applySort();
     applyFilters();
     syncHScroll();
+
+    // -- View mode (table | card) --------------------------------------
+    function applyViewMode() {
+      host.setAttribute('data-view-mode', state.viewMode);
+      var toggle = menuScope.querySelector('[data-role="view-toggle"]');
+      if (toggle) {
+        toggle.querySelectorAll('[data-view]').forEach(function(btn) {
+          btn.classList.toggle('is-active', btn.dataset.view === state.viewMode);
+          btn.setAttribute('aria-pressed', btn.dataset.view === state.viewMode ? 'true' : 'false');
+        });
+      }
+      // Card view leaves all visible columns rendered (CSS rearranges
+      // them) — no need to re-run the column-visibility pass.
+    }
+    var viewToggle = menuScope.querySelector('[data-role="view-toggle"]');
+    if (viewToggle) {
+      viewToggle.querySelectorAll('[data-view]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var next = btn.dataset.view;
+          if (next !== 'table' && next !== 'card') return;
+          if (state.viewMode === next) return;
+          state.viewMode = next;
+          applyViewMode();
+          save();
+        });
+      });
+    }
+    applyViewMode();
 
     // Close the <details> columns menu when the user clicks outside it.
     // Native <details> only closes on summary click; with the panel
