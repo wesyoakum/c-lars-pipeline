@@ -879,20 +879,26 @@ export async function fillTemplate(env, templateKey, data) {
   // one, which is fine for these invisible loop markers.
   rewriteWfmLoopMarkers(zip);
 
-  const doc = new Docxtemplater(zip, {
-    paragraphLoop: true,
-    linebreaks: true,
-    // Don't throw on missing placeholders — render them as empty
-    nullGetter: () => '',
-  });
-
-  // docxtemplater attaches per-placeholder details on the thrown
-  // Error somewhere — version-dependent paths. Default `err.message`
-  // is just "Multi error" which tells the user nothing. We hunt the
-  // inner errors aggressively, then fall back to a JSON-of-the-error
-  // dump so the flash message always surfaces something actionable.
+  // The whole docxtemplater interaction — construction, render, output
+  // generation — can throw "Multi error" with the inner detail attached
+  // at version-dependent paths (sometimes properties.errors, sometimes
+  // top-level, sometimes via .cause). v3.x throws compile-time errors
+  // at the constructor, so wrapping ONLY .render() misses those. We
+  // wrap the entire block, then do an aggressive hunt for inner errors
+  // before falling back to a JSON dump.
+  let doc;
   try {
+    doc = new Docxtemplater(zip, {
+      paragraphLoop: true,
+      linebreaks: true,
+      // Don't throw on missing placeholders — render them as empty
+      nullGetter: () => '',
+    });
     doc.render(data);
+    return doc.getZip().generate({
+      type: 'arraybuffer',
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    });
   } catch (err) {
     const inner = findDocxInnerErrors(err);
     if (Array.isArray(inner) && inner.length > 0) {
@@ -916,20 +922,18 @@ export async function fillTemplate(env, templateKey, data) {
     }
     // Last-ditch: serialize whatever non-enumerable bag of fields the
     // Error has so the flash message surfaces something instead of just
-    // the generic "Multi error" string.
+    // the generic "Multi error" string. Also include the constructor /
+    // prototype name so we can tell where in the pipeline the throw
+    // came from.
+    const ctorName = err?.constructor?.name || err?.name || 'Error';
     const dump = dumpErrorShape(err);
-    if (dump) {
-      const wrapped = new Error(`docx render — ${err?.message || 'render error'} — ${dump}`);
-      wrapped.cause = err;
-      throw wrapped;
-    }
-    throw err;
+    const wrapped = new Error(
+      `docx ${ctorName} — ${err?.message || 'render error'}` +
+      (dump ? ` — ${dump}` : '')
+    );
+    wrapped.cause = err;
+    throw wrapped;
   }
-
-  return doc.getZip().generate({
-    type: 'arraybuffer',
-    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  });
 }
 
 // Hunt the inner errors array on a docxtemplater exception across all
