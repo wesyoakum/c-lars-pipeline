@@ -887,22 +887,24 @@ export async function fillTemplate(env, templateKey, data) {
   });
 
   // docxtemplater attaches per-placeholder details on the thrown
-  // Error's `properties.errors` array. Default `err.message` is just
-  // "Multi error" or similar — useless to a user. We unpack the
-  // explanations and ids into a single readable string so the flash
-  // message in the calling route surfaces something actionable
-  // (e.g. "Unclosed tag: Cost (line 12)").
+  // Error somewhere — version-dependent paths. Default `err.message`
+  // is just "Multi error" which tells the user nothing. We hunt the
+  // inner errors aggressively, then fall back to a JSON-of-the-error
+  // dump so the flash message always surfaces something actionable.
   try {
     doc.render(data);
   } catch (err) {
-    const inner = err?.properties?.errors;
+    const inner = findDocxInnerErrors(err);
     if (Array.isArray(inner) && inner.length > 0) {
       const parts = inner.slice(0, 5).map(e => {
-        const id   = e?.properties?.id || e?.name || 'error';
+        const id   = e?.properties?.id || e?.id || e?.name || 'error';
         const exp  = e?.properties?.explanation
+                  || e?.explanation
                   || e?.message
-                  || JSON.stringify(e?.properties || {});
-        const ctx  = e?.properties?.xtag ? ` (tag: ${e.properties.xtag})` : '';
+                  || (typeof e === 'string' ? e : '')
+                  || JSON.stringify(e?.properties || e || {}).slice(0, 200);
+        const xtag = e?.properties?.xtag || e?.xtag;
+        const ctx  = xtag ? ` (tag: ${xtag})` : '';
         return `${id}${ctx}: ${exp}`;
       });
       const overflow = inner.length > parts.length
@@ -912,6 +914,15 @@ export async function fillTemplate(env, templateKey, data) {
       wrapped.docxErrors = inner;
       throw wrapped;
     }
+    // Last-ditch: serialize whatever non-enumerable bag of fields the
+    // Error has so the flash message surfaces something instead of just
+    // the generic "Multi error" string.
+    const dump = dumpErrorShape(err);
+    if (dump) {
+      const wrapped = new Error(`docx render — ${err?.message || 'render error'} — ${dump}`);
+      wrapped.cause = err;
+      throw wrapped;
+    }
     throw err;
   }
 
@@ -919,6 +930,56 @@ export async function fillTemplate(env, templateKey, data) {
     type: 'arraybuffer',
     mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   });
+}
+
+// Hunt the inner errors array on a docxtemplater exception across all
+// the paths I've seen across versions. Returns null if nothing array-
+// shaped is found.
+function findDocxInnerErrors(err) {
+  if (!err) return null;
+  const candidates = [
+    err.properties?.errors,
+    err.errors,
+    err.properties?.id === 'multi_error' ? err.properties?.errors : null,
+    err.cause?.properties?.errors,
+    err.cause?.errors,
+    Array.isArray(err) ? err : null,
+  ];
+  for (const c of candidates) {
+    if (Array.isArray(c) && c.length > 0) return c;
+  }
+  return null;
+}
+
+// Last-resort serializer — pulls every own property off an Error object
+// (Errors don't enumerate normally) and returns a short JSON-ish blob
+// so the flash message isn't just "Multi error" with no detail. Cap to
+// 500 chars; the flash text shouldn't dominate the page.
+function dumpErrorShape(err) {
+  if (!err || typeof err !== 'object') return '';
+  try {
+    const acc = {};
+    for (const k of Object.getOwnPropertyNames(err)) {
+      if (k === 'stack') continue;  // noisy, not actionable
+      const v = err[k];
+      if (v == null) continue;
+      if (typeof v === 'function') continue;
+      // Inline simple values; deep-stringify objects
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+        acc[k] = v;
+      } else {
+        try {
+          acc[k] = JSON.parse(JSON.stringify(v));
+        } catch (_) {
+          acc[k] = String(v);
+        }
+      }
+    }
+    if (Object.keys(acc).length === 0) return '';
+    return JSON.stringify(acc).slice(0, 500);
+  } catch (_) {
+    return '';
+  }
 }
 
 function rewriteWfmLoopMarkers(zip) {
