@@ -869,14 +869,14 @@ export async function onRequestGet(context) {
             <tbody>
               ${docRows.map(d => html`<tr>
                 <td>
-                  <strong>${escape(d.title)}</strong>
+                  <a href="/documents/${escape(d.id)}/download" target="_blank" rel="noopener" title="Open in new tab"><strong>${escape(d.title)}</strong></a>
                   ${d.original_filename ? html`<br><small class="muted">${escape(d.original_filename)}</small>` : ''}
                 </td>
                 <td><span class="pill">${escape(DOC_KIND_LABELS[d.kind] ?? d.kind)}</span></td>
                 <td><small>${escape(fmtSize(d.size_bytes))}</small></td>
                 <td><small class="muted">${escape((d.uploaded_at ?? '').slice(0, 10))}</small></td>
                 <td class="row-actions">
-                  <a class="btn small" href="/documents/${escape(d.id)}/download">Download</a>
+                  <a class="btn small" href="/documents/${escape(d.id)}/download?download=1" title="Force download">Download</a>
                 </td>
               </tr>`)}
             </tbody>
@@ -1126,7 +1126,8 @@ export async function onRequestGet(context) {
                 <td><small class="muted">${escape((d.uploaded_at ?? '').slice(0, 10))}</small></td>
                 <td><small>${escape(d.uploaded_by_name ?? d.uploaded_by_email ?? '—')}</small></td>
                 <td class="row-actions">
-                  <a class="btn small" href="/documents/${escape(d.id)}/download">Download</a>
+                  <a class="btn small" href="/documents/${escape(d.id)}/download" target="_blank" rel="noopener" title="Open in a new tab">Open</a>
+                  <a class="btn small" href="/documents/${escape(d.id)}/download?download=1" title="Force download">Download</a>
                   <form method="post" action="/documents/${escape(d.id)}/replace" style="display:inline" enctype="multipart/form-data">
                     <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}?tab=docs">
                     <label class="btn small" style="cursor:pointer">Replace<input type="file" name="file" hidden onchange="this.form.submit()"></label>

@@ -665,13 +665,13 @@ export async function onRequestGet(context) {
               ${docRows.map((d) => html`
                 <tr>
                   <td><span class="pill">${escape(d.kindLabel)}</span></td>
-                  <td><a href="/documents/${escape(d.id)}/download">${escape(d.title)}</a></td>
+                  <td><a href="/documents/${escape(d.id)}/download" target="_blank" rel="noopener" title="Open in new tab">${escape(d.title)}</a></td>
                   <td>${d.linkedHref
                     ? html`<a href="${escape(d.linkedHref)}">${escape(d.linkedTo)}</a>`
                     : html`<small class="muted">${escape(d.linkedTo)}</small>`}</td>
                   <td class="num"><small class="muted">${escape(d.size)}</small></td>
                   <td><small class="muted">${escape(d.uploaded)}</small></td>
-                  <td class="row-actions"><a class="btn btn-sm" href="/documents/${escape(d.id)}/download">Download</a></td>
+                  <td class="row-actions"><a class="btn btn-sm" href="/documents/${escape(d.id)}/download?download=1" title="Force download">Download</a></td>
                 </tr>
               `)}
             </tbody>

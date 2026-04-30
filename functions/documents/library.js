@@ -180,7 +180,8 @@ export async function onRequestGet(context) {
                     </td>
                     <td class="col-actions" data-col="actions" style="text-align:right;white-space:nowrap">
                       <div style="display:inline-flex;align-items:center;gap:0.35rem;justify-content:flex-end">
-                        <a href="/documents/${escape(d.id)}/download" class="btn btn-sm">Download</a>
+                        <a href="/documents/${escape(d.id)}/download" target="_blank" rel="noopener" class="btn btn-sm" title="Open in a new tab">Open</a>
+                        <a href="/documents/${escape(d.id)}/download?download=1" class="btn btn-sm" title="Force download">Download</a>
                         <form method="post" action="/documents/${escape(d.id)}/replace"
                               enctype="multipart/form-data" style="display:inline">
                           <input type="file" name="file" style="display:none"
