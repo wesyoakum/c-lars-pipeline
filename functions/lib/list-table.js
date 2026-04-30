@@ -91,21 +91,14 @@ export function listToolbar({ id, count, columns = null, newHref, newOnClick, ne
             <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="3" x2="4" y2="17"/><line x1="10" y1="3" x2="10" y2="17"/><line x1="16" y1="3" x2="16" y2="17"/></svg>
           </summary>
           <div class="opp-list-columns-menu" data-role="columns-list">
-            ${columns.map((c, idx) => html`
-              <div class="opp-list-column-row" data-column-row="${c.key}">
+            ${columns.map(c => html`
+              <div class="opp-list-column-row" data-column-row="${c.key}" draggable="true">
+                <span class="opp-list-column-grip" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
                 <label class="checkbox">
                   <input type="checkbox" data-column-toggle="${c.key}"
                          ${c.default !== false ? 'checked' : ''}>
                   <span>${c.label}</span>
                 </label>
-                <div class="opp-list-column-move">
-                  <button type="button" class="btn btn-xs"
-                          data-column-move="up" data-key="${c.key}"
-                          ${idx === 0 ? 'disabled' : ''}>&#8593;</button>
-                  <button type="button" class="btn btn-xs"
-                          data-column-move="down" data-key="${c.key}"
-                          ${idx === columns.length - 1 ? 'disabled' : ''}>&#8595;</button>
-                </div>
               </div>`)}
             <div class="opp-list-columns-actions">
               <button type="button" class="btn btn-xs" data-role="reset">Reset</button>
@@ -318,12 +311,6 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         state.order.forEach(function(key) {
           var row = menu.querySelector('[data-column-row="' + key + '"]');
           if (row) menu.insertBefore(row, menu.querySelector('.opp-list-columns-actions'));
-        });
-        state.order.forEach(function(key, idx) {
-          var up = menu.querySelector('[data-column-move="up"][data-key="' + key + '"]');
-          var down = menu.querySelector('[data-column-move="down"][data-key="' + key + '"]');
-          if (up) up.disabled = idx === 0;
-          if (down) down.disabled = idx === state.order.length - 1;
         });
       }
     }
@@ -946,10 +933,54 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       });
     });
 
-    menuScope.querySelectorAll('[data-column-move]').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        var dir = btn.dataset.columnMove === 'up' ? -1 : 1;
-        moveColumn(btn.dataset.key, dir);
+    // Drag-and-drop column reorder. Each .opp-list-column-row in the
+    // menu has draggable="true"; on drop we splice state.order to
+    // match the new visual position and re-apply.
+    var dragKey = null;
+    menuScope.querySelectorAll('.opp-list-column-row').forEach(function(row) {
+      row.addEventListener('dragstart', function(e) {
+        dragKey = row.getAttribute('data-column-row');
+        row.classList.add('is-dragging');
+        try {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', dragKey);
+        } catch (_) {}
+      });
+      row.addEventListener('dragend', function() {
+        dragKey = null;
+        menuScope.querySelectorAll('.opp-list-column-row').forEach(function(r) {
+          r.classList.remove('is-dragging', 'drop-before', 'drop-after');
+        });
+      });
+      row.addEventListener('dragover', function(e) {
+        if (!dragKey) return;
+        if (row.getAttribute('data-column-row') === dragKey) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        // Visual hint: show the drop position based on cursor Y.
+        var rect = row.getBoundingClientRect();
+        var before = (e.clientY - rect.top) < rect.height / 2;
+        row.classList.toggle('drop-before', before);
+        row.classList.toggle('drop-after', !before);
+      });
+      row.addEventListener('dragleave', function() {
+        row.classList.remove('drop-before', 'drop-after');
+      });
+      row.addEventListener('drop', function(e) {
+        if (!dragKey) return;
+        var targetKey = row.getAttribute('data-column-row');
+        if (targetKey === dragKey) return;
+        e.preventDefault();
+        var rect = row.getBoundingClientRect();
+        var dropBefore = (e.clientY - rect.top) < rect.height / 2;
+        var fromIdx = state.order.indexOf(dragKey);
+        if (fromIdx < 0) return;
+        state.order.splice(fromIdx, 1);
+        var toIdx = state.order.indexOf(targetKey);
+        if (toIdx < 0) return;
+        state.order.splice(dropBefore ? toIdx : toIdx + 1, 0, dragKey);
+        applyColumnOrder();
+        save();
       });
     });
 
@@ -1029,6 +1060,26 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     applySort();
     applyFilters();
     syncHScroll();
+
+    // Close the <details> columns menu when the user clicks outside it.
+    // Native <details> only closes on summary click; with the panel
+    // floating over the table, expecting users to "click the gear
+    // again to close" is annoying. Watch document clicks and close
+    // the menu when the click target sits outside the <details>.
+    var columnsDetails = menuScope.querySelector('details[data-role="columns-menu"]');
+    if (columnsDetails) {
+      document.addEventListener('click', function(e) {
+        if (!columnsDetails.open) return;
+        if (columnsDetails.contains(e.target)) return;
+        columnsDetails.open = false;
+      });
+      // Esc also closes (matches the native popup close affordance).
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && columnsDetails.open) {
+          columnsDetails.open = false;
+        }
+      });
+    }
 
     // Re-measure on viewport resize — the table width or the container
     // clientWidth may change, toggling whether the proxy is needed.

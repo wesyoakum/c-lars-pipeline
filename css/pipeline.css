@@ -2193,17 +2193,37 @@ fieldset.qualification-box select {
 }
 .opp-list-column-row {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.2rem 0;
+  gap: 0.4rem;
+  padding: 0.25rem 0.3rem;
+  cursor: grab;
+  border-radius: 4px;
+  border-top: 2px solid transparent;
+  border-bottom: 2px solid transparent;
 }
+.opp-list-column-row:hover { background: var(--bg-alt); }
+.opp-list-column-row.is-dragging { opacity: 0.4; cursor: grabbing; }
+/* Drop-position hints: a 2px colored line appears above or below
+   the row the cursor is hovering over while dragging. */
+.opp-list-column-row.drop-before { border-top-color: var(--accent); }
+.opp-list-column-row.drop-after  { border-bottom-color: var(--accent); }
 .opp-list-column-row label {
   display: flex;
   gap: 0.4rem;
   align-items: center;
   color: var(--fg);
   font-size: 0.9em;
+  flex: 1;
+  cursor: inherit;
+}
+/* The "⋮⋮" grip — pure visual cue. The whole row is the drag
+   target, so the grip itself doesn't need its own listener. */
+.opp-list-column-grip {
+  color: var(--fg-muted);
+  font-size: 0.85em;
+  letter-spacing: -1px;
+  user-select: none;
+  flex-shrink: 0;
 }
 .opp-list-column-move { display: flex; gap: 0.2rem; }
 .opp-list-columns-actions {
