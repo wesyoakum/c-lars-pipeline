@@ -166,9 +166,11 @@ function sanitize(value) {
   return value;
 }
 
-// Pull the first record out of a paginated body shape. Mirrors the
-// logic in api-client.mjs's apiGetAllPages but kept here so the probe
-// report doesn't depend on which envelope key was used.
+// Pull the first record out of a paginated body shape. Handles:
+//   - bare arrays
+//   - common JSON envelopes (data / items / results / records / value)
+//   - BlueRock's XML envelope (Response.Clients.Client → first Client)
+//   - single-element XML responses (object instead of array)
 function firstRecord(body) {
   if (Array.isArray(body)) return body[0] ?? null;
   if (!body || typeof body !== 'object') return null;
@@ -177,6 +179,16 @@ function firstRecord(body) {
   }
   for (const v of Object.values(body)) {
     if (Array.isArray(v)) return v[0] ?? null;
+  }
+  // XML envelope: Response → Clients → Client (or similar two-level
+  // descent). Walk one extra step looking for an array or singleton object.
+  for (const v of Object.values(body)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      for (const inner of Object.values(v)) {
+        if (Array.isArray(inner)) return inner[0] ?? null;
+        if (inner && typeof inner === 'object') return inner;
+      }
+    }
   }
   return null;
 }
@@ -207,16 +219,11 @@ function detectPaginationHints(body) {
 }
 
 // Pick a useful identifier out of a probed list response so we can
-// chain a follow-up nested call. Tries the common WFM v1-style keys
-// (`UUID`, `uuid`, `Number`, `Identifier`) on each shape we know.
+// chain a follow-up nested call. Walks: bare array, top-level array
+// inside an object, and the BlueRock XML envelope two levels deep
+// (Response.Clients.Client[0].UUID).
 function pickFirstIdentifier(body, idKeys) {
-  const arr = Array.isArray(body)
-    ? body
-    : (body && typeof body === 'object'
-        ? (Object.values(body).find((v) => Array.isArray(v)) || [])
-        : []);
-  if (!arr.length) return null;
-  const first = arr[0];
+  const first = firstRecord(body);
   if (!first || typeof first !== 'object') return null;
   for (const k of idKeys) {
     if (first[k]) return String(first[k]);
@@ -417,7 +424,13 @@ function renderEntitySection(probe) {
     return lines.join('\n');
   }
 
-  // Rate-limit headers (whatever BlueRock sends).
+  // Content-type + parsed format — useful when the body's shape is
+  // unexpected (XML vs JSON gotchas, etc.).
+  if (chosen.contentType) {
+    lines.push(`- **Content-Type:** \`${chosen.contentType}\` (parsed as \`${chosen.bodyFormat || 'text'}\`)`);
+  }
+
+  // Rate-limit / debug headers.
   const interestingHeaders = Object.entries(chosen.headers)
     .filter(([k]) => /rate|retry|quota|x-request|x-correlation/i.test(k));
   if (interestingHeaders.length) {
@@ -441,6 +454,15 @@ function renderEntitySection(probe) {
   lines.push('  ```');
   lines.push('  ' + summarizeShape(chosen.body, 0, 2));
   lines.push('  ```');
+
+  // If the body is still a string, the parser didn't recognize the
+  // format. Surface the first 400 chars so we can see what came back.
+  if (typeof chosen.body === 'string' && chosen.rawText) {
+    lines.push('- **Body (first 400 chars, unparsed):**');
+    lines.push('  ```');
+    chosen.rawText.slice(0, 400).split('\n').forEach(l => lines.push('  ' + l));
+    lines.push('  ```');
+  }
 
   // Sample record.
   const first = firstRecord(chosen.body);

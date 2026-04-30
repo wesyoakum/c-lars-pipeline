@@ -43,6 +43,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { XMLParser } from 'fast-xml-parser';
+
+// BlueRock kept the legacy v1 XML transport even though the OAS 3.0
+// spec describes JSON shapes. Parser config: keep arrays canonical
+// (always wrap repeated elements in arrays), preserve numeric strings
+// as strings (UUIDs and IDs that look numeric stay safe), drop XML
+// declaration / processing instructions.
+const xmlParser = new XMLParser({
+  ignoreAttributes:    false,
+  attributeNamePrefix: '@_',
+  parseTagValue:       false,  // keep "12345" as string
+  parseAttributeValue: false,
+  trimValues:          true,
+});
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..', '..');
@@ -281,12 +295,39 @@ export async function apiGet(pathOrUrl, opts = {}) {
   const started = Date.now();
   const res = await fetch(url, { method: 'GET', headers });
   const text = await res.text();
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+
+  // Body decoding — try JSON first when the content-type looks JSON-ish
+  // (or is missing — be permissive), fall back to XML when content-type
+  // says so or when JSON.parse fails on something that starts with `<`.
+  // Last resort, return raw text.
   let body = null;
-  try { body = JSON.parse(text); } catch (_) { body = text; }
+  let bodyFormat = 'text';
+  const looksJson = contentType.includes('json') || (!contentType && text.trim().startsWith('{'));
+  const looksXml  = contentType.includes('xml')  || text.trim().startsWith('<');
+
+  if (looksJson) {
+    try { body = JSON.parse(text); bodyFormat = 'json'; }
+    catch (_) { body = text; bodyFormat = 'text'; }
+  } else if (looksXml) {
+    try { body = xmlParser.parse(text); bodyFormat = 'xml'; }
+    catch (_) { body = text; bodyFormat = 'text'; }
+  } else {
+    // Unknown — try JSON anyway (cheap), then XML, then give up.
+    try { body = JSON.parse(text); bodyFormat = 'json'; }
+    catch (_) {
+      try { body = xmlParser.parse(text); bodyFormat = 'xml'; }
+      catch (__) { body = text; bodyFormat = 'text'; }
+    }
+  }
+
   return {
     ok: res.ok,
     status: res.status,
     headers: Object.fromEntries(res.headers.entries()),
+    contentType,
+    bodyFormat,
+    rawText: text,
     body,
     durationMs: Date.now() - started,
     url,
@@ -349,6 +390,19 @@ function extractItems(body, explicitKey) {
   // Last-ditch: pick the first array-valued top-level key.
   for (const [, v] of Object.entries(body)) {
     if (Array.isArray(v)) return v;
+  }
+  // BlueRock's XML envelope is two levels deep:
+  //   { Response: { Status: "OK", Clients: { Client: [ ... ] } } }
+  // Recurse one more time to find the array hidden inside.
+  for (const v of Object.values(body)) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      for (const inner of Object.values(v)) {
+        if (Array.isArray(inner)) return inner;
+        // Single-element responses come back as an object, not a 1-element
+        // array. Wrap so callers iterating get one record, not zero.
+        if (inner && typeof inner === 'object') return [inner];
+      }
+    }
   }
   return [];
 }
@@ -499,13 +553,16 @@ async function main() {
     const target = argv[getIdx + 1];
     const res = await apiGet(target);
     console.log(`GET ${res.url} → ${res.status} (${res.durationMs}ms)`);
-    console.log('Headers:');
+    console.log(`Content-Type: ${res.contentType || '(none)'}`);
+    console.log(`Parsed as: ${res.bodyFormat}`);
+    console.log('Notable headers:');
     for (const [k, v] of Object.entries(res.headers)) {
-      if (/^x-(rate|request)/i.test(k) || /^date$/i.test(k) || /^retry/i.test(k)) {
+      if (/^x-(rate|request|correlation)/i.test(k) || /^date$/i.test(k)
+          || /^retry/i.test(k) || /^content-type$/i.test(k)) {
         console.log(`  ${k}: ${v}`);
       }
     }
-    console.log('Body (first 1500 chars):');
+    console.log('Body (first 1500 chars, parsed):');
     const bodyStr = typeof res.body === 'string'
       ? res.body
       : JSON.stringify(res.body, null, 2);
