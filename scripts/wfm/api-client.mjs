@@ -379,6 +379,27 @@ export async function apiGetAllPages(basePath, opts = {}) {
   return all;
 }
 
+// Recursive depth-limited search for the first array nested in a
+// parsed body. BlueRock's XML envelope wraps records 2–3 levels
+// deep: Response → Clients → Client[]. JSON envelopes (data, items,
+// etc.) get found at depth 1. Returns null if no array is found.
+export function findRecordArray(body, maxDepth = 5) {
+  if (Array.isArray(body)) return body;
+  if (!body || typeof body !== 'object') return null;
+  function dfs(obj, depth) {
+    if (depth > maxDepth || !obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+    for (const v of Object.values(obj)) {
+      if (Array.isArray(v)) return v;
+      if (v && typeof v === 'object') {
+        const found = dfs(v, depth + 1);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+  return dfs(body, 0);
+}
+
 function extractItems(body, explicitKey) {
   if (Array.isArray(body)) return body;
   if (!body || typeof body !== 'object') return [];
@@ -387,24 +408,26 @@ function extractItems(body, explicitKey) {
   for (const k of ['data', 'items', 'results', 'records', 'value']) {
     if (Array.isArray(body[k])) return body[k];
   }
-  // Last-ditch: pick the first array-valued top-level key.
-  for (const [, v] of Object.entries(body)) {
-    if (Array.isArray(v)) return v;
-  }
-  // BlueRock's XML envelope is two levels deep:
-  //   { Response: { Status: "OK", Clients: { Client: [ ... ] } } }
-  // Recurse one more time to find the array hidden inside.
-  for (const v of Object.values(body)) {
-    if (v && typeof v === 'object' && !Array.isArray(v)) {
-      for (const inner of Object.values(v)) {
-        if (Array.isArray(inner)) return inner;
-        // Single-element responses come back as an object, not a 1-element
-        // array. Wrap so callers iterating get one record, not zero.
-        if (inner && typeof inner === 'object') return [inner];
+  // DFS for the first nested array (handles BlueRock XML's 3-level
+  // wrap: Response → Clients → Client[]).
+  const arr = findRecordArray(body);
+  if (arr) return arr;
+  // Singleton XML responses collapse a 1-element array into an object;
+  // dive 3 levels deep and wrap whatever we find as a 1-element array.
+  function dfsObject(obj, depth) {
+    if (depth > 3 || !obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+    for (const v of Object.values(obj)) {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        const inner = dfsObject(v, depth + 1);
+        if (inner) return inner;
+        // Returned the first leaf-ish object two levels in.
+        return v;
       }
     }
+    return null;
   }
-  return [];
+  const single = dfsObject(body, 0);
+  return single ? [single] : [];
 }
 
 function looksLikeLastPage(body) {

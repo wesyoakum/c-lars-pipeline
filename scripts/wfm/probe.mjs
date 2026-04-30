@@ -30,7 +30,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { apiGet, getAccessToken, decodeJwtPayload } from './api-client.mjs';
+import { apiGet, getAccessToken, decodeJwtPayload, findRecordArray } from './api-client.mjs';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..', '..');
@@ -83,7 +83,15 @@ const ENTITY_PROBES = [
     key:     'time',
     label:   'Time entries',
     pipelineDest: 'TBD (no time_entries table yet)',
-    paths:   ['/time.api/list'],
+    // Bare /time.api/list 400s — same as the other /list endpoints
+    // that need a date range. WFM v1 historically used compact
+    // YYYYMMDD format on `from` / `to`. Try both formats; if either
+    // works, that's the convention the importer should use.
+    paths:   [
+      '/time.api/list?from=20260101&to=20260430',
+      '/time.api/list?from=2026-01-01&to=2026-04-30',
+      '/time.api/list',
+    ],
   },
   {
     key:     'invoices',
@@ -166,31 +174,29 @@ function sanitize(value) {
   return value;
 }
 
-// Pull the first record out of a paginated body shape. Handles:
-//   - bare arrays
-//   - common JSON envelopes (data / items / results / records / value)
-//   - BlueRock's XML envelope (Response.Clients.Client → first Client)
-//   - single-element XML responses (object instead of array)
+// Pull the first record out of a paginated body shape. Uses the
+// shared findRecordArray helper which handles bare arrays, common
+// JSON envelopes, and BlueRock's 3-level XML wrap (Response →
+// Clients → Client[]).
 function firstRecord(body) {
-  if (Array.isArray(body)) return body[0] ?? null;
-  if (!body || typeof body !== 'object') return null;
-  for (const k of ['data', 'items', 'results', 'records', 'value']) {
-    if (Array.isArray(body[k])) return body[k][0] ?? null;
-  }
-  for (const v of Object.values(body)) {
-    if (Array.isArray(v)) return v[0] ?? null;
-  }
-  // XML envelope: Response → Clients → Client (or similar two-level
-  // descent). Walk one extra step looking for an array or singleton object.
-  for (const v of Object.values(body)) {
-    if (v && typeof v === 'object' && !Array.isArray(v)) {
-      for (const inner of Object.values(v)) {
-        if (Array.isArray(inner)) return inner[0] ?? null;
-        if (inner && typeof inner === 'object') return inner;
+  const arr = findRecordArray(body);
+  if (arr && arr.length > 0) return arr[0];
+  // Fallback for single-record XML responses where the parser
+  // collapses a 1-element list into an object: walk 3 levels deep
+  // and return the first record-shaped object we find.
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  function dfsObject(obj, depth) {
+    if (depth > 3 || !obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+    for (const v of Object.values(obj)) {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        const inner = dfsObject(v, depth + 1);
+        if (inner) return inner;
+        return v;
       }
     }
+    return null;
   }
-  return null;
+  return dfsObject(body, 0);
 }
 
 // Look for any envelope keys that suggest pagination shape so we know
