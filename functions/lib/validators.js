@@ -576,6 +576,35 @@ export const QUOTE_TYPE_LABELS = {
 };
 
 /**
+ * Long-form subtitle that goes under "QUOTATION" on the quote
+ * detail page header — matches the printed PDF presentation
+ * ("Engineered Products and Services" under the QUOTATION banner).
+ * Falls back to the short label when no subtitle is defined.
+ */
+export const QUOTE_TYPE_SUBTITLES = {
+  spares:               'Spare Parts and Components',
+  eps:                  'Engineered Products and Services',
+  refurb_baseline:      'Refurbishment — Baseline Scope',
+  refurb_modified:      'Refurbishment — Modified Scope',
+  service:              'Field Service and Support',
+};
+
+export function quoteTypeSubtitle(quoteType) {
+  if (!quoteType) return '';
+  // Hybrid quotes: join the per-part subtitles with " + ".
+  if (String(quoteType).includes(',')) {
+    return String(quoteType).split(',')
+      .map(p => p.trim())
+      .filter(Boolean)
+      .map(p => QUOTE_TYPE_SUBTITLES[p] || QUOTE_TYPE_LABELS[p] || p)
+      .join(' + ');
+  }
+  return QUOTE_TYPE_SUBTITLES[quoteType]
+      || QUOTE_TYPE_LABELS[quoteType]
+      || quoteType;
+}
+
+/**
  * T3.4 Sub-feature A — Hybrid quotes.
  *
  * A hybrid quote's `quote_type` column holds a comma-separated list of

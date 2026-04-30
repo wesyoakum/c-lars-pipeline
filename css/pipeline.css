@@ -3069,11 +3069,18 @@ table.data.compact td {
   .quote-meta-grid { grid-template-columns: 1fr; }
 }
 
-/* Seamless quote document — wrapper removes gap between doc cards. */
+/* Seamless quote document — wrapper removes gap between doc cards.
+   Constrained max-width so the on-screen layout reads at roughly the
+   same proportions as the printed PDF (US Letter @ ~96 DPI ≈ 816 px,
+   minus margins). Centers within whatever container holds it. */
 .quote-doc {
   display: flex;
   flex-direction: column;
   gap: 0;
+  max-width: 880px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
 }
 
 /* Seamless quote document cards — banner, details, lines, footer
@@ -3132,6 +3139,38 @@ table.data.compact td {
   height: 96px;
   width: auto;
   object-fit: contain;
+}
+
+/* Long-form subtitle under "QUOTATION" — matches the printed PDF's
+   "Engineered Products and Services" sub-heading. Per-quote-type
+   string is computed by quoteTypeSubtitle() in lib/validators.js. */
+.quote-banner-subtitle {
+  margin: 0.1rem 0 0;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--fg);
+  letter-spacing: 0.01em;
+}
+
+/* Inline "Description:" prefix layout — matches the PDF, which
+   prints "Description: ..." as a single flowing paragraph rather
+   than a stacked label-above-textarea. The textarea takes the
+   remaining width and grows downward as the text wraps. */
+.desc-inline-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.desc-inline-row .desc-inline-label {
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  padding-top: 0.45rem;
+  font-size: 0.95em;
+}
+.desc-inline-row .desc-textarea {
+  flex: 1;
+  min-width: 0;
 }
 
 /* Quote meta table — right column on the details card. */
@@ -3391,8 +3430,17 @@ table.data tr.totals-row td {
   background: var(--bg-muted, #fafafa);
   font-variant-numeric: tabular-nums;
 }
+/* The grand-total row gets stronger emphasis to match the printed
+   PDF: heavier top border + slightly larger / bolder type. */
 table.data tr.totals-row:last-child td {
   border-top: 2px solid var(--fg);
+  font-size: 1.05em;
+  font-weight: 700;
+  padding-top: 0.55rem;
+  padding-bottom: 0.55rem;
+}
+table.data tr.totals-row:last-child td strong {
+  font-weight: 700;
 }
 
 /* New-line blank row at the bottom of the quote lines table. Styled

@@ -26,6 +26,7 @@ import {
   parseQuoteTypes,
   isHybridQuote,
   quoteTypeDisplayLabel,
+  quoteTypeSubtitle,
   QUOTE_TYPE_LABELS,
   QUOTE_STATUS_LABELS,
 } from '../../../../lib/validators.js';
@@ -339,6 +340,7 @@ export async function onRequestGet(context) {
       <div class="quote-banner-inner">
         <div>
           <h2 class="quote-banner-title">QUOTATION</h2>
+          <p class="quote-banner-subtitle">${escape(quoteTypeSubtitle(quote.quote_type))}</p>
           ${readOnly || isHybrid
             ? html`<p class="quote-banner-type">${escape(quoteTypeDisplayLabel(quote.quote_type))}${isHybrid ? html` <span class="pill" style="font-size:0.6em;vertical-align:middle">HYBRID</span>` : ''}</p>`
             : html`<select class="quote-banner-type-select"
@@ -496,12 +498,12 @@ export async function onRequestGet(context) {
                ${readOnly ? 'disabled' : ''}
                @change="patchField('title', $event.target.value)">
       </label>
-      <label class="desc-label" style="margin-top:0.5rem">
-        Description
+      <div class="desc-inline-row" style="margin-top:0.5rem">
+        <strong class="desc-inline-label">Description:</strong>
         <textarea name="description" placeholder="Scope description for the customer" class="desc-textarea"
                   ${readOnly ? 'disabled' : ''}
                   @change="patchField('description', $event.target.value)">${escape(quote.description ?? '')}</textarea>
-      </label>
+      </div>
     </section>
   `;
 
