@@ -170,7 +170,20 @@ function renderDetail({ item, extracted, links, matches, user, attachments }) {
       .aii-att-kind { display: inline-block; padding: .1rem .5rem; background: #eef; color: #335; border-radius: 3px; font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
       .aii-att-primary { color: #d4a017; font-size: 1rem; line-height: 1; }
       .aii-att-meta { color: #555; font-size: .8rem; flex: 1 1 auto; min-width: 8rem; }
-      .aii-att-excluded { display: inline-block; padding: .05rem .35rem; background: #f4ddc3; color: #6b4a18; font-size: .7rem; border-radius: 2px; }
+      /* v3 Phase C row controls — small inline buttons that match the
+         existing aii-rm-btn × button's footprint so the row doesn't
+         get visually heavy. The primary star fills gold when active. */
+      .aii-att-move, .aii-att-primary-btn, .aii-att-include-btn {
+        background: transparent; border: 1px solid #d0d4dc; color: #555;
+        font-size: .8rem; padding: .1rem .35rem; border-radius: 3px;
+        cursor: pointer; line-height: 1.1;
+      }
+      .aii-att-move:hover:not(:disabled),
+      .aii-att-primary-btn:hover:not(:disabled),
+      .aii-att-include-btn:hover { border-color: #1f6feb; color: #1f6feb; }
+      .aii-att-move:disabled, .aii-att-primary-btn:disabled { opacity: .4; cursor: default; }
+      .aii-att-primary-btn.is-primary { color: #d4a017; border-color: #e0c97a; background: #fff8dd; }
+      .aii-att-include-btn.is-excluded { color: #6b4a18; border-color: #d6b67c; background: #f4ddc3; font-weight: 600; }
       .aii-att-captured > summary { cursor: pointer; font-size: .8rem; color: #555; margin-top: .35rem; user-select: none; }
       .aii-att-captured > summary::-webkit-details-marker { display: none; }
       .aii-att-captured > summary::before { content: '▸ '; display: inline-block; }
@@ -2135,16 +2148,14 @@ function renderAttachments({ item, attachments }) {
     </section>`;
   }
 
-  const rows = attachments.map((a) => {
+  const rows = attachments.map((a, idx) => {
     const kindLabel = ATTACHMENT_KIND_LABELS[a.kind] || a.kind;
     const statusColor = ATTACHMENT_STATUS_COLORS[a.status] || '#888';
     const statusLabel = ATTACHMENT_STATUS_LABELS[a.status] || a.status;
-    const primaryBadge = a.is_primary
-      ? html`<span class="aii-att-primary" title="Primary attachment">★</span>`
-      : '';
-    const includeBadge = a.include_in_context === 0
-      ? html`<span class="aii-att-excluded" title="Not included in compiled context">excluded</span>`
-      : '';
+    const isFirst = idx === 0;
+    const isLast = idx === attachments.length - 1;
+    const isPrimary = a.is_primary === 1;
+    const isExcluded = a.include_in_context === 0;
     const metaParts = [
       a.filename || '(no filename)',
       a.size_bytes ? formatSize(a.size_bytes) : null,
@@ -2170,12 +2181,27 @@ function renderAttachments({ item, attachments }) {
     const answersBadge = a.answers_question
       ? html`<div class="aii-att-answers" title="Answer to: ${escape(a.answers_question)}">↳ Answers: ${escape(a.answers_question)}</div>`
       : '';
-    return html`<div class="aii-att-row">
+    return html`<div class="aii-att-row" data-att-id="${escape(a.id)}">
       <div class="aii-att-head">
+        <button type="button" class="aii-att-move"
+                ${isFirst ? 'disabled' : ''}
+                @click="moveAttachment('${escape(a.id)}', -1)"
+                title="Move up">↑</button>
+        <button type="button" class="aii-att-move"
+                ${isLast ? 'disabled' : ''}
+                @click="moveAttachment('${escape(a.id)}', 1)"
+                title="Move down">↓</button>
+        <button type="button"
+                class="aii-att-primary-btn ${isPrimary ? 'is-primary' : ''}"
+                ${isPrimary ? 'disabled' : ''}
+                @click="setPrimary('${escape(a.id)}')"
+                title="${isPrimary ? 'Primary attachment (pinned to top of compiled context)' : 'Make primary'}">★</button>
         <span class="aii-att-kind">${escape(kindLabel)}</span>
-        ${primaryBadge}
         <span class="aii-att-meta">${metaParts.join(' · ')}</span>
-        ${includeBadge}
+        <button type="button"
+                class="aii-att-include-btn ${isExcluded ? 'is-excluded' : ''}"
+                @click="toggleInclude('${escape(a.id)}')"
+                title="${isExcluded ? 'Excluded from extraction — click to include' : 'Included in extraction — click to exclude'}">${isExcluded ? 'excluded' : 'included'}</button>
         <span class="status-pill" style="background:${escape(statusColor)};">${escape(statusLabel)}</span>
         <button type="button" class="aii-rm-btn"
                 @click="deleteAttachment('${escape(a.id)}')"
@@ -2314,6 +2340,66 @@ function renderAttachments({ item, attachments }) {
               window.location.reload();
             } catch (e) {
               alert('Could not delete: ' + (e.message || e));
+            }
+          },
+          // v3 Phase C: promote this attachment to primary. The server
+          // demotes its siblings; reload so the ★ moves and the
+          // compiled-context preview updates if the user opens it.
+          async setPrimary(attachmentId) {
+            try {
+              const res = await fetch('/ai-inbox/' + encodeURIComponent(this.entryId)
+                + '/attachments/' + encodeURIComponent(attachmentId) + '/set-primary', {
+                method: 'POST', credentials: 'same-origin',
+              });
+              const j = await res.json();
+              if (!j.ok) { alert('Could not set primary: ' + (j.error || 'unknown')); return; }
+              window.location.reload();
+            } catch (e) {
+              alert('Could not set primary: ' + (e.message || e));
+            }
+          },
+          // v3 Phase C: flip include_in_context for this attachment. Useful
+          // when the user wants to silence a noisy attachment (e.g. a
+          // transcript from a side-conversation) without losing it.
+          async toggleInclude(attachmentId) {
+            try {
+              const res = await fetch('/ai-inbox/' + encodeURIComponent(this.entryId)
+                + '/attachments/' + encodeURIComponent(attachmentId) + '/toggle-include', {
+                method: 'POST', credentials: 'same-origin',
+              });
+              const j = await res.json();
+              if (!j.ok) { alert('Could not toggle include: ' + (j.error || 'unknown')); return; }
+              window.location.reload();
+            } catch (e) {
+              alert('Could not toggle include: ' + (e.message || e));
+            }
+          },
+          // v3 Phase C: swap this attachment with its neighbor (delta = -1
+          // moves up, +1 moves down) by sending the whole id list with
+          // the swap applied. Reads the row order out of the live DOM
+          // so we don't have to mirror the attachment list on the
+          // client. Reloads on success.
+          async moveAttachment(attachmentId, delta) {
+            const rows = Array.from(document.querySelectorAll('.aii-att-row'));
+            const ids = rows.map((el) => el.getAttribute('data-att-id')).filter(Boolean);
+            const idx = ids.indexOf(attachmentId);
+            if (idx < 0) return;
+            const target = idx + delta;
+            if (target < 0 || target >= ids.length) return;
+            const swapped = ids.slice();
+            const tmp = swapped[idx]; swapped[idx] = swapped[target]; swapped[target] = tmp;
+            try {
+              const res = await fetch('/ai-inbox/' + encodeURIComponent(this.entryId)
+                + '/attachments/reorder', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ ids: swapped }),
+              });
+              const j = await res.json();
+              if (!j.ok) { alert('Could not reorder: ' + (j.error || 'unknown')); return; }
+              window.location.reload();
+            } catch (e) {
+              alert('Could not reorder: ' + (e.message || e));
             }
           },
           async submit() {
