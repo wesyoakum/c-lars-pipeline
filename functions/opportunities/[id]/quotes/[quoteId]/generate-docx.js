@@ -82,7 +82,11 @@ export async function onRequestPost(context) {
         )}&flash_kind=warn`
       );
     }
-    return redirect(`${returnTo}?highlight=${docId}`);
+    // Success → open the generated .docx in a new tab. Browsers
+    // typically prompt to open in Word (or download and open) since
+    // .docx isn't a renderable inline type. Form on the quote-detail
+    // page submits with target="_blank" so the original tab stays put.
+    return redirect(`/documents/${docId}/download`);
   } catch (err) {
     console.error('DOCX generation failed:', err);
     return redirectWithFlash(returnTo, `Word generation failed: ${err.message}`, 'error');

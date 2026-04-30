@@ -87,7 +87,11 @@ export async function onRequestPost(context) {
         )}&flash_kind=warn`
       );
     }
-    return redirect(`${returnTo}?highlight=${docId}`);
+    // Success → open the generated PDF inline (browser viewer in a
+    // new tab, since the form on the quote-detail page submits with
+    // target="_blank"). The doc is also stored against the quote so
+    // it shows up in the docs list on next page load.
+    return redirect(`/documents/${docId}/download`);
   } catch (err) {
     console.error('PDF generation failed:', err);
     return redirectWithFlash(returnTo, `PDF generation failed: ${err.message}`, 'error');
