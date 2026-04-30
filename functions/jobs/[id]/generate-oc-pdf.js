@@ -66,7 +66,10 @@ export async function onRequestPost(context) {
       user,
     });
 
-    return redirect(`${returnTo}?highlight=${docId}`);
+    // Form on the job-OC page submits with target="_blank" — open the
+    // generated PDF inline in the new tab. Doc is still stored on the
+    // job so it shows in the docs list on next page load.
+    return redirect(`/documents/${docId}/download`);
   } catch (err) {
     console.error('OC PDF generation failed:', err);
     return redirectWithFlash(returnTo, `PDF generation failed: ${err.message}`, 'error');

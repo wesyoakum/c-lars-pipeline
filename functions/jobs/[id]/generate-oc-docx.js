@@ -63,7 +63,9 @@ export async function onRequestPost(context) {
       user,
     });
 
-    return redirect(`${returnTo}?highlight=${docId}`);
+    // target="_blank" form on the OC page → new tab opens the .docx
+    // (browser typically prompts to open in Word).
+    return redirect(`/documents/${docId}/download`);
   } catch (err) {
     console.error('OC DOCX generation failed:', err);
     return redirectWithFlash(returnTo, `Word generation failed: ${err.message}`, 'error');

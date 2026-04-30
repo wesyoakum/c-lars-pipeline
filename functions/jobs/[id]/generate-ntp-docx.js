@@ -72,7 +72,9 @@ export async function onRequestPost(context) {
       user,
     });
 
-    return redirect(`${returnTo}?highlight=${docId}`);
+    // target="_blank" form on the NTP page → new tab shows the .docx
+    // (browser typically prompts to open in Word).
+    return redirect(`/documents/${docId}/download`);
   } catch (err) {
     console.error('NTP DOCX generation failed:', err);
     return redirectWithFlash(returnTo, `Word generation failed: ${err.message}`, 'error');

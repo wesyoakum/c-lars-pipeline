@@ -74,7 +74,8 @@ export async function onRequestPost(context) {
       user,
     });
 
-    return redirect(`${returnTo}?highlight=${docId}`);
+    // target="_blank" form on the NTP page → new tab shows the PDF inline.
+    return redirect(`/documents/${docId}/download`);
   } catch (err) {
     console.error('NTP PDF generation failed:', err);
     return redirectWithFlash(returnTo, `PDF generation failed: ${err.message}`, 'error');

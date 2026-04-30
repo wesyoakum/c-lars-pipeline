@@ -156,13 +156,13 @@ export async function onRequestGet(context) {
               </form>
             ` : ''}
             ${canGenerate ? html`
-              <form method="post" action="/jobs/${escape(jobId)}/generate-oc-pdf" class="inline-form">
-                <button class="btn btn-icon" type="submit" title="Generate OC PDF" aria-label="Generate OC PDF">
+              <form method="post" action="/jobs/${escape(jobId)}/generate-oc-pdf" class="inline-form" target="_blank" rel="noopener">
+                <button class="btn btn-icon" type="submit" title="Generate OC PDF (opens in a new tab)" aria-label="Generate OC PDF">
                   ${raw(ICON_PDF)}
                 </button>
               </form>
-              <form method="post" action="/jobs/${escape(jobId)}/generate-oc-docx" class="inline-form">
-                <button class="btn btn-icon" type="submit" title="Download OC Word document" aria-label="Download OC Word">
+              <form method="post" action="/jobs/${escape(jobId)}/generate-oc-docx" class="inline-form" target="_blank" rel="noopener">
+                <button class="btn btn-icon" type="submit" title="Download OC Word document (opens in a new tab)" aria-label="Download OC Word">
                   ${raw(ICON_DOCX)}
                 </button>
               </form>
