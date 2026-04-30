@@ -177,26 +177,14 @@ function sanitize(value) {
 // Pull the first record out of a paginated body shape. Uses the
 // shared findRecordArray helper which handles bare arrays, common
 // JSON envelopes, and BlueRock's 3-level XML wrap (Response →
-// Clients → Client[]).
+// Clients → Client[]). When no array is found (empty list, or a
+// singleton the XML parser collapsed into an object), returns null
+// so the probe reports "Sample record: empty" rather than walking
+// into the XML declaration by accident.
 function firstRecord(body) {
   const arr = findRecordArray(body);
   if (arr && arr.length > 0) return arr[0];
-  // Fallback for single-record XML responses where the parser
-  // collapses a 1-element list into an object: walk 3 levels deep
-  // and return the first record-shaped object we find.
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
-  function dfsObject(obj, depth) {
-    if (depth > 3 || !obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
-    for (const v of Object.values(obj)) {
-      if (v && typeof v === 'object' && !Array.isArray(v)) {
-        const inner = dfsObject(v, depth + 1);
-        if (inner) return inner;
-        return v;
-      }
-    }
-    return null;
-  }
-  return dfsObject(body, 0);
+  return null;
 }
 
 // Look for any envelope keys that suggest pagination shape so we know
@@ -272,26 +260,20 @@ async function probeContactsNested(allProbes) {
   if (ok) {
     lines.push(`- **Top-level shape:**`);
     lines.push('  ```');
-    lines.push('  ' + summarizeShape(res.body, 0, 2));
+    lines.push('  ' + summarizeShape(res.body, 0, 3));
     lines.push('  ```');
-    // Try to count nested contacts.
-    const root = (res.body && typeof res.body === 'object') ? Object.values(res.body)[0] : res.body;
-    const contactsField = root && typeof root === 'object'
-      ? (root.Contacts || root.contacts)
-      : null;
-    if (contactsField) {
-      const contactsArr = Array.isArray(contactsField)
-        ? contactsField
-        : (contactsField.Contact || contactsField.contact || []);
-      lines.push(`- **Contacts on this client:** ${Array.isArray(contactsArr) ? contactsArr.length : 'unknown shape'}`);
-      if (Array.isArray(contactsArr) && contactsArr.length) {
-        lines.push('- **Sample contact (sanitized):**');
-        lines.push('  ```json');
-        JSON.stringify(sanitize(contactsArr[0]), null, 2).split('\n').forEach(l => lines.push('  ' + l));
-        lines.push('  ```');
-      }
+    // findRecordArray walks the parsed XML for the first array. For
+    // /client.api/get/{UUID} the only nested array is Contact[]
+    // (under Client.Contacts), which is exactly what we want.
+    const contactsArr = findRecordArray(res.body) || [];
+    lines.push(`- **Contacts on this client:** ${contactsArr.length}`);
+    if (contactsArr.length > 0) {
+      lines.push('- **Sample contact (sanitized):**');
+      lines.push('  ```json');
+      JSON.stringify(sanitize(contactsArr[0]), null, 2).split('\n').forEach(l => lines.push('  ' + l));
+      lines.push('  ```');
     } else {
-      lines.push('- **Contacts on this client:** _no Contacts field found in body — might be a different key name; check the shape line above_');
+      lines.push('- _Client has zero contacts — endpoint works but this particular client doesn\'t have any._');
     }
   } else {
     lines.push(`- **Body (first 500 chars):** \`${(typeof res.body === 'string' ? res.body : JSON.stringify(res.body)).slice(0, 500)}\``);
