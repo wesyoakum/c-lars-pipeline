@@ -18,3 +18,7 @@ desktop.ini
 node_modules/
 .wrangler/
 .dev.vars
+
+# Local env files (contain secrets — never commit)
+.env
+.env.local
