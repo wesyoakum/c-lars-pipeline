@@ -992,19 +992,54 @@ function rewriteWfmLoopMarkers(zip) {
   const xmlNames = Object.keys(zip.files).filter(
     n => n.endsWith('.xml') && n.startsWith('word/')
   );
-  const re = /\{(TableStart|TableEnd):([\s\S]*?)\}/g;
   for (const name of xmlNames) {
     const original = zip.files[name].asText();
-    if (original.indexOf('{TableStart:') < 0 && original.indexOf('{TableEnd:') < 0) {
+    let xml = original;
+
+    // STEP 1: bridge split placeholders. Word often fragments a
+    // `{Foo}` placeholder across multiple `<w:t>` runs as a side
+    // effect of editing — e.g.
+    //   <w:t>{</w:t></w:r><w:r><w:t>TableStart:Cost</w:t></w:r><w:r><w:t>}</w:t>
+    // Without rejoining, the regex below can't see the literal
+    // `{TableStart:` substring and the loop markers stay as plain
+    // text — docxtemplater never recognizes the loop and the data
+    // row renders just once with all inner placeholders empty.
+    //
+    // We find every `{...}` span (no nested braces) and strip the
+    // run-boundary XML inside. Result is a single text run
+    // containing the joined placeholder, ready for the marker rewrite
+    // below. Curly braces that happen to contain bold/italic toggles
+    // (which would also be `</w:t>...<w:t>` sequences) lose that
+    // formatting — fine for our case since these are invisible
+    // template tokens.
+    if (xml.indexOf('{') >= 0) {
+      xml = xml.replace(/\{([^{}]+)\}/g, (match, body) => {
+        const bridged = body.replace(/<\/w:t>[\s\S]*?<w:t[^>]*>/g, '');
+        return '{' + bridged + '}';
+      });
+    }
+
+    // STEP 2: rewrite WFM-style loop markers to docxtemplater
+    // native loop syntax. Now that placeholders are joined, simple
+    // literal matching works.
+    if (xml.indexOf('{TableStart:') < 0 && xml.indexOf('{TableEnd:') < 0) {
+      // No markers anywhere — even after bridging, nothing to rewrite.
+      // Skip the write so we don't churn the zip needlessly.
+      if (xml === original) continue;
+      zip.file(name, xml);
       continue;
     }
-    const next = original.replace(re, (_match, kind, body) => {
-      const cleaned = body.replace(/<[^>]+>/g, '').trim();
-      if (!cleaned) return _match;
-      return kind === 'TableStart' ? `{#${cleaned}}` : `{/${cleaned}}`;
-    });
-    if (next !== original) {
-      zip.file(name, next);
+    xml = xml.replace(
+      /\{(TableStart|TableEnd):([\s\S]*?)\}/g,
+      (_match, kind, body) => {
+        const cleaned = body.replace(/<[^>]+>/g, '').trim();
+        if (!cleaned) return _match;
+        return kind === 'TableStart' ? `{#${cleaned}}` : `{/${cleaned}}`;
+      }
+    );
+
+    if (xml !== original) {
+      zip.file(name, xml);
     }
   }
 }
