@@ -244,8 +244,9 @@ export function listInlineEditScript(patchUrlTemplate, opts = {}) {
       }
     });
 
-    // Middle-click → open in new tab. Browsers fire `auxclick` (not
-    // `click`) for non-primary buttons, so wire it explicitly.
+    // Middle-click -> open in new tab. Browsers fire the auxclick
+    // event (not click) for non-primary mouse buttons, so we wire
+    // it explicitly. Button 1 is middle.
     tbody.addEventListener('auxclick', function(e) {
       if (e.button !== 1) return;
       if (shouldBailFromRowNav(e.target)) return;
