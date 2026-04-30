@@ -142,17 +142,96 @@ export function listInlineEditScript(patchUrlTemplate, opts = {}) {
     var tbody = host.querySelector('[data-role="rows"]');
     if (!tbody) return;
 
-    // Event delegation: one click listener on the tbody handles every
-    // .ie cell, including rows that get reparented by list-table.js
-    // when the user re-sorts or reorders columns.
+    // Row interaction model:
+    //   single-click anywhere on a row  → navigate to detail page
+    //   double-click on an .ie cell     → activate inline-edit
+    //   double-click on a plain cell    → no-op (single already navigated)
+    //
+    // Click target bail-list: anything that's already actionable
+    // (anchors, buttons, form controls, the columns-menu gear, sort
+    // headers, filter popovers) keeps its native behavior. A row's
+    // detail URL is read from its `<a class="row-open-link">` cell —
+    // every list page emits one, so no extra wiring on individual
+    // pages is required.
+    var DOUBLE_CLICK_MS = 260;
+    var pendingNavTimer = null;
+    var lastClickWasIe = false;
+
+    function shouldBailFromRowNav(target) {
+      if (!target || !target.closest) return true;
+      // Native interactive elements: anchors, buttons, form controls.
+      if (target.closest('a, button, form, input, select, textarea, label')) return true;
+      // List-table machinery (sort header buttons, columns menu, filter popover).
+      if (target.closest('[data-role="columns-menu"], .col-sort, [data-role="header-row"]')) return true;
+      if (target.closest('[data-filter-popover], .opp-list-filter-popover')) return true;
+      // Cells the page explicitly marks as not-clickable.
+      if (target.closest('[data-row-no-nav]')) return true;
+      return false;
+    }
+
+    function rowNavHref(tr) {
+      var openLink = tr.querySelector('a.row-open-link');
+      if (openLink && openLink.getAttribute('href')) {
+        return openLink.getAttribute('href');
+      }
+      // Fallback: opt-in attribute on the row itself for pages that
+      // don't render a row-open-link cell.
+      return tr.getAttribute('data-row-href') || null;
+    }
+
     tbody.addEventListener('click', function(e) {
-      // Clicks on the open-detail link / any child anchor should
-      // navigate normally, not open an editor.
-      if (e.target.closest('a, .row-open-link')) return;
+      if (shouldBailFromRowNav(e.target)) return;
+
+      var tr = e.target.closest('tr[data-row-id]');
+      if (!tr || !tbody.contains(tr)) return;
+
+      var href = rowNavHref(tr);
+      if (!href) {
+        // Page didn't expose a nav URL — fall through to legacy behavior
+        // (activate inline-edit on click) so existing pages without
+        // row-open-link cells still work.
+        var ieLegacy = e.target.closest('.ie');
+        if (ieLegacy && tbody.contains(ieLegacy) && !ieLegacy.querySelector('.ie-input')) {
+          activate(ieLegacy);
+        }
+        return;
+      }
+
+      var ie = e.target.closest('.ie');
+      var clickIsOnEditableCell = !!(ie && tbody.contains(ie) && !ie.querySelector('.ie-input'));
+      lastClickWasIe = clickIsOnEditableCell;
+
+      if (pendingNavTimer) {
+        clearTimeout(pendingNavTimer);
+        pendingNavTimer = null;
+      }
+
+      if (clickIsOnEditableCell) {
+        // Defer navigation so a follow-up dblclick can take over and
+        // open the editor instead.
+        pendingNavTimer = setTimeout(function() {
+          pendingNavTimer = null;
+          window.location.href = href;
+        }, DOUBLE_CLICK_MS);
+      } else {
+        // Plain cell — navigate immediately. New-tab / cmd-click
+        // already works via the row-open-link anchor (which is in
+        // the bail-list above).
+        window.location.href = href;
+      }
+    });
+
+    tbody.addEventListener('dblclick', function(e) {
+      if (shouldBailFromRowNav(e.target)) return;
+
+      // Cancel any pending single-click navigation.
+      if (pendingNavTimer) {
+        clearTimeout(pendingNavTimer);
+        pendingNavTimer = null;
+      }
 
       var ie = e.target.closest('.ie');
       if (!ie || !tbody.contains(ie)) return;
-      // Already editing? Leave the input alone.
       if (ie.querySelector('.ie-input')) return;
       activate(ie);
     });

@@ -2234,6 +2234,30 @@ fieldset.qualification-box select {
   background: var(--bg-alt);
 }
 
+/* Single-click anywhere on a row navigates to the row's detail page;
+   double-click on an inline-edit cell activates the editor. The
+   pointer cursor + soft hover bg signal that a row is clickable. */
+.opp-list-table tbody tr[data-row-id] {
+  cursor: pointer;
+}
+.opp-list-table tbody tr[data-row-id]:hover {
+  background: var(--bg-alt);
+}
+/* Keep the tighter cursor on inputs/anchors so they don't inherit
+   the pointer (otherwise a date-picker input inside a clickable row
+   gets a misleading pointer cursor when really it should show
+   text/I-beam). */
+.opp-list-table tbody tr[data-row-id] a,
+.opp-list-table tbody tr[data-row-id] button,
+.opp-list-table tbody tr[data-row-id] input,
+.opp-list-table tbody tr[data-row-id] select,
+.opp-list-table tbody tr[data-row-id] textarea {
+  cursor: auto;
+}
+.opp-list-table tbody tr[data-row-id] a {
+  cursor: pointer;
+}
+
 /* Draggable column resize grip. Straddles the column boundary so the
    hit target is 10px wide (5px on each side of the divider). The grip
    itself is invisible; a 1px pseudo-element in the middle shows the
