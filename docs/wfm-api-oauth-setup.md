@@ -1,13 +1,28 @@
 # WorkflowMax (BlueRock / WFM2) — OAuth setup walkthrough
 
 **Status:** Phase 0 of the migration plan. Read this once, register the
-app, paste the credentials into `.env`, then run the probe script.
+app, paste the credentials into `.env.local`, then run the probe script.
 
-**Last updated:** 2026-04-30
-**Researched against:** the BlueRock support article on API authentication,
-the v2 docs at `api-docs.workflowmax.com`, the SwaggerHub spec, and the
-Airbyte connector's source notes. Items I couldn't pin down via public
-docs are flagged ❓ — confirm them once you're inside the portal.
+**Last updated:** 2026-04-30 (post-spec confirmation)
+**Sourced from:** the BlueRock auth article (`support.workflowmax.com/.../API-authentication`)
+plus the OAS 3.0 reference at `api.workflowmax2.com`. Most of the items
+flagged ❓ in the first draft of this doc are now confirmed; the few
+remaining ❓s are gaps the live portal will resolve.
+
+## Quick reference — confirmed facts
+
+| Thing | Value |
+|---|---|
+| OAuth authorize URL | `https://oauth.workflowmax.com/oauth/authorize` (no "2") |
+| OAuth token URL | `https://oauth.workflowmax.com/oauth/token` (no "2") |
+| API base URL | `https://api.workflowmax2.com/` (with "2") |
+| Required scopes | `openid profile email workflowmax offline_access` |
+| Endpoint shape | `/{resource}.api/{action}` (legacy v1 paths, JSON responses) |
+| Tenant header | `account_id: <Org ID>` |
+| Org ID source | inside the access-token JWT (decode it, look for the org claim) |
+| Access token TTL | 30 minutes |
+| Refresh token TTL | 60 days, rotates on every use |
+| Rate limits | 5 concurrent · 60/min · 5000/day |
 
 ---
 
@@ -27,39 +42,47 @@ You need:
 ## 2. Register the OAuth app
 
 1. **Sign in to WFM** at `https://app.workflowmax2.com`.
-2. **Find the developer portal.** BlueRock's support article (linked
-   below) refers to a "developer portal" but doesn't quote the URL.
-   The two likely paths:
-   - **In-app**: Settings → Integrations → Developer / API (or
-     similar). Look for a "Create app" or "API credentials" button.
-   - **External portal**: try `https://developer.workflowmax2.com`
-     (not confirmed in public docs ❓ — log in and check).
-3. **Click "Create app" / "Register application"** (the exact wording
-   may differ).
+2. **Open the developer portal.** The BlueRock auth article links to a
+   "this can be created here" page that hosts the app registration —
+   the exact URL isn't quoted in the public copy I have, but the link
+   is clickable from inside the article at
+   `https://support.workflowmax.com/hc/en-us/articles/28754786654233-API-authentication`.
+   ❓ Once you click through, paste the URL back to me so I can lock
+   it into this doc.
+3. **Click "Create app" / "Register application"** (wording may vary).
 4. Fill in the app details:
    - **App name:** `C-LARS Pipeline Migration` (or similar — only you
      see this)
    - **Description:** `Server-to-server integration for migrating WFM
      data into our internal CRM (Pipeline). Read-only access.`
-   - **Redirect URI** (required for the auth-code flow):
-     `http://localhost:8787/wfm/oauth-callback`
-     This is where BlueRock will send the authorization code after
-     consent. We'll spin up a tiny local listener once during initial
-     setup; after that, refresh-token-only flows use no redirect.
-   - **Scopes:** request **`workflowmax`** + **`offline_access`**.
-     `workflowmax` is the API access scope; `offline_access` is what
-     gives you a refresh token (without it, you'd have to redo the
-     consent every 30 minutes).
-   - **PKCE:** ❓ enable if offered. If the form has no PKCE option,
-     proceed without it — server-side OAuth flows tolerate either.
-5. **Save.** WFM should show you:
-   - **Client ID** (public, paste into `.env`)
-   - **Client Secret** (private — paste into `.env`, never commit)
-6. **Note your tenant / org UUID.** It's embedded in the access
-   token (decodable JWT) but if WFM displays a "Tenant ID" or
-   "Organization ID" in the developer portal, copy that too — saves
-   us a step. ❓ The exact label varies between Xero-era pages and
-   BlueRock's rebuild.
+   - **Redirect URI** (required for the auth-code flow): the auth article
+     says this MUST be HTTPS. For the one-shot bootstrap we'll use a
+     local dev URL — try `https://localhost:8787/wfm/oauth-callback`
+     first; if BlueRock rejects localhost outright, fall back to a
+     temporary Cloudflare Pages route on `https://pms.c-lars.com/wfm/oauth-callback`.
+     This is where BlueRock returns the authorization code after consent.
+     After the bootstrap, refresh-token-only flows use no redirect, so
+     the URL only matters once.
+   - **Scopes:** request **all five** —
+     `openid profile email workflowmax offline_access`. The
+     `openid email profile` trio is required by OpenID Connect; `workflowmax`
+     is the actual API scope; `offline_access` is what gives you a
+     refresh token (without it, you'd have to redo the consent every
+     30 minutes).
+   - **PKCE:** ❓ enable if offered. The auth article doesn't mention
+     PKCE either way; server-side flows tolerate either. If the
+     registration form requires it, the bootstrap step below needs
+     a `code_challenge` — easy to add when we know.
+5. **Save.** WFM will show you:
+   - **Client ID** (public, paste into `.env.local`)
+   - **Client Secret** (private — paste into `.env.local`, never commit)
+6. **Don't worry about the tenant / Org ID.** Per BlueRock's auth
+   article, the Org ID lives inside the access-token JWT — the
+   api-client decodes it on every refresh and uses it automatically
+   as the `account_id` header. If you DO see one displayed in the
+   developer portal, copy it into `WFM_TENANT_ID` in `.env.local`
+   so the script doesn't have to extract it (saves a tiny bit of
+   work, also gives a clearer error message if the JWT shape changes).
 
 ---
 
@@ -72,49 +95,64 @@ I'll write a one-shot helper later in Phase 0 once you confirm the
 exact authorize / token URLs from your portal. Until then, the
 manual fallback works:
 
-1. Open this URL in your browser, replacing `<CLIENT_ID>` with yours:
+1. Open this URL in your browser, replacing `<CLIENT_ID>` and
+   `<REDIRECT_URI>` with yours (both URL-encoded). Note: `oauth.workflowmax.com`
+   has **no "2"**.
    ```
-   https://oauth.workflowmax2.com/oauth/authorize
+   https://oauth.workflowmax.com/oauth/authorize
      ?response_type=code
      &client_id=<CLIENT_ID>
-     &redirect_uri=http://localhost:8787/wfm/oauth-callback
-     &scope=workflowmax%20offline_access
+     &redirect_uri=<REDIRECT_URI>
+     &scope=openid%20profile%20email%20workflowmax%20offline_access
      &state=phase0-bootstrap
+     &prompt=consent
    ```
 2. Sign in to WFM if prompted; click **Allow** when asked to grant
    the app access. Pick the C-LARS tenant if you're in multiple orgs.
 3. The browser will be redirected to
-   `http://localhost:8787/wfm/oauth-callback?code=<AUTH_CODE>&state=phase0-bootstrap`.
-   Nothing's listening there yet, so you'll see a "this site can't be
+   `<REDIRECT_URI>?code=<AUTH_CODE>&state=phase0-bootstrap`.
+   If nothing's listening there, you'll see a "this site can't be
    reached" page — **that's fine.** Copy the entire `code=` value
-   from the URL bar.
-4. Exchange the code for tokens via curl:
+   from the URL bar (just the `code` value, not the rest).
+4. Exchange the code for tokens via curl. **Send the credentials in
+   the body** (per BlueRock's note: "this is different to the
+   WorkflowMax by Xero API, which passes this information via headers"):
    ```bash
-   curl -X POST https://oauth.workflowmax2.com/oauth/token \
+   curl -X POST https://oauth.workflowmax.com/oauth/token \
      -H 'content-type: application/x-www-form-urlencoded' \
      -d 'grant_type=authorization_code' \
      -d 'client_id=<CLIENT_ID>' \
      -d 'client_secret=<CLIENT_SECRET>' \
-     -d 'redirect_uri=http://localhost:8787/wfm/oauth-callback' \
+     -d 'redirect_uri=<REDIRECT_URI>' \
      -d 'code=<PASTE_THE_CODE_HERE>'
    ```
 5. The response includes `access_token`, `refresh_token`, `expires_in`
-   (typically 1800 = 30 min), and possibly `id_token`. **Save the
-   `refresh_token`.**
+   (1800 = 30 min), `token_type: Bearer`, and likely `id_token` (since
+   we requested `openid`). **Save the `refresh_token`** — you'll paste
+   it into `.env.local`. Decode the `access_token` at jwt.io if you
+   want to eyeball the org-ID claim.
 
 ---
 
 ## 4. Populate `.env` for the importer
 
-Create or extend `.env.local` (gitignored) at the repo root:
+Create or extend `.env.local` (gitignored) at the repo root. Only the
+first three are strictly required — the rest already have correct
+defaults baked into `scripts/wfm/api-client.mjs`:
 
 ```
 WFM_CLIENT_ID=<from-step-2>
 WFM_CLIENT_SECRET=<from-step-2>
 WFM_REFRESH_TOKEN=<from-step-3>
-WFM_TENANT_ID=<from-step-2-or-decode-jwt>
-WFM_OAUTH_TOKEN_URL=https://oauth.workflowmax2.com/oauth/token
-WFM_API_BASE=https://api.workflowmax2.com
+
+# Optional — script auto-extracts from JWT if omitted:
+# WFM_TENANT_ID=<org-id-from-jwt>
+
+# Optional overrides (defaults shown):
+# WFM_OAUTH_TOKEN_URL=https://oauth.workflowmax.com/oauth/token
+# WFM_API_BASE=https://api.workflowmax2.com
+# WFM_TENANT_HEADER_NAME=account_id
+# WFM_SCOPES=openid profile email workflowmax offline_access
 ```
 
 The api-client reads these on startup. **Do not commit `.env.local`** —
@@ -124,19 +162,26 @@ the repo's `.gitignore` already covers it; double-check before pushing.
 
 ## 5. Verify
 
-After you've got those four values in `.env.local`, run:
+After you've got those values in `.env.local`, run:
 
 ```bash
 node scripts/wfm/api-client.mjs --whoami
 ```
 
 That round-trips the refresh token, prints the decoded JWT (so you can
-sanity-check the tenant), and exits 0. If you get a 401 or a parsing
+sanity-check the org ID), and exits 0. If you get a 401 or a parsing
 error, the most common causes are:
-- `WFM_TENANT_ID` doesn't match what's actually in the JWT (the api
-  client will print both)
-- The `Authorization` / tenant header pair isn't quite right ❓ — see
-  the gap callout below
+- The refresh token has been used already (BlueRock invalidates it
+  the moment a new one is issued — the script auto-rotates and
+  rewrites `.env.local`, but if you ran the curl bootstrap and then
+  ran something else against the same token before this script, the
+  token is dead and you have to redo the consent flow).
+- The redirect URI on the auth-code request didn't match the one
+  registered in the app — BlueRock returns a vague "invalid_grant" in
+  that case. Re-check the redirect string is identical.
+- The JWT has no recognizable org-ID claim — `--whoami` prints the
+  full payload; eyeball it for any field that looks like an org/tenant
+  ID, then set `WFM_TENANT_ID` explicitly in `.env.local` and rerun.
 
 ---
 
@@ -156,19 +201,18 @@ to Phase 1 (schema sign-off).
 
 ---
 
-## 7. Open gaps to confirm against the live portal
+## 7. Open gaps remaining
 
-These are things public BlueRock docs didn't fully spell out. Once
-you're inside the portal in step 2, please verify and ping back so I
-can update this doc:
+Most of the original gaps closed once the BlueRock auth article + OAS
+3.0 spec became available. What's left:
 
-| Item | Why it matters |
+| Item | Status / impact |
 |---|---|
-| **Developer-portal URL** (`developer.workflowmax2.com` or in-app?) | The walkthrough above guesses both; pin the right one. |
-| **Tenant header name** on `api.workflowmax2.com` (`xero-tenant-id` from the Xero era vs. `account-id` / `tenant-id` in the rebuild) | Every authenticated request needs it. The api-client tries `xero-tenant-id` first; if that 401s we'll fall through. |
-| **PKCE required?** | Server-side flows work without; just confirm it's not enforced. |
-| **Pagination parameter names** (`?page=N&pageSize=M` vs. cursor-based) | The api-client guesses `page` + `pageSize`; the probe will confirm or surface the right names. |
-| **Document/attachment endpoint paths** | v2 docs mention nested endpoints under jobs / clients / leads / suppliers / POs but don't quote them. |
+| **Developer-portal URL** | Still ❓ — the auth article has a clickable "this can be created here" link but the URL isn't in the public copy. Paste the URL once you've clicked it so I can lock it in. |
+| **PKCE required?** | Still ❓ — auth article doesn't mention it. The bootstrap above omits PKCE; if registration insists on it, we'll add `code_challenge` + `code_verifier` to the curl command. |
+| **Pagination parameter names** | Probably `?page=N&pageSize=M` (legacy v1 convention), but the OAS 3.0 spec didn't show the parameter list in what I have. The probe sends that pair and reports what came back; we'll confirm from `docs/wfm-api-probe-results.md`. |
+| **Org ID claim name in JWT** | Confirmed by docs as "Org ID" but not the exact JWT claim name. The api-client tries `org_id`/`orgId`/`organization_id`/`tenant_id`/`tid` and falls back to a fuzzy match. `--whoami` shows the full payload so we can eyeball the right field. |
+| **Per-resource document-endpoint coverage** | Confirmed: documents are nested under clients (`/client.api/documents/{uuid}`) and jobs (`/job.api/documents/{job_number}`). The probe walks both. The OAS spec also lists POST upload endpoints (`/client.api/document`, `/job.api/document`) — read-only probe doesn't hit those. |
 
 ---
 
@@ -176,9 +220,17 @@ can update this doc:
 
 - BlueRock support — API authentication article:
   https://support.workflowmax.com/hc/en-us/articles/28754786654233-API-authentication
+  (the canonical source for the auth flow — sourced everything in §1
+  of this doc from here)
+- BlueRock v1 OAS 3.0 reference (live, no login required):
+  https://api.workflowmax2.com/ — has the full endpoint list (Client,
+  Job, Quote, Lead, Staff, Custom Field, etc.) plus schema definitions.
+  Hosted at the same domain as the API itself; click "Export" to grab
+  the OpenAPI JSON.
 - v2 API docs (some pages render client-side, login may be required):
   https://api-docs.workflowmax.com/overview
-- SwaggerHub OpenAPI 3 spec (gated behind login):
+- SwaggerHub OpenAPI 3 spec (gated behind login — superseded by the
+  live `api.workflowmax2.com` reference above):
   https://app.swaggerhub.com/apis-docs/WorkflowMax-BlueRock/WorkflowMax-BlueRock-OpenAPI3/0.1
 - Airbyte connector source (useful for endpoint inventory):
   https://docs.airbyte.com/integrations/sources/workflowmax

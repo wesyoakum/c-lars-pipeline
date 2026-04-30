@@ -25,10 +25,15 @@
 //   WFM_CLIENT_ID
 //   WFM_CLIENT_SECRET
 //   WFM_REFRESH_TOKEN
-//   WFM_TENANT_ID            — UUID of the C-LARS WFM org
-//   WFM_OAUTH_TOKEN_URL      — defaults to https://oauth.workflowmax2.com/oauth/token
+//   WFM_TENANT_ID            — Org ID of the C-LARS WFM tenant. Optional —
+//                              if omitted, --whoami / apiGet auto-extract
+//                              it from the JWT payload's org-id claim.
+//   WFM_OAUTH_TOKEN_URL      — defaults to https://oauth.workflowmax.com/oauth/token
+//                              (note: workflowmax.com, NOT workflowmax2)
 //   WFM_API_BASE             — defaults to https://api.workflowmax2.com
-//   WFM_TENANT_HEADER_NAME   — defaults to xero-tenant-id (override if BlueRock renamed it)
+//                              (note: workflowmax2.com — server has the "2")
+//   WFM_TENANT_HEADER_NAME   — defaults to "account_id" per BlueRock auth docs
+//   WFM_SCOPES               — defaults to "openid profile email workflowmax offline_access"
 //
 // The refresh token rotates with every refresh per OAuth spec. We
 // write the new value back to .env.local automatically so the next
@@ -121,10 +126,33 @@ function getConfig() {
     clientSecret:    process.env.WFM_CLIENT_SECRET,
     refreshToken:    process.env.WFM_REFRESH_TOKEN,
     tenantId:        process.env.WFM_TENANT_ID || '',
-    tokenUrl:        process.env.WFM_OAUTH_TOKEN_URL || 'https://oauth.workflowmax2.com/oauth/token',
+    tokenUrl:        process.env.WFM_OAUTH_TOKEN_URL || 'https://oauth.workflowmax.com/oauth/token',
     apiBase:         process.env.WFM_API_BASE || 'https://api.workflowmax2.com',
-    tenantHeaderName: process.env.WFM_TENANT_HEADER_NAME || 'xero-tenant-id',
+    tenantHeaderName: process.env.WFM_TENANT_HEADER_NAME || 'account_id',
+    scopes:          process.env.WFM_SCOPES || 'openid profile email workflowmax offline_access',
   };
+}
+
+// Pull the org / account ID out of the JWT payload. BlueRock's auth
+// article calls it "Org ID" / "Organisation ID" but doesn't say which
+// claim name they use. We try the common ones in order.
+function extractOrgIdFromJwt(payload) {
+  if (!payload || typeof payload !== 'object') return '';
+  const candidates = [
+    'org_id', 'orgId', 'organization_id', 'organisationId',
+    'account_id', 'accountId', 'tenant_id', 'tenantId', 'tid',
+  ];
+  for (const k of candidates) {
+    if (payload[k]) return String(payload[k]);
+  }
+  // Some OAuth providers nest the org under a custom claim. Look for
+  // any string-shaped value whose key looks org-shaped, as a last resort.
+  for (const [k, v] of Object.entries(payload)) {
+    if (/org|tenant|account/i.test(k) && typeof v === 'string' && v.length >= 8) {
+      return v;
+    }
+  }
+  return '';
 }
 
 // ---------------------------------------------------------------------
@@ -133,21 +161,34 @@ function getConfig() {
 
 let _cachedAccessToken = null;
 let _cachedTokenExpiresAt = 0;
+let _cachedOrgIdFromJwt = '';
 
 export async function getAccessToken({ force = false } = {}) {
   if (!force && _cachedAccessToken && Date.now() < _cachedTokenExpiresAt - 30_000) {
     return _cachedAccessToken;
   }
   const cfg = getConfig();
+  // BlueRock auth article (Refreshing tokens section) says the refresh
+  // request should include grant_type, refresh_token, client_id,
+  // client_secret, AND the same scope from the original consent. They
+  // also mention an Authorization header carrying client_id+secret —
+  // adding that as Basic auth doesn't hurt and covers both styles.
   const body = new URLSearchParams({
     grant_type:    'refresh_token',
     client_id:     cfg.clientId,
     client_secret: cfg.clientSecret,
     refresh_token: cfg.refreshToken,
+    scope:         cfg.scopes,
   });
+  const basic = Buffer
+    .from(`${cfg.clientId}:${cfg.clientSecret}`)
+    .toString('base64');
   const res = await fetch(cfg.tokenUrl, {
     method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      authorization:  `Basic ${basic}`,
+    },
     body,
   });
   const text = await res.text();
@@ -167,6 +208,12 @@ export async function getAccessToken({ force = false } = {}) {
   }
   _cachedAccessToken = access;
   _cachedTokenExpiresAt = Date.now() + expiresIn * 1000;
+
+  // Extract the org ID from the JWT and cache it. apiGet uses this when
+  // the user didn't set WFM_TENANT_ID explicitly — BlueRock requires
+  // every API call to carry the org ID in the account_id header.
+  const jwt = decodeJwtPayload(access);
+  _cachedOrgIdFromJwt = extractOrgIdFromJwt(jwt);
 
   // BlueRock rotates the refresh token on each use. Persist the new
   // one so the next run can authenticate.
@@ -204,8 +251,12 @@ export async function apiGet(pathOrUrl, opts = {}) {
     accept: 'application/json',
     authorization: `Bearer ${token}`,
   };
-  if (cfg.tenantId) {
-    headers[cfg.tenantHeaderName] = cfg.tenantId;
+  // Tenant header: prefer the env override; fall back to the org ID
+  // we cached from the JWT during the last refresh. BlueRock requires
+  // this on every authenticated request.
+  const tenantId = cfg.tenantId || _cachedOrgIdFromJwt;
+  if (tenantId) {
+    headers[cfg.tenantHeaderName] = tenantId;
   }
   // Allow callers to override / supplement headers.
   Object.assign(headers, opts.headers || {});
@@ -313,8 +364,13 @@ async function main() {
       console.log('Could not decode access token as a JWT (might be opaque).');
     }
     const cfg = getConfig();
+    const effectiveTenant = cfg.tenantId || _cachedOrgIdFromJwt;
     console.log(`API base:         ${cfg.apiBase}`);
-    console.log(`Tenant header:    ${cfg.tenantHeaderName} = ${cfg.tenantId || '(not set)'}`);
+    console.log(`OAuth scopes:     ${cfg.scopes}`);
+    console.log(`Tenant header:    ${cfg.tenantHeaderName} = ${effectiveTenant || '(none — JWT had no org claim)'}`);
+    if (!cfg.tenantId && _cachedOrgIdFromJwt) {
+      console.log(`                  ↳ auto-extracted from JWT (set WFM_TENANT_ID in .env.local to pin it)`);
+    }
     return;
   }
 
@@ -344,8 +400,10 @@ async function main() {
 
 Examples:
   node scripts/wfm/api-client.mjs --whoami
-  node scripts/wfm/api-client.mjs --get /v2/clients?page=1&pageSize=1
-  node scripts/wfm/api-client.mjs --get /v2/jobs?pageSize=2
+  node scripts/wfm/api-client.mjs --get /staff.api/list
+  node scripts/wfm/api-client.mjs --get /client.api/list?page=1&pageSize=2
+  node scripts/wfm/api-client.mjs --get /quote.api/current
+  node scripts/wfm/api-client.mjs --get /customfield.api/definition
 `);
 }
 
