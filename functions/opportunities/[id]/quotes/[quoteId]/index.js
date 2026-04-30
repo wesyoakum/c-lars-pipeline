@@ -185,12 +185,22 @@ export async function onRequestGet(context) {
             <span class="pill ${statusPillClass(quote.status)}">${escape(QUOTE_STATUS_LABELS[quote.status] ?? quote.status)}</span>
             <span class="header-value" id="q-header-total">${fmtDollar(total)}</span>
           </h1>
-          <p class="muted" style="margin:0.15rem 0 0;font-size:0.85em">
-            ${escape(quoteTypeDisplayLabel(quote.quote_type))}
-            · ${escape(quote.revision)}
-            ${quote.title ? html` · ${escape(quote.title)}` : ''}
+          <p class="muted" style="margin:0.15rem 0 0;font-size:0.85em;display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap">
+            ${readOnly || isHybrid
+              ? html`<span>${escape(quoteTypeDisplayLabel(quote.quote_type))}${isHybrid ? html` <span class="pill" style="font-size:0.85em">HYBRID</span>` : ''}</span>`
+              : html`<select class="header-type-select"
+                             style="font-size:inherit;padding:0.05rem 0.3rem;border:1px solid var(--border);background:var(--bg);border-radius:4px;color:inherit"
+                             @change="window._qPatch('quote_type', $event.target.value)">
+                  ${quoteTypeOptions.map(qt => html`
+                    <option value="${escape(qt)}" ${qt === quote.quote_type ? 'selected' : ''}>
+                      ${escape(QUOTE_TYPE_LABELS[qt] ?? qt)}
+                    </option>
+                  `)}
+                </select>`}
+            <span>· ${escape(quote.revision)}</span>
+            ${quote.title ? html`<span>· ${escape(quote.title)}</span>` : ''}
             ${quote.supersedes_quote_id
-              ? html` · supersedes <a href="/opportunities/${escape(oppId)}/quotes/${escape(quote.supersedes_quote_id)}">${escape(quote.supersedes_number ?? '')} ${escape(quote.supersedes_revision ?? '')}</a>`
+              ? html`<span>· supersedes <a href="/opportunities/${escape(oppId)}/quotes/${escape(quote.supersedes_quote_id)}">${escape(quote.supersedes_number ?? '')} ${escape(quote.supersedes_revision ?? '')}</a></span>`
               : ''}
           </p>
         </div>
@@ -341,16 +351,6 @@ export async function onRequestGet(context) {
         <div>
           <h2 class="quote-banner-title">QUOTATION</h2>
           <p class="quote-banner-subtitle">${escape(quoteTypeSubtitle(quote.quote_type))}</p>
-          ${readOnly || isHybrid
-            ? html`<p class="quote-banner-type">${escape(quoteTypeDisplayLabel(quote.quote_type))}${isHybrid ? html` <span class="pill" style="font-size:0.6em;vertical-align:middle">HYBRID</span>` : ''}</p>`
-            : html`<select class="quote-banner-type-select"
-                           @change="window._qPatch('quote_type', $event.target.value)">
-                ${quoteTypeOptions.map(qt => html`
-                  <option value="${escape(qt)}" ${qt === quote.quote_type ? 'selected' : ''}>
-                    ${escape(QUOTE_TYPE_LABELS[qt] ?? qt)}
-                  </option>
-                `)}
-              </select>`}
         </div>
         <img src="/img/logo-black.png" alt="C-LARS" class="quote-banner-logo">
       </div>
