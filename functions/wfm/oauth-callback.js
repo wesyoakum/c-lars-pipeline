@@ -71,9 +71,15 @@ export async function onRequestGet(context) {
     ));
   }
 
-  // Pre-baked curl command the user can copy. We can't fill in
-  // CLIENT_ID/CLIENT_SECRET here without leaking them — they live in
-  // .env.local. So the curl shows placeholders the user replaces.
+  // Pre-baked Node command — reads WFM_CLIENT_ID / WFM_CLIENT_SECRET
+  // out of .env.local automatically, exchanges the code, and writes
+  // the refresh token back to .env.local. Much simpler than curl on
+  // Windows where shell-variable expansion in PowerShell vs cmd.exe
+  // would otherwise be a footgun.
+  const nodeCmd = `node scripts/wfm/api-client.mjs --bootstrap-token ${code}`;
+
+  // curl command kept as a fallback for anyone not on a machine with
+  // a checked-out repo (or who'd rather inspect the raw HTTP response).
   const curlCmd = [
     `curl -X POST https://oauth.workflowmax.com/oauth/token \\`,
     `  -H 'content-type: application/x-www-form-urlencoded' \\`,
@@ -95,8 +101,8 @@ export async function onRequestGet(context) {
 
       <h2 style="margin-top:1.4rem">1. Code</h2>
       <p class="muted" style="margin-top:0;font-size:.85rem">Copy this
-        and paste into the curl command below as the <code>code=</code>
-        value.</p>
+        if you want to inspect it; the recommended command below
+        already has it baked in.</p>
       <div style="display:flex;gap:.5rem;align-items:flex-start">
         <input id="code-box" type="text" readonly
                value="${escape(code)}"
@@ -104,27 +110,31 @@ export async function onRequestGet(context) {
         <button type="button" class="btn" onclick="copyCode()">Copy code</button>
       </div>
 
-      <h2 style="margin-top:1.4rem">2. Curl bootstrap</h2>
-      <p class="muted" style="margin-top:0;font-size:.85rem">Run this
-        from a terminal where <code>$WFM_CLIENT_ID</code> /
-        <code>$WFM_CLIENT_SECRET</code> are set (e.g. your dev shell
-        with <code>.env.local</code> sourced). The redirect URI is
-        baked in for you.</p>
-      <pre style="background:#0d1117;color:#c9d1d9;padding:.75rem .9rem;border-radius:4px;overflow-x:auto;font-size:.82rem;line-height:1.5"><code id="curl-box">${escape(curlCmd)}</code></pre>
-      <button type="button" class="btn" onclick="copyCurl()" style="margin-top:.4rem">Copy curl command</button>
+      <h2 style="margin-top:1.4rem">2. Run the bootstrap (recommended)</h2>
+      <p class="muted" style="margin-top:0;font-size:.85rem">From a
+        terminal at the repo root (PowerShell on Windows, bash on
+        macOS/Linux). Reads <code>WFM_CLIENT_ID</code> and
+        <code>WFM_CLIENT_SECRET</code> from <code>.env.local</code>,
+        exchanges the code for tokens, and writes
+        <code>WFM_REFRESH_TOKEN</code> back to <code>.env.local</code>
+        automatically.</p>
+      <pre style="background:#0d1117;color:#c9d1d9;padding:.75rem .9rem;border-radius:4px;overflow-x:auto;font-size:.82rem;line-height:1.5"><code id="node-box">${escape(nodeCmd)}</code></pre>
+      <button type="button" class="btn" onclick="copyNode()" style="margin-top:.4rem">Copy Node command</button>
 
-      <h2 style="margin-top:1.4rem">3. Save the refresh token</h2>
-      <p>The response will look like:</p>
-      <pre style="background:#f6f8fa;padding:.6rem .8rem;border-radius:4px;font-size:.82rem;border:1px solid var(--border)">{
-  "access_token":  "eyJhbGciOi...",
-  "expires_in":    1800,
-  "token_type":    "Bearer",
-  "refresh_token": "...",
-  "scope":         "openid profile email workflowmax offline_access"
-}</pre>
-      <p>Add the <code>refresh_token</code> to <code>.env.local</code>
-        as <code>WFM_REFRESH_TOKEN</code>, then run
-        <code>node scripts/wfm/api-client.mjs --whoami</code> to verify.</p>
+      <h2 style="margin-top:1.4rem">3. Verify</h2>
+      <p>Once the bootstrap prints <strong>✅ Refresh token saved</strong>:</p>
+      <pre style="background:#0d1117;color:#c9d1d9;padding:.75rem .9rem;border-radius:4px;font-size:.82rem;line-height:1.5"><code>node scripts/wfm/api-client.mjs --whoami
+node scripts/wfm/probe.mjs</code></pre>
+
+      <details style="margin-top:1.4rem">
+        <summary style="cursor:pointer;font-weight:600">Fallback: raw curl (if you can't run Node here)</summary>
+        <p class="muted" style="margin-top:.6rem;font-size:.85rem">Set
+          <code>$WFM_CLIENT_ID</code> and <code>$WFM_CLIENT_SECRET</code>
+          first (e.g. <code>$env:WFM_CLIENT_ID = "…"</code> in
+          PowerShell), then:</p>
+        <pre style="background:#0d1117;color:#c9d1d9;padding:.75rem .9rem;border-radius:4px;overflow-x:auto;font-size:.82rem;line-height:1.5"><code id="curl-box">${escape(curlCmd)}</code></pre>
+        <button type="button" class="btn" onclick="copyCurl()" style="margin-top:.4rem">Copy curl command</button>
+      </details>
     </section>
 
     <script>
@@ -134,9 +144,12 @@ export async function onRequestGet(context) {
       el.setSelectionRange(0, el.value.length);
       navigator.clipboard.writeText(el.value);
     }
+    function copyNode() {
+      navigator.clipboard.writeText(document.getElementById('node-box').innerText);
+    }
     function copyCurl() {
-      var text = document.getElementById('curl-box').innerText;
-      navigator.clipboard.writeText(text);
+      var el = document.getElementById('curl-box');
+      if (el) navigator.clipboard.writeText(el.innerText);
     }
     </script>
   `;

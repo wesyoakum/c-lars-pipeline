@@ -350,8 +350,111 @@ function looksLikeLastPage(body) {
 // CLI
 // ---------------------------------------------------------------------
 
+// One-shot token exchange: trade an authorization code for an access
+// token + refresh token, then write the refresh token to .env.local.
+// Used during the Phase 0 bootstrap — the developer does the OAuth
+// consent in their browser, lands on /wfm/oauth-callback, copies the
+// `code` query-string value, and runs:
+//
+//   node scripts/wfm/api-client.mjs --bootstrap-token <CODE>
+//
+// This avoids hand-rolling a curl with shell variables on Windows.
+// Returns the printed JWT payload so the user can sanity-check the
+// org ID before running the probe.
+async function bootstrapToken(code) {
+  applyEnvLocal();
+  const clientId     = process.env.WFM_CLIENT_ID;
+  const clientSecret = process.env.WFM_CLIENT_SECRET;
+  const tokenUrl     = process.env.WFM_OAUTH_TOKEN_URL || 'https://oauth.workflowmax.com/oauth/token';
+  const redirectUri  = process.env.WFM_REDIRECT_URI || 'https://c-lars-pms.pages.dev/wfm/oauth-callback';
+  const scopes       = process.env.WFM_SCOPES || 'openid profile email workflowmax offline_access';
+
+  if (!clientId || !clientSecret) {
+    throw new Error('WFM_CLIENT_ID and WFM_CLIENT_SECRET must be set in .env.local before --bootstrap-token.');
+  }
+
+  console.log('Exchanging authorization code for tokens…');
+  console.log(`  token URL:    ${tokenUrl}`);
+  console.log(`  redirect URI: ${redirectUri}`);
+  console.log(`  scopes:       ${scopes}`);
+
+  const body = new URLSearchParams({
+    grant_type:    'authorization_code',
+    code,
+    client_id:     clientId,
+    client_secret: clientSecret,
+    redirect_uri:  redirectUri,
+  });
+  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+
+  const res = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      authorization:  `Basic ${basic}`,
+    },
+    body,
+  });
+  const text = await res.text();
+  if (!res.ok) {
+    console.error(`\n❌ Token exchange failed (${res.status}):`);
+    console.error(text);
+    console.error('\nCommon causes:');
+    console.error('  - The auth code was already used (each is single-use, ~10-minute TTL).');
+    console.error('  - WFM_REDIRECT_URI doesn\'t match the URI registered on the BlueRock app.');
+    console.error('  - Wrong WFM_CLIENT_ID / WFM_CLIENT_SECRET.');
+    console.error('Re-run the authorize URL to get a fresh code, then try again.');
+    process.exitCode = 1;
+    return;
+  }
+
+  let payload;
+  try { payload = JSON.parse(text); }
+  catch { console.error('Response was not JSON:', text); process.exitCode = 1; return; }
+
+  if (!payload.refresh_token) {
+    console.error('❌ Response had no refresh_token. Did the consent grant include `offline_access`?');
+    console.error(JSON.stringify(payload, null, 2));
+    process.exitCode = 1;
+    return;
+  }
+
+  writeEnvLocalKeyValue('WFM_REFRESH_TOKEN', payload.refresh_token);
+  console.log(`\n✅ Refresh token saved to .env.local (length ${payload.refresh_token.length}).`);
+  console.log(`   Access token expires in ${payload.expires_in || '?'} seconds.`);
+
+  const jwt = decodeJwtPayload(payload.access_token);
+  if (jwt) {
+    const orgId = extractOrgIdFromJwt(jwt);
+    console.log(`\nOrg ID extracted from JWT: ${orgId || '(none found — see payload below)'}`);
+    if (!orgId) {
+      console.log('Set WFM_TENANT_ID manually in .env.local based on this payload:');
+    }
+    console.log(JSON.stringify(jwt, null, 2));
+  } else {
+    console.log('(Access token was not a JWT — opaque token, the org ID will need to be set manually.)');
+  }
+
+  console.log('\nNext steps:');
+  console.log('  node scripts/wfm/api-client.mjs --whoami    (verify the refresh round-trips)');
+  console.log('  node scripts/wfm/probe.mjs                  (probe every entity, write the report)');
+}
+
 async function main() {
   const argv = process.argv.slice(2);
+
+  const bootstrapIdx = argv.indexOf('--bootstrap-token');
+  if (bootstrapIdx >= 0) {
+    const code = argv[bootstrapIdx + 1];
+    if (!code || code.startsWith('--')) {
+      console.error('Usage: --bootstrap-token <AUTHORIZATION_CODE>');
+      process.exitCode = 1;
+      return;
+    }
+    await bootstrapToken(code);
+    return;
+  }
+
   if (argv.includes('--whoami')) {
     const token = await getAccessToken({ force: true });
     const payload = decodeJwtPayload(token);
@@ -395,10 +498,12 @@ async function main() {
   }
 
   console.log(`Usage:
+  node scripts/wfm/api-client.mjs --bootstrap-token <CODE>
   node scripts/wfm/api-client.mjs --whoami
   node scripts/wfm/api-client.mjs --get <path-or-full-url>
 
 Examples:
+  node scripts/wfm/api-client.mjs --bootstrap-token Yzhk…   (one-shot Phase 0 token exchange)
   node scripts/wfm/api-client.mjs --whoami
   node scripts/wfm/api-client.mjs --get /staff.api/list
   node scripts/wfm/api-client.mjs --get /client.api/list?page=1&pageSize=2
