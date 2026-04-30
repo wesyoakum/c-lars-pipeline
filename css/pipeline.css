@@ -2314,11 +2314,17 @@ fieldset.qualification-box select {
   gap: 0.5rem;
   padding: 0.25rem 0;
 }
+/* Cards flow horizontally with wrap — every cell is inline, the
+   "headline" cell (title / name / subject) grows to push the rest
+   onto the next line, and the actions cell pins to the right. The
+   layout settles into 2–3 visual lines per card on a typical row,
+   matching the user's reference design. */
 .opp-list[data-view-mode="card"] .opp-list-table tbody tr[data-row-id] {
   display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  padding: 0.7rem 0.85rem;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem 0.85rem;
+  padding: 0.7rem 1rem;
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -2326,24 +2332,50 @@ fieldset.qualification-box select {
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 .opp-list[data-view-mode="card"] .opp-list-table tbody tr[data-row-id]:hover {
-  background: var(--bg);
   border-color: var(--accent);
   box-shadow: 0 2px 6px rgba(0,0,0,0.06);
 }
 .opp-list[data-view-mode="card"] .opp-list-table tbody tr[data-row-id] td {
-  display: block;
+  display: inline-flex;
+  align-items: baseline;
   padding: 0;
   border: 0;
+  /* Reset all width / min-width / max-width values that listScript
+     may have inlined for the table view, so cells size to content. */
   width: auto !important;
-  /* Reset min-width so column-resize values don't apply. */
   min-width: 0 !important;
+  max-width: none !important;
   white-space: normal;
+  flex: 0 0 auto;
 }
-/* Empty cells in card mode are noisy — collapse them. The :empty
-   selector matches td with no content (most common in card mode
-   when a column was empty in this row). */
+/* Empty cells collapse so they don't introduce gaps in the wrap. */
 .opp-list[data-view-mode="card"] .opp-list-table tbody tr[data-row-id] td:empty {
   display: none;
+}
+/* Title-ish columns are the visual headline of the card. Bolder
+   weight + flex-grow so the cell expands and forces meta cells to
+   wrap onto the next line. */
+.opp-list[data-view-mode="card"] .opp-list-table tbody tr[data-row-id] td.col-title,
+.opp-list[data-view-mode="card"] .opp-list-table tbody tr[data-row-id] td.col-subject,
+.opp-list[data-view-mode="card"] .opp-list-table tbody tr[data-row-id] td.col-name {
+  font-weight: 600;
+  flex: 1 1 50%;
+}
+/* Right-edge cells (delete X, action buttons) pinned to the end of
+   the line so the card ends with the actions affordance. */
+.opp-list[data-view-mode="card"] .opp-list-table tbody tr[data-row-id] td.col-actions {
+  margin-left: auto;
+}
+/* Muted-row treatment carries through to card mode so dead /
+   rejected / completed rows still read as de-emphasized. */
+.opp-list[data-view-mode="card"] .opp-list-table tbody tr.row-muted {
+  opacity: 0.55;
+}
+/* Pills + small inputs in cards keep their natural size; reset any
+   100%-width inline-edit input the table view may have given them. */
+.opp-list[data-view-mode="card"] .opp-list-table tbody tr[data-row-id] .ie-input {
+  width: auto;
+  min-width: 8rem;
 }
 /* Hidden columns: listScript sets style.display='none' inline on
    the <td> when a column is unchecked in the columns menu. Inline
