@@ -105,6 +105,18 @@ export const ICON_DOCX =
           stroke="none" fill="currentColor">DOC</text>
   </svg>`;
 
+/** Sparkle (4-point star) — used as the "AI assist" / "polish this
+ * text" affordance throughout the app. A solid 4-point burst with a
+ * smaller companion star to signal "magic / AI" without resorting to
+ * an emoji. Reads cleanly at 18×18. */
+export const ICON_SPARKLE =
+  `<svg ${COMMON_ATTRS}>
+    <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5z"
+          fill="currentColor" stroke="none"/>
+    <path d="M19 14l.6 1.8L21.4 16.4l-1.8.6L19 18.8l-.6-1.8L16.6 16.4l1.8-.6z"
+          fill="currentColor" stroke="none"/>
+  </svg>`;
+
 /** Calculator + plus — same calculator with a small "+" badge in the
  * top-right corner. Used as the "create a new price build" affordance
  * on quote line rows that don't have one yet. The "+" sits inside a

@@ -18,7 +18,7 @@ import { auditStmt, diff } from '../../../../lib/audit.js';
 import { now } from '../../../../lib/ids.js';
 import { layout, htmlResponse, html, raw, escape } from '../../../../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../../../../lib/http.js';
-import { ICON_CALCULATOR, ICON_CALCULATOR_PLUS, ICON_PDF, ICON_DOCX, ICON_MIC } from '../../../../lib/icons.js';
+import { ICON_CALCULATOR, ICON_CALCULATOR_PLUS, ICON_PDF, ICON_DOCX, ICON_MIC, ICON_SPARKLE } from '../../../../lib/icons.js';
 import {
   validateQuote,
   allowedQuoteTypes,
@@ -591,6 +591,17 @@ export async function onRequestGet(context) {
                   </div>
                   <textarea name="line_notes" ${readOnly ? 'disabled' : ''}
                             placeholder="Item notes..." class="line-notes" data-autosave>${escape(l.line_notes ?? '')}</textarea>
+                  ${!readOnly ? html`
+                    <div style="display:flex;justify-content:flex-end;margin-top:0.2rem">
+                      <button type="button" class="line-polish-btn"
+                              data-line-polish-id="${escape(l.id)}"
+                              title="Rewrite the title, description, and notes for a customer-facing tone"
+                              style="display:inline-flex;align-items:center;gap:0.3rem;background:transparent;border:1px solid var(--border);border-radius:4px;padding:0.2rem 0.5rem;cursor:pointer;color:var(--fg-muted);font-size:0.8rem">
+                        <span style="display:inline-flex;align-items:center;color:#6f42c1">${raw(ICON_SPARKLE)}</span>
+                        <span>Polish with AI</span>
+                      </button>
+                    </div>
+                  ` : ''}
                   ${showDiscounts ? renderLineDiscountEditor({ line: l, readOnly, hasDiscount: lineHasDiscount }) : ''}
                   <input type="hidden" name="is_option" value="${l.is_option ? '1' : '0'}">
                 </form>
@@ -841,6 +852,80 @@ export async function onRequestGet(context) {
       if (!confirm(msg)) return false;
       return confirm('Are you sure? Last chance.');
     };
+    </script>
+    <script>
+    // AI line-polish handler. One delegated click listener finds any
+    // [data-line-polish-id] button on the page and:
+    //   1. POSTs the line id to the polish endpoint
+    //   2. Server runs the line through Claude with the surrounding
+    //      account / opp / quote-type context, returns
+    //      { polished: { title, description, line_notes }, original }
+    //   3. Confirms with the user (showing the diff in a textarea-like
+    //      preview is overkill for a first pass — a plain confirm() is
+    //      fine; the user can always Ctrl+Z / inline-edit afterward)
+    //   4. Writes the polished values back into the line's three inputs
+    //      and dispatches a 'change' event on each so the existing
+    //      data-autosave wiring patches the row.
+    document.addEventListener('click', function (e) {
+      var btn = e.target.closest && e.target.closest('[data-line-polish-id]');
+      if (!btn) return;
+      e.preventDefault();
+      var lineId = btn.getAttribute('data-line-polish-id');
+      if (!lineId) return;
+      var row = btn.closest('tr[data-line-row]');
+      if (!row) return;
+      var titleInput = row.querySelector('input[name="title"]');
+      var descInput  = row.querySelector('input[name="description"]');
+      var notesArea  = row.querySelector('textarea[name="line_notes"]');
+      btn.disabled = true;
+      var origLabel = btn.innerHTML;
+      btn.innerHTML = '<span style="font-size:0.8rem">Polishing…</span>';
+      fetch('/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/' + encodeURIComponent(lineId) + '/polish', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      }).then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function (j) {
+          btn.disabled = false;
+          btn.innerHTML = origLabel;
+          if (!j || !j.ok) {
+            alert('Polish failed: ' + ((j && j.error) || 'unknown error'));
+            return;
+          }
+          var p = j.polished || {};
+          var preview = '';
+          if (titleInput && p.title != null && p.title !== titleInput.value) {
+            preview += '\\n\\nTitle:\\n  ' + (titleInput.value || '(empty)') + '\\n  → ' + p.title;
+          }
+          if (descInput && p.description != null && p.description !== descInput.value) {
+            preview += '\\n\\nDescription:\\n  ' + (descInput.value || '(empty)') + '\\n  → ' + p.description;
+          }
+          if (notesArea && p.line_notes != null && p.line_notes !== notesArea.value) {
+            preview += '\\n\\nNotes:\\n  ' + (notesArea.value || '(empty)') + '\\n  → ' + p.line_notes;
+          }
+          if (!preview) {
+            alert('Polish complete — no changes proposed (the AI thinks this line already reads cleanly).');
+            return;
+          }
+          if (!confirm('Apply these AI-polished values to this line?' + preview)) return;
+          // Apply each changed field and trigger change event so
+          // data-autosave wiring patches the row.
+          function setAndFire(el, val) {
+            if (!el) return;
+            el.value = val == null ? '' : String(val);
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          if (titleInput && p.title != null) setAndFire(titleInput, p.title);
+          if (descInput  && p.description != null) setAndFire(descInput,  p.description);
+          if (notesArea  && p.line_notes != null) setAndFire(notesArea,  p.line_notes);
+        })
+        .catch(function (err) {
+          btn.disabled = false;
+          btn.innerHTML = origLabel;
+          alert('Polish failed: ' + (err && err.message ? err.message : 'unknown error'));
+        });
+    });
     </script>
     <script>
     // Global patch helper — auto-saves quote fields via fetch.
