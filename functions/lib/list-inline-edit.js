@@ -143,14 +143,14 @@ export function listInlineEditScript(patchUrlTemplate, opts = {}) {
     if (!tbody) return;
 
     // Row interaction model:
-    //   single-click anywhere on a row  → navigate to detail page
-    //   double-click on an .ie cell     → activate inline-edit
-    //   double-click on a plain cell    → no-op (single already navigated)
+    //   single-click anywhere on a row  -> navigate to detail page
+    //   double-click on an .ie cell     -> activate inline-edit
+    //   double-click on a plain cell    -> no-op (single already navigated)
     //
-    // Click target bail-list: anything that's already actionable
+    // Click target bail-list: anything that is already actionable
     // (anchors, buttons, form controls, the columns-menu gear, sort
     // headers, filter popovers) keeps its native behavior. A row's
-    // detail URL is read from its `<a class="row-open-link">` cell —
+    // detail URL is read from its leading row-open-link anchor cell;
     // every list page emits one, so no extra wiring on individual
     // pages is required.
     var DOUBLE_CLICK_MS = 260;
