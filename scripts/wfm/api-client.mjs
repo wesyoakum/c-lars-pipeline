@@ -168,11 +168,11 @@ export async function getAccessToken({ force = false } = {}) {
     return _cachedAccessToken;
   }
   const cfg = getConfig();
-  // BlueRock auth article (Refreshing tokens section) says the refresh
-  // request should include grant_type, refresh_token, client_id,
-  // client_secret, AND the same scope from the original consent. They
-  // also mention an Authorization header carrying client_id+secret —
-  // adding that as Basic auth doesn't hurt and covers both styles.
+  // BlueRock explicitly rejects HTTP Basic auth on this endpoint
+  // (verified empirically: 401 with hint "Basic auth headers are not
+  // supported"). All credentials go in the body. The auth article's
+  // "Refreshing tokens" section mentions an authorization header, but
+  // that's a documentation error — the live server says no.
   const body = new URLSearchParams({
     grant_type:    'refresh_token',
     client_id:     cfg.clientId,
@@ -180,15 +180,9 @@ export async function getAccessToken({ force = false } = {}) {
     refresh_token: cfg.refreshToken,
     scope:         cfg.scopes,
   });
-  const basic = Buffer
-    .from(`${cfg.clientId}:${cfg.clientSecret}`)
-    .toString('base64');
   const res = await fetch(cfg.tokenUrl, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/x-www-form-urlencoded',
-      authorization:  `Basic ${basic}`,
-    },
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body,
   });
   const text = await res.text();
@@ -385,14 +379,14 @@ async function bootstrapToken(code) {
     client_secret: clientSecret,
     redirect_uri:  redirectUri,
   });
-  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
 
+  // No Basic auth header — BlueRock rejects it. The auth article's
+  // bootstrap-flow note explicitly says: "this is different to the
+  // WorkflowMax by Xero API, which passes this information via
+  // headers." Body params only.
   const res = await fetch(tokenUrl, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/x-www-form-urlencoded',
-      authorization:  `Basic ${basic}`,
-    },
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body,
   });
   const text = await res.text();
