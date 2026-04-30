@@ -167,6 +167,15 @@ export async function onRequestGet(context) {
   const isDraft = quote.status === 'draft' || quote.status === 'revision_draft';
   const isIssued = quote.status === 'issued' || quote.status === 'revision_issued';
 
+  // Hoisted up from the banner-card section (was line ~345) because
+  // v0.395 moved the editable type dropdown into the header-card
+  // subtitle row above. The header is rendered earlier in the same
+  // template literal, so these consts have to be declared before the
+  // template touches them — otherwise we hit a temporal-dead-zone
+  // ReferenceError, which surfaces as a Cloudflare 1101 in production.
+  const quoteTypeOptions = allowedQuoteTypes(quote.opp_transaction_type);
+  const isHybrid = isHybridQuote(quote.quote_type);
+
   const patchUrl = `/opportunities/${oppId}/quotes/${quoteId}/patch`;
 
   // Pick the default address to show. 'both' rows count as billing.
@@ -337,13 +346,10 @@ export async function onRequestGet(context) {
   `;
 
   // ── 2. Banner card ─────────────────────────────────────────────────
-  // T3.4 Sub-feature A — if this is a hybrid quote (comma-separated
-  // quote_type), render the composite label read-only. Editing the
-  // mix post-creation is explicitly out of scope for Sub-feature A —
-  // delete the quote and create a new one with a different mix.
-  // Single-type quotes retain the existing editable select.
-  const quoteTypeOptions = allowedQuoteTypes(quote.opp_transaction_type);
-  const isHybrid = isHybridQuote(quote.quote_type);
+  // T3.4 Sub-feature A — quoteTypeOptions / isHybrid moved above the
+  // header section (v0.395 needed them earlier in the template).
+  // quoteTypeParts is only used below in the line-items section; keep
+  // it here.
   const quoteTypeParts = parseQuoteTypes(quote.quote_type);
   const bannerCard = html`
     <section class="card quote-doc-card quote-doc-first quote-banner">
