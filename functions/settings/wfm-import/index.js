@@ -161,10 +161,12 @@ export async function onRequestGet(context) {
             </button>
           </div>
 
-          <!-- Search row -->
+          <!-- Search row (simple) -->
           <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem;align-items:center">
             <span class="muted" style="font-size:.85rem">— or search:</span>
-            <select x-model="searchKind" :disabled="busy"
+            <select x-model="searchKind"
+                    @change="onSearchKindChange()"
+                    :disabled="busy"
                     style="padding:.32rem .4rem;border:1px solid var(--border);border-radius:4px;font-size:.9rem">
               <option value="client">Clients</option>
               <option value="lead">Leads</option>
@@ -177,10 +179,196 @@ export async function onRequestGet(context) {
                    @keyup.enter="doSearch()"
                    :disabled="busy"
                    style="flex:1;min-width:14rem;padding:.32rem .5rem;border:1px solid var(--border);border-radius:4px;font-size:.9rem">
-            <button type="button" class="btn" @click="doSearch()" :disabled="busy || !searchQuery.trim()">
+            <button type="button" class="btn" @click="doSearch()"
+                    :disabled="busy || (!searchQuery.trim() && activeFilterCount() === 0)">
               <span x-show="!busy || phase !== 'searching'">Search</span>
               <span x-show="busy && phase === 'searching'">Searching…</span>
             </button>
+            <button type="button" class="btn"
+                    @click="searchAdvanced = !searchAdvanced"
+                    style="font-size:.85rem"
+                    x-text="(searchAdvanced ? 'Hide filters' : 'Advanced filters') + (activeFilterCount() ? ' (' + activeFilterCount() + ')' : '')"></button>
+          </div>
+
+          <!-- Advanced filters panel -->
+          <div x-show="searchAdvanced" x-cloak
+               style="margin-top:.6rem;padding:.7rem .85rem;border:1px solid var(--border);border-radius:6px;background:#fafafa">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:.7rem">
+
+              <!-- Date range -->
+              <div x-show="availableDateFields().length > 0"
+                   style="display:flex;flex-direction:column;gap:.3rem">
+                <label class="muted" style="font-size:.78rem;font-weight:600;letter-spacing:.02em">Date range</label>
+                <div style="display:flex;gap:.3rem;flex-wrap:wrap;align-items:center">
+                  <select x-model="searchFilters.date_field" :disabled="busy"
+                          style="padding:.25rem .35rem;border:1px solid var(--border);border-radius:4px;font-size:.82rem;flex:1;min-width:7rem">
+                    <option value="">— field —</option>
+                    <template x-for="opt in availableDateFields()" :key="opt">
+                      <option :value="opt" x-text="opt"></option>
+                    </template>
+                  </select>
+                  <select x-model="searchFilters.date_preset"
+                          @change="applyDatePreset()"
+                          :disabled="busy || !searchFilters.date_field"
+                          style="padding:.25rem .35rem;border:1px solid var(--border);border-radius:4px;font-size:.82rem;flex:1;min-width:7rem">
+                    <option value="">Custom</option>
+                    <option value="last_7_days">Last 7 days</option>
+                    <option value="last_30_days">Last 30 days</option>
+                    <option value="last_90_days">Last 90 days</option>
+                    <option value="this_month">This month</option>
+                    <option value="last_month">Last month</option>
+                    <option value="this_quarter">This quarter</option>
+                    <option value="this_year">This year</option>
+                    <option value="last_year">Last year</option>
+                    <option value="year_2026">All of 2026</option>
+                    <option value="year_2025">All of 2025</option>
+                    <option value="year_2024">All of 2024</option>
+                  </select>
+                </div>
+                <div style="display:flex;gap:.3rem;align-items:center">
+                  <input type="date" x-model="searchFilters.date_from"
+                         :disabled="busy || !searchFilters.date_field"
+                         style="padding:.25rem .35rem;border:1px solid var(--border);border-radius:4px;font-size:.82rem;flex:1;min-width:0">
+                  <span class="muted" style="font-size:.75rem">to</span>
+                  <input type="date" x-model="searchFilters.date_to"
+                         :disabled="busy || !searchFilters.date_field"
+                         style="padding:.25rem .35rem;border:1px solid var(--border);border-radius:4px;font-size:.82rem;flex:1;min-width:0">
+                </div>
+              </div>
+
+              <!-- State multi-select -->
+              <div x-show="availableStates().length > 0"
+                   style="display:flex;flex-direction:column;gap:.3rem">
+                <label class="muted" style="font-size:.78rem;font-weight:600;letter-spacing:.02em">State</label>
+                <div style="display:flex;gap:.3rem;flex-wrap:wrap">
+                  <template x-for="opt in availableStates()" :key="opt">
+                    <button type="button" :disabled="busy"
+                            @click="toggleArrayFilter('state', opt)"
+                            :style="chipStyle(searchFilters.state.includes(opt))"
+                            x-text="opt"></button>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Category multi-select (lead) -->
+              <div x-show="availableCategories().length > 0"
+                   style="display:flex;flex-direction:column;gap:.3rem">
+                <label class="muted" style="font-size:.78rem;font-weight:600;letter-spacing:.02em">Category</label>
+                <div style="display:flex;gap:.3rem;flex-wrap:wrap">
+                  <template x-for="opt in availableCategories()" :key="opt">
+                    <button type="button" :disabled="busy"
+                            @click="toggleArrayFilter('category', opt)"
+                            :style="chipStyle(searchFilters.category.includes(opt))"
+                            x-text="opt"></button>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Type multi-select (job) -->
+              <div x-show="availableTypes().length > 0"
+                   style="display:flex;flex-direction:column;gap:.3rem">
+                <label class="muted" style="font-size:.78rem;font-weight:600;letter-spacing:.02em">Type</label>
+                <div style="display:flex;gap:.3rem;flex-wrap:wrap">
+                  <template x-for="opt in availableTypes()" :key="opt">
+                    <button type="button" :disabled="busy"
+                            @click="toggleArrayFilter('type', opt)"
+                            :style="chipStyle(searchFilters.type.includes(opt))"
+                            x-text="opt"></button>
+                  </template>
+                </div>
+              </div>
+
+              <!-- Relation-name substrings -->
+              <div style="display:flex;flex-direction:column;gap:.3rem"
+                   x-show="searchKind === 'lead' || searchKind === 'quote' || searchKind === 'job'">
+                <label class="muted" style="font-size:.78rem;font-weight:600;letter-spacing:.02em">Client name contains</label>
+                <input type="text" x-model="searchFilters.client_name"
+                       :disabled="busy" placeholder="e.g. rovop"
+                       style="padding:.25rem .4rem;border:1px solid var(--border);border-radius:4px;font-size:.82rem">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:.3rem"
+                   x-show="searchKind === 'lead' || searchKind === 'quote'">
+                <label class="muted" style="font-size:.78rem;font-weight:600;letter-spacing:.02em">Contact name contains</label>
+                <input type="text" x-model="searchFilters.contact_name"
+                       :disabled="busy" placeholder="e.g. doug"
+                       style="padding:.25rem .4rem;border:1px solid var(--border);border-radius:4px;font-size:.82rem">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:.3rem"
+                   x-show="searchKind === 'lead'">
+                <label class="muted" style="font-size:.78rem;font-weight:600;letter-spacing:.02em">Owner name contains</label>
+                <input type="text" x-model="searchFilters.owner_name"
+                       :disabled="busy" placeholder="e.g. wes"
+                       style="padding:.25rem .4rem;border:1px solid var(--border);border-radius:4px;font-size:.82rem">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:.3rem"
+                   x-show="searchKind === 'job'">
+                <label class="muted" style="font-size:.78rem;font-weight:600;letter-spacing:.02em">Manager name contains</label>
+                <input type="text" x-model="searchFilters.manager_name"
+                       :disabled="busy" placeholder="e.g. falynne"
+                       style="padding:.25rem .4rem;border:1px solid var(--border);border-radius:4px;font-size:.82rem">
+              </div>
+
+              <!-- Amount range -->
+              <div x-show="availableAmountFields().length > 0"
+                   style="display:flex;flex-direction:column;gap:.3rem">
+                <label class="muted" style="font-size:.78rem;font-weight:600;letter-spacing:.02em">Amount range (USD)</label>
+                <select x-model="searchFilters.amount_field" :disabled="busy"
+                        style="padding:.25rem .35rem;border:1px solid var(--border);border-radius:4px;font-size:.82rem">
+                  <option value="">— field —</option>
+                  <template x-for="opt in availableAmountFields()" :key="opt">
+                    <option :value="opt" x-text="opt"></option>
+                  </template>
+                </select>
+                <div style="display:flex;gap:.3rem;align-items:center">
+                  <input type="number" min="0" step="any" x-model="searchFilters.amount_min"
+                         :disabled="busy || !searchFilters.amount_field" placeholder="min"
+                         style="padding:.25rem .4rem;border:1px solid var(--border);border-radius:4px;font-size:.82rem;flex:1;min-width:0">
+                  <span class="muted" style="font-size:.75rem">to</span>
+                  <input type="number" min="0" step="any" x-model="searchFilters.amount_max"
+                         :disabled="busy || !searchFilters.amount_field" placeholder="max"
+                         style="padding:.25rem .4rem;border:1px solid var(--border);border-radius:4px;font-size:.82rem;flex:1;min-width:0">
+                </div>
+              </div>
+
+              <!-- Client flags -->
+              <div x-show="searchKind === 'client'"
+                   style="display:flex;flex-direction:column;gap:.3rem">
+                <label class="muted" style="font-size:.78rem;font-weight:600;letter-spacing:.02em">Flags</label>
+                <div style="display:flex;gap:.3rem;align-items:center;flex-wrap:wrap">
+                  <span class="muted" style="font-size:.78rem">Archived:</span>
+                  <select x-model="searchFilters.is_archived" :disabled="busy"
+                          style="padding:.2rem .35rem;border:1px solid var(--border);border-radius:4px;font-size:.78rem">
+                    <option value="">any</option>
+                    <option value="yes">yes</option>
+                    <option value="no">no</option>
+                  </select>
+                  <span class="muted" style="font-size:.78rem">Prospect:</span>
+                  <select x-model="searchFilters.is_prospect" :disabled="busy"
+                          style="padding:.2rem .35rem;border:1px solid var(--border);border-radius:4px;font-size:.78rem">
+                    <option value="">any</option>
+                    <option value="yes">yes</option>
+                    <option value="no">no</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Limit -->
+              <div style="display:flex;flex-direction:column;gap:.3rem">
+                <label class="muted" style="font-size:.78rem;font-weight:600;letter-spacing:.02em">Result limit</label>
+                <input type="number" min="1" max="500" x-model.number="searchLimit"
+                       :disabled="busy"
+                       style="padding:.25rem .4rem;border:1px solid var(--border);border-radius:4px;font-size:.82rem;width:6rem">
+              </div>
+            </div>
+
+            <div style="margin-top:.6rem;display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
+              <button type="button" class="btn"
+                      @click="clearFilters()"
+                      :disabled="busy"
+                      style="font-size:.82rem">Clear filters</button>
+              <span class="muted" style="font-size:.75rem"
+                    x-text="activeFilterCount() ? activeFilterCount() + ' filter' + (activeFilterCount() === 1 ? '' : 's') + ' active' : 'No filters set'"></span>
+            </div>
           </div>
 
           <!-- Import button (shows once a batch is loaded, regardless of source) -->
@@ -290,6 +478,186 @@ export async function onRequestGet(context) {
                 importResult: null,
                 searchKind: 'client',
                 searchQuery: '',
+                searchAdvanced: false,
+                searchLimit: 100,
+                searchFilters: {
+                  date_field: '', date_preset: '', date_from: '', date_to: '',
+                  state: [], category: [], type: [],
+                  client_name: '', contact_name: '', owner_name: '', manager_name: '',
+                  amount_field: '', amount_min: '', amount_max: '',
+                  is_archived: '', is_prospect: '',
+                },
+
+                // Per-kind static catalogs. The UI hides irrelevant
+                // controls based on these maps; the server independently
+                // re-validates on filter dispatch.
+                STATES_BY_KIND: {
+                  lead:   ['Current', 'Won', 'Lost'],
+                  quote:  ['Draft', 'Issued', 'Accepted', 'Declined', 'Archived'],
+                  job:    ['PLANNED', 'PRODUCTION', 'COMPLETED', 'CANCELLED'],
+                  client: [],
+                  staff:  [],
+                },
+                CATEGORIES_BY_KIND: {
+                  lead: ['1 Identified', '2 Qualifying', '3 Opportunity',
+                         '4 Quoted', '5 Won', '6 Lost'],
+                },
+                TYPES_BY_KIND: {
+                  job: ['NEW EQUIPMENT', 'SPARES', 'REFURBISHMENT', 'SERVICE',
+                        'SUPPLIES', 'WARRANTY', 'CYLINDERS', 'REFURB CYLINDERS'],
+                },
+                DATE_FIELDS_BY_KIND: {
+                  lead:   ['Date', 'DateWonLost'],
+                  quote:  ['Date', 'ValidDate'],
+                  job:    ['StartDate', 'DueDate', 'DateCreatedUtc', 'DateModifiedUtc'],
+                  client: [],
+                  staff:  [],
+                },
+                AMOUNT_FIELDS_BY_KIND: {
+                  lead:  ['EstimatedValue'],
+                  quote: ['AmountIncludingTax', 'Amount', 'EstimatedCost'],
+                  job:   ['Budget'],
+                  client: [],
+                  staff:  [],
+                },
+
+                availableStates()       { return this.STATES_BY_KIND[this.searchKind]   || []; },
+                availableCategories()   { return this.CATEGORIES_BY_KIND[this.searchKind] || []; },
+                availableTypes()        { return this.TYPES_BY_KIND[this.searchKind]     || []; },
+                availableDateFields()   { return this.DATE_FIELDS_BY_KIND[this.searchKind]  || []; },
+                availableAmountFields() { return this.AMOUNT_FIELDS_BY_KIND[this.searchKind] || []; },
+
+                chipStyle(active) {
+                  return {
+                    padding: '.2rem .5rem',
+                    border: '1px solid ' + (active ? '#1f6feb' : 'var(--border)'),
+                    borderRadius: '12px',
+                    background: active ? '#dbeafe' : '#fff',
+                    fontSize: '.78rem',
+                    cursor: 'pointer',
+                  };
+                },
+
+                onSearchKindChange() {
+                  // Drop filters that don't apply to the new kind so the
+                  // payload is clean and the UI doesn't misrepresent
+                  // active-filter count.
+                  const f = this.searchFilters;
+                  if (!this.availableDateFields().includes(f.date_field)) {
+                    f.date_field = ''; f.date_preset = '';
+                    f.date_from = ''; f.date_to = '';
+                  }
+                  // State / Category / Type lists differ per kind — clear.
+                  f.state = []; f.category = []; f.type = [];
+                  if (!this.availableAmountFields().includes(f.amount_field)) {
+                    f.amount_field = ''; f.amount_min = ''; f.amount_max = '';
+                  }
+                  if (this.searchKind !== 'client') {
+                    f.is_archived = ''; f.is_prospect = '';
+                  }
+                  this.searchFilters = Object.assign({}, f);
+                },
+
+                toggleArrayFilter(key, value) {
+                  const arr = (this.searchFilters[key] || []).slice();
+                  const idx = arr.indexOf(value);
+                  if (idx >= 0) arr.splice(idx, 1);
+                  else arr.push(value);
+                  this.searchFilters = Object.assign({}, this.searchFilters, { [key]: arr });
+                },
+
+                applyDatePreset() {
+                  const preset = this.searchFilters.date_preset;
+                  if (!preset) return;   // Custom — leave from/to alone
+                  const fmt = (d) => {
+                    const y = d.getFullYear();
+                    const m = String(d.getMonth() + 1).padStart(2, '0');
+                    const dd = String(d.getDate()).padStart(2, '0');
+                    return y + '-' + m + '-' + dd;
+                  };
+                  const today = new Date(); today.setHours(0, 0, 0, 0);
+                  let from = null, to = null;
+                  if (preset === 'last_7_days')   { to = today; from = new Date(today); from.setDate(from.getDate() - 7); }
+                  else if (preset === 'last_30_days')  { to = today; from = new Date(today); from.setDate(from.getDate() - 30); }
+                  else if (preset === 'last_90_days')  { to = today; from = new Date(today); from.setDate(from.getDate() - 90); }
+                  else if (preset === 'this_month')    { from = new Date(today.getFullYear(), today.getMonth(), 1); to = today; }
+                  else if (preset === 'last_month')    {
+                    from = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+                    to   = new Date(today.getFullYear(), today.getMonth(), 0);
+                  }
+                  else if (preset === 'this_quarter')  {
+                    const q = Math.floor(today.getMonth() / 3);
+                    from = new Date(today.getFullYear(), q * 3, 1);
+                    to = today;
+                  }
+                  else if (preset === 'this_year')     { from = new Date(today.getFullYear(), 0, 1); to = today; }
+                  else if (preset === 'last_year')     {
+                    from = new Date(today.getFullYear() - 1, 0, 1);
+                    to   = new Date(today.getFullYear() - 1, 11, 31);
+                  }
+                  else if (preset === 'year_2026')     { from = new Date(2026, 0, 1); to = new Date(2026, 11, 31); }
+                  else if (preset === 'year_2025')     { from = new Date(2025, 0, 1); to = new Date(2025, 11, 31); }
+                  else if (preset === 'year_2024')     { from = new Date(2024, 0, 1); to = new Date(2024, 11, 31); }
+                  if (from) this.searchFilters.date_from = fmt(from);
+                  if (to)   this.searchFilters.date_to   = fmt(to);
+                },
+
+                activeFilterCount() {
+                  const f = this.searchFilters;
+                  let n = 0;
+                  if (f.date_field && (f.date_from || f.date_to)) n++;
+                  if (f.state && f.state.length)       n++;
+                  if (f.category && f.category.length) n++;
+                  if (f.type && f.type.length)         n++;
+                  if (f.client_name)  n++;
+                  if (f.contact_name) n++;
+                  if (f.owner_name)   n++;
+                  if (f.manager_name) n++;
+                  if (f.amount_field && (f.amount_min !== '' || f.amount_max !== '')) n++;
+                  if (f.is_archived) n++;
+                  if (f.is_prospect) n++;
+                  return n;
+                },
+
+                clearFilters() {
+                  this.searchFilters = {
+                    date_field: '', date_preset: '', date_from: '', date_to: '',
+                    state: [], category: [], type: [],
+                    client_name: '', contact_name: '', owner_name: '', manager_name: '',
+                    amount_field: '', amount_min: '', amount_max: '',
+                    is_archived: '', is_prospect: '',
+                  };
+                },
+
+                buildSearchPayload() {
+                  const f = this.searchFilters;
+                  const out = {
+                    kind: this.searchKind,
+                    query: (this.searchQuery || '').trim(),
+                    limit: Number(this.searchLimit) || 100,
+                    filters: {},
+                  };
+                  if (f.date_field && (f.date_from || f.date_to)) {
+                    out.filters.date_field = f.date_field;
+                    if (f.date_from) out.filters.date_from = f.date_from;
+                    if (f.date_to)   out.filters.date_to   = f.date_to;
+                  }
+                  if (f.state && f.state.length)       out.filters.state    = f.state.slice();
+                  if (f.category && f.category.length) out.filters.category = f.category.slice();
+                  if (f.type && f.type.length)         out.filters.type     = f.type.slice();
+                  if (f.client_name)  out.filters.client_name  = f.client_name.trim();
+                  if (f.contact_name) out.filters.contact_name = f.contact_name.trim();
+                  if (f.owner_name)   out.filters.owner_name   = f.owner_name.trim();
+                  if (f.manager_name) out.filters.manager_name = f.manager_name.trim();
+                  if (f.amount_field && (f.amount_min !== '' || f.amount_max !== '')) {
+                    out.filters.amount_field = f.amount_field;
+                    if (f.amount_min !== '') out.filters.amount_min = Number(f.amount_min);
+                    if (f.amount_max !== '') out.filters.amount_max = Number(f.amount_max);
+                  }
+                  if (f.is_archived) out.filters.is_archived = f.is_archived === 'yes';
+                  if (f.is_prospect) out.filters.is_prospect = f.is_prospect === 'yes';
+                  return out;
+                },
 
                 keyOf(rec) {
                   return rec.UUID || rec.ID || JSON.stringify(rec).slice(0, 40);
@@ -339,20 +707,22 @@ export async function onRequestGet(context) {
                   return out;
                 },
 
-                // Search WFM for records matching searchQuery of the
-                // selected searchKind. Results populate the same
-                // samples state so the existing card UI + import
-                // flow work unchanged.
+                // Search WFM with the current text query and structured
+                // filters. Results populate the same samples state so
+                // the existing card UI + import flow work unchanged.
                 async doSearch() {
-                  const q = (this.searchQuery || '').trim();
-                  if (!q) return;
+                  const payload = this.buildSearchPayload();
+                  if (!payload.query && Object.keys(payload.filters).length === 0) {
+                    this.error = 'Enter a search term or set at least one filter.';
+                    return;
+                  }
                   this.busy = true; this.phase = 'searching';
                   this.error = ''; this.importResult = null;
                   try {
                     const res = await fetch('/settings/wfm-import/search', {
                       method: 'POST', credentials: 'same-origin',
                       headers: { 'content-type': 'application/json' },
-                      body: JSON.stringify({ kind: this.searchKind, query: q }),
+                      body: JSON.stringify(payload),
                     });
                     const j = await res.json();
                     if (!j.ok) throw new Error(j.error || 'search failed');
@@ -368,7 +738,9 @@ export async function onRequestGet(context) {
                     if (j.count === 0) {
                       this.error = 'No matches.';
                     } else if (j.truncated) {
-                      this.error = 'Showing first ' + j.count + ' matches — narrow the query for more specificity.';
+                      this.error = 'Showing first ' + j.count + ' matches (limit hit) — narrow filters or raise the limit.';
+                    } else {
+                      this.error = j.count + ' match' + (j.count === 1 ? '' : 'es') + '.';
                     }
                   } catch (e) {
                     this.error = String(e.message || e);

@@ -1587,6 +1587,7 @@ export function layout(title, body, opts = {}) {
       ${navLink('/workflow', 'Workflow', activeNav)}
       ${navLink('/settings', 'Settings', activeNav)}
       ${user && user.email === 'wes.yoakum@c-lars.com' ? navLink('/ai-inbox', 'AI Inbox', activeNav) : ''}
+      ${user && user.email === 'wes.yoakum@c-lars.com' ? navLink('/sandbox', 'Sandbox', activeNav) : ''}
     </nav>
     <div class="header-right">
       ${user ? BOARD_RESTORE_HEADER_BTN : ''}

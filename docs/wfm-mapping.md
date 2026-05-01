@@ -722,6 +722,95 @@ Phase-1 importer throttles to ~50/min for safety margin.
 
 ---
 
+## 13. Future: full WFM data backup (planning placeholder)
+
+**Status:** not building yet — captured here so we don't lose the idea.
+
+The selective-import workbench at `/settings/wfm-import` covers the
+"pull what I need into Pipeline" use case. Separate from that, the
+user wants a way to **download a complete backup of every single
+thing available in WFM** — a defensive snapshot we can fall back on
+if BlueRock loses data, sunsets the v1 API, or we ever leave the
+platform. Two shapes are possible; we'd pick one before building.
+
+### Option A — Raw archive (recommended)
+
+A read-only dump of every WFM endpoint into R2, preserving the source
+XML/JSON exactly as BlueRock returns it. No mapping, no
+interpretation — just bytes.
+
+```
+r2://c-lars-pms-docs/wfm-backup/<run-id>/
+   manifest.json                    # endpoint list + counts + timing
+   clients/list.xml                 # /client.api/list (concatenated pages)
+   clients/get/<uuid>.xml           # /client.api/get/<uuid> per client
+   clients/documents/<uuid>.xml
+   leads/current.xml
+   leads/get/<uuid>.xml
+   leads/customfield/<uuid>.xml
+   quotes/current.xml
+   quotes/get/<uuid>.xml
+   jobs/current.xml
+   jobs/get/<uuid>.xml
+   jobs/documents/<uuid>.xml
+   tasks/list.xml
+   templates/list.xml
+   suppliers/list.xml
+   suppliers/get/<uuid>.xml
+   invoices/current.xml
+   invoices/get/<uuid>.xml
+   time/list.<from>-<to>.xml        # one file per quarter
+   staff/list.xml
+   customfields/definition.xml
+   categories/list.xml
+   documents/<wfm-doc-uuid>/<filename>   # binary files (PDFs, etc.)
+```
+
+A `wfm_backup_runs` table records each run: started_at, finished_at,
+endpoint_count, error_count, total_bytes, r2_prefix.
+
+A subsequent UI (`/settings/wfm-backup`) lists past runs and surfaces
+a "Download as zip" button that streams a tar/zip of the entire
+prefix.
+
+### Option B — Structured snapshot
+
+Project every WFM record into a normalized SQLite database, separate
+from Pipeline's working DB. Same idea as Pipeline's import, but with
+zero mapping/loss — every field of every entity in flat tables. Can
+be queried with stock SQLite tooling years later.
+
+This is more work to build (we'd duplicate the import logic for read
+fidelity) but produces a friendlier artifact. Probably defer until
+Option A is in place.
+
+### Constraints we'll need to think through
+
+- **Rate limit**: 60 calls/min, 5000/day. A full crawl is roughly 
+  one daily quota at C-LARS scale. Throttle to ~50/min.
+- **Pagination**: list endpoints page; `/current` endpoints don't.
+  The dump should preserve pagination as separate files
+  (`list-page-1.xml`, etc.) so a re-fetch reproduces what BlueRock
+  returned.
+- **Documents**: the per-doc binary fetch endpoint isn't probed yet.
+  Try `/document.api/get/{UUID}` first; fall back to the WebURL with
+  the OAuth token if needed.
+- **Worker time limits**: full crawl is too long for a single Pages
+  Function (30s wall clock). Either run as a Worker cron split into
+  sequential phases (clients → leads → quotes → ...) or trigger from
+  a one-shot CLI script (`scripts/wfm/full-backup.mjs`) that streams
+  to R2 over many minutes.
+- **Cadence**: monthly seems right. Manual button + a scheduled
+  monthly cron, retain last 12 runs.
+
+### Decision needed before we build
+
+- Option A vs B (recommendation: A)
+- Where the trigger lives: web button vs. CLI script vs. cron
+- Retention: how many runs to keep in R2
+
+---
+
 *End of v2 mapping draft. Mark up the "Your call" column in §11 and
 ping me when ready — I'll roll the answers into a final mapping
 spec, then build the importer.*
