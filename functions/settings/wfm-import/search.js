@@ -58,8 +58,37 @@ async function searchClients(env, query) {
   return recordList(r.body, 'Client');
 }
 
+async function readTotalRecords(env, basePath) {
+  const sep = basePath.includes('?') ? '&' : '?';
+  const r = await apiGet(env, basePath + sep + 'page=1&pageSize=1');
+  if (!r.ok) return null;
+  const totalStr = r.body?.Response?.TotalRecords;
+  if (!totalStr) return null;
+  const n = parseInt(totalStr, 10);
+  return Number.isNaN(n) ? null : n;
+}
+
 async function searchByListWalk(env, basePath, primaryKey, qLower) {
+  // Probe pagination support. /client.api/list paginates (and gives
+  // TotalRecords). /lead.api/current, /quote.api/current,
+  // /job.api/current return the WHOLE current set in one shot and
+  // ignore page= params — walking pages 2..N just returns the same
+  // records again and we end up with N copies of every match.
+  const total = await readTotalRecords(env, basePath);
+
+  if (total === null) {
+    // Single-shot endpoint. Pull big and filter once.
+    const sep = basePath.includes('?') ? '&' : '?';
+    const r = await apiGet(env, basePath + sep + 'pageSize=500');
+    if (!r.ok) return [];
+    const arr = recordList(r.body, primaryKey);
+    return arr.filter((rec) => recordMatches(rec, qLower)).slice(0, MAX_RESULTS);
+  }
+
+  // Truly paginated — walk pages, deduping on UUID/ID as belt-and-
+  // suspenders against any pagination weirdness.
   const matches = [];
+  const seen = new Set();
   for (let page = 1; page <= MAX_LIST_PAGES && matches.length < MAX_RESULTS; page++) {
     const sep = basePath.includes('?') ? '&' : '?';
     const r = await apiGet(env, basePath + sep + 'page=' + page + '&pageSize=' + LIST_PAGE_SIZE);
@@ -67,10 +96,15 @@ async function searchByListWalk(env, basePath, primaryKey, qLower) {
     const arr = recordList(r.body, primaryKey);
     if (arr.length === 0) break;
     for (const rec of arr) {
-      if (recordMatches(rec, qLower)) matches.push(rec);
-      if (matches.length >= MAX_RESULTS) break;
+      const id = rec.UUID || rec.ID;
+      if (id && seen.has(id)) continue;
+      if (id) seen.add(id);
+      if (recordMatches(rec, qLower)) {
+        matches.push(rec);
+        if (matches.length >= MAX_RESULTS) break;
+      }
     }
-    if (arr.length < LIST_PAGE_SIZE) break;   // last page reached
+    if (arr.length < LIST_PAGE_SIZE) break;
   }
   return matches;
 }
