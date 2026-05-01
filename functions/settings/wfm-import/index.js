@@ -214,7 +214,7 @@ export async function onRequestGet(context) {
                       </span>
                     </h3>
                     <ul style="list-style:none;padding:0;margin:0">
-                      <template x-for="rec in group" :key="keyOf(rec)">
+                      <template x-for="(rec, idx) in group" :key="idx + '-' + (rec.UUID || rec.ID || '')">
                         <li style="display:flex;gap:.5rem;align-items:flex-start;padding:.4rem .5rem;border-bottom:1px dashed #eee;font-size:.85rem;line-height:1.4;cursor:pointer"
                             @click="toggleSelect(kind, rec)">
                           <input type="checkbox"
@@ -223,27 +223,23 @@ export async function onRequestGet(context) {
                                  style="margin-top:.25rem">
                           <div style="flex:1;min-width:0">
                             <strong x-text="rec.Name || rec.ID || rec.UUID || '(unnamed)'"></strong>
-                            <template x-if="rec.UUID">
-                              <code style="font-size:.72rem;color:#999;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">UUID: <span x-text="rec.UUID"></span></code>
-                            </template>
-                            <template x-if="rec.State || rec.Category || rec.Type">
-                              <span class="muted" style="display:block;font-size:.75rem">
-                                <template x-if="rec.State"><span>State: <span x-text="rec.State"></span></span></template>
-                                <template x-if="rec.Category"><span style="margin-left:.6rem">Cat: <span x-text="rec.Category"></span></span></template>
-                                <template x-if="rec.Type"><span style="margin-left:.6rem">Type: <span x-text="rec.Type"></span></span></template>
-                              </span>
-                            </template>
-                            <template x-if="rec.Client && rec.Client.Name">
-                              <span class="muted" style="display:block;font-size:.75rem">Client: <span x-text="rec.Client.Name"></span></span>
-                            </template>
-                            <template x-if="rec.Email">
-                              <span class="muted" style="display:block;font-size:.75rem">Email: <span x-text="rec.Email"></span></span>
-                            </template>
-                            <template x-if="rec.EstimatedValue || rec.Amount || rec.AmountIncludingTax">
-                              <span class="muted" style="display:block;font-size:.75rem">
-                                Value: $<span x-text="(rec.AmountIncludingTax || rec.Amount || rec.EstimatedValue || '0')"></span>
-                              </span>
-                            </template>
+                            <span x-show="rec.UUID" style="display:block">
+                              <code style="font-size:.72rem;color:#999;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">UUID: <span x-text="rec.UUID"></span></code>
+                            </span>
+                            <span x-show="rec.State || rec.Category || rec.Type" class="muted" style="display:block;font-size:.75rem">
+                              <span x-show="rec.State">State: <span x-text="rec.State"></span></span>
+                              <span x-show="rec.Category" style="margin-left:.6rem">Cat: <span x-text="rec.Category"></span></span>
+                              <span x-show="rec.Type" style="margin-left:.6rem">Type: <span x-text="rec.Type"></span></span>
+                            </span>
+                            <span x-show="rec.Client && rec.Client.Name" class="muted" style="display:block;font-size:.75rem">
+                              Client: <span x-text="rec.Client && rec.Client.Name"></span>
+                            </span>
+                            <span x-show="rec.Email" class="muted" style="display:block;font-size:.75rem">
+                              Email: <span x-text="rec.Email"></span>
+                            </span>
+                            <span x-show="rec.EstimatedValue || rec.Amount || rec.AmountIncludingTax" class="muted" style="display:block;font-size:.75rem">
+                              Value: $<span x-text="rec.AmountIncludingTax || rec.Amount || rec.EstimatedValue || '0'"></span>
+                            </span>
                           </div>
                         </li>
                       </template>
