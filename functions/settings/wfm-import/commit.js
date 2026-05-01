@@ -605,10 +605,21 @@ async function syncQuoteLines(env, pipelineQuoteId, wfmQuoteUuid, ctx) {
     sortOrder += 10;
   }
 
-  // Idempotency: walk existing wfm-sourced quote_lines for this
-  // quote, capture their per-line cost_build IDs (via the
-  // cost_builds.quote_line_id backref), then delete both. User-added
-  // quote_lines + builds are preserved.
+  // Idempotency: there's a circular FK between quote_lines and
+  // cost_builds (cost_builds.quote_line_id → quote_lines AND
+  // quote_lines.cost_build_id → cost_builds). Both with NO ACTION on
+  // delete, so we have to break the cycle manually:
+  //   1. NULL out quote_lines.cost_build_id on the wfm rows so the
+  //      cost_builds DELETE in step 2 doesn't fail on a back-pointer.
+  //   2. DELETE the cost_builds linked via quote_line_id.
+  //   3. DELETE the quote_lines.
+  // User-added (non-wfm) quote_lines + cost_builds are preserved.
+  await run(env.DB,
+    `UPDATE quote_lines
+        SET cost_build_id = NULL
+      WHERE quote_id = ? AND external_source = 'wfm' AND cost_build_id IS NOT NULL`,
+    [pipelineQuoteId]);
+
   const oldLines = await all(env.DB,
     `SELECT id FROM quote_lines
       WHERE quote_id = ? AND external_source = 'wfm'`,
@@ -616,7 +627,6 @@ async function syncQuoteLines(env, pipelineQuoteId, wfmQuoteUuid, ctx) {
   const oldQuoteLineIds = oldLines.map((r) => r.id);
 
   if (oldQuoteLineIds.length > 0) {
-    // Delete cost_builds linked back to these wfm quote_lines.
     const placeholders = oldQuoteLineIds.map(() => '?').join(',');
     await run(env.DB,
       'DELETE FROM cost_builds WHERE quote_line_id IN (' + placeholders + ')',
