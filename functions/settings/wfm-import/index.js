@@ -147,6 +147,7 @@ export async function onRequestGet(context) {
             shuffle.
           </p>
 
+          <!-- Random sample row -->
           <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.5rem;align-items:center">
             <label style="display:flex;align-items:center;gap:.4rem">
               <span class="muted" style="font-size:.85rem">Sample size per entity:</span>
@@ -158,10 +159,35 @@ export async function onRequestGet(context) {
               <span x-show="!busy">Get random samples</span>
               <span x-show="busy && phase === 'sampling'">Sampling…</span>
             </button>
+          </div>
+
+          <!-- Search row -->
+          <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem;align-items:center">
+            <span class="muted" style="font-size:.85rem">— or search:</span>
+            <select x-model="searchKind" :disabled="busy"
+                    style="padding:.32rem .4rem;border:1px solid var(--border);border-radius:4px;font-size:.9rem">
+              <option value="client">Clients</option>
+              <option value="lead">Leads</option>
+              <option value="quote">Quotes</option>
+              <option value="job">Jobs</option>
+              <option value="staff">Staff</option>
+            </select>
+            <input type="text" x-model="searchQuery"
+                   placeholder="search by name / id / description…"
+                   @keyup.enter="doSearch()"
+                   :disabled="busy"
+                   style="flex:1;min-width:14rem;padding:.32rem .5rem;border:1px solid var(--border);border-radius:4px;font-size:.9rem">
+            <button type="button" class="btn" @click="doSearch()" :disabled="busy || !searchQuery.trim()">
+              <span x-show="!busy || phase !== 'searching'">Search</span>
+              <span x-show="busy && phase === 'searching'">Searching…</span>
+            </button>
+          </div>
+
+          <!-- Import button (shows once a batch is loaded, regardless of source) -->
+          <div style="margin-top:.6rem" x-show="samples">
             <button type="button" class="btn danger"
                     @click="commitImport()"
-                    :disabled="busy || !samples || totalSelected() === 0"
-                    x-show="samples">
+                    :disabled="busy || !samples || totalSelected() === 0">
               <span x-show="!busy || phase !== 'committing'">
                 Import selected (<span x-text="totalSelected()"></span>)
               </span>
@@ -253,6 +279,8 @@ export async function onRequestGet(context) {
                 samples: null,
                 selected: {},   // { kind: { recordKey: true } }
                 importResult: null,
+                searchKind: 'client',
+                searchQuery: '',
 
                 keyOf(rec) {
                   return rec.UUID || rec.ID || JSON.stringify(rec).slice(0, 40);
@@ -300,6 +328,44 @@ export async function onRequestGet(context) {
                       .filter((r) => this.isSelected(kind, r));
                   }
                   return out;
+                },
+
+                // Search WFM for records matching `searchQuery` of
+                // the selected `searchKind`. Results populate the same
+                // `samples` state so the existing card UI + import
+                // flow work unchanged.
+                async doSearch() {
+                  const q = (this.searchQuery || '').trim();
+                  if (!q) return;
+                  this.busy = true; this.phase = 'searching';
+                  this.error = ''; this.importResult = null;
+                  try {
+                    const res = await fetch('/settings/wfm-import/search', {
+                      method: 'POST', credentials: 'same-origin',
+                      headers: { 'content-type': 'application/json' },
+                      body: JSON.stringify({ kind: this.searchKind, query: q }),
+                    });
+                    const j = await res.json();
+                    if (!j.ok) throw new Error(j.error || 'search failed');
+                    this.samples = j.samples;
+                    const sel = {};
+                    for (const kind of Object.keys(this.samples)) {
+                      sel[kind] = {};
+                      for (const rec of this.samples[kind]) {
+                        sel[kind][this.keyOf(rec)] = true;
+                      }
+                    }
+                    this.selected = sel;
+                    if (j.count === 0) {
+                      this.error = 'No matches.';
+                    } else if (j.truncated) {
+                      this.error = 'Showing first ' + j.count + ' matches — narrow the query for more specificity.';
+                    }
+                  } catch (e) {
+                    this.error = String(e.message || e);
+                  } finally {
+                    this.busy = false; this.phase = '';
+                  }
                 },
 
                 async fetchSamples() {
