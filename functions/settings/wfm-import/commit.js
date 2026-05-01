@@ -669,12 +669,12 @@ async function syncQuoteLines(env, pipelineQuoteId, wfmQuoteUuid, ctx) {
 
     await run(env.DB,
       `INSERT INTO cost_builds
-         (id, opportunity_id, quote_line_id, label, status,
+         (id, opportunity_id, quote_line_id, label, status, build_kind,
           dm_user_cost, dl_user_cost, imoh_user_cost, other_user_cost,
           quote_price_user,
           use_dm_library, use_labor_library, discount_is_phantom,
           notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'draft',
+       VALUES (?, ?, ?, ?, 'draft', 'wfm_reference',
                ?, ?, 0, 0,
                ?,
                0, 0, 0,

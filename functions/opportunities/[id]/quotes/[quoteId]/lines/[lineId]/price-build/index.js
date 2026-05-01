@@ -30,6 +30,7 @@ async function loadContext(env, params) {
   const line = await one(
     env.DB,
     `SELECT ql.*, q.opportunity_id, q.number AS quote_number, q.revision,
+            q.quote_type AS quote_type,
             q.show_discounts AS quote_show_discounts,
             o.number AS opp_number, o.title AS opp_title
        FROM quote_lines ql
@@ -1005,6 +1006,19 @@ async function handleCreate(context, ctx, input) {
   const label = input.label || line.description || 'Price build';
   const templateId = input.builds_library_id || null;
 
+  // Derive build_kind from the parent quote's quote_type. WFM-imported
+  // builds get 'wfm_reference' (set by the WFM importer, not here).
+  // Spares quotes get the simpler material+other UI; everything else
+  // currently gets the full eps_full UI.
+  const buildKind = (function () {
+    const qt = String(line.quote_type || '').toLowerCase();
+    if (qt === 'spares')                return 'spares_simple';
+    if (qt === 'eps')                   return 'eps_full';
+    if (qt === 'service')               return 'eps_full';   // service_* variant TBD
+    if (qt.startsWith('refurb'))        return 'eps_full';
+    return 'eps_full';
+  })();
+
   // Auto-generate price build number: P{quoteSeq}.{lineIndex}
   // quoteSeq is the quote's position (1, 2, 3...) and lineIndex is
   // the build's position within the quote (1, 2, 3...).
@@ -1029,12 +1043,12 @@ async function handleCreate(context, ctx, input) {
     statements.push(
       stmt(env.DB,
         `INSERT INTO cost_builds
-           (id, opportunity_id, quote_line_id, builds_library_id, label, number, status,
+           (id, opportunity_id, quote_line_id, builds_library_id, label, number, status, build_kind,
             dm_user_cost, dl_user_cost, imoh_user_cost, other_user_cost,
             quote_price_user, use_dm_library, use_labor_library,
             notes, created_at, updated_at, created_by_user_id)
-         VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, line.opportunity_id, lineId, templateId, label, buildNumber,
+         VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, line.opportunity_id, lineId, templateId, label, buildNumber, buildKind,
          tmpl.dm_user_cost, tmpl.dl_user_cost, tmpl.imoh_user_cost, tmpl.other_user_cost,
          tmpl.quote_price_user, tmpl.use_dm_library, tmpl.use_labor_library,
          tmpl.notes, ts, ts, user?.id ?? null]
@@ -1059,15 +1073,19 @@ async function handleCreate(context, ctx, input) {
       statements.push(stmt(env.DB, 'INSERT INTO cost_build_labor (cost_build_id, workcenter, hours, rate) VALUES (?, ?, ?, ?)', [id, e.workcenter, e.hours, e.rate]));
     }
   } else {
+    // Spares-simple builds default Other to 0 (per user spec) so the
+    // "Other" field shows zero rather than null on first render.
+    const defaultOther = buildKind === 'spares_simple' ? 0 : null;
     statements.push(
       stmt(env.DB,
         `INSERT INTO cost_builds
-           (id, opportunity_id, quote_line_id, label, number, status,
+           (id, opportunity_id, quote_line_id, label, number, status, build_kind,
             dm_user_cost, dl_user_cost, imoh_user_cost, other_user_cost,
             quote_price_user, use_dm_library, use_labor_library,
             notes, created_at, updated_at, created_by_user_id)
-         VALUES (?, ?, ?, ?, ?, 'draft', NULL, NULL, NULL, NULL, NULL, 0, 0, NULL, ?, ?, ?)`,
-        [id, line.opportunity_id, lineId, label, buildNumber, ts, ts, user?.id ?? null]
+         VALUES (?, ?, ?, ?, ?, 'draft', ?, NULL, NULL, NULL, ?, NULL, 0, 0, NULL, ?, ?, ?)`,
+        [id, line.opportunity_id, lineId, label, buildNumber, buildKind,
+         defaultOther, ts, ts, user?.id ?? null]
       )
     );
   }
