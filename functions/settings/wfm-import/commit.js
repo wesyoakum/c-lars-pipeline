@@ -28,6 +28,7 @@
 
 import { hasRole } from '../../lib/auth.js';
 import { one, run, all } from '../../lib/db.js';
+import { apiGet, recordList } from '../../lib/wfm-client.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -387,6 +388,82 @@ async function upsertQuote(env, q, opportunityId) {
   }
 }
 
+// ---------- On-demand WFM fetch helpers (for FK auto-cascade) ----------
+//
+// When the user selects, say, a single quote whose parent lead isn't in
+// the same batch (and isn't already in Pipeline), we fetch the missing
+// parent on the fly. Cache the fetches in a per-request Map so the same
+// account/lead isn't re-fetched if multiple selections share a parent.
+
+async function fetchClientDetail(env, wfmUuid, cache) {
+  if (!wfmUuid) return null;
+  if (cache.has('client:' + wfmUuid)) return cache.get('client:' + wfmUuid);
+  const r = await apiGet(env, '/client.api/get/' + encodeURIComponent(wfmUuid));
+  if (!r.ok) { cache.set('client:' + wfmUuid, null); return null; }
+  const c = recordList(r.body, 'Client')[0] || null;
+  cache.set('client:' + wfmUuid, c);
+  return c;
+}
+
+async function fetchLeadDetail(env, wfmUuid, cache) {
+  if (!wfmUuid) return null;
+  if (cache.has('lead:' + wfmUuid)) return cache.get('lead:' + wfmUuid);
+  const r = await apiGet(env, '/lead.api/get/' + encodeURIComponent(wfmUuid));
+  if (!r.ok) { cache.set('lead:' + wfmUuid, null); return null; }
+  const l = recordList(r.body, 'Lead')[0] || null;
+  cache.set('lead:' + wfmUuid, l);
+  return l;
+}
+
+// Get-or-import an account by WFM UUID. If we've already imported it
+// (in this batch or a previous run), returns the Pipeline id. Otherwise
+// fetches /client.api/get/{uuid}, imports it (with nested contacts),
+// and returns the new id. Returns null if the WFM record is missing.
+async function ensureAccount(env, wfmUuid, ctx) {
+  if (!wfmUuid) return null;
+  if (ctx.accountByWfmUuid.has(wfmUuid)) return ctx.accountByWfmUuid.get(wfmUuid);
+  const c = await fetchClientDetail(env, wfmUuid, ctx.fetchCache);
+  if (!c) return null;
+  const r = await upsertAccount(env, c);
+  ctx.accountByWfmUuid.set(wfmUuid, r.id);
+  ctx.counts.accounts_cascaded++;
+
+  const cts = (c.Contacts && c.Contacts.Contact)
+    ? (Array.isArray(c.Contacts.Contact) ? c.Contacts.Contact : [c.Contacts.Contact])
+    : [];
+  for (const ct of cts) {
+    const ctr = await upsertContact(env, ct, r.id);
+    ctx.contactByWfmUuid.set(ct.UUID, ctr.id);
+    ctx.counts.contacts_cascaded++;
+  }
+  return r.id;
+}
+
+// Get-or-import a lead-derived opportunity by WFM Lead UUID. Cascades
+// account+contacts if the parent client isn't in our maps.
+async function ensureOpportunityFromLead(env, wfmLeadUuid, ctx) {
+  if (!wfmLeadUuid) return null;
+  if (ctx.oppByWfmUuid.has(wfmLeadUuid)) return ctx.oppByWfmUuid.get(wfmLeadUuid);
+  const lead = await fetchLeadDetail(env, wfmLeadUuid, ctx.fetchCache);
+  if (!lead) return null;
+
+  const accountId = lead.Client?.UUID
+    ? await ensureAccount(env, lead.Client.UUID, ctx)
+    : null;
+  if (!accountId) return null;
+  const contactId = lead.Contact?.UUID
+    ? (ctx.contactByWfmUuid.get(lead.Contact.UUID) || null)
+    : null;
+  const ownerId = lead.Owner?.UUID
+    ? (ctx.userByWfmUuid.get(lead.Owner.UUID) || null)
+    : null;
+
+  const o = await upsertOpportunityFromLead(env, lead, accountId, contactId, ownerId);
+  ctx.oppByWfmUuid.set(wfmLeadUuid, o.id);
+  ctx.counts.opportunities_cascaded++;
+  return o.id;
+}
+
 async function enrichUserFromStaff(env, st) {
   const email = String(st.Email || '').toLowerCase().trim();
   if (!email) return null;
@@ -438,9 +515,22 @@ export async function onRequestPost(context) {
     ['wfm-lead', 'wfm-job']);
   for (const r of priorOpps) oppByWfmUuid.set(r.external_id, r.id);
 
-  const counts = { accounts: 0, contacts: 0, opportunities: 0, quotes: 0, users: 0, jobs: 0, skipped: 0 };
+  const counts = {
+    accounts: 0, contacts: 0, opportunities: 0, quotes: 0,
+    users: 0, jobs: 0, skipped: 0,
+    // Records imported via auto-cascade (parent FK was missing).
+    accounts_cascaded: 0, contacts_cascaded: 0, opportunities_cascaded: 0,
+  };
   const links = [];
   const errors = [];
+
+  // Per-request fetch cache so we don't re-pull /client.api/get/{X}
+  // 5 times if 5 selected leads all reference the same client.
+  const fetchCache = new Map();
+  const ctx = {
+    accountByWfmUuid, contactByWfmUuid, userByWfmUuid, oppByWfmUuid,
+    fetchCache, counts,
+  };
 
   try {
     // -------- Staff ---------
@@ -474,46 +564,70 @@ export async function onRequestPost(context) {
     // -------- Leads ---------
     for (const lead of (samples.leads || [])) {
       try {
-        const accountId = lead.Client?.UUID && accountByWfmUuid.get(lead.Client.UUID);
+        // Auto-cascade: if the lead's parent Client isn't in the
+        // current batch and isn't already in Pipeline, fetch it from
+        // WFM and import it on the fly.
+        const accountId = lead.Client?.UUID
+          ? await ensureAccount(env, lead.Client.UUID, ctx)
+          : null;
         if (!accountId) { counts.skipped++; continue; }
         const contactId = lead.Contact?.UUID ? contactByWfmUuid.get(lead.Contact.UUID) : null;
         const ownerId   = lead.Owner?.UUID   ? userByWfmUuid.get(lead.Owner.UUID)      : null;
         const o = await upsertOpportunityFromLead(env, lead, accountId, contactId, ownerId);
         oppByWfmUuid.set(lead.UUID, o.id);
         counts.opportunities++;
-        links.push({ url: `/opportunities/${o.id}`, label: `Opp: ${lead.Name || o.number}` });
-      } catch (e) { errors.push(`lead ${lead?.Name}: ${e.message}`); }
+        links.push({ url: '/opportunities/' + o.id, label: 'Opp: ' + (lead.Name || o.number) });
+      } catch (e) { errors.push('lead ' + (lead?.Name || '?') + ': ' + e.message); }
     }
 
     // -------- Quotes ---------
     for (const q of (samples.quotes || [])) {
       try {
-        const wfmOppUuid = q.LeadUUID || q.JobUUID;
-        const oppId = wfmOppUuid && oppByWfmUuid.get(wfmOppUuid);
+        // Auto-cascade: if the quote's parent Lead isn't in the
+        // current batch and isn't in Pipeline, fetch the Lead (which
+        // recursively cascades the Client) and import it.
+        let oppId = null;
+        if (q.LeadUUID) oppId = await ensureOpportunityFromLead(env, q.LeadUUID, ctx);
+        // (JobUUID cascade — not yet wired; falls through to skip.)
+        if (!oppId && q.JobUUID) oppId = oppByWfmUuid.get(q.JobUUID) || null;
         if (!oppId) { counts.skipped++; continue; }
         const r = await upsertQuote(env, q, oppId);
         counts.quotes++;
-        links.push({ url: `/opportunities/${oppId}/quotes/${r.id}`, label: `Quote: ${q.Name || r.number}` });
-      } catch (e) { errors.push(`quote ${q?.Name}: ${e.message}`); }
+        links.push({ url: '/opportunities/' + oppId + '/quotes/' + r.id, label: 'Quote: ' + (q.Name || r.number) });
+      } catch (e) { errors.push('quote ' + (q?.Name || '?') + ': ' + e.message); }
     }
 
     // -------- Jobs ---------
     for (const job of (samples.jobs || [])) {
       try {
-        const accountId = job.Client?.UUID && accountByWfmUuid.get(job.Client.UUID);
+        const accountId = job.Client?.UUID
+          ? await ensureAccount(env, job.Client.UUID, ctx)
+          : null;
         if (!accountId) { counts.skipped++; continue; }
         const ownerId = job.Manager?.UUID ? userByWfmUuid.get(job.Manager.UUID) : null;
         const o = await upsertOpportunityFromJob(env, job, accountId, ownerId);
         oppByWfmUuid.set(job.UUID, o.id);
         counts.jobs++;
-        links.push({ url: `/opportunities/${o.id}`, label: `Job-opp: ${job.Name || o.number}` });
-      } catch (e) { errors.push(`job ${job?.Name}: ${e.message}`); }
+        links.push({ url: '/opportunities/' + o.id, label: 'Job-opp: ' + (job.Name || o.number) });
+      } catch (e) { errors.push('job ' + (job?.Name || '?') + ': ' + e.message); }
     }
 
     return json({
       ok: true,
       counts,
-      summary: `${counts.accounts} accounts · ${counts.contacts} contacts · ${counts.opportunities} opps from leads · ${counts.quotes} quotes · ${counts.jobs} opps from jobs · ${counts.users} users enriched · ${counts.skipped} skipped (FK unresolved)`,
+      summary:
+        counts.accounts + ' accounts'
+        + ' · ' + counts.contacts + ' contacts'
+        + ' · ' + counts.opportunities + ' opps from leads'
+        + ' · ' + counts.quotes + ' quotes'
+        + ' · ' + counts.jobs + ' opps from jobs'
+        + ' · ' + counts.users + ' users enriched'
+        + ' · ' + counts.skipped + ' skipped (FK unresolved)'
+        + ((counts.accounts_cascaded + counts.contacts_cascaded + counts.opportunities_cascaded) > 0
+            ? ' · auto-cascaded: ' + counts.accounts_cascaded + ' accounts, '
+              + counts.contacts_cascaded + ' contacts, '
+              + counts.opportunities_cascaded + ' opps'
+            : ''),
       links: links.slice(0, 30),  // cap so the UI stays readable
       errors: errors.slice(0, 10),
     });
