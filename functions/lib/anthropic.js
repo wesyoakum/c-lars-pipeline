@@ -145,3 +145,141 @@ export const ANTHROPIC_MODELS = {
   default: DEFAULT_MODEL,
   fast: DEFAULT_FAST_MODEL,
 };
+
+/**
+ * Send a Messages request that supports the tool-use loop.
+ *
+ * Caller passes a list of `tools` (Anthropic tool definitions: { name,
+ * description, input_schema }) and an `executeTool(name, input)` async
+ * function that runs one tool call and returns a serializable result.
+ *
+ * Loop semantics: we send the conversation, and if Claude responds with
+ * `stop_reason: 'tool_use'`, we run each tool_use block, append the
+ * results as a user message, and send again — up to `maxToolHops` times.
+ * Final return is the assistant's last text response plus the full trace
+ * (every assistant content array we received) for debugging / UI.
+ *
+ * `messages` is the conversation history in Anthropic format:
+ *   [{role: 'user'|'assistant', content: string | ContentBlock[]}, ...]
+ * Plain text user turns can be passed as strings; the API normalizes them.
+ *
+ * @param {object} env
+ * @param {object} opts
+ * @param {string}   opts.system
+ * @param {Array}    opts.messages
+ * @param {Array}    opts.tools
+ * @param {Function} opts.executeTool          async (name, input) => result
+ * @param {string}   [opts.model]
+ * @param {number}   [opts.maxTokens]          per-turn cap (default 4096)
+ * @param {number}   [opts.temperature]        default 0.2
+ * @param {boolean}  [opts.cacheSystem]
+ * @param {number}   [opts.maxToolHops]        runaway guard (default 8)
+ * @returns {Promise<{text, model, usage, trace, toolCalls}>}
+ */
+export async function messagesWithTools(env, opts) {
+  const key = requireKey(env);
+  const model = opts.model || env.ANTHROPIC_MODEL || DEFAULT_MODEL;
+  const maxToolHops = opts.maxToolHops ?? 8;
+
+  const systemBlock = opts.cacheSystem
+    ? [{ type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } }]
+    : opts.system;
+
+  const messages = [...opts.messages];
+  const trace = [];
+  const toolCalls = [];
+  const usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
+
+  for (let hop = 0; hop <= maxToolHops; hop++) {
+    const body = {
+      model,
+      max_tokens: opts.maxTokens ?? 4096,
+      temperature: opts.temperature ?? 0.2,
+      system: systemBlock,
+      tools: opts.tools,
+      messages,
+    };
+
+    const url = `${aiBaseUrl(env, 'anthropic')}/messages`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'x-api-key': key,
+        'anthropic-version': ANTHROPIC_VERSION,
+        'content-type': 'application/json',
+        ...gatewayHeaders(env),
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '');
+      throw new Error(`Anthropic messagesWithTools failed (${resp.status}): ${detail.slice(0, 500)}`);
+    }
+
+    const data = await resp.json();
+    const content = data?.content || [];
+    trace.push(content);
+
+    // Roll up usage across all hops.
+    if (data.usage) {
+      usage.input_tokens += data.usage.input_tokens || 0;
+      usage.output_tokens += data.usage.output_tokens || 0;
+      usage.cache_creation_input_tokens += data.usage.cache_creation_input_tokens || 0;
+      usage.cache_read_input_tokens += data.usage.cache_read_input_tokens || 0;
+    }
+
+    // Add the assistant turn to history (full content block array).
+    messages.push({ role: 'assistant', content });
+
+    if (data.stop_reason !== 'tool_use') {
+      const text = content
+        .filter((b) => b?.type === 'text')
+        .map((b) => b.text)
+        .join('')
+        .trim();
+      return { text, model, usage, trace, toolCalls };
+    }
+
+    // Run every tool_use block this turn produced. Anthropic supports
+    // parallel tool calls, so we execute concurrently and gather results
+    // in order before sending them back.
+    const toolUses = content.filter((b) => b?.type === 'tool_use');
+    const results = await Promise.all(toolUses.map(async (tu) => {
+      let result;
+      let isError = false;
+      try {
+        result = await opts.executeTool(tu.name, tu.input ?? {});
+      } catch (err) {
+        result = `Error: ${err?.message || String(err)}`;
+        isError = true;
+      }
+      const serialized = typeof result === 'string' ? result : JSON.stringify(result);
+      toolCalls.push({ name: tu.name, input: tu.input, result: serialized, isError });
+      return {
+        type: 'tool_result',
+        tool_use_id: tu.id,
+        content: serialized,
+        ...(isError ? { is_error: true } : {}),
+      };
+    }));
+
+    messages.push({ role: 'user', content: results });
+  }
+
+  // Hit the hop limit without a clean stop. Return whatever text we have so
+  // the UI can show it instead of erroring opaquely.
+  const lastTurn = trace[trace.length - 1] || [];
+  const text = lastTurn
+    .filter((b) => b?.type === 'text')
+    .map((b) => b.text)
+    .join('')
+    .trim();
+  return {
+    text: text || `(stopped: hit ${maxToolHops}-hop tool-use limit)`,
+    model,
+    usage,
+    trace,
+    toolCalls,
+  };
+}

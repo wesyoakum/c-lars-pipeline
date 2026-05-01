@@ -1,0 +1,156 @@
+// functions/sandbox/assistant/index.js
+//
+// GET /sandbox/assistant
+//
+// Phase 1 chat UI for the personal AI assistant. Wes-only — same email
+// allowlist as the rest of /sandbox. Shows the user's single persisted
+// thread (lazy-created on first send) and a textarea form. Submits via
+// HTMX POST to /sandbox/assistant/send which returns just the updated
+// conversation list for an in-place swap (no full reload).
+
+import { all, one } from '../../lib/db.js';
+import { layout, html, escape, htmlResponse, subnavTabs } from '../../lib/layout.js';
+
+const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
+
+export async function onRequestGet(context) {
+  const { env, data } = context;
+  const user = data?.user;
+  if (!user || user.email !== SANDBOX_OWNER) {
+    return new Response('Not found', { status: 404 });
+  }
+
+  const thread = await one(
+    env.DB,
+    'SELECT id, title FROM assistant_threads WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1',
+    [user.id]
+  );
+
+  const messages = thread
+    ? await all(
+        env.DB,
+        `SELECT id, role, text, created_at
+           FROM assistant_messages
+          WHERE thread_id = ?
+          ORDER BY created_at ASC, id ASC`,
+        [thread.id]
+      )
+    : [];
+
+  const tabs = subnavTabs(
+    [
+      { href: '/sandbox', label: 'Flow Chart' },
+      { href: '/sandbox/assistant', label: 'Assistant' },
+    ],
+    '/sandbox/assistant'
+  );
+
+  const body = html`
+    <style>
+      .assistant-wrap {
+        max-width: 880px; margin: 0 auto; padding: 1rem;
+        display: flex; flex-direction: column;
+        height: calc(100vh - 160px); min-height: 480px;
+      }
+      .assistant-messages {
+        flex: 1; overflow-y: auto; padding: 0.5rem 0;
+        display: flex; flex-direction: column; gap: 0.75rem;
+      }
+      .assistant-empty {
+        margin: auto; color: #666; font-style: italic; text-align: center;
+        max-width: 420px; line-height: 1.6;
+      }
+      .assistant-msg {
+        max-width: 80%; padding: 0.6rem 0.85rem; border-radius: 10px;
+        line-height: 1.45; white-space: pre-wrap; word-wrap: break-word;
+        font-size: 14px;
+      }
+      .assistant-msg.user {
+        align-self: flex-end; background: #2566ff; color: #fff;
+        border-bottom-right-radius: 2px;
+      }
+      .assistant-msg.assistant {
+        align-self: flex-start; background: #f1f3f7; color: #1a1a22;
+        border-bottom-left-radius: 2px;
+      }
+      .assistant-msg-meta {
+        font-size: 11px; color: #888; margin-top: 4px;
+      }
+      .assistant-form {
+        display: flex; gap: 0.5rem; align-items: flex-end;
+        padding-top: 0.75rem; border-top: 1px solid #e5e7eb;
+      }
+      .assistant-form textarea {
+        flex: 1; resize: none; min-height: 44px; max-height: 180px;
+        padding: 10px 12px; border: 1px solid #d0d0d5; border-radius: 8px;
+        font: inherit; font-size: 14px; line-height: 1.4;
+      }
+      .assistant-form textarea:focus { outline: 2px solid #2566ff; outline-offset: -1px; border-color: #2566ff; }
+      .assistant-form button {
+        padding: 10px 18px; background: #2566ff; color: #fff; border: 0;
+        border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: 500;
+      }
+      .assistant-form button:hover { background: #1245cc; }
+      .assistant-form button:disabled { opacity: 0.6; cursor: wait; }
+      .assistant-pending {
+        align-self: flex-start; background: #f1f3f7; color: #888;
+        padding: 0.6rem 0.85rem; border-radius: 10px; font-style: italic;
+        font-size: 14px;
+      }
+      .htmx-request .assistant-pending { display: block; }
+      .assistant-pending { display: none; }
+    </style>
+    ${tabs}
+    <div class="assistant-wrap">
+      <div id="assistant-messages" class="assistant-messages">
+        ${messages.length === 0
+          ? html`<div class="assistant-empty">
+              Personal assistant. Ask about open tasks, opportunities, or just talk through what
+              is on your plate. I can read your accounts/tasks/opportunities and remember things
+              you ask me to (travel prefs, ongoing context, "remind me about X").
+            </div>`
+          : messages.map(renderMessage)}
+      </div>
+      <form
+        class="assistant-form"
+        hx-post="/sandbox/assistant/send"
+        hx-target="#assistant-messages"
+        hx-swap="innerHTML"
+        hx-disabled-elt="find textarea, find button"
+        hx-on::after-request="if(event.detail.successful){ this.querySelector('textarea').value=''; this.querySelector('textarea').focus(); document.getElementById('assistant-messages').scrollTop = 999999; }"
+      >
+        <textarea
+          name="text"
+          placeholder="Message..."
+          rows="1"
+          required
+          autofocus
+          onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); this.form.requestSubmit(); }"
+        ></textarea>
+        <button type="submit">Send</button>
+      </form>
+    </div>
+    <script>
+      // Auto-grow textarea up to its max-height.
+      (function () {
+        const ta = document.querySelector('.assistant-form textarea');
+        if (!ta) return;
+        const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 180) + 'px'; };
+        ta.addEventListener('input', grow);
+        // Scroll to bottom on initial load.
+        const list = document.getElementById('assistant-messages');
+        if (list) list.scrollTop = list.scrollHeight;
+      })();
+    </script>
+  `;
+
+  return htmlResponse(layout('Assistant', body, { user, activeNav: '/sandbox' }));
+}
+
+function renderMessage(m) {
+  return html`<div class="assistant-msg ${m.role}">${escape(m.text)}</div>`;
+}
+
+// Exported so send.js can reuse the exact same row markup when returning
+// the swap fragment.
+export const renderMessageRow = renderMessage;

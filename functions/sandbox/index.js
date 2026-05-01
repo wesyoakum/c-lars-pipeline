@@ -21,7 +21,10 @@ export async function onRequestGet(context) {
   }
 
   const tabs = subnavTabs(
-    [{ href: '/sandbox', label: 'Flow Chart' }],
+    [
+      { href: '/sandbox', label: 'Flow Chart' },
+      { href: '/sandbox/assistant', label: 'Assistant' },
+    ],
     '/sandbox'
   );
 
