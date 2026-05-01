@@ -103,3 +103,78 @@ export function listRecords(body) {
   if (Array.isArray(body.data)) return body.data;
   return [];
 }
+
+/**
+ * POST request against the Katana REST API.
+ *
+ * Used by Phase 2b+ to create resources (customers, sales orders,
+ * sales-order rows, etc.). Caller is responsible for the body shape;
+ * we just JSON-encode and send.
+ *
+ * @param {object} env       Pages Functions env bindings
+ * @param {string} pathOrUrl Path (e.g. '/customers') or full URL
+ * @param {object} body      Request body (will be JSON-encoded)
+ */
+export async function apiPost(env, pathOrUrl, body) {
+  const apiKey = requireApiKey(env);
+  const url = pathOrUrl.startsWith('http')
+    ? pathOrUrl
+    : API_BASE + (pathOrUrl.startsWith('/') ? pathOrUrl : '/' + pathOrUrl);
+
+  const headers = {
+    accept:         'application/json',
+    'content-type': 'application/json',
+    authorization:  'Bearer ' + apiKey,
+  };
+
+  const started = Date.now();
+  const res = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  const contentType = (res.headers.get('content-type') || '').toLowerCase();
+
+  let parsed = text;
+  if (contentType.includes('json') || (text && text.trim().startsWith('{'))) {
+    try { parsed = JSON.parse(text); } catch { /* fall through */ }
+  }
+
+  return {
+    ok: res.ok,
+    status: res.status,
+    body: parsed,
+    rawText: text,
+    contentType,
+    durationMs: Date.now() - started,
+    url,
+  };
+}
+
+/**
+ * Fetch every record from a paginated list endpoint. Walks pages with
+ * limit=100 until the response array is shorter than the limit, then
+ * stops. Returns the concatenated `data` array.
+ *
+ * Defensive caps: bails after 50 pages (5,000 records) to avoid
+ * runaway loops if a future Katana change breaks the pagination
+ * contract. The caller can handle the partial-result case.
+ */
+export async function apiGetAll(env, path, query = {}) {
+  const out = [];
+  const limit = 100;
+  for (let page = 1; page <= 50; page++) {
+    const r = await apiGet(env, path, { query: { ...query, limit, page } });
+    if (!r.ok) {
+      const err = new Error('Katana ' + path + ' page ' + page + ' failed (' + r.status + ')');
+      err.status = r.status;
+      err.body = r.body;
+      throw err;
+    }
+    const records = listRecords(r.body);
+    out.push(...records);
+    if (records.length < limit) break;
+  }
+  return out;
+}

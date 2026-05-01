@@ -36,6 +36,8 @@ export function settingsSubNav(active, isAdmin) {
            href="/settings/wfm-import">WFM import</a>
         <a class="nav-link ${active === 'katana-probe' ? 'active' : ''}"
            href="/settings/katana-probe">Katana probe</a>
+        <a class="nav-link ${active === 'katana-customer-map' ? 'active' : ''}"
+           href="/settings/katana-customer-map">Katana customers</a>
       ` : ''}
     </nav>`;
 }
