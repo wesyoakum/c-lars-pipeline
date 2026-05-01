@@ -161,8 +161,8 @@ Dropbox               →   wfm_payload (deprecated WFM placeholder string)
 **Sample (WROV LARS):**
 ```
 title              = WROV LARS
-transaction_type   = eps        (from §6 mapping)
-stage              = qualified  (from State='Current' + Category='3 Opportunity')
+transaction_type   = eps           (from §6 mapping)
+stage              = quote_drafted (from State='Current' + Category='3 Opportunity')
 wfm_category       = 3 Opportunity
 estimated_value_usd = 1200000
 account_id         = (Pipeline ID for "Saab")
@@ -320,23 +320,66 @@ Two classification axes feed Pipeline:
 
 ### 6a. WFM Lead.Category (numbered) → opportunities.stage
 
-The probe only saw "3 Opportunity" and "4 Quoted" — we need the full
-list from inside WFM. Tentative map (please confirm):
+Final mapping against the production stage catalog (post-migration
+0062/0063, which renamed `closed_*` to `won`/`lost`/`abandoned`):
 
 ```
-WFM Lead.Category         Pipeline stage (transaction_type='spares' as example)
-─────────────────         ─────────────────────────
-"1 Identified"        →   identified
-"2 Qualifying"        →   qualifying
-"3 Opportunity"       →   qualified
-"4 Quoted"            →   quote_submitted
-"5 Won"               →   closed_won
-"6 Lost"              →   closed_lost
+WFM Lead.Category    Pipeline stage_key   Pipeline label
+─────────────────    ──────────────────   ─────────────────────────
+"1 Identified"   →   lead                 Lead
+"2 Qualifying"   →   rfq_received         RFQ received
+"3 Opportunity"  →   quote_drafted        Quote drafted
+"4 Quoted"       →   quote_submitted      Quote submitted
+"5 Won"          →   won                  Won (OC issued)
+"6 Lost"         →   lost                 Lost
 ```
 
-Plus: WFM Lead.State overrides — `Won` → `closed_won`, `Lost` → `closed_lost` regardless of category.
+### Lead.State overrides
+Regardless of Category, WFM Lead.State takes precedence at the terminal end:
+- `Current` → keep the Category-derived stage
+- `Won`     → override to `won`
+- `Lost`    → override to `lost`
 
-The raw WFM Category text is preserved in `opportunities.wfm_category` either way.
+The raw WFM Category text is preserved in `opportunities.wfm_category`
+on every imported opp.
+
+### What about the rest of the rich funnel?
+
+Pipeline's production catalog has a much richer post-quote and post-win
+flow than WFM tracks:
+
+```
+Pre-quote:    lead → rfq_received → awaiting_client_feedback
+Quote cycle:  quote_drafted → quote_submitted → quote_under_revision → revised_quote_submitted
+OC / win:     oc_drafted → won → oc_submitted
+Execution:    job_in_progress → change_order_drafted → change_order_submitted
+              → change_order_under_revision → revised_change_order_submitted
+              → change_order_won → amended_oc_drafted → amended_oc_submitted
+              → completed
+Terminal:     lost · abandoned
+```
+
+WFM imports only ever land an opportunity in the **early** stages
+(lead / rfq_received / quote_drafted / quote_submitted) or the
+terminal ones (won / lost). The intermediate revision and
+post-execution stages are populated when C-LARS uses Pipeline as the
+system of record going forward — WFM never tracked any of that detail
+to begin with.
+
+WFM Job.State (PLANNED / PRODUCTION / COMPLETED / CANCELLED) maps
+into the post-win execution band:
+
+```
+WFM Job.State        Pipeline stage_key
+─────────────────    ──────────────────
+PLANNED          →   won                 (OC issued; production hasn't started yet)
+PRODUCTION       →   job_in_progress
+COMPLETED        →   completed
+CANCELLED        →   abandoned
+```
+
+If a WFM Lead and a WFM Job both reference the same opportunity, the
+Job's State wins (it's later in the lifecycle and more authoritative).
 
 ### 6b. WFM Categories list (global) AND WFM Job.Type → opportunities.transaction_type
 
@@ -391,6 +434,9 @@ PRODUCTION      → handed_off
 COMPLETED       → handed_off (+ actual_close_date on parent opp)
 CANCELLED       → cancelled
 ```
+
+(The corresponding opportunity.stage mapping is in §6a above:
+PLANNED → won, PRODUCTION → job_in_progress, etc.)
 
 ---
 
@@ -453,7 +499,9 @@ the doc.
 ## 10. Required schema changes (consolidated)
 
 ```sql
--- migrations/0062_wfm_import_support.sql
+-- migrations/0064_wfm_import_support.sql
+-- (0062 + 0063 already shipped as part of the funnel-rename cleanup;
+-- this WFM-specific migration is now 0064.)
 -- Adds the columns and tables needed to import WFM data without
 -- losing any field. wfm_payload is JSON (TEXT in SQLite); use
 -- json_extract() / json_each() to query.
@@ -640,7 +688,7 @@ via wfm_payload, hybrid Lead/Job. The remaining decisions are smaller:
 | 10 | RFQReceivedDate column on opportunities | yes (per Principle 2 — promote to typed) | |
 | 11 | project_manager_user_id on jobs | yes | |
 | 12 | Stale-owner handling (people who left) | set owner_user_id=null, log unmatched, raw kept in wfm_payload | |
-| 13 | Confirm full WFM Lead.Category list | (need to inspect WFM directly — probe only saw "3 Opportunity" + "4 Quoted") | |
+| 13 | Confirm full WFM Lead.Category list | 1 Identified · 2 Qualifying · 3 Opportunity · 4 Quoted · 5 Won · 6 Lost | ✅ confirmed; mapped in §6a |
 | 14 | Drop archived/deleted WFM clients? | NO — import everything, set is_archived/is_deleted columns | |
 | 15 | Re-import strategy: full-overwrite vs. last-modified delta? | last-modified delta (DateModifiedUtc → updated_at filter) | |
 
