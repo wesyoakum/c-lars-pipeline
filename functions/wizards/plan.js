@@ -533,7 +533,7 @@ async function planQuote(env, extracted) {
       `SELECT id, number, title, stage, transaction_type
          FROM opportunities
         WHERE account_id = ?
-          AND stage NOT IN ('closed_won','closed_lost','dead','dormant')
+          AND stage NOT IN ('won','lost','abandoned')
         ORDER BY created_at DESC
         LIMIT 12`,
       [accountSection.matched.id]);

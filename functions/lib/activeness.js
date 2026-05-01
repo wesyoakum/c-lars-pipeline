@@ -58,11 +58,11 @@ export const INACTIVE_JOB_STATUSES = [
 ];
 
 // Stages that mark an opportunity as "inactive" for the active_only
-// filter. Intentionally excludes `closed_won`: won deals stay in the
+// filter. Intentionally excludes `won`: won deals stay in the
 // active list until the downstream job is complete.
 export const CLOSED_OPPORTUNITY_STAGES = [
-  'closed_lost',
-  'closed_abandoned',
+  'lost',
+  'abandoned',
 ];
 
 // Separate constant for the inactive-opportunities section on the

@@ -150,12 +150,12 @@ export async function onRequestGet(context) {
               COUNT(*) AS n, COALESCE(SUM(o.estimated_value_usd), 0) AS total_value
          FROM opportunities o
          LEFT JOIN users u ON u.id = o.owner_user_id
-        WHERE o.stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
+        WHERE o.stage NOT IN ('won', 'lost', 'abandoned')
         GROUP BY o.owner_user_id ORDER BY total_value DESC`),
     all(env.DB,
       `SELECT stage, COUNT(*) AS n, COALESCE(SUM(estimated_value_usd), 0) AS total_value
          FROM opportunities
-        WHERE stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
+        WHERE stage NOT IN ('won', 'lost', 'abandoned')
         GROUP BY stage ORDER BY n DESC`),
     one(env.DB,
       `SELECT COUNT(*) AS total,
@@ -169,17 +169,17 @@ export async function onRequestGet(context) {
               a.name AS account_name
          FROM opportunities o
          LEFT JOIN accounts a ON a.id = o.account_id
-        WHERE o.stage = 'closed_won'
+        WHERE o.stage = 'won'
         ORDER BY o.updated_at DESC LIMIT 10`),
     one(env.DB,
       `SELECT COALESCE(SUM(estimated_value_usd), 0) AS value, COUNT(*) AS n
          FROM opportunities
-        WHERE stage = 'closed_won'
+        WHERE stage = 'won'
           AND COALESCE(actual_close_date, updated_at) >= date('now', 'start of year')`),
     one(env.DB,
       `SELECT COALESCE(SUM(estimated_value_usd), 0) AS value, COUNT(*) AS n
          FROM opportunities
-        WHERE stage = 'closed_won'
+        WHERE stage = 'won'
           AND COALESCE(actual_close_date, updated_at) >= date('now', 'start of month')`),
   ]);
 

@@ -1,0 +1,25 @@
+-- =====================================================================
+-- Migration 0063 — drop the redundant `revision` stage that 0062
+-- introduced.
+--
+-- Context: 0062 added a generic `revision` stage thinking it was the
+-- only revision-related stage in the funnel. The production catalog
+-- already had a richer revision flow:
+--   * quote_under_revision      (sort 60) — between quote_submitted
+--                                            and revised_quote_submitted
+--   * revised_quote_submitted   (sort 70) — explicit "we've sent the
+--                                            revised quote back"
+--   * change_order_under_revision   (sort 160) — same pattern in the
+--                                                post-win OC change-order
+--                                                cycle
+--   * revised_change_order_submitted (sort 170) — paired with the above
+--
+-- These cover the revision lifecycle in much more detail than a single
+-- `revision` bucket. The 0062 row is redundant and would split traffic
+-- the user has been carefully directing into the explicit stages.
+--
+-- Drop it on every transaction_type. No opportunity rows reference it
+-- (0062 just landed; the WFM importer hasn't run yet).
+-- =====================================================================
+
+DELETE FROM stage_definitions WHERE stage_key = 'revision';

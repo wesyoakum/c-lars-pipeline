@@ -84,7 +84,7 @@ export async function onRequestPost(context) {
   }
 
   // ---- Close reason required for terminal-loss stages -----------------
-  const CLOSE_REASON_REQUIRED = ['closed_lost', 'closed_died'];
+  const CLOSE_REASON_REQUIRED = ['lost', 'closed_died'];
   if (CLOSE_REASON_REQUIRED.includes(targetDef.stage_key) && !value.override_reason?.trim()) {
     return redirectWithFlash(
       `/opportunities/${oppId}`,
@@ -142,9 +142,9 @@ export async function onRequestPost(context) {
   // If moving to a terminal stage, set close_reason and actual_close_date
   const isTerminal = !!targetDef.is_terminal;
   const closeReason = isTerminal
-    ? (targetDef.is_won ? 'won' : (targetDef.stage_key === 'closed_lost' ? 'lost' : 'abandoned'))
+    ? (targetDef.is_won ? 'won' : (targetDef.stage_key === 'lost' ? 'lost' : 'abandoned'))
     : null;
-  const isCloseLoss = targetDef.stage_key === 'closed_lost' || targetDef.stage_key === 'closed_died';
+  const isCloseLoss = targetDef.stage_key === 'lost' || targetDef.stage_key === 'closed_died';
   const lossReasonTag = isCloseLoss ? (value.override_reason || null) : null;
 
   const statements = [

@@ -61,13 +61,13 @@ export async function onRequestGet(context) {
     like
       ? all(env.DB,
           `SELECT id, number, title FROM opportunities
-            WHERE stage NOT IN ('closed_won','closed_lost','closed_abandoned')
+            WHERE stage NOT IN ('won','lost','abandoned')
               AND (LOWER(CAST(number AS TEXT)) LIKE ? OR LOWER(title) LIKE ?)
             ORDER BY updated_at DESC LIMIT ?`,
           [like, like, limit])
       : all(env.DB,
           `SELECT id, number, title FROM opportunities
-            WHERE stage NOT IN ('closed_won','closed_lost','closed_abandoned')
+            WHERE stage NOT IN ('won','lost','abandoned')
             ORDER BY updated_at DESC LIMIT ?`,
           [limit]),
 

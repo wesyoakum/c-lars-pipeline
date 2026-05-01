@@ -205,37 +205,57 @@ export const TOKEN_PATHS = {
   ],
 };
 
-// Mirrors migration 0002/0003 stage seeds. Stored per-key so UI shows
-// friendly labels; engine conditions match against the raw key.
+// Mirrors the production stage_definitions catalog. Stored per-key
+// so UI shows friendly labels; engine conditions match against the
+// raw key. The catalog has been carefully evolved from the seed —
+// keep this list in sync with the live catalog when it changes.
 export const STAGE_KEYS = [
-  { key: 'prospect',        label: 'Prospect' },
-  { key: 'qualified',       label: 'Qualified' },
-  { key: 'proposal_sent',   label: 'Proposal sent' },
-  { key: 'negotiation',     label: 'Negotiation' },
-  { key: 'ntp_draft',       label: 'NTP draft (EPS)' },
-  { key: 'ntp_issued',      label: 'NTP issued (EPS)' },
-  { key: 'oc_drafted',      label: 'OC drafted' },
-  { key: 'oc_issued',       label: 'OC issued' },
-  { key: 'closed_won',      label: 'Closed — won' },
-  { key: 'closed_lost',     label: 'Closed — lost' },
-  { key: 'closed_died',     label: 'Closed — died' },
-  { key: 'closed_abandoned',label: 'Closed — abandoned' },
+  // Pre-quote
+  { key: 'lead',                              label: 'Lead' },
+  { key: 'rfq_received',                      label: 'RFQ received' },
+  { key: 'awaiting_client_feedback',          label: 'Awaiting client feedback' },
+
+  // Quote cycle
+  { key: 'quote_drafted',                     label: 'Quote drafted' },
+  { key: 'quote_submitted',                   label: 'Quote submitted' },
+  { key: 'quote_under_revision',              label: 'Quote under revision' },
+  { key: 'revised_quote_submitted',           label: 'Revised quote submitted' },
+
+  // OC / win
+  { key: 'oc_drafted',                        label: 'OC drafted' },
+  { key: 'won',                               label: 'Won (OC issued)' },
+  { key: 'oc_submitted',                      label: 'OC submitted' },
+
+  // Post-win execution + change-order cycle
+  { key: 'job_in_progress',                   label: 'Job in progress' },
+  { key: 'change_order_drafted',              label: 'Change order drafted' },
+  { key: 'change_order_submitted',            label: 'Change order submitted' },
+  { key: 'change_order_under_revision',       label: 'Change order under revision' },
+  { key: 'revised_change_order_submitted',    label: 'Revised change order submitted' },
+  { key: 'change_order_won',                  label: 'Change order won' },
+  { key: 'amended_oc_drafted',                label: 'Amended OC drafted' },
+  { key: 'amended_oc_submitted',              label: 'Amended OC submitted' },
+  { key: 'completed',                         label: 'Completed' },
+
+  // Terminal — losses
+  { key: 'lost',                              label: 'Lost' },
+  { key: 'abandoned',                         label: 'Abandoned' },
 ];
 
 export const TRANSACTION_TYPES = [
-  { key: 'spares',        label: 'Spares' },
-  { key: 'eps',           label: 'EPS' },
-  { key: 'service',       label: 'Service' },
-  { key: 'refurb_baseline', label: 'Refurb — baseline' },
-  { key: 'refurb_major',  label: 'Refurb — major' },
+  { key: 'spares',  label: 'Spares' },
+  { key: 'eps',     label: 'EPS' },
+  { key: 'refurb',  label: 'Refurb' },
+  { key: 'service', label: 'Service' },
 ];
 
 export const QUOTE_TYPES = [
-  { key: 'spares',        label: 'Spares' },
-  { key: 'eps',           label: 'EPS' },
-  { key: 'service',       label: 'Service' },
-  { key: 'refurb_baseline', label: 'Refurb — baseline' },
-  { key: 'refurb_major',  label: 'Refurb — major' },
+  { key: 'spares',              label: 'Spares' },
+  { key: 'eps',                 label: 'EPS' },
+  { key: 'refurb_baseline',     label: 'Refurb — baseline' },
+  { key: 'refurb_modified',     label: 'Refurb — modified' },
+  { key: 'refurb_supplemental', label: 'Refurb — supplemental' },
+  { key: 'service',             label: 'Service' },
 ];
 
 export const ERROR_CODES = [

@@ -36,7 +36,7 @@ function scoreMatch(label, q) {
   return 0;
 }
 
-const CLOSED_STAGES = "('closed_won','closed_lost','closed_abandoned')";
+const CLOSED_STAGES = "('won','lost','abandoned')";
 
 export async function onRequestGet(context) {
   const { env, request, data } = context;
