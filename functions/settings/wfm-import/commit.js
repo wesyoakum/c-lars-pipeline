@@ -605,63 +605,74 @@ async function syncQuoteLines(env, pipelineQuoteId, wfmQuoteUuid, ctx) {
     sortOrder += 10;
   }
 
-  // Idempotency, two-step:
-  //   1. Find the cost_builds attached to existing wfm-sourced
-  //      quote_lines for this quote.
-  //   2. Delete those quote_lines, then delete those cost_builds.
-  // User-added (non-wfm) quote_lines and their cost_builds are
-  // preserved.
+  // Idempotency: walk existing wfm-sourced quote_lines for this
+  // quote, capture their per-line cost_build IDs (via the
+  // cost_builds.quote_line_id backref), then delete both. User-added
+  // quote_lines + builds are preserved.
   const oldLines = await all(env.DB,
-    `SELECT cost_build_id FROM quote_lines
-      WHERE quote_id = ? AND external_source = 'wfm'
-        AND cost_build_id IS NOT NULL`,
+    `SELECT id FROM quote_lines
+      WHERE quote_id = ? AND external_source = 'wfm'`,
     [pipelineQuoteId]);
-  const oldBuildIds = oldLines.map((r) => r.cost_build_id).filter(Boolean);
+  const oldQuoteLineIds = oldLines.map((r) => r.id);
+
+  if (oldQuoteLineIds.length > 0) {
+    // Delete cost_builds linked back to these wfm quote_lines.
+    const placeholders = oldQuoteLineIds.map(() => '?').join(',');
+    await run(env.DB,
+      'DELETE FROM cost_builds WHERE quote_line_id IN (' + placeholders + ')',
+      oldQuoteLineIds);
+  }
 
   await run(env.DB,
     `DELETE FROM quote_lines WHERE quote_id = ? AND external_source = 'wfm'`,
     [pipelineQuoteId]);
-  for (const cbId of oldBuildIds) {
-    await run(env.DB, 'DELETE FROM cost_builds WHERE id = ?', [cbId]);
-  }
 
-  // Insert per-line cost_build + quote_line.
+  // Insert quote_line first (so we have its id to backref from
+  // cost_builds.quote_line_id), then insert cost_build pointing back.
   const ts = nowIso();
   for (const line of lines) {
-    const cbId = uuid();
-    const labelSrc = (line.part_number || line.title || line.description || line.external_id);
-    const label = 'WFM: ' + String(labelSrc).slice(0, 70);
-    // Margin: ((price - cost) / price) * 100. Zero when price is 0.
-    const marginPct = line.ext_price > 0
-      ? ((line.ext_price - line.ext_cost) / line.ext_price) * 100
-      : 0;
-
-    await run(env.DB,
-      `INSERT INTO cost_builds
-         (id, opportunity_id, label, status, pricing_method,
-          total_cost, total_cost_source,
-          target_price, target_margin_pct,
-          notes, created_at, updated_at)
-       VALUES (?, ?, ?, 'draft', 'manual',
-               ?, 'manual',
-               ?, ?,
-               ?, ?, ?)`,
-      [cbId, opportunityId, label,
-       line.ext_cost, line.ext_price, marginPct,
-       'WFM-imported (qty ' + line.quantity + ' × cost ' + line.unit_cost.toFixed(4) + ' / price ' + line.unit_price.toFixed(4) + ')',
-       ts, ts]);
-
+    const qlId = uuid();
     await run(env.DB,
       `INSERT INTO quote_lines
          (id, quote_id, external_source, external_id,
           sort_order, item_type, title, part_number, description,
           quantity, unit, unit_price, extended_price,
-          cost_build_id, wfm_payload, created_at, updated_at)
-       VALUES (?, ?, 'wfm', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [uuid(), pipelineQuoteId, line.external_id,
+          wfm_payload, created_at, updated_at)
+       VALUES (?, ?, 'wfm', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [qlId, pipelineQuoteId, line.external_id,
        line.sort_order, line.item_type, line.title, line.part_number, line.description,
        line.quantity, line.unit, line.unit_price, line.ext_price,
-       cbId, line.wfm_payload, ts, ts]);
+       line.wfm_payload, ts, ts]);
+
+    // Per-line cost_build. Pipeline's cost_builds schema decomposes
+    // cost into 4 buckets (dm/dl/imoh/other) — for WFM imports we
+    // dump the rolled-up cost into the appropriate bucket based on
+    // line type:
+    //   product → dm_user_cost (Direct Materials)
+    //   labor   → dl_user_cost (Direct Labor)
+    // Price is the unified quote_price_user.
+    const cbId = uuid();
+    const labelSrc = (line.part_number || line.title || line.description || line.external_id);
+    const label = 'WFM: ' + String(labelSrc).slice(0, 70);
+    const dmCost = (line.item_type === 'product') ? line.ext_cost : 0;
+    const dlCost = (line.item_type === 'labor')   ? line.ext_cost : 0;
+
+    await run(env.DB,
+      `INSERT INTO cost_builds
+         (id, opportunity_id, quote_line_id, label, status,
+          dm_user_cost, dl_user_cost, imoh_user_cost, other_user_cost,
+          quote_price_user,
+          use_dm_library, use_labor_library, discount_is_phantom,
+          notes, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 'draft',
+               ?, ?, 0, 0,
+               ?,
+               0, 0, 0,
+               ?, ?, ?)`,
+      [cbId, opportunityId, qlId, label,
+       dmCost, dlCost, line.ext_price,
+       'WFM-imported (qty ' + line.quantity + ' × cost ' + line.unit_cost.toFixed(4) + ' / price ' + line.unit_price.toFixed(4) + ')',
+       ts, ts]);
   }
 
   return lines.length;
