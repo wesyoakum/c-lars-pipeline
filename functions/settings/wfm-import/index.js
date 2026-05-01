@@ -262,6 +262,19 @@ export async function onRequestGet(context) {
                   <li><a :href="link.url" x-text="link.label"></a></li>
                 </template>
               </ul>
+
+              <!-- Surface any per-record errors so the user can see when a
+                   row didn't import cleanly even when overall ok=true. -->
+              <template x-if="importResult.errors && importResult.errors.length > 0">
+                <div style="margin-top:.7rem;padding:.5rem .7rem;background:#fff8c5;border:1px solid #d4a72c;border-radius:4px;font-size:.85em">
+                  <strong>Errors during import:</strong>
+                  <ul style="margin:.3rem 0 0 0;padding-left:1.2rem">
+                    <template x-for="(err, idx) in importResult.errors" :key="idx">
+                      <li style="font-family:ui-monospace,monospace;font-size:.85em" x-text="err"></li>
+                    </template>
+                  </ul>
+                </div>
+              </template>
             </section>
           </template>
 
