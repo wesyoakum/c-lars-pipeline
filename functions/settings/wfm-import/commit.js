@@ -489,13 +489,26 @@ async function fetchQuoteDetail(env, wfmUuid, cache) {
 }
 
 // Walk DetailedQuote.{Costs,Tasks} arrays and produce Pipeline
-// quote_lines rows. Idempotent on (external_source='wfm',
-// external_id=<line UUID>): DELETEs all WFM-sourced lines for the
-// quote first, then INSERTs the new ones. User-added non-WFM
-// lines are preserved.
+// quote_lines rows. Each line gets its own per-line cost_build
+// (manual-mode, total_cost_source='manual') storing the WFM cost
+// basis vs. customer price with margin computed. quote_lines
+// references the cost_build via cost_build_id so the per-row
+// "Build" column lights up.
+//
+// Idempotent on (external_source='wfm', external_id=<line UUID>):
+// DELETEs all WFM-sourced lines AND their per-line cost_builds for
+// the quote first, then re-INSERTs. User-added (non-wfm) lines and
+// builds are preserved.
 async function syncQuoteLines(env, pipelineQuoteId, wfmQuoteUuid, ctx) {
   const detail = await fetchQuoteDetail(env, wfmQuoteUuid, ctx.fetchCache);
   if (!detail) return 0;
+
+  // Get the parent opportunity (cost_builds.opportunity_id is a
+  // required FK).
+  const quoteRow = await one(env.DB,
+    'SELECT opportunity_id FROM quotes WHERE id = ?', [pipelineQuoteId]);
+  if (!quoteRow) return 0;
+  const opportunityId = quoteRow.opportunity_id;
 
   // Persist the full DetailedQuote (including Costs/Tasks/Options)
   // onto the quote row's wfm_payload, replacing the lighter
@@ -532,13 +545,20 @@ async function syncQuoteLines(env, pipelineQuoteId, wfmQuoteUuid, ctx) {
 
     let partNumber = code;
     let description = desc;
-    // Move a part-number-shaped Description into part_number when
-    // there's no separate Code field. Skips long descriptions and
-    // anything with whitespace.
     if (!partNumber && desc && !desc.includes(' ') && PART_NUM_RE.test(desc)) {
       partNumber = desc;
       description = '';
     }
+
+    const quantity  = n(c.Quantity) || 1;
+    const unitPrice = n(c.UnitPrice) || 0;
+    // WFM Costs may have UnitCost (the cost basis) separately from
+    // UnitPrice (customer price). Fall back to UnitPrice when no
+    // separate cost field is provided — margin will be 0 in that
+    // case but the user can edit it later.
+    const unitCost  = n(c.UnitCost) || unitPrice;
+    const extPrice  = n(c.Amount) || n(c.Total) || (quantity * unitPrice);
+    const extCost   = quantity * unitCost;
 
     lines.push({
       external_id: s(c.UUID) || ('cost-' + sortOrder),
@@ -546,25 +566,28 @@ async function syncQuoteLines(env, pipelineQuoteId, wfmQuoteUuid, ctx) {
       title:       s(c.Title) || '',
       part_number: partNumber,
       description: description || (partNumber ? '' : '(no description)'),
-      quantity:    n(c.Quantity) || 1,
+      quantity,
       unit:        s(c.Unit) || '',
-      unit_price:  n(c.UnitPrice) || 0,
-      // WFM Costs sometimes use "Amount" for the extended total,
-      // sometimes "Total". Try both, fall back to qty*unit_price.
-      extended_price: n(c.Amount) || n(c.Total) || (n(c.Quantity) * n(c.UnitPrice)),
+      unit_price:  unitPrice,
+      unit_cost:   unitCost,
+      ext_price:   extPrice,
+      ext_cost:    extCost,
       wfm_payload: JSON.stringify(c),
     });
     sortOrder += 10;
   }
 
   for (const t of arrayOf(detail.Tasks, 'Task')) {
-    // WFM Tasks are billable-time line items. Quantity-of-time fields
-    // can be Quantity / EstimatedMinutes / BillableMinutes depending
-    // on the org's setup; pick the first non-zero.
     const qty = n(t.Quantity) || n(t.BillableMinutes) || n(t.EstimatedMinutes) || 1;
     const unit = s(t.Unit)
       || (n(t.BillableMinutes) || n(t.EstimatedMinutes) ? 'min' : 'hr');
     const rate = n(t.BillableRate) || n(t.Rate) || 0;
+    // Labor cost basis: WFM Task may have CostRate or UnitCost; if
+    // not, fall back to the billable rate (margin=0).
+    const cost = n(t.CostRate) || n(t.UnitCost) || rate;
+    const extPrice = n(t.Amount) || n(t.Total) || (qty * rate);
+    const extCost  = qty * cost;
+
     lines.push({
       external_id: s(t.UUID) || ('task-' + sortOrder),
       sort_order:  sortOrder, item_type: 'labor',
@@ -574,30 +597,71 @@ async function syncQuoteLines(env, pipelineQuoteId, wfmQuoteUuid, ctx) {
       quantity:    qty,
       unit,
       unit_price:  rate,
-      extended_price: n(t.Amount) || n(t.Total) || (qty * rate),
+      unit_cost:   cost,
+      ext_price:   extPrice,
+      ext_cost:    extCost,
       wfm_payload: JSON.stringify(t),
     });
     sortOrder += 10;
   }
 
-  // Idempotency: drop existing WFM-sourced lines, then re-insert.
+  // Idempotency, two-step:
+  //   1. Find the cost_builds attached to existing wfm-sourced
+  //      quote_lines for this quote.
+  //   2. Delete those quote_lines, then delete those cost_builds.
+  // User-added (non-wfm) quote_lines and their cost_builds are
+  // preserved.
+  const oldLines = await all(env.DB,
+    `SELECT cost_build_id FROM quote_lines
+      WHERE quote_id = ? AND external_source = 'wfm'
+        AND cost_build_id IS NOT NULL`,
+    [pipelineQuoteId]);
+  const oldBuildIds = oldLines.map((r) => r.cost_build_id).filter(Boolean);
+
   await run(env.DB,
     `DELETE FROM quote_lines WHERE quote_id = ? AND external_source = 'wfm'`,
     [pipelineQuoteId]);
+  for (const cbId of oldBuildIds) {
+    await run(env.DB, 'DELETE FROM cost_builds WHERE id = ?', [cbId]);
+  }
 
+  // Insert per-line cost_build + quote_line.
   const ts = nowIso();
   for (const line of lines) {
+    const cbId = uuid();
+    const labelSrc = (line.part_number || line.title || line.description || line.external_id);
+    const label = 'WFM: ' + String(labelSrc).slice(0, 70);
+    // Margin: ((price - cost) / price) * 100. Zero when price is 0.
+    const marginPct = line.ext_price > 0
+      ? ((line.ext_price - line.ext_cost) / line.ext_price) * 100
+      : 0;
+
+    await run(env.DB,
+      `INSERT INTO cost_builds
+         (id, opportunity_id, label, status, pricing_method,
+          total_cost, total_cost_source,
+          target_price, target_margin_pct,
+          notes, created_at, updated_at)
+       VALUES (?, ?, ?, 'draft', 'manual',
+               ?, 'manual',
+               ?, ?,
+               ?, ?, ?)`,
+      [cbId, opportunityId, label,
+       line.ext_cost, line.ext_price, marginPct,
+       'WFM-imported (qty ' + line.quantity + ' × cost ' + line.unit_cost.toFixed(4) + ' / price ' + line.unit_price.toFixed(4) + ')',
+       ts, ts]);
+
     await run(env.DB,
       `INSERT INTO quote_lines
          (id, quote_id, external_source, external_id,
           sort_order, item_type, title, part_number, description,
-          quantity, unit, unit_price, extended_price, wfm_payload,
-          created_at, updated_at)
-       VALUES (?, ?, 'wfm', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          quantity, unit, unit_price, extended_price,
+          cost_build_id, wfm_payload, created_at, updated_at)
+       VALUES (?, ?, 'wfm', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [uuid(), pipelineQuoteId, line.external_id,
        line.sort_order, line.item_type, line.title, line.part_number, line.description,
-       line.quantity, line.unit, line.unit_price, line.extended_price, line.wfm_payload,
-       ts, ts]);
+       line.quantity, line.unit, line.unit_price, line.ext_price,
+       cbId, line.wfm_payload, ts, ts]);
   }
 
   return lines.length;
