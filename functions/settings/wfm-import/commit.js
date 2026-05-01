@@ -520,11 +520,32 @@ async function syncQuoteLines(env, pipelineQuoteId, wfmQuoteUuid, ctx) {
   const lines = [];
   let sortOrder = 10;
 
+  // Pattern for "looks like a part number": single token, alphanumeric
+  // with hyphens/dots/slashes/underscores, length 2..29. Used as a
+  // fallback when WFM Cost has no separate Code field — many parts
+  // quotes use Description as the part number directly.
+  const PART_NUM_RE = /^[A-Za-z0-9][\w\-./]{1,28}$/;
+
   for (const c of arrayOf(detail.Costs, 'Cost')) {
+    const code = s(c.Code) || s(c.PartNumber) || s(c.SKU) || '';
+    const desc = s(c.Description) || s(c.Note) || '';
+
+    let partNumber = code;
+    let description = desc;
+    // Move a part-number-shaped Description into part_number when
+    // there's no separate Code field. Skips long descriptions and
+    // anything with whitespace.
+    if (!partNumber && desc && !desc.includes(' ') && PART_NUM_RE.test(desc)) {
+      partNumber = desc;
+      description = '';
+    }
+
     lines.push({
       external_id: s(c.UUID) || ('cost-' + sortOrder),
       sort_order:  sortOrder, item_type: 'product',
-      description: s(c.Description) || s(c.Note) || '(no description)',
+      title:       s(c.Title) || '',
+      part_number: partNumber,
+      description: description || (partNumber ? '' : '(no description)'),
       quantity:    n(c.Quantity) || 1,
       unit:        s(c.Unit) || '',
       unit_price:  n(c.UnitPrice) || 0,
@@ -547,6 +568,8 @@ async function syncQuoteLines(env, pipelineQuoteId, wfmQuoteUuid, ctx) {
     lines.push({
       external_id: s(t.UUID) || ('task-' + sortOrder),
       sort_order:  sortOrder, item_type: 'labor',
+      title:       s(t.Title) || s(t.Name) || '',
+      part_number: '',
       description: s(t.Description) || s(t.Name) || '(no description)',
       quantity:    qty,
       unit,
@@ -567,13 +590,13 @@ async function syncQuoteLines(env, pipelineQuoteId, wfmQuoteUuid, ctx) {
     await run(env.DB,
       `INSERT INTO quote_lines
          (id, quote_id, external_source, external_id,
-          sort_order, item_type, description, quantity, unit,
-          unit_price, extended_price, wfm_payload,
+          sort_order, item_type, title, part_number, description,
+          quantity, unit, unit_price, extended_price, wfm_payload,
           created_at, updated_at)
-       VALUES (?, ?, 'wfm', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, 'wfm', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [uuid(), pipelineQuoteId, line.external_id,
-       line.sort_order, line.item_type, line.description, line.quantity, line.unit,
-       line.unit_price, line.extended_price, line.wfm_payload,
+       line.sort_order, line.item_type, line.title, line.part_number, line.description,
+       line.quantity, line.unit, line.unit_price, line.extended_price, line.wfm_payload,
        ts, ts]);
   }
 
