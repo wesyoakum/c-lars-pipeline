@@ -152,21 +152,6 @@ function inlineSelect(field, value, options, opts = {}) {
 }
 
 export async function onRequestGet(context) {
-  // TEMP diagnostic wrapper — until the 1101 is pinned down. Catches
-  // any thrown exception in the GET path and returns a readable HTML
-  // page with file/line/stack instead of a generic "Worker threw".
-  // Remove once the offending line is identified and fixed.
-  try {
-    return await onRequestGetInner(context);
-  } catch (e) {
-    return new Response(
-      '<!doctype html><meta charset=utf-8><style>body{font:14px/1.5 ui-monospace,monospace;background:#fff8c5;padding:1.2rem;color:#24292f}h1{margin:0 0 .6rem 0;color:#cf222e}pre{background:#fff;padding:.7rem .8rem;border:1px solid #d4a72c;border-radius:4px;overflow:auto;white-space:pre-wrap;word-break:break-word}</style><h1>Account page threw</h1><p><strong>Account ID:</strong> ' + (context?.params?.id || '?') + '</p><p><strong>Error:</strong> ' + (e?.message || String(e)) + '</p><pre>' + (e?.stack || '(no stack)').replace(/[<>&]/g, function(c){return c==='<'?'&lt;':c==='>'?'&gt;':'&amp;'}) + '</pre>',
-      { status: 500, headers: { 'content-type': 'text/html; charset=utf-8' } }
-    );
-  }
-}
-
-async function onRequestGetInner(context) {
   const { env, data, request, params } = context;
   const user = data?.user;
   const url = new URL(request.url);
@@ -197,7 +182,7 @@ async function onRequestGetInner(context) {
   // Siblings in the same parent_group, if any. Used both for the
   // sidebar strip on this page and (indirectly) to tell the group
   // rollup link whether there is actually anything to show.
-  const siblings = await loadSiblingAccounts(env.DB, accountId, account.parent_group);
+  const siblings = await loadSiblingAccounts(env, accountId, account.parent_group);
   const groupSlug = slugifyGroup(account.parent_group);
 
   // Build the parent-group dropdown from the distinct set of labels
