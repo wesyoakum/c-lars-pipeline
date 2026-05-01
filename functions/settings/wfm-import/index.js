@@ -139,23 +139,32 @@ export async function onRequestGet(context) {
                  x-data="wfmImportInit()">
           <h2 style="margin-top:0">Sample & import</h2>
           <p class="muted" style="margin-top:0">
-            <strong>1.</strong> Click "Get random samples" to pull 5
-            random records of each kind from WFM (no DB writes yet).
-            <strong>2.</strong> Eyeball the proposed Pipeline rows.
-            <strong>3.</strong> If happy, click "Import these" — the
-            same 5 land in Pipeline. Re-run for a fresh shuffle.
+            <strong>1.</strong> Pick a sample size and click "Get
+            random samples" — no DB writes yet.
+            <strong>2.</strong> Uncheck any record you don't want.
+            <strong>3.</strong> Click "Import selected" — only the
+            checked records land in Pipeline. Re-run for a fresh
+            shuffle.
           </p>
 
-          <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem">
-            <button type="button" class="btn" @click="fetchSamples()" :disabled="busy">
+          <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.5rem;align-items:center">
+            <label style="display:flex;align-items:center;gap:.4rem">
+              <span class="muted" style="font-size:.85rem">Sample size per entity:</span>
+              <input type="number" min="1" max="50" x-model.number="count"
+                     style="width:4.5rem;padding:.3rem .4rem;border:1px solid var(--border);border-radius:4px;font-family:ui-monospace,monospace"
+                     :disabled="busy">
+            </label>
+            <button type="button" class="btn" @click="fetchSamples()" :disabled="busy || !count || count < 1">
               <span x-show="!busy">Get random samples</span>
               <span x-show="busy && phase === 'sampling'">Sampling…</span>
             </button>
             <button type="button" class="btn danger"
                     @click="commitImport()"
-                    :disabled="busy || !samples"
+                    :disabled="busy || !samples || totalSelected() === 0"
                     x-show="samples">
-              <span x-show="!busy || phase !== 'committing'">Import these</span>
+              <span x-show="!busy || phase !== 'committing'">
+                Import selected (<span x-text="totalSelected()"></span>)
+              </span>
               <span x-show="busy && phase === 'committing'">Importing…</span>
             </button>
           </div>
@@ -168,35 +177,48 @@ export async function onRequestGet(context) {
               <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:.75rem">
                 <template x-for="(group, kind) in samples" :key="kind">
                   <section class="card" style="margin:0;padding:.75rem 1rem">
-                    <h3 style="margin:0 0 .5rem 0;text-transform:capitalize;display:flex;justify-content:space-between;align-items:baseline;gap:.5rem">
-                      <span x-text="kind"></span>
-                      <span class="muted" style="font-size:.8rem;font-weight:400" x-text="group.length + ' sampled'"></span>
+                    <h3 style="margin:0 0 .5rem 0;display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;flex-wrap:wrap">
+                      <span style="text-transform:capitalize" x-text="kind"></span>
+                      <span style="display:flex;gap:.4rem;align-items:center;font-size:.78rem;font-weight:400">
+                        <span class="muted" x-text="selectedCountInGroup(kind) + ' / ' + group.length + ' selected'"></span>
+                        <button type="button" @click="selectAllInGroup(kind, true)"
+                                style="background:none;border:none;color:#1f6feb;cursor:pointer;padding:0 .15rem;font-size:.78rem;text-decoration:underline">all</button>
+                        <button type="button" @click="selectAllInGroup(kind, false)"
+                                style="background:none;border:none;color:#1f6feb;cursor:pointer;padding:0 .15rem;font-size:.78rem;text-decoration:underline">none</button>
+                      </span>
                     </h3>
                     <ul style="list-style:none;padding:0;margin:0">
-                      <template x-for="rec in group" :key="rec.UUID || rec.ID || rec.UUID || JSON.stringify(rec).slice(0,40)">
-                        <li style="padding:.4rem .5rem;border-bottom:1px dashed #eee;font-size:.85rem;line-height:1.4">
-                          <strong x-text="rec.Name || rec.ID || rec.UUID || '(unnamed)'"></strong>
-                          <template x-if="rec.UUID">
-                            <code style="font-size:.75rem;color:#999;display:block">UUID: <span x-text="rec.UUID"></span></code>
-                          </template>
-                          <template x-if="rec.State || rec.Category || rec.Type">
-                            <span class="muted" style="display:block;font-size:.75rem">
-                              <template x-if="rec.State"><span>State: <span x-text="rec.State"></span></span></template>
-                              <template x-if="rec.Category"><span style="margin-left:.6rem">Cat: <span x-text="rec.Category"></span></span></template>
-                              <template x-if="rec.Type"><span style="margin-left:.6rem">Type: <span x-text="rec.Type"></span></span></template>
-                            </span>
-                          </template>
-                          <template x-if="rec.Client && rec.Client.Name">
-                            <span class="muted" style="display:block;font-size:.75rem">Client: <span x-text="rec.Client.Name"></span></span>
-                          </template>
-                          <template x-if="rec.Email">
-                            <span class="muted" style="display:block;font-size:.75rem">Email: <span x-text="rec.Email"></span></span>
-                          </template>
-                          <template x-if="rec.EstimatedValue || rec.Amount || rec.AmountIncludingTax">
-                            <span class="muted" style="display:block;font-size:.75rem">
-                              Value: $<span x-text="(rec.AmountIncludingTax || rec.Amount || rec.EstimatedValue || '0')"></span>
-                            </span>
-                          </template>
+                      <template x-for="rec in group" :key="keyOf(rec)">
+                        <li style="display:flex;gap:.5rem;align-items:flex-start;padding:.4rem .5rem;border-bottom:1px dashed #eee;font-size:.85rem;line-height:1.4;cursor:pointer"
+                            @click="toggleSelect(kind, rec)">
+                          <input type="checkbox"
+                                 :checked="isSelected(kind, rec)"
+                                 @click.stop="toggleSelect(kind, rec)"
+                                 style="margin-top:.25rem">
+                          <div style="flex:1;min-width:0">
+                            <strong x-text="rec.Name || rec.ID || rec.UUID || '(unnamed)'"></strong>
+                            <template x-if="rec.UUID">
+                              <code style="font-size:.72rem;color:#999;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">UUID: <span x-text="rec.UUID"></span></code>
+                            </template>
+                            <template x-if="rec.State || rec.Category || rec.Type">
+                              <span class="muted" style="display:block;font-size:.75rem">
+                                <template x-if="rec.State"><span>State: <span x-text="rec.State"></span></span></template>
+                                <template x-if="rec.Category"><span style="margin-left:.6rem">Cat: <span x-text="rec.Category"></span></span></template>
+                                <template x-if="rec.Type"><span style="margin-left:.6rem">Type: <span x-text="rec.Type"></span></span></template>
+                              </span>
+                            </template>
+                            <template x-if="rec.Client && rec.Client.Name">
+                              <span class="muted" style="display:block;font-size:.75rem">Client: <span x-text="rec.Client.Name"></span></span>
+                            </template>
+                            <template x-if="rec.Email">
+                              <span class="muted" style="display:block;font-size:.75rem">Email: <span x-text="rec.Email"></span></span>
+                            </template>
+                            <template x-if="rec.EstimatedValue || rec.Amount || rec.AmountIncludingTax">
+                              <span class="muted" style="display:block;font-size:.75rem">
+                                Value: $<span x-text="(rec.AmountIncludingTax || rec.Amount || rec.EstimatedValue || '0')"></span>
+                              </span>
+                            </template>
+                          </div>
                         </li>
                       </template>
                     </ul>
@@ -227,19 +249,81 @@ export async function onRequestGet(context) {
                 busy: false,
                 phase: '',
                 error: '',
+                count: 5,
                 samples: null,
+                selected: {},   // { kind: { recordKey: true } }
                 importResult: null,
 
+                keyOf(rec) {
+                  return rec.UUID || rec.ID || JSON.stringify(rec).slice(0, 40);
+                },
+
+                isSelected(kind, rec) {
+                  return !!(this.selected[kind] && this.selected[kind][this.keyOf(rec)]);
+                },
+
+                toggleSelect(kind, rec) {
+                  if (!this.selected[kind]) this.selected[kind] = {};
+                  const k = this.keyOf(rec);
+                  this.selected[kind][k] = !this.selected[kind][k];
+                  // Force Alpine to notice the nested-object mutation.
+                  this.selected = Object.assign({}, this.selected);
+                },
+
+                selectAllInGroup(kind, value) {
+                  const next = {};
+                  for (const rec of (this.samples[kind] || [])) {
+                    if (value) next[this.keyOf(rec)] = true;
+                  }
+                  this.selected = Object.assign({}, this.selected, { [kind]: next });
+                },
+
+                selectedCountInGroup(kind) {
+                  if (!this.samples || !this.samples[kind]) return 0;
+                  return this.samples[kind].filter((r) => this.isSelected(kind, r)).length;
+                },
+
+                totalSelected() {
+                  if (!this.samples) return 0;
+                  let n = 0;
+                  for (const kind of Object.keys(this.samples)) {
+                    n += this.selectedCountInGroup(kind);
+                  }
+                  return n;
+                },
+
+                selectedSamples() {
+                  const out = {};
+                  if (!this.samples) return out;
+                  for (const kind of Object.keys(this.samples)) {
+                    out[kind] = (this.samples[kind] || [])
+                      .filter((r) => this.isSelected(kind, r));
+                  }
+                  return out;
+                },
+
                 async fetchSamples() {
-                  this.busy = true; this.phase = 'sampling'; this.error = ''; this.importResult = null;
+                  this.busy = true; this.phase = 'sampling';
+                  this.error = ''; this.importResult = null;
                   try {
                     const res = await fetch('/settings/wfm-import/sample', {
                       method: 'POST', credentials: 'same-origin',
                       headers: { 'content-type': 'application/json' },
+                      body: JSON.stringify({ count: Number(this.count) || 5 }),
                     });
                     const j = await res.json();
                     if (!j.ok) throw new Error(j.error || 'sample failed');
                     this.samples = j.samples;
+                    // Default: pre-select every record so a quick "Import"
+                    // brings the whole batch in.
+                    const sel = {};
+                    for (const kind of Object.keys(this.samples)) {
+                      sel[kind] = {};
+                      for (const rec of this.samples[kind]) {
+                        sel[kind][this.keyOf(rec)] = true;
+                      }
+                    }
+                    this.selected = sel;
                   } catch (e) {
                     this.error = String(e.message || e);
                   } finally {
@@ -248,19 +332,26 @@ export async function onRequestGet(context) {
                 },
 
                 async commitImport() {
-                  if (!this.samples) return;
-                  if (!confirm('Import these into Pipeline? Idempotent — re-running with the same WFM IDs updates existing rows rather than duplicating.')) return;
+                  const filtered = this.selectedSamples();
+                  const total = Object.values(filtered)
+                    .reduce((sum, arr) => sum + arr.length, 0);
+                  if (total === 0) {
+                    alert('Nothing selected.');
+                    return;
+                  }
+                  if (!confirm(`Import ${total} record(s) into Pipeline? Idempotent — re-running with the same WFM IDs updates existing rows rather than duplicating.`)) return;
                   this.busy = true; this.phase = 'committing'; this.error = '';
                   try {
                     const res = await fetch('/settings/wfm-import/commit', {
                       method: 'POST', credentials: 'same-origin',
                       headers: { 'content-type': 'application/json' },
-                      body: JSON.stringify({ samples: this.samples }),
+                      body: JSON.stringify({ samples: filtered }),
                     });
                     const j = await res.json();
                     if (!j.ok) throw new Error(j.error || 'import failed');
                     this.importResult = j;
-                    this.samples = null;  // hide the preview now that they're imported
+                    this.samples = null;
+                    this.selected = {};
                   } catch (e) {
                     this.error = String(e.message || e);
                   } finally {

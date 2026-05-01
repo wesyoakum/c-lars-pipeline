@@ -25,7 +25,8 @@
 import { hasRole } from '../../lib/auth.js';
 import { apiGet, recordList } from '../../lib/wfm-client.js';
 
-const SAMPLE_SIZE = 5;
+const DEFAULT_SAMPLE_SIZE = 5;
+const MAX_SAMPLE_SIZE     = 50;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -95,10 +96,19 @@ async function fetchRandomSample(env, basePath, count, primaryKey) {
 }
 
 export async function onRequestPost(context) {
-  const { env, data } = context;
+  const { env, request, data } = context;
   const user = data?.user;
   if (!user) return json({ ok: false, error: 'sign_in_required' }, 401);
   if (!hasRole(user, 'admin')) return json({ ok: false, error: 'admin_only' }, 403);
+
+  // Accept optional `count` (default 5, max 50). Per-entity counts can
+  // come later if the user wants different sizes per kind.
+  let body = {};
+  try { body = await request.json(); } catch { /* ignore — empty body OK */ }
+  const requested = parseInt(body?.count, 10);
+  const SAMPLE_SIZE = (Number.isFinite(requested) && requested > 0)
+    ? Math.min(requested, MAX_SAMPLE_SIZE)
+    : DEFAULT_SAMPLE_SIZE;
 
   try {
     // Run the four paginated probes in parallel + staff (small list).
