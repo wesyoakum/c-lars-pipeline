@@ -341,33 +341,124 @@ function mapStaff(s) {
 }
 
 // ---------------------------------------------------------------------
+// Random sampling
+// ---------------------------------------------------------------------
+
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function pickDistinct(n, lo, hi) {
+  // Pick n distinct integers in [lo, hi] (inclusive). If fewer than n
+  // values exist in the range, returns all of them.
+  const range = hi - lo + 1;
+  const target = Math.min(n, range);
+  const set = new Set();
+  while (set.size < target) {
+    set.add(lo + Math.floor(Math.random() * range));
+  }
+  return [...set];
+}
+
+function joinQuery(basePath, params) {
+  const sep = basePath.includes('?') ? '&' : '?';
+  return `${basePath}${sep}${params}`;
+}
+
+// Probe an endpoint to read TotalRecords from its pagination envelope.
+// Returns null if the endpoint doesn't surface a total.
+async function readTotalRecords(basePath) {
+  const r = await apiGet(joinQuery(basePath, 'page=1&pageSize=1'));
+  if (!r.ok) return null;
+  const totalStr = r.body?.Response?.TotalRecords;
+  if (!totalStr) return null;
+  const n = parseInt(totalStr, 10);
+  return Number.isNaN(n) ? null : n;
+}
+
+// Fetch `count` random records from a list endpoint. Strategy:
+//   1. Probe TotalRecords from the pagination envelope.
+//   2. Pick `count` distinct random page numbers (treating each
+//      page-of-size-1 as one random offset).
+//   3. Fetch each and take its first record.
+// Falls back to "fetch a chunk and shuffle" for endpoints that don't
+// advertise TotalRecords (smaller catalogs like /staff.api/list).
+async function fetchRandomSample(basePath, count, primaryKey) {
+  const total = await readTotalRecords(basePath);
+
+  if (total === null) {
+    // Non-paginated or no TotalRecords surfaced — pull a single page
+    // sized larger than `count`, shuffle, take `count`.
+    const r = await apiGet(joinQuery(basePath, 'page=1&pageSize=200'));
+    const arr = recordArray(r.body, primaryKey);
+    return shuffle(arr).slice(0, count);
+  }
+
+  if (total <= count) {
+    // Fewer records than requested — just return all of them.
+    const r = await apiGet(joinQuery(basePath, `page=1&pageSize=${Math.max(total, 1)}`));
+    return recordArray(r.body, primaryKey);
+  }
+
+  // Pick distinct random page numbers in [1, total].
+  const pages = pickDistinct(count, 1, total);
+  const records = [];
+  for (const page of pages) {
+    const r = await apiGet(joinQuery(basePath, `page=${page}&pageSize=1`));
+    if (!r.ok) continue;
+    const rec = recordArray(r.body, primaryKey, /*singletonFallback*/ true)[0];
+    if (rec) records.push(rec);
+  }
+  return records;
+}
+
+// ---------------------------------------------------------------------
 // Probe + render
 // ---------------------------------------------------------------------
 
 async function fetchSamples() {
-  const [clientList, leadList, quoteList, jobList, staffList] = await Promise.all([
-    apiGet(`/client.api/list?page=1&pageSize=${SAMPLE_SIZE}`),
-    apiGet(`/lead.api/current?page=1&pageSize=${SAMPLE_SIZE}`),
-    apiGet(`/quote.api/current?page=1&pageSize=${SAMPLE_SIZE}`),
-    apiGet(`/job.api/current?page=1&pageSize=${SAMPLE_SIZE}`),
-    apiGet(`/staff.api/list`),
+  console.log(`  Sampling ${SAMPLE_SIZE} random records per entity…`);
+
+  // Run the four paginated probes in parallel; staff is fetched whole
+  // and shuffled (it's only ~30 records).
+  const [clientStubs, leads, quotes, jobs, staffList] = await Promise.all([
+    fetchRandomSample('/client.api/list', SAMPLE_SIZE, 'Client')
+      .then((arr) => { console.log(`    Clients: ${arr.length} sampled`); return arr; }),
+    fetchRandomSample('/lead.api/current', SAMPLE_SIZE, 'Lead')
+      .then((arr) => { console.log(`    Leads:   ${arr.length} sampled`); return arr; }),
+    fetchRandomSample('/quote.api/current', SAMPLE_SIZE, 'Quote')
+      .then((arr) => { console.log(`    Quotes:  ${arr.length} sampled`); return arr; }),
+    fetchRandomSample('/job.api/current', SAMPLE_SIZE, 'Job')
+      .then((arr) => { console.log(`    Jobs:    ${arr.length} sampled`); return arr; }),
+    apiGet('/staff.api/list')
+      .then((r) => {
+        const arr = recordArray(r.body, 'Staff');
+        const sampled = shuffle(arr).slice(0, SAMPLE_SIZE);
+        console.log(`    Staff:   ${sampled.length} sampled (of ${arr.length} total)`);
+        return sampled;
+      }),
   ]);
 
-  // For each client, fetch its detail (which includes contacts).
+  // For each randomly-sampled client, fetch its detail (so we get
+  // Contacts on the response).
   const clientSamples = [];
-  const clients = recordArray(clientList.body, 'Client');
-  for (const c of clients.slice(0, SAMPLE_SIZE)) {
+  for (const c of clientStubs) {
     const detail = await apiGet(`/client.api/get/${c.UUID}`);
-    const detailClient = recordArray(detail.body, 'Client', /*singleton*/ true)[0] || c;
+    const detailClient = recordArray(detail.body, 'Client', /*singletonFallback*/ true)[0] || c;
     clientSamples.push(detailClient);
   }
 
   return {
     clients: clientSamples,
-    leads:   recordArray(leadList.body, 'Lead').slice(0, SAMPLE_SIZE),
-    quotes:  recordArray(quoteList.body, 'Quote').slice(0, SAMPLE_SIZE),
-    jobs:    recordArray(jobList.body, 'Job').slice(0, SAMPLE_SIZE),
-    staff:   recordArray(staffList.body, 'Staff').slice(0, SAMPLE_SIZE),
+    leads,
+    quotes,
+    jobs,
+    staff: staffList,
   };
 }
 
@@ -461,18 +552,14 @@ async function main() {
 
   const samples = await fetchSamples();
 
-  console.log(`  Clients: ${samples.clients.length}`);
-  console.log(`  Leads:   ${samples.leads.length}`);
-  console.log(`  Quotes:  ${samples.quotes.length}`);
-  console.log(`  Jobs:    ${samples.jobs.length}`);
-  console.log(`  Staff:   ${samples.staff.length}`);
-
   const sections = [];
   sections.push('# WFM → Pipeline mapping samples');
   sections.push('');
   sections.push(`**Run at:** ${new Date().toISOString()}`);
   sections.push(`**Org:** ${jwt?.org_ids?.[0] || '?'}`);
-  sections.push(`**Sample size:** ${SAMPLE_SIZE} per entity`);
+  sections.push(`**Sample size:** ${SAMPLE_SIZE} random records per entity`);
+  sections.push('');
+  sections.push(`Each section below picks ${SAMPLE_SIZE} records uniformly at random from the entity's full list (using the TotalRecords envelope to pick distinct random page positions). Re-running the script reshuffles — repeat a few times if you want broader coverage.`);
   sections.push('');
   sections.push('Each section pairs a WFM source record with the Pipeline row(s) it would produce, per the mapping rules in `docs/wfm-mapping.md`. **No database writes happen.** Use this to vet the rules; edit the doc and re-run until the output looks right; then we ship the real importer.');
   sections.push('');
