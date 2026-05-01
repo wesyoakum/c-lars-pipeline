@@ -108,7 +108,7 @@ export async function onRequestGet(context) {
               <strong>Claudia</strong> — your personal Pipeline assistant. Read-only access to
               every account, opportunity, task, quote, contact, and the rest of the schema.
               Ask about your funnel, your next due task, who owns what — or tell me something
-              to remember (travel prefs, ongoing context, "remind me about X"). Dale.
+              to remember (travel prefs, ongoing context, "remind me about X").
             </div>`
           : messages.map(renderMessage)}
       </div>
