@@ -17,7 +17,7 @@
 import { layout, htmlResponse, html, escape, raw } from '../../lib/layout.js';
 import { hasRole } from '../../lib/auth.js';
 import { settingsSubNav } from '../../lib/settings-subnav.js';
-import { apiGet, listRecords } from '../../lib/katana-client.js';
+import { apiGet } from '../../lib/katana-client.js';
 
 // The probes we run on page load. Each is a (label, path, query) tuple.
 // Kept small (limit=5) so the page renders quickly and we don't hammer
@@ -58,17 +58,31 @@ export async function onRequestGet(context) {
     : PROBES.map((p) => ({ ...p, ok: false, status: 0, durationMs: 0, body: null, rawText: '', error: 'KATANA_API_KEY not set' }));
 
   const overallOk = hasApiKey && results.every((r) => r.ok);
-  const probeJson = JSON.stringify(results.map((r) => ({
-    key: r.key,
-    label: r.label,
-    path: r.path,
-    ok: r.ok,
-    status: r.status,
-    durationMs: r.durationMs,
-    error: r.error,
-    sampleCount: Array.isArray(listRecords(r.body)) ? listRecords(r.body).length : 0,
-    body: r.body,
-  })));
+
+  // Bundle the full probe payload for the "Download as JSON" button.
+  // We include a top-level wrapper with metadata (timestamp, base URL,
+  // tenant identifier if exposed) so the file is self-describing — when
+  // the user pastes it back to me, I have everything I need without
+  // asking follow-ups.
+  const downloadPayload = {
+    schema: 'katana-probe-v1',
+    captured_at: new Date().toISOString(),
+    base_url: 'https://api.katanamrp.com/v1',
+    overall_ok: overallOk,
+    probes: results.map((r) => ({
+      key: r.key,
+      label: r.label,
+      path: r.path,
+      query: r.query,
+      ok: r.ok,
+      status: r.status,
+      duration_ms: r.durationMs,
+      error: r.error,
+      sample_count: r.body && Array.isArray(r.body.data) ? r.body.data.length : null,
+      body: r.body,
+    })),
+  };
+  const probeJson = JSON.stringify(downloadPayload);
 
   const body = html`
     ${settingsSubNav('katana-probe', true)}
@@ -101,10 +115,18 @@ export async function onRequestGet(context) {
           </p>` : ''}
       </div>
 
+      <!-- =============== Toolbar — download / expand all =============== -->
+      <div style="margin-top:1rem;display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+        <button type="button" class="btn primary" id="katana-probe-download">Download as JSON</button>
+        <button type="button" class="btn" id="katana-probe-expand-all">Expand all</button>
+        <button type="button" class="btn" id="katana-probe-collapse-all">Collapse all</button>
+        <span class="muted" style="font-size:.85em">The download bundles every response body (including any names/emails) — review before sharing.</span>
+      </div>
+
       <!-- =============== Per-probe results =============== -->
-      <div style="margin-top:1rem;display:flex;flex-direction:column;gap:.5rem">
+      <div id="katana-probe-results" style="margin-top:1rem;display:flex;flex-direction:column;gap:.5rem">
         ${results.map((r) => html`
-          <details style="border:1px solid var(--border);border-radius:4px;background:var(--bg-elev)">
+          <details class="katana-probe-row" style="border:1px solid var(--border);border-radius:4px;background:var(--bg-elev)">
             <summary style="padding:.5rem .75rem;cursor:pointer;display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
               <strong style="min-width:8rem">${escape(r.label)}</strong>
               <code style="font-size:.85em;color:var(--fg-muted)">GET ${escape(r.path)}</code>
@@ -112,8 +134,8 @@ export async function onRequestGet(context) {
                 ? html`<span style="color:#1a7f37;font-size:.85em">&check; ${r.status}</span>`
                 : html`<span style="color:#b3261e;font-size:.85em">&#10005; ${r.status || 'error'}</span>`}
               <span class="muted" style="font-size:.8em">${r.durationMs} ms</span>
-              ${r.ok && Array.isArray(listRecords(r.body)) ? html`
-                <span class="muted" style="font-size:.8em">${listRecords(r.body).length} record${listRecords(r.body).length === 1 ? '' : 's'}</span>
+              ${r.ok && r.body && Array.isArray(r.body.data) ? html`
+                <span class="muted" style="font-size:.8em">${r.body.data.length} record${r.body.data.length === 1 ? '' : 's'}</span>
               ` : ''}
               ${r.error ? html`<span style="color:#b3261e;font-size:.8em">${escape(r.error)}</span>` : ''}
             </summary>
@@ -136,7 +158,42 @@ export async function onRequestGet(context) {
       </div>
     </section>
 
-    <script>window.__KATANA_PROBES__ = ${raw(probeJson)};</script>
+    <script>
+      (function () {
+        window.__KATANA_PROBES__ = ${raw(probeJson)};
+
+        // Download button — package the bundled probe payload as a
+        // JSON file. Filename includes a timestamp so multiple downloads
+        // don't collide.
+        var downloadBtn = document.getElementById('katana-probe-download');
+        if (downloadBtn) {
+          downloadBtn.addEventListener('click', function () {
+            var payload = window.__KATANA_PROBES__ || { error: 'no probe data' };
+            var pretty  = JSON.stringify(payload, null, 2);
+            var blob    = new Blob([pretty], { type: 'application/json' });
+            var url     = URL.createObjectURL(blob);
+            var stamp   = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+            var a       = document.createElement('a');
+            a.href      = url;
+            a.download  = 'katana-probe-' + stamp + '.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+          });
+        }
+
+        // Expand-all / Collapse-all — toggle every <details.katana-probe-row>.
+        function setAllOpen(open) {
+          var rows = document.querySelectorAll('details.katana-probe-row');
+          for (var i = 0; i < rows.length; i++) rows[i].open = open;
+        }
+        var expandBtn   = document.getElementById('katana-probe-expand-all');
+        var collapseBtn = document.getElementById('katana-probe-collapse-all');
+        if (expandBtn)   expandBtn.addEventListener('click',   function () { setAllOpen(true); });
+        if (collapseBtn) collapseBtn.addEventListener('click', function () { setAllOpen(false); });
+      })();
+    </script>
   `;
 
   return htmlResponse(layout('Katana probe', body, {
