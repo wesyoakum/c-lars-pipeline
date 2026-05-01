@@ -27,19 +27,28 @@ export async function onRequestGet(context) {
 
   const body = html`
     <style>
+      /* Break out of the global .site-main max-width cap so the diagrams
+         editor uses the full viewport width. Scoped to the Sandbox page —
+         this <style> block is only emitted here. */
+      main.site-main {
+        max-width: none !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+      }
       .sandbox-frame-wrap {
-        margin: 0 auto;
-        max-width: 1600px;
-        padding: 0 1rem 1rem;
+        padding: 0;
       }
       .sandbox-frame {
         width: 100%;
-        height: calc(100vh - 200px);
+        height: calc(100vh - 160px);
         min-height: 480px;
-        border: 1px solid #d0d0d5;
-        border-radius: 8px;
+        border: 0;
         background: #f5f5f7;
         display: block;
+      }
+      nav.subnav-tabs {
+        padding-left: 16px;
+        padding-right: 16px;
       }
     </style>
     ${tabs}
