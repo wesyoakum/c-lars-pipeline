@@ -32,6 +32,8 @@ export function settingsSubNav(active, isAdmin) {
            href="/settings/history">History</a>
         <a class="nav-link ${active === 'data-refresh' ? 'active' : ''}"
            href="/settings/data-refresh">Data refresh</a>
+        <a class="nav-link ${active === 'wfm-import' ? 'active' : ''}"
+           href="/settings/wfm-import">WFM import</a>
       ` : ''}
     </nav>`;
 }
