@@ -138,20 +138,25 @@ async function upsertAccount(env, c) {
     ['wfm', c.UUID]);
 
   // 2) Smart-match against an existing account with the same name
-  //    (case-insensitive, trimmed). Excludes accounts that are
-  //    already wfm-imported (those have a different WFM UUID and
-  //    represent a different WFM record). Includes Pipeline-native
-  //    accounts AND accounts imported from other systems — for the
-  //    user's case, "ROVOP Inc" might have been seeded from a prior
-  //    Xero import, so just `external_id IS NULL` would miss it.
+  //    (case-insensitive, trimmed). The exact-UUID path (step 1)
+  //    already handled the idempotent case, so we just need to
+  //    exclude that specific row from the smart-match. Everything
+  //    else is fair game:
+  //      - Pipeline-native rows (external_source IS NULL)
+  //      - Other-system imports (Xero, etc.)
+  //      - Legacy WFM rows with slug-style external_ids (e.g.
+  //        external_id='rovop-inc' from the old wfm-import.mjs
+  //        script before we moved to real UUIDs). These should be
+  //        re-stamped with the proper UUID — they ARE the same
+  //        logical record, just under a different ID convention.
   let claimed = false;
   if (!existing && s(c.Name)) {
     const match = await one(env.DB,
       `SELECT id, external_source, external_id FROM accounts
         WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
-          AND (external_source IS NULL OR external_source != 'wfm')
+          AND NOT (external_source = 'wfm' AND external_id = ?)
         LIMIT 1`,
-      [s(c.Name)]);
+      [s(c.Name), c.UUID]);
     if (match) { existing = match; claimed = true; }
   }
 
@@ -214,10 +219,10 @@ async function upsertContact(env, ct, accountId) {
     ['wfm', ct.UUID]);
 
   // 2) Smart-match against an existing contact on the same account.
-  //    Match by email first (most reliable); if no email, fall back
-  //    to first + last name. Excludes contacts that are already
-  //    wfm-imported (different WFM record); includes Pipeline-native
-  //    AND non-WFM-imported contacts.
+  //    Email match first (most reliable), name fallback. Excludes
+  //    only the exact incoming-UUID row (idempotent path already
+  //    handled) — legacy slug-based wfm contacts get re-stamped
+  //    with proper UUIDs.
   let claimed = false;
   const split = splitName(ct.Name);
   if (!existing) {
@@ -225,21 +230,21 @@ async function upsertContact(env, ct, accountId) {
       existing = await one(env.DB,
         `SELECT id FROM contacts
           WHERE account_id = ?
-            AND (external_source IS NULL OR external_source != 'wfm')
+            AND NOT (external_source = 'wfm' AND external_id = ?)
             AND LOWER(TRIM(email)) = LOWER(TRIM(?))
           LIMIT 1`,
-        [accountId, s(ct.Email)]);
+        [accountId, ct.UUID, s(ct.Email)]);
       if (existing) claimed = true;
     }
     if (!existing && split.first_name && split.last_name) {
       existing = await one(env.DB,
         `SELECT id FROM contacts
           WHERE account_id = ?
-            AND (external_source IS NULL OR external_source != 'wfm')
+            AND NOT (external_source = 'wfm' AND external_id = ?)
             AND LOWER(TRIM(first_name)) = LOWER(TRIM(?))
             AND LOWER(TRIM(last_name)) = LOWER(TRIM(?))
           LIMIT 1`,
-        [accountId, split.first_name, split.last_name]);
+        [accountId, ct.UUID, split.first_name, split.last_name]);
       if (existing) claimed = true;
     }
   }
