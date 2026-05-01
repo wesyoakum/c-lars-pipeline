@@ -799,7 +799,11 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
 
       <h2 class="section-h">Cost Inputs &amp; Summary</h2>
       <p class="muted" style="margin-top:-0.5rem">
-        Blanks auto-fill from quote \u00d7 target %. Linked DM/labor totals override manual values.
+        ${build.build_kind === 'spares_simple'
+          ? 'Material cost + Other only. Other defaults to $0.'
+          : (build.build_kind === 'wfm_reference'
+              ? html`<span style="display:inline-block;background:#e0e7ff;color:#3730a3;padding:.05rem .4rem;border-radius:3px;font-size:.78rem;font-weight:600;margin-right:.4rem">WFM imported</span> Cost basis + price came from the WFM quote. Editable; margin recalculates.`
+              : 'Blanks auto-fill from quote \u00d7 target %. Linked DM/labor totals override manual values.')}
       </p>
 
       <table class="data compact cost-summary-table">
@@ -807,10 +811,17 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
           <tr><th></th><th class="num">Cost</th><th class="num">Target %</th><th class="num">% of Target</th><th class="num">% of Quote</th></tr>
         </thead>
         <tbody>
-          ${categoryRow('dm',    'Direct Material (DM)',        build.dm_user_cost,   auto.dm,   linked.dm ? notes.dm : (auto.dm !== null ? notes.dm : ''),       linked.dm,    eff.dm)}
-          ${categoryRow('dl',    'Direct Labor (DL)',           build.dl_user_cost,   auto.dl,   linked.labor ? notes.dl : (auto.dl !== null ? notes.dl : ''),    linked.labor, eff.dl)}
-          ${categoryRow('imoh',  'Indirect Material + OH', build.imoh_user_cost, auto.imoh, auto.imoh !== null ? notes.imoh : '',                       false,        eff.imoh)}
-          ${categoryRow('other', 'Other',                       build.other_user_cost, auto.other, auto.other !== null ? notes.other : '',                        false,        eff.other)}
+          ${build.build_kind === 'spares_simple'
+            ? html`
+                ${categoryRow('dm',    'Material cost',     build.dm_user_cost,    auto.dm,    linked.dm ? notes.dm : (auto.dm !== null ? notes.dm : ''),    linked.dm, eff.dm)}
+                ${categoryRow('other', 'Other',             build.other_user_cost, auto.other, auto.other !== null ? notes.other : '',                      false,     eff.other)}
+              `
+            : html`
+                ${categoryRow('dm',    'Direct Material (DM)',        build.dm_user_cost,   auto.dm,   linked.dm ? notes.dm : (auto.dm !== null ? notes.dm : ''),       linked.dm,    eff.dm)}
+                ${categoryRow('dl',    'Direct Labor (DL)',           build.dl_user_cost,   auto.dl,   linked.labor ? notes.dl : (auto.dl !== null ? notes.dl : ''),    linked.labor, eff.dl)}
+                ${categoryRow('imoh',  'Indirect Material + OH', build.imoh_user_cost, auto.imoh, auto.imoh !== null ? notes.imoh : '',                       false,        eff.imoh)}
+                ${categoryRow('other', 'Other',                       build.other_user_cost, auto.other, auto.other !== null ? notes.other : '',                        false,        eff.other)}
+              `}
         </tbody>
         <tfoot>
           <tr>
