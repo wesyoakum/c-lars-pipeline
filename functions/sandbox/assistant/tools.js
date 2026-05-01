@@ -36,8 +36,9 @@ export function makeAssistantTools({ env, user }) {
       name: 'list_open_tasks',
       description:
         "List the user's open tasks (activities of type 'task' with no completed_at). " +
-        'Returns id, subject, due_at, account_id, opportunity_id, status. ' +
-        'Use when planning the day, surfacing what is due, or checking what is in flight.',
+        'Returns id, subject, due_at, account_id, opportunity_id, status, created_at, updated_at. ' +
+        'Use when planning the day, surfacing what is due, checking what is in flight, or ' +
+        'finding what was recently touched (sort=recently_updated).',
       input_schema: {
         type: 'object',
         properties: {
@@ -46,6 +47,11 @@ export function makeAssistantTools({ env, user }) {
             description: 'Only return tasks due within this many days from today (inclusive). Omit for all open tasks.',
           },
           limit: { type: 'integer', description: 'Max rows to return. Default 50, hard cap 200.' },
+          sort: {
+            type: 'string',
+            enum: ['due_soonest', 'recently_updated', 'recently_created'],
+            description: 'Sort order. Default: due_soonest.',
+          },
         },
       },
     },
@@ -53,13 +59,20 @@ export function makeAssistantTools({ env, user }) {
       name: 'list_open_opportunities',
       description:
         "List the user's open Pipeline opportunities (stage not in ('won','lost','closed')). " +
-        'Returns id, number, title, stage, account_id, expected_close_date, estimated_value_usd. ' +
-        'Use to discuss the funnel, deals at risk, or what is closing soon.',
+        'Returns id, number, title, stage, account_id, expected_close_date, estimated_value_usd, ' +
+        'created_at, updated_at, stage_entered_at. ' +
+        'Use to discuss the funnel, deals at risk, what is closing soon, or what was recently ' +
+        'touched (sort=recently_updated).',
       input_schema: {
         type: 'object',
         properties: {
           limit: { type: 'integer', description: 'Max rows to return. Default 50, hard cap 200.' },
           stage: { type: 'string', description: 'Optional exact-match stage filter.' },
+          sort: {
+            type: 'string',
+            enum: ['closing_soonest', 'recently_updated', 'recently_created'],
+            description: 'Sort order. Default: closing_soonest.',
+          },
         },
       },
     },
@@ -133,11 +146,12 @@ async function searchAccounts(env, { query, include_inactive }) {
   return { rows, count: rows.length };
 }
 
-async function listOpenTasks(env, user, { due_within_days, limit } = {}) {
+async function listOpenTasks(env, user, { due_within_days, limit, sort } = {}) {
   const cap = Math.min(Math.max(Number(limit) || 50, 1), 200);
   const params = [user.id];
   let sql = `
-    SELECT id, subject, status, due_at, account_id, opportunity_id, type
+    SELECT id, subject, status, due_at, account_id, opportunity_id, type,
+           created_at, updated_at
       FROM activities
      WHERE assigned_user_id = ?
        AND completed_at IS NULL
@@ -148,17 +162,27 @@ async function listOpenTasks(env, user, { due_within_days, limit } = {}) {
     sql += ' AND due_at IS NOT NULL AND due_at <= ?';
     params.push(deadline);
   }
-  sql += ' ORDER BY due_at IS NULL, due_at ASC LIMIT ?';
+  sql += ` ORDER BY ${orderClauseForTasks(sort)} LIMIT ?`;
   params.push(cap);
   const rows = await all(env.DB, sql, params);
   return { rows, count: rows.length };
 }
 
-async function listOpenOpportunities(env, user, { limit, stage } = {}) {
+function orderClauseForTasks(sort) {
+  switch (sort) {
+    case 'recently_updated': return 'updated_at DESC';
+    case 'recently_created': return 'created_at DESC';
+    case 'due_soonest':
+    default:                 return 'due_at IS NULL, due_at ASC';
+  }
+}
+
+async function listOpenOpportunities(env, user, { limit, stage, sort } = {}) {
   const cap = Math.min(Math.max(Number(limit) || 50, 1), 200);
   const params = [user.id, user.id];
   let sql = `
-    SELECT id, number, title, stage, account_id, expected_close_date, estimated_value_usd
+    SELECT id, number, title, stage, account_id, expected_close_date,
+           estimated_value_usd, created_at, updated_at, stage_entered_at
       FROM opportunities
      WHERE (owner_user_id = ? OR salesperson_user_id = ?)
        AND stage NOT IN ('won', 'lost', 'closed')
@@ -167,10 +191,19 @@ async function listOpenOpportunities(env, user, { limit, stage } = {}) {
     sql += ' AND stage = ?';
     params.push(stage);
   }
-  sql += ' ORDER BY expected_close_date IS NULL, expected_close_date ASC LIMIT ?';
+  sql += ` ORDER BY ${orderClauseForOpps(sort)} LIMIT ?`;
   params.push(cap);
   const rows = await all(env.DB, sql, params);
   return { rows, count: rows.length };
+}
+
+function orderClauseForOpps(sort) {
+  switch (sort) {
+    case 'recently_updated': return 'updated_at DESC';
+    case 'recently_created': return 'created_at DESC';
+    case 'closing_soonest':
+    default:                 return 'expected_close_date IS NULL, expected_close_date ASC';
+  }
 }
 
 async function getMemory(env, user, { key } = {}) {
