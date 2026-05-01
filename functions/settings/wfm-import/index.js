@@ -339,7 +339,7 @@ export async function onRequestGet(context) {
                     alert('Nothing selected.');
                     return;
                   }
-                  if (!confirm(`Import ${total} record(s) into Pipeline? Idempotent — re-running with the same WFM IDs updates existing rows rather than duplicating.`)) return;
+                  if (!confirm('Import ' + total + ' record(s) into Pipeline? Idempotent — re-running with the same WFM IDs updates existing rows rather than duplicating.')) return;
                   this.busy = true; this.phase = 'committing'; this.error = '';
                   try {
                     const res = await fetch('/settings/wfm-import/commit', {
