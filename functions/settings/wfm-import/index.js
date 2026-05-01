@@ -330,9 +330,9 @@ export async function onRequestGet(context) {
                   return out;
                 },
 
-                // Search WFM for records matching `searchQuery` of
-                // the selected `searchKind`. Results populate the same
-                // `samples` state so the existing card UI + import
+                // Search WFM for records matching searchQuery of the
+                // selected searchKind. Results populate the same
+                // samples state so the existing card UI + import
                 // flow work unchanged.
                 async doSearch() {
                   const q = (this.searchQuery || '').trim();
