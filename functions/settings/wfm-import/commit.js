@@ -478,6 +478,108 @@ async function fetchLeadDetail(env, wfmUuid, cache) {
   return l;
 }
 
+async function fetchQuoteDetail(env, wfmUuid, cache) {
+  if (!wfmUuid) return null;
+  if (cache.has('quote:' + wfmUuid)) return cache.get('quote:' + wfmUuid);
+  const r = await apiGet(env, '/quote.api/get/' + encodeURIComponent(wfmUuid));
+  if (!r.ok) { cache.set('quote:' + wfmUuid, null); return null; }
+  const q = recordList(r.body, 'Quote')[0] || null;
+  cache.set('quote:' + wfmUuid, q);
+  return q;
+}
+
+// Walk DetailedQuote.{Costs,Tasks} arrays and produce Pipeline
+// quote_lines rows. Idempotent on (external_source='wfm',
+// external_id=<line UUID>): DELETEs all WFM-sourced lines for the
+// quote first, then INSERTs the new ones. User-added non-WFM
+// lines are preserved.
+async function syncQuoteLines(env, pipelineQuoteId, wfmQuoteUuid, ctx) {
+  const detail = await fetchQuoteDetail(env, wfmQuoteUuid, ctx.fetchCache);
+  if (!detail) return 0;
+
+  // Persist the full DetailedQuote (including Costs/Tasks/Options)
+  // onto the quote row's wfm_payload, replacing the lighter
+  // current-list payload that upsertQuote stored.
+  await run(env.DB,
+    'UPDATE quotes SET wfm_payload = ? WHERE id = ?',
+    [JSON.stringify(detail), pipelineQuoteId]);
+
+  // Helper: WFM XML wraps repeated children as <Plural><Singular/></Plural>.
+  // After parsing, that's typically { Plural: { Singular: [...] } } when
+  // multiple children exist, or { Plural: { Singular: {...} } } for one,
+  // or "" / undefined when empty.
+  const arrayOf = (field, primaryKey) => {
+    if (!field || typeof field !== 'object') return [];
+    if (Array.isArray(field)) return field;
+    const inner = field[primaryKey];
+    if (Array.isArray(inner)) return inner;
+    if (inner && typeof inner === 'object') return [inner];
+    return [];
+  };
+
+  const lines = [];
+  let sortOrder = 10;
+
+  for (const c of arrayOf(detail.Costs, 'Cost')) {
+    lines.push({
+      external_id: s(c.UUID) || ('cost-' + sortOrder),
+      sort_order:  sortOrder, item_type: 'product',
+      description: s(c.Description) || s(c.Note) || '(no description)',
+      quantity:    n(c.Quantity) || 1,
+      unit:        s(c.Unit) || '',
+      unit_price:  n(c.UnitPrice) || 0,
+      // WFM Costs sometimes use "Amount" for the extended total,
+      // sometimes "Total". Try both, fall back to qty*unit_price.
+      extended_price: n(c.Amount) || n(c.Total) || (n(c.Quantity) * n(c.UnitPrice)),
+      wfm_payload: JSON.stringify(c),
+    });
+    sortOrder += 10;
+  }
+
+  for (const t of arrayOf(detail.Tasks, 'Task')) {
+    // WFM Tasks are billable-time line items. Quantity-of-time fields
+    // can be Quantity / EstimatedMinutes / BillableMinutes depending
+    // on the org's setup; pick the first non-zero.
+    const qty = n(t.Quantity) || n(t.BillableMinutes) || n(t.EstimatedMinutes) || 1;
+    const unit = s(t.Unit)
+      || (n(t.BillableMinutes) || n(t.EstimatedMinutes) ? 'min' : 'hr');
+    const rate = n(t.BillableRate) || n(t.Rate) || 0;
+    lines.push({
+      external_id: s(t.UUID) || ('task-' + sortOrder),
+      sort_order:  sortOrder, item_type: 'labor',
+      description: s(t.Description) || s(t.Name) || '(no description)',
+      quantity:    qty,
+      unit,
+      unit_price:  rate,
+      extended_price: n(t.Amount) || n(t.Total) || (qty * rate),
+      wfm_payload: JSON.stringify(t),
+    });
+    sortOrder += 10;
+  }
+
+  // Idempotency: drop existing WFM-sourced lines, then re-insert.
+  await run(env.DB,
+    `DELETE FROM quote_lines WHERE quote_id = ? AND external_source = 'wfm'`,
+    [pipelineQuoteId]);
+
+  const ts = nowIso();
+  for (const line of lines) {
+    await run(env.DB,
+      `INSERT INTO quote_lines
+         (id, quote_id, external_source, external_id,
+          sort_order, item_type, description, quantity, unit,
+          unit_price, extended_price, wfm_payload,
+          created_at, updated_at)
+       VALUES (?, ?, 'wfm', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [uuid(), pipelineQuoteId, line.external_id,
+       line.sort_order, line.item_type, line.description, line.quantity, line.unit,
+       line.unit_price, line.extended_price, line.wfm_payload,
+       ts, ts]);
+  }
+
+  return lines.length;
+}
+
 // Get-or-import an account by WFM UUID. If we've already imported it
 // (in this batch or a previous run), returns the Pipeline id. Otherwise
 // fetches /client.api/get/{uuid}, imports it (with nested contacts),
@@ -583,6 +685,7 @@ export async function onRequestPost(context) {
   const counts = {
     accounts: 0, contacts: 0, opportunities: 0, quotes: 0,
     users: 0, jobs: 0, skipped: 0,
+    quote_lines: 0,
     // Records imported via auto-cascade (parent FK was missing).
     accounts_cascaded: 0, contacts_cascaded: 0, opportunities_cascaded: 0,
     // Records claimed: a Pipeline-native row was found by name/email
@@ -664,6 +767,14 @@ export async function onRequestPost(context) {
         if (!oppId) { counts.skipped++; continue; }
         const r = await upsertQuote(env, q, oppId);
         counts.quotes++;
+        // Pull the DetailedQuote and write its Costs/Tasks into
+        // quote_lines. Cached so we don't re-fetch when re-importing.
+        try {
+          const lineCount = await syncQuoteLines(env, r.id, q.UUID, ctx);
+          counts.quote_lines += lineCount;
+        } catch (lineErr) {
+          errors.push('quote-lines ' + (q?.Name || '?') + ': ' + lineErr.message);
+        }
         links.push({ url: '/opportunities/' + oppId + '/quotes/' + r.id, label: 'Quote: ' + (q.Name || r.number) });
       } catch (e) { errors.push('quote ' + (q?.Name || '?') + ': ' + e.message); }
     }
@@ -690,7 +801,7 @@ export async function onRequestPost(context) {
         counts.accounts + ' accounts'
         + ' · ' + counts.contacts + ' contacts'
         + ' · ' + counts.opportunities + ' opps from leads'
-        + ' · ' + counts.quotes + ' quotes'
+        + ' · ' + counts.quotes + ' quotes (' + counts.quote_lines + ' line items)'
         + ' · ' + counts.jobs + ' opps from jobs'
         + ' · ' + counts.users + ' users enriched'
         + ' · ' + counts.skipped + ' skipped (FK unresolved)'
