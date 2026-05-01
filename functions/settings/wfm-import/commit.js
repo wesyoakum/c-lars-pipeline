@@ -137,16 +137,19 @@ async function upsertAccount(env, c) {
     'SELECT id FROM accounts WHERE external_source = ? AND external_id = ?',
     ['wfm', c.UUID]);
 
-  // 2) Smart-match against a Pipeline-native account with the same
-  //    name (case-insensitive, trimmed). If found, "claim" it by
-  //    stamping the WFM external_id onto the existing row. Future
-  //    imports go through the idempotent path above.
+  // 2) Smart-match against an existing account with the same name
+  //    (case-insensitive, trimmed). Excludes accounts that are
+  //    already wfm-imported (those have a different WFM UUID and
+  //    represent a different WFM record). Includes Pipeline-native
+  //    accounts AND accounts imported from other systems — for the
+  //    user's case, "ROVOP Inc" might have been seeded from a prior
+  //    Xero import, so just `external_id IS NULL` would miss it.
   let claimed = false;
   if (!existing && s(c.Name)) {
     const match = await one(env.DB,
-      `SELECT id FROM accounts
-        WHERE external_id IS NULL
-          AND LOWER(TRIM(name)) = LOWER(TRIM(?))
+      `SELECT id, external_source, external_id FROM accounts
+        WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
+          AND (external_source IS NULL OR external_source != 'wfm')
         LIMIT 1`,
       [s(c.Name)]);
     if (match) { existing = match; claimed = true; }
@@ -210,17 +213,19 @@ async function upsertContact(env, ct, accountId) {
     'SELECT id FROM contacts WHERE external_source = ? AND external_id = ?',
     ['wfm', ct.UUID]);
 
-  // 2) Smart-match against a Pipeline-native contact on the same
-  //    account. Match by email first (most reliable); if no email,
-  //    fall back to first + last name. Skip if both fail.
+  // 2) Smart-match against an existing contact on the same account.
+  //    Match by email first (most reliable); if no email, fall back
+  //    to first + last name. Excludes contacts that are already
+  //    wfm-imported (different WFM record); includes Pipeline-native
+  //    AND non-WFM-imported contacts.
   let claimed = false;
   const split = splitName(ct.Name);
   if (!existing) {
     if (s(ct.Email)) {
       existing = await one(env.DB,
         `SELECT id FROM contacts
-          WHERE external_id IS NULL
-            AND account_id = ?
+          WHERE account_id = ?
+            AND (external_source IS NULL OR external_source != 'wfm')
             AND LOWER(TRIM(email)) = LOWER(TRIM(?))
           LIMIT 1`,
         [accountId, s(ct.Email)]);
@@ -229,8 +234,8 @@ async function upsertContact(env, ct, accountId) {
     if (!existing && split.first_name && split.last_name) {
       existing = await one(env.DB,
         `SELECT id FROM contacts
-          WHERE external_id IS NULL
-            AND account_id = ?
+          WHERE account_id = ?
+            AND (external_source IS NULL OR external_source != 'wfm')
             AND LOWER(TRIM(first_name)) = LOWER(TRIM(?))
             AND LOWER(TRIM(last_name)) = LOWER(TRIM(?))
           LIMIT 1`,
