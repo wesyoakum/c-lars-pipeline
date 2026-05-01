@@ -40,7 +40,7 @@ export async function onRequestGet(context) {
   const tabs = subnavTabs(
     [
       { href: '/sandbox', label: 'Flow Chart' },
-      { href: '/sandbox/assistant', label: 'Assistant' },
+      { href: '/sandbox/assistant', label: 'Claudia' },
     ],
     '/sandbox/assistant'
   );
@@ -105,9 +105,10 @@ export async function onRequestGet(context) {
       <div id="assistant-messages" class="assistant-messages">
         ${messages.length === 0
           ? html`<div class="assistant-empty">
-              Personal assistant. Ask about open tasks, opportunities, or just talk through what
-              is on your plate. I can read your accounts/tasks/opportunities and remember things
-              you ask me to (travel prefs, ongoing context, "remind me about X").
+              <strong>Claudia</strong> — your personal Pipeline assistant. Read-only access to
+              every account, opportunity, task, quote, contact, and the rest of the schema.
+              Ask about your funnel, your next due task, who owns what — or tell me something
+              to remember (travel prefs, ongoing context, "remind me about X"). Dale.
             </div>`
           : messages.map(renderMessage)}
       </div>
@@ -144,7 +145,7 @@ export async function onRequestGet(context) {
     </script>
   `;
 
-  return htmlResponse(layout('Assistant', body, { user, activeNav: '/sandbox' }));
+  return htmlResponse(layout('Claudia', body, { user, activeNav: '/sandbox' }));
 }
 
 function renderMessage(m) {

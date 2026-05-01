@@ -106,6 +106,43 @@ export function makeAssistantTools({ env, user }) {
         required: ['key', 'value'],
       },
     },
+    {
+      name: 'describe_schema',
+      description:
+        'Introspect the Pipeline database. Pass `tables: ["accounts", "opportunities"]` to get the ' +
+        'full CREATE TABLE statement for those tables. Pass an empty/omitted `tables` to just list all ' +
+        'table names. Call this before query_db when you need to check column names or see what links ' +
+        'to what. The list of table names is also included in your system prompt so you usually do not ' +
+        'need to list them — go straight to fetching the schema for the tables you care about.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          tables: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Specific table names to introspect. Omit/empty to just list all tables.',
+          },
+        },
+      },
+    },
+    {
+      name: 'query_db',
+      description:
+        'Run a single read-only SELECT (or WITH ... SELECT) against the Pipeline D1 database. Returns ' +
+        'up to 200 rows. Use this for any question the curated tools cannot answer: arbitrary joins, ' +
+        'aggregations, filters, recency cuts, or full-table introspection. Rules: ' +
+        '(1) one statement only, no semicolons; ' +
+        '(2) read-only — INSERT/UPDATE/DELETE/DROP/ALTER/CREATE/REPLACE/ATTACH/DETACH/PRAGMA/VACUUM are blocked; ' +
+        '(3) if you do not include LIMIT, 200 is appended; ' +
+        "(4) prefer the curated tools (search_accounts / list_open_tasks / list_open_opportunities) when they fit — they're cheaper and pre-scoped to the current user.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          sql: { type: 'string', description: 'A single read-only SELECT statement.' },
+        },
+        required: ['sql'],
+      },
+    },
   ];
 
   async function execute(name, input) {
@@ -120,12 +157,29 @@ export function makeAssistantTools({ env, user }) {
         return getMemory(env, user, input);
       case 'set_memory':
         return setMemory(env, user, input);
+      case 'describe_schema':
+        return describeSchema(env, input);
+      case 'query_db':
+        return queryDb(env, input);
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
   }
 
   return { definitions, execute };
+}
+
+/**
+ * Returns the list of all user-visible table names. Used by the system
+ * prompt so Claudia always knows what tables exist without spending a
+ * tool call to list them.
+ */
+export async function listTableNames(env) {
+  const rows = await all(
+    env.DB,
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+  );
+  return rows.map((r) => r.name);
 }
 
 // ---------- Implementations ----------
@@ -221,6 +275,44 @@ async function getMemory(env, user, { key } = {}) {
     [user.id]
   );
   return { rows, count: rows.length };
+}
+
+async function describeSchema(env, { tables } = {}) {
+  if (!tables || tables.length === 0) {
+    const rows = await all(
+      env.DB,
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    );
+    return { tables: rows.map((r) => r.name) };
+  }
+  const placeholders = tables.map(() => '?').join(',');
+  const rows = await all(
+    env.DB,
+    `SELECT name, sql FROM sqlite_master WHERE type='table' AND name IN (${placeholders}) ORDER BY name`,
+    tables
+  );
+  const missing = tables.filter((t) => !rows.find((r) => r.name === t));
+  return { tables: rows, missing };
+}
+
+const DENIED_KEYWORDS = /\b(insert|update|delete|drop|alter|create|replace|attach|detach|pragma|vacuum|reindex|truncate)\b/i;
+
+async function queryDb(env, { sql }) {
+  let stmt = String(sql || '').trim();
+  // Strip a single trailing semicolon if present.
+  stmt = stmt.replace(/;\s*$/, '');
+  if (!stmt) throw new Error('Empty query.');
+  if (stmt.includes(';')) throw new Error('Multi-statement queries are not allowed.');
+  if (!/^(select|with)\b/i.test(stmt)) {
+    throw new Error('Only SELECT or WITH...SELECT queries are allowed.');
+  }
+  if (DENIED_KEYWORDS.test(stmt)) {
+    throw new Error('Query contains a write/DDL keyword (insert/update/delete/drop/alter/create/replace/attach/detach/pragma/vacuum/reindex/truncate).');
+  }
+  // Apply a hard row cap if the caller didn't include LIMIT.
+  const finalSql = /\blimit\s+\d+/i.test(stmt) ? stmt : `${stmt} LIMIT 200`;
+  const rows = await all(env.DB, finalSql);
+  return { rows, count: rows.length, sql: finalSql };
 }
 
 async function setMemory(env, user, { key, value }) {
