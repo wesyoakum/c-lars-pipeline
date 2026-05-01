@@ -19,7 +19,7 @@ import { layout, htmlResponse, html, raw } from '../lib/layout.js';
 import { readFlash } from '../lib/http.js';
 import { hasRole } from '../lib/auth.js';
 import { VALIDITY_DAYS_TYPES, getQuoteValidityDays } from '../lib/quote-term-defaults.js';
-import { loadEpsSchedule } from '../lib/eps-schedule.js';
+import { loadEpsSchedule, DEFAULT_EPS_SCHEDULE } from '../lib/eps-schedule.js';
 import { QUOTE_TYPE_LABELS } from '../lib/validators.js';
 import { settingsSubNav } from '../lib/settings-subnav.js';
 
@@ -236,7 +236,7 @@ export async function onRequestGet(context) {
         </p>
       </section>
 
-      <section class="card" x-data="epsScheduleEditor(${JSON.stringify(epsSchedule || { rows: [] })})">
+      <section class="card" x-data="epsScheduleEditor(${JSON.stringify(epsSchedule || { rows: [] })}, ${JSON.stringify(DEFAULT_EPS_SCHEDULE)})">
         <h2>EPS default payment schedule</h2>
         <p class="muted">
           Milestone rows that populate the "Default EPS Terms" textarea
@@ -474,7 +474,7 @@ document.addEventListener('alpine:init', function () {
   // (percentages must sum to 100) so the Save button is disabled
   // until the total is correct; the server validates again and is
   // authoritative.
-  Alpine.data('epsScheduleEditor', function (initial) {
+  Alpine.data('epsScheduleEditor', function (initial, siteDefault) {
     function cloneRows(src) {
       return (src.rows || []).map(function (r) {
         return {
@@ -487,6 +487,7 @@ document.addEventListener('alpine:init', function () {
     }
     return {
       rows: cloneRows(initial),
+      siteDefault: siteDefault,
       busy: false,
       saveLabel: 'Save EPS schedule',
       get totalPct() {
@@ -581,14 +582,8 @@ document.addEventListener('alpine:init', function () {
         });
       },
       resetToDefault: function () {
-        if (!confirm('Reset the EPS schedule to the built-in default (25/25/25/15/10 with ARO 1/3 and 2/3)? This does not save until you click "Save EPS schedule".')) return;
-        this.rows = [
-          { percent: 25, label: 'Due upon receipt of purchase order', weeks_num: '', weeks_den: '' },
-          { percent: 25, label: 'Due {weeks} weeks ARO', weeks_num: '1', weeks_den: '3' },
-          { percent: 25, label: 'Due {weeks} weeks ARO', weeks_num: '2', weeks_den: '3' },
-          { percent: 15, label: 'Due upon completion of FAT', weeks_num: '', weeks_den: '' },
-          { percent: 10, label: 'Due upon delivery of final documentation', weeks_num: '', weeks_den: '' },
-        ];
+        if (!confirm('Reset the EPS schedule to the built-in default (10/15/30/20/20/5 — six milestones aligned with Katana billing)? This does not save until you click "Save EPS schedule".')) return;
+        this.rows = cloneRows(this.siteDefault);
       },
     };
   });
