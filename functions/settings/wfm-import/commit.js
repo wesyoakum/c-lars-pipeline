@@ -180,6 +180,8 @@ async function upsertAccount(env, c) {
     updated_at:           ts,
   };
 
+  let pipelineId;
+  let action;
   if (existing) {
     // For claims, we also need to write the external_source/external_id
     // so future re-imports of this WFM record find the row by UUID.
@@ -190,9 +192,10 @@ async function upsertAccount(env, c) {
     await run(env.DB,
       'UPDATE accounts SET ' + setClause + ' WHERE id = ?',
       [...Object.values(writeCols), existing.id]);
-    return { id: existing.id, action: claimed ? 'claimed' : 'updated' };
+    pipelineId = existing.id;
+    action = claimed ? 'claimed' : 'updated';
   } else {
-    const id = uuid();
+    pipelineId = uuid();
     await run(env.DB,
       `INSERT INTO accounts
          (id, external_source, external_id,
@@ -202,13 +205,71 @@ async function upsertAccount(env, c) {
           is_archived, is_prospect, is_deleted, wfm_payload,
           created_at, updated_at)
        VALUES (?, 'wfm', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, c.UUID,
+      [pipelineId, c.UUID,
        cols.name, cols.email, cols.phone, cols.fax, cols.website,
        cols.address_billing, cols.address_physical, cols.external_url,
        cols.account_manager_name, cols.referral_source, cols.export_code,
        cols.is_archived, cols.is_prospect, cols.is_deleted, cols.wfm_payload,
        ts, ts]);
-    return { id, action: 'created' };
+    action = 'created';
+  }
+
+  // Sync addresses into the normalized account_addresses table —
+  // that's what the account-detail UI actually displays. Idempotent
+  // on (account_id, external_source='wfm', external_id).
+  await syncAccountAddresses(env, pipelineId, c, ts);
+
+  return { id: pipelineId, action };
+}
+
+// Build address rows for an imported WFM Client and reconcile them
+// against existing wfm-sourced addresses on the account. Each address
+// gets a stable external_id ('billing' or 'physical') so re-imports
+// update in place rather than duplicating.
+//
+// Mapping:
+//   WFM Address (street/visiting)   → kind='physical'
+//   WFM PostalAddress (mail/billing) → kind='billing'
+//
+// User-added (non-wfm) address rows on the same account are left
+// untouched — only wfm-sourced rows are deleted/re-inserted.
+async function syncAccountAddresses(env, accountId, c, ts) {
+  // Build the two candidate address blocks.
+  const lines = (...vals) => vals.filter((v) => v && String(v).trim()).join('\n');
+  const physicalText = lines(
+    s(c.Address),
+    [s(c.City), s(c.Region)].filter(Boolean).join(' '),
+    [s(c.PostCode), s(c.Country)].filter(Boolean).join(' ')
+  );
+  const billingText = lines(
+    s(c.PostalAddress),
+    [s(c.PostalCity), s(c.PostalRegion)].filter(Boolean).join(' '),
+    [s(c.PostalPostCode), s(c.PostalCountry)].filter(Boolean).join(' ')
+  );
+
+  // Remove wfm-sourced address rows for this account.
+  await run(env.DB,
+    `DELETE FROM account_addresses
+      WHERE account_id = ? AND external_source = 'wfm'`,
+    [accountId]);
+
+  let isFirst = true;
+  if (physicalText.trim()) {
+    await run(env.DB,
+      `INSERT INTO account_addresses
+         (id, account_id, kind, label, address, is_default,
+          external_source, external_id, created_at, updated_at)
+       VALUES (?, ?, 'physical', ?, ?, ?, 'wfm', 'physical', ?, ?)`,
+      [uuid(), accountId, 'WFM physical', physicalText, isFirst ? 1 : 0, ts, ts]);
+    isFirst = false;
+  }
+  if (billingText.trim()) {
+    await run(env.DB,
+      `INSERT INTO account_addresses
+         (id, account_id, kind, label, address, is_default,
+          external_source, external_id, created_at, updated_at)
+       VALUES (?, ?, 'billing', ?, ?, ?, 'wfm', 'billing', ?, ?)`,
+      [uuid(), accountId, 'WFM billing/postal', billingText, isFirst ? 1 : 0, ts, ts]);
   }
 }
 
