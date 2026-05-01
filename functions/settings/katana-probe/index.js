@@ -19,16 +19,21 @@ import { hasRole } from '../../lib/auth.js';
 import { settingsSubNav } from '../../lib/settings-subnav.js';
 import { apiGet } from '../../lib/katana-client.js';
 
-// The probes we run on page load. Each is a (label, path, query) tuple.
-// Kept small (limit=5) so the page renders quickly and we don't hammer
-// rate limits while iterating.
+// The probes we run on page load. limit=25 is enough to surface the
+// full shape of small-tenant resources (milestone products, customer
+// list) without paying for huge payloads. Adding /sales_orders and
+// /services since both are central to the Phase 2 design — sales
+// orders show how Adam structures existing project billing, services
+// show whether non-physical line items have a separate resource.
 const PROBES = [
-  { key: 'products',   label: 'Products',    path: '/products',   query: { limit: 5 } },
-  { key: 'variants',   label: 'Variants',    path: '/variants',   query: { limit: 5 } },
-  { key: 'customers',  label: 'Customers',   path: '/customers',  query: { limit: 5 } },
-  { key: 'tax_rates',  label: 'Tax rates',   path: '/tax_rates',  query: {} },
-  { key: 'locations',  label: 'Locations',   path: '/locations',  query: {} },
-  { key: 'user_info',  label: 'User info',   path: '/user_info',  query: {} },
+  { key: 'products',      label: 'Products',     path: '/products',      query: { limit: 25 } },
+  { key: 'variants',      label: 'Variants',     path: '/variants',      query: { limit: 25 } },
+  { key: 'customers',     label: 'Customers',    path: '/customers',     query: { limit: 25 } },
+  { key: 'sales_orders',  label: 'Sales orders', path: '/sales_orders',  query: { limit: 10 } },
+  { key: 'services',      label: 'Services',     path: '/services',      query: { limit: 25 } },
+  { key: 'tax_rates',     label: 'Tax rates',    path: '/tax_rates',     query: {} },
+  { key: 'locations',     label: 'Locations',    path: '/locations',     query: {} },
+  { key: 'user_info',     label: 'User info',    path: '/user_info',     query: {} },
 ];
 
 export async function onRequestGet(context) {
