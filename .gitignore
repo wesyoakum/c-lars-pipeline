@@ -22,3 +22,6 @@ node_modules/
 # Local env files (contain secrets — never commit)
 .env
 .env.local
+
+# Local research / scratch artifacts (e.g. cached OpenAPI specs)
+tmp/

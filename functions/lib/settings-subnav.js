@@ -11,7 +11,7 @@ import { html } from './layout.js';
 
 /**
  * Render the Settings sub-nav.
- * @param {'preferences'|'notifications'|'auto-tasks'|'users'|'history'|'fake-names'} active — which tab is active
+ * @param {'preferences'|'notifications'|'auto-tasks'|'users'|'history'|'fake-names'|'wfm-import'|'katana-probe'} active — which tab is active
  * @param {boolean} isAdmin — include admin-only tabs when true
  */
 export function settingsSubNav(active, isAdmin) {
@@ -34,6 +34,8 @@ export function settingsSubNav(active, isAdmin) {
            href="/settings/data-refresh">Data refresh</a>
         <a class="nav-link ${active === 'wfm-import' ? 'active' : ''}"
            href="/settings/wfm-import">WFM import</a>
+        <a class="nav-link ${active === 'katana-probe' ? 'active' : ''}"
+           href="/settings/katana-probe">Katana probe</a>
       ` : ''}
     </nav>`;
 }
