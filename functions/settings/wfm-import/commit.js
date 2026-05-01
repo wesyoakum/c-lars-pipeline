@@ -132,9 +132,25 @@ async function allocateNumber(env, prefix) {
 // ---------- Per-entity upserts ----------
 
 async function upsertAccount(env, c) {
-  const existing = await one(env.DB,
+  // 1) Already WFM-imported? Idempotent update.
+  let existing = await one(env.DB,
     'SELECT id FROM accounts WHERE external_source = ? AND external_id = ?',
     ['wfm', c.UUID]);
+
+  // 2) Smart-match against a Pipeline-native account with the same
+  //    name (case-insensitive, trimmed). If found, "claim" it by
+  //    stamping the WFM external_id onto the existing row. Future
+  //    imports go through the idempotent path above.
+  let claimed = false;
+  if (!existing && s(c.Name)) {
+    const match = await one(env.DB,
+      `SELECT id FROM accounts
+        WHERE external_id IS NULL
+          AND LOWER(TRIM(name)) = LOWER(TRIM(?))
+        LIMIT 1`,
+      [s(c.Name)]);
+    if (match) { existing = match; claimed = true; }
+  }
 
   const ts = nowIso();
   const cols = {
@@ -157,11 +173,16 @@ async function upsertAccount(env, c) {
   };
 
   if (existing) {
-    const setClause = Object.keys(cols).map((k) => `${k} = ?`).join(', ');
+    // For claims, we also need to write the external_source/external_id
+    // so future re-imports of this WFM record find the row by UUID.
+    const writeCols = claimed
+      ? { external_source: 'wfm', external_id: c.UUID, ...cols }
+      : cols;
+    const setClause = Object.keys(writeCols).map((k) => k + ' = ?').join(', ');
     await run(env.DB,
-      `UPDATE accounts SET ${setClause} WHERE id = ?`,
-      [...Object.values(cols), existing.id]);
-    return { id: existing.id, action: 'updated' };
+      'UPDATE accounts SET ' + setClause + ' WHERE id = ?',
+      [...Object.values(writeCols), existing.id]);
+    return { id: existing.id, action: claimed ? 'claimed' : 'updated' };
   } else {
     const id = uuid();
     await run(env.DB,
@@ -184,11 +205,40 @@ async function upsertAccount(env, c) {
 }
 
 async function upsertContact(env, ct, accountId) {
-  const existing = await one(env.DB,
+  // 1) Already WFM-imported?
+  let existing = await one(env.DB,
     'SELECT id FROM contacts WHERE external_source = ? AND external_id = ?',
     ['wfm', ct.UUID]);
 
+  // 2) Smart-match against a Pipeline-native contact on the same
+  //    account. Match by email first (most reliable); if no email,
+  //    fall back to first + last name. Skip if both fail.
+  let claimed = false;
   const split = splitName(ct.Name);
+  if (!existing) {
+    if (s(ct.Email)) {
+      existing = await one(env.DB,
+        `SELECT id FROM contacts
+          WHERE external_id IS NULL
+            AND account_id = ?
+            AND LOWER(TRIM(email)) = LOWER(TRIM(?))
+          LIMIT 1`,
+        [accountId, s(ct.Email)]);
+      if (existing) claimed = true;
+    }
+    if (!existing && split.first_name && split.last_name) {
+      existing = await one(env.DB,
+        `SELECT id FROM contacts
+          WHERE external_id IS NULL
+            AND account_id = ?
+            AND LOWER(TRIM(first_name)) = LOWER(TRIM(?))
+            AND LOWER(TRIM(last_name)) = LOWER(TRIM(?))
+          LIMIT 1`,
+        [accountId, split.first_name, split.last_name]);
+      if (existing) claimed = true;
+    }
+  }
+
   const ts = nowIso();
   const cols = {
     account_id:  accountId,
@@ -206,11 +256,14 @@ async function upsertContact(env, ct, accountId) {
   };
 
   if (existing) {
-    const setClause = Object.keys(cols).map((k) => `${k} = ?`).join(', ');
+    const writeCols = claimed
+      ? { external_source: 'wfm', external_id: ct.UUID, ...cols }
+      : cols;
+    const setClause = Object.keys(writeCols).map((k) => k + ' = ?').join(', ');
     await run(env.DB,
-      `UPDATE contacts SET ${setClause} WHERE id = ?`,
-      [...Object.values(cols), existing.id]);
-    return { id: existing.id, action: 'updated' };
+      'UPDATE contacts SET ' + setClause + ' WHERE id = ?',
+      [...Object.values(writeCols), existing.id]);
+    return { id: existing.id, action: claimed ? 'claimed' : 'updated' };
   } else {
     const id = uuid();
     await run(env.DB,
@@ -427,6 +480,7 @@ async function ensureAccount(env, wfmUuid, ctx) {
   const r = await upsertAccount(env, c);
   ctx.accountByWfmUuid.set(wfmUuid, r.id);
   ctx.counts.accounts_cascaded++;
+  if (r.action === 'claimed') ctx.counts.accounts_claimed++;
 
   const cts = (c.Contacts && c.Contacts.Contact)
     ? (Array.isArray(c.Contacts.Contact) ? c.Contacts.Contact : [c.Contacts.Contact])
@@ -435,6 +489,7 @@ async function ensureAccount(env, wfmUuid, ctx) {
     const ctr = await upsertContact(env, ct, r.id);
     ctx.contactByWfmUuid.set(ct.UUID, ctr.id);
     ctx.counts.contacts_cascaded++;
+    if (ctr.action === 'claimed') ctx.counts.contacts_claimed++;
   }
   return r.id;
 }
@@ -520,6 +575,10 @@ export async function onRequestPost(context) {
     users: 0, jobs: 0, skipped: 0,
     // Records imported via auto-cascade (parent FK was missing).
     accounts_cascaded: 0, contacts_cascaded: 0, opportunities_cascaded: 0,
+    // Records claimed: a Pipeline-native row was found by name/email
+    // and stamped with the WFM external_id (rather than creating a
+    // new row alongside the existing one).
+    accounts_claimed: 0, contacts_claimed: 0,
   };
   const links = [];
   const errors = [];
@@ -548,7 +607,8 @@ export async function onRequestPost(context) {
         const a = await upsertAccount(env, c);
         accountByWfmUuid.set(c.UUID, a.id);
         counts.accounts++;
-        links.push({ url: `/accounts/${a.id}`, label: `Account: ${c.Name || c.UUID}` });
+        if (a.action === 'claimed') counts.accounts_claimed++;
+        links.push({ url: '/accounts/' + a.id, label: 'Account: ' + (c.Name || c.UUID) });
 
         const cts = (c.Contacts && c.Contacts.Contact)
           ? (Array.isArray(c.Contacts.Contact) ? c.Contacts.Contact : [c.Contacts.Contact])
@@ -557,8 +617,9 @@ export async function onRequestPost(context) {
           const r = await upsertContact(env, ct, a.id);
           contactByWfmUuid.set(ct.UUID, r.id);
           counts.contacts++;
+          if (r.action === 'claimed') counts.contacts_claimed++;
         }
-      } catch (e) { errors.push(`client ${c?.Name}: ${e.message}`); }
+      } catch (e) { errors.push('client ' + (c?.Name || '?') + ': ' + e.message); }
     }
 
     // -------- Leads ---------
@@ -627,6 +688,11 @@ export async function onRequestPost(context) {
             ? ' · auto-cascaded: ' + counts.accounts_cascaded + ' accounts, '
               + counts.contacts_cascaded + ' contacts, '
               + counts.opportunities_cascaded + ' opps'
+            : '')
+        + ((counts.accounts_claimed + counts.contacts_claimed) > 0
+            ? ' · claimed (matched existing Pipeline rows by name): '
+              + counts.accounts_claimed + ' accounts, '
+              + counts.contacts_claimed + ' contacts'
             : ''),
       links: links.slice(0, 30),  // cap so the UI stays readable
       errors: errors.slice(0, 10),
