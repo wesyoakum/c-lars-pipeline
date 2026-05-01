@@ -442,30 +442,66 @@ PLANNED → won, PRODUCTION → job_in_progress, etc.)
 
 ## 8. Custom fields
 
-Per-record custom-field values are read from the entity-specific
-endpoint (e.g. `/lead.api/get/{UUID}/customfield`). They get applied
-in two layers:
+**Status:** Complete catalog confirmed via
+`/settings/wfm-import/probe-customfields` (v0.446) — 18 definitions in
+total. Implementation of the typed-column promotions is **deferred to
+the real migration** (§14); for now the importer leaves customs
+untouched in `wfm_payload.customFields` once that key is wired up.
 
-1. **Promote known-useful customs to typed columns.**
+Per-record custom-field values are read from the entity-specific
+endpoint (e.g. `/lead.api/get/{UUID}/customfield`). At import time we'll:
+
+1. **Promote known-useful customs to typed columns** (per the table below).
 2. **Merge the full custom-field map into the target row's `wfm_payload.customFields` key.**
    So even un-promoted customs are preserved verbatim.
 
-| WFM custom field | Type | Applies to | Promoted to typed column? |
-|---|---|---|---|
-| MATERIAL DESC | Text | JobCost | cost_lines.material_desc [NEW] |
-| REV | Text | JobCost | cost_lines.rev [NEW] |
-| DRAWING REFERENCE | Text | JobCost | cost_lines.drawing_reference [NEW] |
-| TAG | Text | JobCost | cost_lines.tag [NEW] |
-| Delivery Address | Multi-line | Job | jobs.delivery_address [NEW] (and quotes.delivery_terms) |
-| QuoteNotesExternal | Multi-line | Quote | quotes.notes_customer (append) |
-| QuoteDueDate | Date | Quote | quotes.valid_until (override if set) |
-| QuoteTerms | Multi-line | Quote | quotes.payment_terms |
-| Hot Sheet | Checkbox | Lead | opportunities.is_hot_sheet [NEW] |
-| RFQReceivedDate | Date | (lead — truncated in probe) | opportunities.rfq_received_at [NEW] |
+### Complete catalog (all 18 definitions)
+
+#### Quote-applicable (10)
+
+| WFM custom field | Type | Promotion target |
+|---|---|---|
+| `RFQReceivedDate` | Date | → `opportunities.rfq_received_at` (NEW) — funnel-timing event; lives on the parent opportunity. When multiple quotes per opp, use the earliest non-null. |
+| `OCDate` | Date | → `quotes.oc_received_at` (NEW) — date the customer's OC was issued for this quote. |
+| `QuoteDueDate` | Date | → `quotes.quote_due_date` (NEW). **Do NOT override `valid_until`** — preserve as a separate column. The two often differ in practice (ValidDate = quote expiry, QuoteDueDate = when *we* committed to deliver the quote). |
+| `CustomerPO` | Text | → `opportunities.customer_po_number` (column already exists). |
+| `JobNumber` | Text | leave in `wfm_payload.customFields` (cross-reference only; Pipeline has its own job numbering). |
+| `QuotedDelivery` | Text | → `quotes.quoted_delivery` (NEW) — free-text delivery terms we offered. |
+| `RequestedDelivery` | Text | → `quotes.requested_delivery` (NEW) — free-text delivery the customer asked for. |
+| `QuoteNotesExternal` | Multi-line | append to `quotes.notes_customer`. |
+| `QuoteNotesInternal` | Multi-line | append to `quotes.notes_internal`. |
+| `QuoteTerms` | Multi-line | → `quotes.payment_terms`. |
+
+#### Job-applicable (3)
+
+| WFM custom field | Type | Promotion target |
+|---|---|---|
+| `Order Confirmation Date` | Date | → `jobs.oc_received_at` (NEW). When the parent opp is also being touched, mirror to `opportunities.actual_close_date` if currently null. |
+| `NoticeToProceedDate` | Date | → `jobs.ntp_at` (NEW). |
+| `Delivery Address` | Multi-line | → `jobs.delivery_address` (already in §10 plan). |
+
+#### Lead-applicable (1)
+
+| WFM custom field | Type | Promotion target |
+|---|---|---|
+| `Hot Sheet` | Checkbox | → `opportunities.is_hot_sheet` (already in §10 plan). |
+
+#### JobCost-applicable (4) — line-item level
+
+| WFM custom field | Type | Promotion target |
+|---|---|---|
+| `MATERIAL DESC` | Text | → `cost_lines.material_desc` (already in §10 plan). |
+| `REV` | Text | → `cost_lines.rev` (already in §10 plan). |
+| `DRAWING REFERENCE` | Text | → `cost_lines.drawing_reference` (already in §10 plan). |
+| `TAG` | Text | → `cost_lines.tag` (already in §10 plan). |
+
+#### Client / Contact / Supplier / JobTask / JobTime — **none**
+
+(No custom fields on these entities in the C-LARS WFM tenant.)
 
 If WFM adds new custom fields later, they automatically land in
-`wfm_payload.customFields` — no schema migration needed unless you
-want them as filterable columns.
+`wfm_payload.customFields` once the importer is wired up — no schema
+migration needed unless we want them as filterable columns.
 
 ---
 
@@ -808,6 +844,98 @@ Option A is in place.
 - Option A vs B (recommendation: A)
 - Where the trigger lives: web button vs. CLI script vs. cron
 - Retention: how many runs to keep in R2
+
+---
+
+## 14. Real-migration TODO checklist
+
+Stuff that's intentionally **deferred to the real migration cutover**
+(once we're done sampling / testing the import workbench against
+ROVOP-shaped data and ready to do the full pull). Captured here so it
+doesn't fall through the cracks.
+
+### 14.1 Schema migrations needed
+
+One follow-up migration (likely `0069_wfm_custom_field_columns.sql`)
+adds the new typed columns from §8 that haven't been built yet:
+
+```sql
+-- Quote-level custom date fields (do NOT override valid_until)
+ALTER TABLE quotes ADD COLUMN quote_due_date     TEXT;   -- WFM QuoteDueDate
+ALTER TABLE quotes ADD COLUMN oc_received_at     TEXT;   -- WFM OCDate
+ALTER TABLE quotes ADD COLUMN quoted_delivery    TEXT;   -- WFM QuotedDelivery (free text)
+ALTER TABLE quotes ADD COLUMN requested_delivery TEXT;   -- WFM RequestedDelivery (free text)
+
+-- Job-level custom date fields
+ALTER TABLE jobs ADD COLUMN oc_received_at TEXT;         -- WFM "Order Confirmation Date"
+ALTER TABLE jobs ADD COLUMN ntp_at         TEXT;         -- WFM NoticeToProceedDate
+
+-- Opportunity-level (RFQ funnel timing)
+-- Note: opportunities.rfq_received_at and opportunities.is_hot_sheet
+-- are already covered by §10's 0064 migration that already shipped.
+-- opportunities.customer_po_number already exists in the base schema.
+```
+
+### 14.2 Importer extensions
+
+`functions/settings/wfm-import/commit.js` must be extended to:
+
+1. Call `/quote.api/get/<UUID>/customfield` per imported quote and
+   populate the new typed columns + `wfm_payload.customFields`.
+2. Call `/job.api/get/<UUID>/customfield` per imported job and do the
+   same for jobs.
+3. Call `/lead.api/get/<UUID>/customfield` per imported lead — populate
+   `opportunities.is_hot_sheet` from `Hot Sheet` and `opportunities.rfq_received_at`
+   when the lead has a quote with `RFQReceivedDate` set (or move the
+   custom to opportunity level if WFM stores it on leads in your tenant —
+   our probe shows it's a Quote-level custom in C-LARS, so the
+   opportunity-level RFQ timestamp gets sourced from the earliest
+   non-null `Quote.RFQReceivedDate` across the opp's quotes).
+4. Mirror `Job.Order Confirmation Date` to the parent opportunity's
+   `actual_close_date` when that field is currently null.
+
+Throttle the per-record customfield calls — at C-LARS scale this is
+~200 quotes + ~150 jobs + ~150 leads = ~500 extra API calls, which fits
+inside the 5000/day budget but would saturate the 60/min ceiling without
+a sleep loop.
+
+### 14.3 Importer behavior locks (decisions captured)
+
+- **`QuoteDueDate` does NOT override `quotes.valid_until`.** Two distinct
+  fields, store separately. (Reverses an earlier draft of §8 that had
+  the override; the current Pages Functions importer never built the
+  override anyway, so no live-data harm.)
+- **Custom value collision**: if both `QuoteNotesExternal` and the
+  list-endpoint `Description` are set, the importer appends — does not
+  overwrite. Same rule for any multi-line custom that lands in an
+  existing typed column.
+
+### 14.4 Pipeline UI follow-on
+
+Once the new columns exist:
+
+- Add `rfq_received_at`, `oc_received_at`, `quote_due_date` to the
+  opportunities and quotes detail-page filters.
+- Add `oc_received_at`, `ntp_at` to the jobs detail-page filters.
+- Surface the four free-text Quote customs (`CustomerPO`,
+  `QuotedDelivery`, `RequestedDelivery`, `JobNumber`) in the quote
+  detail page header strip — these are useful at-a-glance but
+  not filter-worthy.
+
+### 14.5 Backfill strategy
+
+Once the new columns + extended importer are live, **re-import** every
+WFM-sourced row to populate the new fields. Idempotent, so this is
+safe — the existing rows just get UPDATEd with the new column values.
+Plan ~30 minutes of API time for the full backfill given rate limits.
+
+### 14.6 Backup snapshot before cutover
+
+Before the real-migration full pull, take one **complete data backup
+run** per §13 (Option A — raw archive). That gives us a defensive
+snapshot of every WFM endpoint at cutover time, separate from
+Pipeline's interpretation. Build the §13 mechanism first if it isn't
+already in place.
 
 ---
 
