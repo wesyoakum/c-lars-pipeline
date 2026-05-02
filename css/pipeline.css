@@ -101,6 +101,66 @@ code {
 .nav-link:hover  { background: var(--bg-alt); text-decoration: none; }
 .nav-link.active { background: var(--bg-alt); font-weight: 600; }
 
+/* ---------- Settings sub-nav ---------- */
+/* Horizontal bar shared by every /settings/* page (settingsSubNav).
+   Replaces the old inline-styled nav so the dropdown machinery has a
+   stable hook. */
+.settings-subnav {
+  padding: 0.5rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0;
+}
+
+/* ---------- Dropdown (used in settings sub-nav) ---------- */
+/* Hover or keyboard-focus opens the menu. The trigger is a real
+   <button> so it's tab-able and announces aria-haspopup; clicking it
+   on touch devices gives it focus, which keeps the menu open while
+   the user picks an item. */
+.nav-dropdown {
+  position: relative;
+  display: inline-block;
+}
+.nav-dropdown-trigger {
+  font: inherit;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.nav-dropdown-caret {
+  font-size: 0.7em;
+  opacity: 0.6;
+}
+.nav-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  min-width: 12rem;
+  display: none;
+  z-index: 100;
+  padding: 0.25rem 0;
+  flex-direction: column;
+}
+.nav-dropdown:hover > .nav-dropdown-menu,
+.nav-dropdown:focus-within > .nav-dropdown-menu {
+  display: flex;
+}
+.nav-dropdown-menu .nav-link {
+  display: block;
+  border-radius: 0;
+  padding: 0.4rem 0.75rem;
+  white-space: nowrap;
+}
+
 /* Hamburger toggle. Only visible at mobile widths via media query
    below; desktop hides it and shows the inline nav. */
 .nav-toggle {
