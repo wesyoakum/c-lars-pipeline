@@ -23,6 +23,12 @@ import { now } from './ids.js';
  * category). Add a new entry here when adding a new write tool — the
  * settings page will pick it up on the next render and bootstrap the
  * row.
+ *
+ * Optional fields:
+ * - `defaultEnabled: false` — bootstrap the row with enabled=0 instead
+ *   of 1. Use for tools that are intentionally shipped-but-off so Wes
+ *   has to explicitly opt in (e.g. high-blast-radius ops like merging
+ *   accounts, or experimental features under evaluation).
  */
 export const PERMISSION_GATED_ACTIONS_CATALOG = [
   // accounts
@@ -110,6 +116,37 @@ export const PERMISSION_GATED_ACTIONS_CATALOG = [
     label: 'Change document retention',
     description: 'Pin a dropped document as keep_forever, mark it auto, or trash it. Low-risk, but gated for consistency.',
   },
+  {
+    action: 'set_document_category',
+    category: 'documents',
+    label: 'Categorize documents',
+    description: 'Label a dropped document with a category (RFQ, spec sheet, contact list, meeting note, badge photo, etc.). Free-form text — no enum yet. Helpful for searches and cleanups, but not yet wired into the rest of the app.',
+    defaultEnabled: false,
+  },
+  // auto-task rule firing — manually trigger a rule chain when the
+  // natural event didn\'t fire (rare but useful for cleanup).
+  {
+    action: 'fire_auto_task_chain',
+    category: 'auto_tasks',
+    label: 'Fire auto-task chains manually',
+    description: 'Re-fire an auto-task rule chain against an entity (opp, quote, task, job) by event_type. Use only when the natural trigger missed for a specific entity — firing a chain that already ran will create duplicate tasks. Powerful and easy to misuse, hence default-off.',
+    defaultEnabled: false,
+  },
+  // account / contact merging (consolidate duplicate rows)
+  {
+    action: 'merge_accounts',
+    category: 'merging',
+    label: 'Merge duplicate accounts',
+    description: 'Consolidate two account rows: repoints all foreign-key references (contacts, opps, activities, documents) from the loser onto the winner, then deletes the loser. NOT undoable via undo_claudia_write — to reverse, manually re-create the loser and split the children. Default-off; turn on only when actively de-duping.',
+    defaultEnabled: false,
+  },
+  {
+    action: 'merge_contacts',
+    category: 'merging',
+    label: 'Merge duplicate contacts',
+    description: 'Consolidate two contact rows: repoints all foreign-key references (opportunities.primary_contact_id, opportunities.bant_authority_contact_id, activities.contact_id, documents.contact_id) from the loser onto the winner, then deletes the loser. NOT undoable. Default-off.',
+    defaultEnabled: false,
+  },
 ];
 
 /**
@@ -161,6 +198,16 @@ export const PERMISSION_CATEGORIES = [
     label: 'Documents',
     blurb: 'Mutations against Claudia\'s drop-zone (claudia_documents). Does not include creating documents — those land via the upload endpoint.',
   },
+  {
+    key: 'auto_tasks',
+    label: 'Auto-tasks',
+    blurb: 'Manual control over the auto-task rule engine. Fire a chain only when the natural trigger missed; firing a chain that already ran will create duplicate tasks.',
+  },
+  {
+    key: 'merging',
+    label: 'Merging (deduplication)',
+    blurb: 'Consolidate duplicate accounts or contacts into one row. Repoints every FK reference and deletes the loser. NOT undoable — only enable when actively de-duping.',
+  },
 ];
 
 /**
@@ -195,12 +242,13 @@ export async function loadPermissionMap(env) {
 export async function ensurePermissionRows(env) {
   const ts = now();
   for (const entry of PERMISSION_GATED_ACTIONS_CATALOG) {
+    const initialEnabled = entry.defaultEnabled === false ? 0 : 1;
     await run(
       env.DB,
       `INSERT OR IGNORE INTO claudia_permissions
          (action, enabled, category, label, description, updated_at)
-       VALUES (?, 1, ?, ?, ?, ?)`,
-      [entry.action, entry.category, entry.label, entry.description, ts]
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [entry.action, initialEnabled, entry.category, entry.label, entry.description, ts]
     );
   }
   const rows = await all(

@@ -8,10 +8,12 @@
 // that's a deliberate Phase-1 boundary.
 
 import Papa from 'papaparse';
-import { all, one, run } from '../../lib/db.js';
+import { all, one, run, batch as d1Batch, stmt } from '../../lib/db.js';
 import { now, uuid, nextSequenceValue, nextNumber, currentYear } from '../../lib/ids.js';
 import { CLAUDIA_USER_ID } from '../../lib/auth.js';
+import { audit, auditStmt } from '../../lib/audit.js';
 import { changeOppStage } from '../../lib/stage-transitions.js';
+import { fireEvent } from '../../lib/auto-tasks.js';
 import {
   claudiaInsert,
   claudiaUpdate,
@@ -590,6 +592,85 @@ export async function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'fire_auto_task_chain',
+      description:
+        'Manually fire an auto-task rule chain against a specific entity. Use ONLY when the natural ' +
+        'event missed for some reason and tasks are visibly absent that should be there. Firing a ' +
+        'chain that already ran will create DUPLICATE tasks — the rule engine has no per-entity ' +
+        'idempotency check. Always confirm with the user before firing. ' +
+        'Required: event_type and the matching entity_* fields. Common event types: ' +
+        '"opportunity.stage_changed" (needs entity_type=opportunity), ' +
+        '"quote.issued" / "quote.accepted" / "quote.rejected" / "quote.expired" / "quote.revised" ' +
+        '(needs entity_type=quote), "task.completed" (needs entity_type=activity), ' +
+        '"oc.issued" / "ntp.issued" / "change_order.issued" / "job.handed_off" / "job.completed". ' +
+        'Returns { ok, fired, skipped, event_type, entity_type, entity_id }.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          event_type:  { type: 'string', description: 'Required. The trigger string (e.g. "opportunity.stage_changed").' },
+          entity_type: { type: 'string', enum: ['opportunity', 'quote', 'activity', 'job'], description: 'Required. Which kind of entity the event is firing for.' },
+          entity_id:   { type: 'string', description: 'Required. Id of the entity.' },
+        },
+        required: ['event_type', 'entity_type', 'entity_id'],
+      },
+    },
+    {
+      name: 'set_document_category',
+      description:
+        'Label a dropped document with a category — RFQ, spec sheet, contact list, meeting note, ' +
+        'badge photo, contract, PO, etc. Free-form string for now (no enum). Pass null to clear. ' +
+        'Useful for filtered listings and cleanups; not yet wired into the rest of the app. Direct ' +
+        'UPDATE — no claudia_writes/audit row.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id:       { type: 'string', description: 'Document id.' },
+          category: { type: 'string', description: 'Category label, or null/empty to clear.' },
+        },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'merge_accounts',
+      description:
+        'Consolidate two account rows into one. Repoints every FK reference (contacts, opportunities, ' +
+        'activities, documents) from `loser_id` onto `winner_id`, then deletes the loser. ALL data ' +
+        'on the loser row itself (name / alias / segment / addresses / notes) is LOST — anything you ' +
+        'want to keep must be merged onto the winner via update_account first. ' +
+        'NOT undoable via undo_claudia_write — to reverse you would manually re-create the loser and ' +
+        'split the children back. Always confirm with the user, including which row wins, before ' +
+        'firing. The `reason` field is required for the audit trail. Returns the per-table repoint ' +
+        'counts plus the deleted loser snapshot.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          loser_id:  { type: 'string', description: 'Required. The duplicate account that will be deleted.' },
+          winner_id: { type: 'string', description: 'Required. The account that absorbs all the FK references and survives.' },
+          reason:    { type: 'string', description: 'Required. Short note for the audit trail (e.g. "duplicate KCS rows from CSV import").' },
+        },
+        required: ['loser_id', 'winner_id', 'reason'],
+      },
+    },
+    {
+      name: 'merge_contacts',
+      description:
+        'Consolidate two contact rows into one. Repoints FK references on opportunities ' +
+        '(primary_contact_id, bant_authority_contact_id), activities (contact_id), and documents ' +
+        '(contact_id) from `loser_id` onto `winner_id`, then deletes the loser. ALL data on the ' +
+        'loser row (name / email / phone / title / notes) is LOST — merge anything worth keeping ' +
+        'via update_contact first. NOT undoable. Always confirm with the user, including which row ' +
+        'wins, before firing. `reason` is required.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          loser_id:  { type: 'string', description: 'Required. The duplicate contact that will be deleted.' },
+          winner_id: { type: 'string', description: 'Required. The contact that absorbs the FK references and survives.' },
+          reason:    { type: 'string', description: 'Required. Short note for the audit trail.' },
+        },
+        required: ['loser_id', 'winner_id', 'reason'],
+      },
+    },
+    {
       name: 'undo_claudia_write',
       description:
         'Reverse a previous Claudia write within the 24-hour undo window. For a CREATE: deletes ' +
@@ -743,6 +824,14 @@ export async function makeAssistantTools({ env, user }) {
         return createQuoteDraft(env, user, input);
       case 'create_job':
         return createJob(env, user, input);
+      case 'fire_auto_task_chain':
+        return fireAutoTaskChain(env, user, input);
+      case 'set_document_category':
+        return setDocumentCategory(env, user, input);
+      case 'merge_accounts':
+        return mergeAccounts(env, user, input);
+      case 'merge_contacts':
+        return mergeContacts(env, user, input);
       case 'undo_claudia_write':
         return undoClaudiaWrite(env, user, input);
       case 'list_recent_writes':
@@ -1665,6 +1754,241 @@ async function createJob(env, user, input = {}) {
     title,
     job_type: opp.transaction_type,
     summary,
+  };
+}
+
+// ---------- Auto-task rule firing (manual trigger) ----------
+
+// Map entity_type → SELECT * FROM <table>. fireEvent's payload shape
+// uses single-key entity sub-objects (opportunity, quote, task, job).
+const AUTO_TASK_ENTITY_TABLES = {
+  opportunity: 'opportunities',
+  quote:       'quotes',
+  activity:    'activities',
+  job:         'jobs',
+};
+const AUTO_TASK_PAYLOAD_KEYS = {
+  opportunity: 'opportunity',
+  quote:       'quote',
+  activity:    'task',  // auto-tasks engine uses `task` for the activity entry
+  job:         'job',
+};
+
+async function fireAutoTaskChain(env, user, input = {}) {
+  const eventType = trimOrNull(input.event_type);
+  const entityType = trimOrNull(input.entity_type);
+  const entityId = trimOrNull(input.entity_id);
+  if (!eventType) throw new Error('fire_auto_task_chain requires event_type.');
+  if (!entityType) throw new Error('fire_auto_task_chain requires entity_type.');
+  if (!entityId) throw new Error('fire_auto_task_chain requires entity_id.');
+
+  const table = AUTO_TASK_ENTITY_TABLES[entityType];
+  const payloadKey = AUTO_TASK_PAYLOAD_KEYS[entityType];
+  if (!table || !payloadKey) {
+    return { error: 'unknown_entity_type', entity_type: entityType };
+  }
+
+  const entityRow = await one(env.DB, `SELECT * FROM ${table} WHERE id = ?`, [entityId]);
+  if (!entityRow) {
+    return { error: 'entity_not_found', entity_type: entityType, entity_id: entityId };
+  }
+
+  // Enrich the payload with adjacent rows the rule conditions may
+  // reference. Mirrors what production callers pass — opps include
+  // their account; quotes include their opp + account; tasks include
+  // any linked opp/account.
+  const payload = {
+    trigger: { user: user.id, at: now(), source: 'claudia_manual_fire' },
+    [payloadKey]: entityRow,
+  };
+  if (entityType === 'opportunity' && entityRow.account_id) {
+    payload.account = await one(env.DB, 'SELECT * FROM accounts WHERE id = ?', [entityRow.account_id]);
+  }
+  if (entityType === 'quote' && entityRow.opportunity_id) {
+    payload.opportunity = await one(env.DB, 'SELECT * FROM opportunities WHERE id = ?', [entityRow.opportunity_id]);
+    if (payload.opportunity?.account_id) {
+      payload.account = await one(env.DB, 'SELECT * FROM accounts WHERE id = ?', [payload.opportunity.account_id]);
+    }
+  }
+  if (entityType === 'activity') {
+    if (entityRow.opportunity_id) {
+      payload.opportunity = await one(env.DB, 'SELECT * FROM opportunities WHERE id = ?', [entityRow.opportunity_id]);
+    }
+    if (entityRow.account_id) {
+      payload.account = await one(env.DB, 'SELECT * FROM accounts WHERE id = ?', [entityRow.account_id]);
+    }
+  }
+  if (entityType === 'job' && entityRow.opportunity_id) {
+    payload.opportunity = await one(env.DB, 'SELECT * FROM opportunities WHERE id = ?', [entityRow.opportunity_id]);
+    if (payload.opportunity?.account_id) {
+      payload.account = await one(env.DB, 'SELECT * FROM accounts WHERE id = ?', [payload.opportunity.account_id]);
+    }
+  }
+
+  const claudiaUser = await one(
+    env.DB,
+    'SELECT id, email, display_name, role FROM users WHERE id = ?',
+    [CLAUDIA_USER_ID]
+  );
+  const result = await fireEvent(env, eventType, payload, claudiaUser || user);
+
+  // Audit the manual fire so /settings/history shows it. entity_type
+  // is the singular Pipeline convention (account / contact / opportunity),
+  // not the table name.
+  const triggeredBy = user.display_name || user.email || user.id;
+  try {
+    await audit(env.DB, {
+      entityType: entityType,
+      entityId: entityId,
+      eventType: 'claudia_fired_auto_tasks',
+      user: claudiaUser || user,
+      summary: `Manually fired ${eventType} chain → ${result.fired} task(s) created, ${result.skipped} skipped (triggered by ${triggeredBy})`,
+      changes: { event_type: eventType, fired: result.fired, skipped: result.skipped },
+    });
+  } catch (err) {
+    console.error('[fire_auto_task_chain] audit failed:', err?.message || err);
+  }
+
+  return {
+    ok: true,
+    event_type: eventType,
+    entity_type: entityType,
+    entity_id: entityId,
+    fired: result.fired,
+    skipped: result.skipped,
+  };
+}
+
+// ---------- Document categorization ----------
+
+async function setDocumentCategory(env, user, { id, category } = {}) {
+  if (!id) throw new Error('set_document_category requires an id.');
+  const value = trimOrNull(category);
+  const ts = now();
+  const result = await run(
+    env.DB,
+    `UPDATE claudia_documents
+        SET category = ?, updated_at = ?
+      WHERE id = ? AND user_id = ?`,
+    [value, ts, id, user.id]
+  );
+  return { ok: true, id, category: value, updated_at: ts, changes: result?.meta?.changes ?? null };
+}
+
+// ---------- Account / contact merging ----------
+
+// FK columns that point at accounts(id). When merging accounts, every
+// row in <table>.<column> = loser_id becomes <table>.<column> = winner_id
+// before the loser is deleted. Sourced from grep on the migrations.
+const ACCOUNT_FK_REWRITERS = [
+  { table: 'contacts',      column: 'account_id' },
+  { table: 'opportunities', column: 'account_id' },
+  { table: 'activities',    column: 'account_id' },
+  { table: 'documents',     column: 'account_id' },
+];
+
+const CONTACT_FK_REWRITERS = [
+  { table: 'opportunities', column: 'primary_contact_id' },
+  { table: 'opportunities', column: 'bant_authority_contact_id' },
+  { table: 'activities',    column: 'contact_id' },
+  { table: 'documents',     column: 'contact_id' },
+];
+
+async function mergeAccounts(env, user, input = {}) {
+  return mergeRows(env, user, {
+    entityType: 'account',
+    table: 'accounts',
+    fkRewriters: ACCOUNT_FK_REWRITERS,
+    loserId: input.loser_id,
+    winnerId: input.winner_id,
+    reason: input.reason,
+  });
+}
+
+async function mergeContacts(env, user, input = {}) {
+  return mergeRows(env, user, {
+    entityType: 'contact',
+    table: 'contacts',
+    fkRewriters: CONTACT_FK_REWRITERS,
+    loserId: input.loser_id,
+    winnerId: input.winner_id,
+    reason: input.reason,
+  });
+}
+
+async function mergeRows(env, user, opts) {
+  const { entityType, table, fkRewriters, loserId, winnerId, reason } = opts;
+  const loser = String(loserId || '').trim();
+  const winner = String(winnerId || '').trim();
+  const why = trimOrNull(reason);
+  if (!loser) throw new Error(`merge_${table} requires loser_id.`);
+  if (!winner) throw new Error(`merge_${table} requires winner_id.`);
+  if (!why) throw new Error(`merge_${table} requires reason.`);
+  if (loser === winner) {
+    return { error: 'same_id', message: 'loser_id and winner_id must differ.' };
+  }
+
+  const loserRow = await one(env.DB, `SELECT * FROM ${table} WHERE id = ?`, [loser]);
+  const winnerRow = await one(env.DB, `SELECT * FROM ${table} WHERE id = ?`, [winner]);
+  if (!loserRow) return { error: 'loser_not_found', loser_id: loser };
+  if (!winnerRow) return { error: 'winner_not_found', winner_id: winner };
+
+  // Repoint each FK column. Done as a single batch with the loser
+  // delete + audit row so the whole merge is atomic — partial repoints
+  // would leave orphaned rows pointing at a deleted parent.
+  const stmts = [];
+  const repointCounts = {};
+  for (const { table: refTable, column } of fkRewriters) {
+    // Pre-count so we can report what moved per table; the actual
+    // UPDATE below does the rewrite.
+    const row = await one(
+      env.DB,
+      `SELECT COUNT(*) AS n FROM ${refTable} WHERE ${column} = ?`,
+      [loser]
+    );
+    const count = row?.n ?? 0;
+    repointCounts[`${refTable}.${column}`] = count;
+    if (count > 0) {
+      stmts.push(stmt(
+        env.DB,
+        `UPDATE ${refTable} SET ${column} = ? WHERE ${column} = ?`,
+        [winner, loser]
+      ));
+    }
+  }
+
+  // Delete the loser row last, after all repoints land.
+  stmts.push(stmt(env.DB, `DELETE FROM ${table} WHERE id = ?`, [loser]));
+
+  // Standard Pipeline audit row attributed to Claudia.
+  const claudiaUser = await one(
+    env.DB,
+    'SELECT id, email, display_name, role FROM users WHERE id = ?',
+    [CLAUDIA_USER_ID]
+  );
+  const triggeredBy = user.display_name || user.email || user.id;
+  const winnerLabel = winnerRow.name || `${winnerRow.first_name || ''} ${winnerRow.last_name || ''}`.trim() || winner;
+  const loserLabel  = loserRow.name  || `${loserRow.first_name || ''} ${loserRow.last_name || ''}`.trim()  || loser;
+  stmts.push(auditStmt(env.DB, {
+    entityType,
+    entityId: winner,
+    eventType: 'merged',
+    user: claudiaUser || user,
+    summary: `Merged ${entityType} "${loserLabel}" → "${winnerLabel}" — ${why} (triggered by ${triggeredBy})`.slice(0, 500),
+    changes: { loser_id: loser, winner_id: winner, repoints: repointCounts, deleted_loser: loserRow },
+  }));
+
+  await d1Batch(env.DB, stmts);
+
+  return {
+    ok: true,
+    entity_type: entityType,
+    loser_id: loser,
+    winner_id: winner,
+    loser_label: loserLabel,
+    winner_label: winnerLabel,
+    repoints: repointCounts,
+    summary: `Merged "${loserLabel}" into "${winnerLabel}". ${Object.values(repointCounts).reduce((a, b) => a + b, 0)} FK references repointed.`,
   };
 }
 
