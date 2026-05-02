@@ -549,19 +549,54 @@ export async function onRequestGet(context) {
         async function uploadFiles(files) {
           if (!files || files.length === 0) return;
           attachBtn?.setAttribute('aria-busy', 'true');
-          const filenames = Array.from(files).map((f) => f && f.name).filter(Boolean);
+          const allFilenames = Array.from(files).map((f) => f && f.name).filter(Boolean);
           try {
             const fd = new FormData();
             for (const f of files) fd.append('file', f);
             const res = await fetch('/sandbox/assistant/documents', { method: 'POST', body: fd });
             const html = await res.text();
             applyPanelHtml(html);
-            // Now that the doc(s) are in D1 with extraction complete, fire
-            // an analyze turn so Claudia acknowledges + reads + suggests
-            // actions without the user having to ask.
-            if (filenames.length > 0) triggerUploadAnalysis(filenames);
+
+            // Determine which files actually landed. The endpoint inlines an
+            // error flash listing rejected filenames ("name: reason") inside
+            // the docs panel HTML. Parse it so we can (a) skip the analyze
+            // turn for rejected files (otherwise Claudia hallucinates "still
+            // processing"), and (b) surface the rejection right here in the
+            // chat as a small red ghost note so the user sees it without
+            // having to look at the sidebar.
+            const tmp = document.createElement('template');
+            tmp.innerHTML = html;
+            const rejectedNames = new Set();
+            const rejectionMessages = [];
+            for (const li of tmp.content.querySelectorAll('.claudia-doc-flash.error li')) {
+              const text = (li.textContent || '').trim();
+              rejectionMessages.push(text);
+              const colon = text.indexOf(':');
+              if (colon > 0) rejectedNames.add(text.slice(0, colon).trim());
+            }
+            const successNames = allFilenames.filter((n) => !rejectedNames.has(n));
+
+            if (rejectionMessages.length > 0 && list) {
+              const note = document.createElement('div');
+              note.className = 'assistant-msg user system-trigger';
+              note.style.color = '#b91c1c';
+              note.textContent = 'Upload rejected — ' + rejectionMessages.join('; ');
+              list.appendChild(note);
+              list.scrollTop = list.scrollHeight;
+            }
+            if (successNames.length > 0) {
+              triggerUploadAnalysis(successNames);
+            }
           } catch (err) {
             console.error('upload failed:', err);
+            if (list) {
+              const note = document.createElement('div');
+              note.className = 'assistant-msg user system-trigger';
+              note.style.color = '#b91c1c';
+              note.textContent = 'Upload failed: ' + (err?.message || String(err));
+              list.appendChild(note);
+              list.scrollTop = list.scrollHeight;
+            }
           } finally {
             attachBtn?.setAttribute('aria-busy', 'false');
             if (fileInput) fileInput.value = '';
