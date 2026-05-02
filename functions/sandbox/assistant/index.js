@@ -350,7 +350,7 @@ export async function onRequestGet(context) {
 
       /* ---- Drop zone overlay (visible when dragging files over the wrap) ---- */
       .assistant-wrap.drag-active::after {
-        content: 'Drop to upload (PDF · DOCX · XLSX · images · audio · TXT/MD — up to 25 MB)';
+        content: 'Drop to upload (PDF · DOCX · XLSX · images · audio · email .eml/.mbox · zip · TXT/MD — up to 25 MB)';
         position: absolute; inset: 0;
         background: rgba(37, 102, 255, 0.08);
         border: 2px dashed #2566ff; border-radius: 12px;
@@ -447,13 +447,13 @@ export async function onRequestGet(context) {
         hx-swap="innerHTML"
         hx-disabled-elt="find textarea, find #send-btn"
       >
-        <button type="button" class="attach-btn" id="attach-btn" aria-label="Attach document" title="Attach (PDF · DOCX · XLSX · image · audio · TXT / MD)">
+        <button type="button" class="attach-btn" id="attach-btn" aria-label="Attach document" title="Attach (PDF · DOCX · XLSX · image · audio · email .eml/.mbox · zip · TXT / MD)">
           ${raw(ICON_PAPERCLIP)}
         </button>
         <button type="button" class="mic-btn" id="mic-btn" aria-label="Record audio" title="Record audio (transcribed via Whisper)">
           ${raw(ICON_MIC)}
         </button>
-        <input type="file" id="attach-input" multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.png,.jpg,.jpeg,.gif,.webp,.mp3,.wav,.m4a,.mp4,.ogg,.oga,.flac,.webm,.aac,.txt,.md,.markdown,.csv,.tsv,.json,.xml,.yaml,.yml,.log,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,image/png,image/jpeg,image/gif,image/webp,audio/*,text/plain,text/markdown,text/csv,text/tab-separated-values,application/json,application/xml">
+        <input type="file" id="attach-input" multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.png,.jpg,.jpeg,.gif,.webp,.mp3,.wav,.m4a,.mp4,.ogg,.oga,.flac,.webm,.aac,.eml,.mbox,.zip,.txt,.md,.markdown,.csv,.tsv,.json,.xml,.yaml,.yml,.log,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,image/png,image/jpeg,image/gif,image/webp,audio/*,message/rfc822,application/mbox,application/zip,application/x-zip-compressed,text/plain,text/markdown,text/csv,text/tab-separated-values,application/json,application/xml">
         <textarea
           name="text"
           placeholder="Message..."

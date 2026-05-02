@@ -36,6 +36,13 @@ const TEXT_LIKE_TYPES = new Set([
   'text/xml',
   'application/json',
   'application/xml',
+  // Email files: .eml is plain MIME (headers + body in clear text), and
+  // .mbox is just N RFC822 messages concatenated. Both are readable as
+  // text — basic dedupe / summarization works without a full MIME parser.
+  // Attachments come through as base64 noise inside the body; that's
+  // acceptable for the "find the email where X said Y" use case.
+  'message/rfc822',
+  'application/mbox',
 ]);
 
 const IMAGE_TYPES = new Set([
@@ -75,8 +82,130 @@ export function classifyContentType(contentType, filename) {
   if (XLSX_TYPES.has(ct) || XLSX_EXTS.has(ext)) return 'xlsx';
   if (AUDIO_TYPE_PREFIXES.some((p) => ct.startsWith(p)) || AUDIO_EXTS.has(ext)) return 'audio';
   // Unknown content types but with a text-ish extension → treat as text.
-  if (['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'log', 'xml', 'yaml', 'yml'].includes(ext)) return 'text';
+  if (['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'log', 'xml', 'yaml', 'yml', 'eml', 'mbox'].includes(ext)) return 'text';
   return null;
+}
+
+/**
+ * Detect a zip archive (by content type or .zip extension). Used by the
+ * upload endpoint to expand zips into their constituent files BEFORE
+ * the per-file ingest loop runs. Each inner file becomes its own
+ * claudia_documents row.
+ */
+export function isZip(contentType, filename) {
+  const ct = String(contentType || '').toLowerCase();
+  const ext = String(filename || '').toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
+  return ct === 'application/zip' || ct === 'application/x-zip-compressed' || ext === 'zip';
+}
+
+/**
+ * Expand a zip buffer into an array of File-like entries. Filters out
+ * directories, macOS metadata (__MACOSX/, .DS_Store), and obviously
+ * empty entries. Each returned entry is a real File so the upload
+ * loop can treat it identically to a top-level upload.
+ *
+ * Throws if the buffer isn't a valid zip.
+ */
+export function expandZip(buffer) {
+  const zip = new PizZip(buffer);
+  const entries = [];
+  for (const [name, entry] of Object.entries(zip.files)) {
+    if (entry.dir) continue;
+    if (name.startsWith('__MACOSX/')) continue;
+    if (name.endsWith('/.DS_Store') || name === '.DS_Store') continue;
+    const baseName = name.replace(/^.*[\\/]/, '');
+    if (!baseName) continue;
+    const data = entry.asUint8Array();
+    if (!data || data.length === 0) continue;
+    // Best-effort content type from the inner filename. Workers' File
+    // ctor takes (parts, name, options) — we leave .type unset for many
+    // formats and let classifyContentType resolve them by extension.
+    const guessedType = guessTypeFromExt(baseName) || '';
+    entries.push(new File([data], baseName, { type: guessedType }));
+  }
+  return entries;
+}
+
+/**
+ * Detect an mbox archive (Berkeley format — N RFC822 messages
+ * concatenated, separated by lines that start with "From "). The
+ * upload endpoint expands these into N individual .eml entries so
+ * each email becomes its own claudia_documents row.
+ */
+export function isMbox(contentType, filename) {
+  const ct = String(contentType || '').toLowerCase();
+  const ext = String(filename || '').toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
+  return ct === 'application/mbox' || ext === 'mbox';
+}
+
+/**
+ * Split an mbox buffer into File entries — one per message. Each
+ * returned File has type 'message/rfc822' and a name derived from
+ * the message's Subject header (sanitized + truncated). The
+ * "From " separator line itself is dropped from each message; any
+ * ">From " quoting in the body is unescaped per Berkeley format.
+ */
+export function expandMbox(buffer) {
+  const text = new TextDecoder('utf-8', { fatal: false }).decode(buffer);
+  const lines = text.split(/\r?\n/);
+  const messages = [];
+  let current = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const prev = i > 0 ? lines[i - 1] : null;
+    // mbox separator: "From " at the start of a line, AND either it's
+    // the first line of the file or the previous line was blank. The
+    // blank-line check is the standard way to disambiguate from "From "
+    // appearing inside a message body.
+    const isSeparator = line.startsWith('From ') && (i === 0 || prev === '');
+    if (isSeparator) {
+      if (current && current.length > 0) messages.push(current.join('\n'));
+      current = [];
+      continue;
+    }
+    if (current !== null) {
+      // Unescape ">From " back to "From " (Berkeley quoting). The
+      // standard escapes any leading ">*From " by adding one '>'.
+      current.push(line.replace(/^>(>*)From /, '$1From '));
+    }
+  }
+  if (current && current.length > 0) messages.push(current.join('\n'));
+
+  return messages.map((body, idx) => {
+    const subjMatch = body.match(/^Subject:\s*(.{1,80})/im);
+    const safeSubj = subjMatch
+      ? subjMatch[1].replace(/[^\w\s.-]+/g, '_').replace(/\s+/g, '_').trim().slice(0, 50)
+      : `message_${idx + 1}`;
+    const name = `${String(idx + 1).padStart(3, '0')}-${safeSubj || 'message'}.eml`;
+    return new File([body], name, { type: 'message/rfc822' });
+  });
+}
+
+function guessTypeFromExt(name) {
+  const ext = String(name || '').toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+  switch (ext) {
+    case 'eml':       return 'message/rfc822';
+    case 'mbox':      return 'application/mbox';
+    case 'pdf':       return 'application/pdf';
+    case 'docx':      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case 'xlsx':      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    case 'png':       return 'image/png';
+    case 'jpg':
+    case 'jpeg':      return 'image/jpeg';
+    case 'gif':       return 'image/gif';
+    case 'webp':      return 'image/webp';
+    case 'csv':       return 'text/csv';
+    case 'tsv':       return 'text/tab-separated-values';
+    case 'json':      return 'application/json';
+    case 'txt':
+    case 'md':
+    case 'markdown':
+    case 'log':
+    case 'yaml':
+    case 'yml':
+    case 'xml':       return 'text/plain';
+    default:          return '';
+  }
 }
 
 /**

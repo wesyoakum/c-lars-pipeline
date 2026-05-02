@@ -13,7 +13,14 @@
 
 import { all, run } from '../../../lib/db.js';
 import { now, uuid } from '../../../lib/ids.js';
-import { extractText, classifyContentType } from '../../../lib/claudia-extract.js';
+import {
+  extractText,
+  classifyContentType,
+  isZip,
+  expandZip,
+  isMbox,
+  expandMbox,
+} from '../../../lib/claudia-extract.js';
 import { renderDocumentsPanel } from '../../../lib/claudia-documents-render.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
@@ -33,12 +40,50 @@ export async function onRequestPost(context) {
     return htmlFragment(`<div class="claudia-doc-flash error">Bad upload: ${escapeHtml(err.message || 'invalid form')}</div>`);
   }
 
-  const files = formData.getAll('file').filter((f) => f && typeof f === 'object' && 'arrayBuffer' in f);
-  if (files.length === 0) {
+  const rawFiles = formData.getAll('file').filter((f) => f && typeof f === 'object' && 'arrayBuffer' in f);
+  if (rawFiles.length === 0) {
     return htmlFragment(`<div class="claudia-doc-flash error">No files attached.</div>`);
   }
 
   const errors = [];
+
+  // Expand any zip / mbox archives into their constituent files BEFORE
+  // the per-file ingest loop. Each inner file becomes its own
+  // claudia_documents row — better for granular search / dismiss / keep
+  // than dumping a single archive blob.
+  const files = [];
+  for (const f of rawFiles) {
+    if (isZip(f.type, f.name)) {
+      try {
+        const buf = await f.arrayBuffer();
+        const inner = expandZip(buf);
+        if (inner.length === 0) {
+          errors.push(`${f.name}: zip is empty.`);
+        } else {
+          files.push(...inner);
+        }
+      } catch (err) {
+        errors.push(`${f.name}: failed to unzip — ${err?.message || String(err)}`);
+      }
+      continue;
+    }
+    if (isMbox(f.type, f.name)) {
+      try {
+        const buf = await f.arrayBuffer();
+        const inner = expandMbox(buf);
+        if (inner.length === 0) {
+          errors.push(`${f.name}: mbox contained no parseable messages.`);
+        } else {
+          files.push(...inner);
+        }
+      } catch (err) {
+        errors.push(`${f.name}: failed to parse mbox — ${err?.message || String(err)}`);
+      }
+      continue;
+    }
+    files.push(f);
+  }
+
   for (const file of files) {
     try {
       if (!classifyContentType(file.type, file.name)) {
