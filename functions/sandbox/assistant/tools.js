@@ -1007,7 +1007,7 @@ async function listDocuments(env, user, { include_trashed, retention, limit } = 
   params.push(cap);
   const rows = await all(
     env.DB,
-    `SELECT id, filename, content_type, size_bytes, retention,
+    `SELECT id, filename, content_type, size_bytes, retention, category,
             extraction_status, extraction_error, created_at, last_accessed_at,
             substr(coalesce(full_text, ''), 1, 200) AS preview
        FROM claudia_documents
@@ -1026,7 +1026,7 @@ async function searchDocuments(env, user, { query, limit } = {}) {
   const like = `%${q}%`;
   const rows = await all(
     env.DB,
-    `SELECT id, filename, content_type, size_bytes, retention, created_at,
+    `SELECT id, filename, content_type, size_bytes, retention, category, created_at,
             substr(coalesce(full_text, ''), 1, 200) AS preview
        FROM claudia_documents
       WHERE user_id = ?
@@ -1064,7 +1064,7 @@ async function readDocument(env, user, { id } = {}) {
   if (!id) throw new Error('read_document requires an id.');
   const row = await one(
     env.DB,
-    `SELECT id, filename, content_type, size_bytes, retention,
+    `SELECT id, filename, content_type, size_bytes, retention, category,
             extraction_status, extraction_error, full_text, created_at
        FROM claudia_documents
       WHERE id = ? AND user_id = ?`,
@@ -1093,6 +1093,7 @@ async function readDocument(env, user, { id } = {}) {
     content_type: row.content_type,
     size_bytes: row.size_bytes,
     retention: row.retention,
+    category: row.category,
     extraction_status: row.extraction_status,
     extraction_error: row.extraction_error,
     truncated,

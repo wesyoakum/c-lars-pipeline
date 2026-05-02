@@ -115,7 +115,7 @@ export async function onRequestPost(context) {
     : new Date(Date.now() - 10 * 60 * 1000).toISOString();
   const recentUploads = await all(
     env.DB,
-    `SELECT id, filename, content_type, size_bytes, retention,
+    `SELECT id, filename, content_type, size_bytes, retention, category,
             extraction_status, created_at,
             substr(coalesce(full_text, ''), 1, 300) AS preview
        FROM claudia_documents
@@ -217,9 +217,10 @@ function buildSystemPrompt(user, tableNames, recentUploads = []) {
     ? `\n\nRECENT UPLOADS (since your last turn) — apply the "Handling new uploads" rules to each:\n${recentUploads
         .map((d) => {
           const previewSnippet = String(d.preview || '').replace(/\s+/g, ' ').trim().slice(0, 200);
-          return `- id=${d.id} | filename="${d.filename}" | type=${d.content_type || 'unknown'} | status=${d.extraction_status} | preview="${previewSnippet}${previewSnippet.length >= 200 ? '…' : ''}"`;
+          const cat = d.category ? ` | auto-category=${d.category}` : '';
+          return `- id=${d.id} | filename="${d.filename}" | type=${d.content_type || 'unknown'} | status=${d.extraction_status}${cat} | preview="${previewSnippet}${previewSnippet.length >= 200 ? '…' : ''}"`;
         })
-        .join('\n')}\n\nIf any of the above is unread/unanalyzed, your response MUST start by addressing it (acknowledge → read_document → cross-reference → 2-3 concrete actions). The user's typed message takes priority over the uploads only if they explicitly redirect you ("ignore the file", "different topic").\n`
+        .join('\n')}\n\nThe auto-category is a best-guess label set on upload (RFQ, spec, quote, contract, contact_list, etc.) — useful as a hint but not authoritative; if your analysis disagrees, just say so and use what you found. If any of the above is unread/unanalyzed, your response MUST start by addressing it (acknowledge → read_document → cross-reference → 2-3 concrete actions). The user's typed message takes priority over the uploads only if they explicitly redirect you ("ignore the file", "different topic").\n`
     : '';
   return `CLAUDIA
 

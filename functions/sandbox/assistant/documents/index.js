@@ -22,6 +22,7 @@ import {
   expandMbox,
 } from '../../../lib/claudia-extract.js';
 import { renderDocumentsPanel } from '../../../lib/claudia-documents-render.js';
+import { categorizeDocument } from '../../../lib/claudia-categorize.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB per file
@@ -120,13 +121,32 @@ export async function onRequestPost(context) {
         extracted = { text: '', status: 'error', error: err?.message || String(err) };
       }
 
+      // Auto-categorize. Cheap (Haiku, < 60 output tokens) — runs after
+      // extraction so the model has the text to look at. Tries a regex
+      // heuristic first to skip the LLM call when the answer is obvious
+      // (filename keyword, .eml extension, etc.). Failures are silent;
+      // category stays NULL and Wes / Claudia can fill it later via
+      // set_document_category. Auto-categorize is NOT gated by the
+      // set_document_category permission — that toggle controls
+      // whether Claudia can OVERWRITE categories from chat.
+      let category = null;
+      try {
+        category = await categorizeDocument(env, {
+          filename: file.name,
+          contentType: file.type,
+          text: extracted.text,
+        });
+      } catch (err) {
+        console.error('[upload] categorize failed:', err?.message || err);
+      }
+
       await run(
         env.DB,
         `INSERT INTO claudia_documents
            (id, user_id, filename, content_type, size_bytes, r2_key,
             full_text, retention, extraction_status, extraction_error,
-            created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'auto', ?, ?, ?, ?)`,
+            category, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'auto', ?, ?, ?, ?, ?)`,
         [
           docId,
           user.id,
@@ -137,6 +157,7 @@ export async function onRequestPost(context) {
           extracted.text || null,
           extracted.status,
           extracted.error || null,
+          category,
           ts,
           ts,
         ]

@@ -431,6 +431,11 @@ export async function onRequestGet(context) {
       .claudia-doc-badge.keep { background: #fef3c7; color: #92400e; }
       .claudia-doc-badge.warn { background: #fef9c3; color: #854d0e; }
       .claudia-doc-badge.error { background: #fee2e2; color: #991b1b; }
+      .claudia-doc-badge.cat {
+        background: #ecfeff; color: #0369a1; border: 1px solid #bae6fd;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        text-transform: lowercase; font-weight: 500;
+      }
       .claudia-doc-actions { display: flex; gap: 4px; flex-shrink: 0; }
       .claudia-doc-btn {
         background: transparent; border: 1px solid transparent; color: #6b7280;

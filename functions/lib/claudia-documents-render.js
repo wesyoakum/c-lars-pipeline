@@ -85,6 +85,8 @@ function renderDocRow(d) {
     ? `<span class="claudia-doc-badge error" title="${escapeAttr(d.extraction_error || '')}">extract failed</span>`
     : d.extraction_status === 'partial'
     ? '<span class="claudia-doc-badge warn">partial extract</span>' : '';
+  const categoryBadge = d.category
+    ? `<span class="claudia-doc-badge cat" title="Auto-categorized on upload">${escapeHtml(d.category)}</span>` : '';
   const isKept = retention === 'keep_forever';
   const keepHref = isKept ? 'auto' : 'keep_forever';
   const keepLabel = isKept ? 'Unkeep' : 'Keep forever';
@@ -94,7 +96,7 @@ function renderDocRow(d) {
     <div class="claudia-doc-main">
       <div class="claudia-doc-title">
         <span class="claudia-doc-filename">${filename}</span>
-        ${retentionBadge}${statusBadge}
+        ${categoryBadge}${retentionBadge}${statusBadge}
       </div>
       <div class="claudia-doc-meta">${escapeHtml(meta)}</div>
     </div>
