@@ -33,30 +33,49 @@ async function getClaudiaUser(env) {
 
 // Map a writable table name to the entity_type used in the standard
 // audit_events trail. Pipeline's existing handlers use these singulars
-// (account, contact) — keep them aligned so Claudia's changes show up
-// alongside human-driven ones in any history view.
+// (account, contact, activity, opportunity) — keep them aligned so
+// Claudia's changes show up alongside human-driven ones in any history
+// view.
 const ENTITY_TYPE_BY_TABLE = {
-  accounts: 'account',
-  contacts: 'contact',
+  accounts:      'account',
+  contacts:      'contact',
+  activities:    'activity',
+  opportunities: 'opportunity',
 };
 
 // Whitelisted fields per table for the diff computation on UPDATEs.
 // Anything not in this list is excluded from the audit_events
 // changes_json — keeps timestamps and IDs out of the trail.
+//
+// For activities + opportunities we mirror the column sets used by the
+// human-driven handlers (functions/activities/, functions/opportunities/)
+// so the history view shows the same field names regardless of who
+// triggered the change.
 const AUDIT_FIELDS_BY_TABLE = {
   accounts: ['name', 'segment', 'alias', 'parent_group', 'owner_user_id',
     'phone', 'website', 'email', 'notes', 'address_billing', 'address_physical',
     'is_active'],
   contacts: ['account_id', 'first_name', 'last_name', 'title', 'email', 'phone',
     'mobile', 'is_primary', 'notes'],
+  activities: ['type', 'subject', 'body', 'status', 'due_at', 'completed_at',
+    'opportunity_id', 'account_id', 'contact_id', 'job_id', 'quote_id',
+    'assigned_user_id', 'remind_at', 'direction'],
+  opportunities: ['number', 'account_id', 'primary_contact_id', 'title',
+    'description', 'transaction_type', 'stage', 'probability',
+    'estimated_value_usd', 'currency', 'expected_close_date', 'actual_close_date',
+    'source', 'rfq_format', 'rfq_received_date', 'rfq_due_date', 'rfi_due_date',
+    'quoted_date', 'bant_budget', 'bant_authority', 'bant_authority_contact_id',
+    'bant_need', 'bant_timeline', 'close_reason', 'loss_reason_tag',
+    'owner_user_id', 'salesperson_user_id', 'customer_po_number', 'notes_internal'],
 };
 
 const UNDO_WINDOW_HOURS = 24;
 
 // Tables Claudia is allowed to write to. Anything else is rejected.
-// Add intentionally; do NOT add opportunities/quotes/jobs without a
-// matching read-back + audit pattern in tools.js.
-const WRITABLE_TABLES = new Set(['contacts', 'accounts']);
+// Add intentionally; the per-tool definitions in tools.js still gate
+// individual fields (e.g. she can update an activity's status but the
+// tool definition decides which columns are settable).
+const WRITABLE_TABLES = new Set(['contacts', 'accounts', 'activities', 'opportunities']);
 
 /**
  * Insert a new row + log to claudia_writes in a single batch.

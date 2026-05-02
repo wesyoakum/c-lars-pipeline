@@ -51,6 +51,38 @@ export const PERMISSION_GATED_ACTIONS_CATALOG = [
     label: 'Update contacts',
     description: 'Edit contact fields — name, email, phone, mobile, title, notes, account.',
   },
+  // activities (tasks, calls, emails, meetings, notes)
+  {
+    action: 'create_activity',
+    category: 'activities',
+    label: 'Create activities (tasks)',
+    description: 'Add a new task / call / meeting / note, optionally linked to an account, opportunity, or contact. Most often used to convert a commitment found in a meeting note or upload into a tracked task.',
+  },
+  {
+    action: 'update_activity',
+    category: 'activities',
+    label: 'Update activities',
+    description: 'Edit an activity\'s subject, body, due date, status, assignee, or links. Use to reassign, reschedule, clarify scope, or fix typos.',
+  },
+  {
+    action: 'complete_activity',
+    category: 'activities',
+    label: 'Complete activities',
+    description: 'Mark an activity as completed. Sugar around update_activity that sets status=completed and completed_at=now.',
+  },
+  // opportunities (deals)
+  {
+    action: 'create_opportunity',
+    category: 'opportunities',
+    label: 'Create opportunities',
+    description: 'Open a new deal under an existing account. Auto-allocates the next opportunity number from the sequence; defaults to stage=lead, transaction_type=spares unless overridden.',
+  },
+  {
+    action: 'update_opportunity',
+    category: 'opportunities',
+    label: 'Update opportunities',
+    description: 'Edit opportunity fields — title, description, value, expected close date, BANT, RFQ dates, owner, etc. Stage transitions are NOT exposed here — use the dedicated stage endpoint to keep the auto-task chain consistent.',
+  },
   // documents
   {
     action: 'set_document_retention',
@@ -83,6 +115,16 @@ export const PERMISSION_CATEGORIES = [
     key: 'contacts',
     label: 'Contacts',
     blurb: 'Mutations on the contacts table. Contacts always belong to an account.',
+  },
+  {
+    key: 'activities',
+    label: 'Activities (tasks)',
+    blurb: 'Mutations on the activities table — tasks, calls, meetings, notes. The activities surface is what other users (Kat, etc.) can already assign to Claudia, so giving her write access closes the loop on those.',
+  },
+  {
+    key: 'opportunities',
+    label: 'Opportunities',
+    blurb: 'Mutations on the opportunities table. Stage transitions are intentionally NOT exposed here — those need to fire the auto-task chain via the regular stage endpoint, not a raw column write.',
   },
   {
     key: 'documents',

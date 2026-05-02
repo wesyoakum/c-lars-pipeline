@@ -9,7 +9,7 @@
 
 import Papa from 'papaparse';
 import { all, one, run } from '../../lib/db.js';
-import { now, uuid } from '../../lib/ids.js';
+import { now, uuid, nextSequenceValue } from '../../lib/ids.js';
 import {
   claudiaInsert,
   claudiaUpdate,
@@ -340,6 +340,169 @@ export async function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'create_activity',
+      description:
+        'Create a new activity (task / call / email / meeting / note), optionally linked to an account, ' +
+        'opportunity, contact, job, or quote. Most common use: convert a commitment found in a meeting note ' +
+        'or upload into a tracked task. Required: subject. Optional: type (default "task"), body, due_at, ' +
+        'remind_at, status, opportunity_id, account_id, contact_id, job_id, quote_id, assigned_user_id ' +
+        '(default the current user). Always confirm with the user before creating, and use a batch_id when ' +
+        'creating several from one source. Returns the new activity id + audit_id for undo.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          subject:          { type: 'string', description: 'Required. Short title shown in task lists.' },
+          type:             { type: 'string', description: 'Default "task". Common values: task, call, email, meeting, note.' },
+          body:             { type: 'string', description: 'Optional longer description / agenda / notes.' },
+          status:           { type: 'string', description: 'Default "open". Common values: open, in_progress, blocked, completed.' },
+          due_at:           { type: 'string', description: 'ISO datetime when the task is due.' },
+          remind_at:        { type: 'string', description: 'ISO datetime to fire a reminder.' },
+          direction:        { type: 'string', description: 'For calls/emails/meetings: "inbound" or "outbound".' },
+          opportunity_id:   { type: 'string', description: 'Link to an opportunity. Cascade-deletes if the opp is deleted.' },
+          account_id:       { type: 'string', description: 'Link to an account. Cascade-deletes if the account is deleted.' },
+          contact_id:       { type: 'string', description: 'Link to a specific contact.' },
+          job_id:           { type: 'string', description: 'Link to a job (post-sale execution record).' },
+          quote_id:         { type: 'string', description: 'Link to a specific quote.' },
+          assigned_user_id: { type: 'string', description: 'User id this is assigned to. Default: current user.' },
+          batch_id:         { type: 'string', description: 'Group writes for batch undo.' },
+          summary:          { type: 'string', description: 'One-line description for the audit trail.' },
+        },
+        required: ['subject'],
+      },
+    },
+    {
+      name: 'update_activity',
+      description:
+        'Update one or more fields on an existing activity. Pass only the fields you want to change. ' +
+        'Use to reassign, reschedule, clarify scope, or fix typos. Returns diffs + audit_id. ' +
+        'Note: to mark an activity completed, prefer complete_activity which also sets completed_at.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id:               { type: 'string', description: 'Activity id to update.' },
+          subject:          { type: 'string' },
+          type:             { type: 'string' },
+          body:             { type: 'string' },
+          status:           { type: 'string' },
+          due_at:           { type: 'string' },
+          remind_at:        { type: 'string' },
+          direction:        { type: 'string' },
+          opportunity_id:   { type: 'string' },
+          account_id:       { type: 'string' },
+          contact_id:       { type: 'string' },
+          job_id:           { type: 'string' },
+          quote_id:         { type: 'string' },
+          assigned_user_id: { type: 'string' },
+          batch_id:         { type: 'string' },
+          summary:          { type: 'string' },
+        },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'complete_activity',
+      description:
+        'Mark an activity completed. Sets status="completed" and completed_at to now. Sugar around ' +
+        'update_activity that handles the timestamp atomically. Use when the user (or a task assigner) ' +
+        'tells you "I did that" / "done" / "mark it complete." Returns audit_id for undo.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id:       { type: 'string', description: 'Activity id to complete.' },
+          batch_id: { type: 'string', description: 'Group writes for batch undo.' },
+          summary:  { type: 'string', description: 'Optional one-line audit note.' },
+        },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'create_opportunity',
+      description:
+        'Open a new deal (opportunity) under an existing account. Required: account_id, title. ' +
+        'Optional: description, transaction_type (default "spares"), stage (default "lead"), ' +
+        'estimated_value_usd, expected_close_date, primary_contact_id, owner_user_id, ' +
+        'salesperson_user_id, source, rfq_format, rfq_received_date, rfq_due_date, rfi_due_date, ' +
+        'quoted_date, bant_budget, bant_authority, bant_authority_contact_id, bant_need, bant_timeline, ' +
+        'notes_internal, number (auto-allocated from the sequence if omitted — that is the strongly ' +
+        'preferred default; only pass an explicit number if the user dictates one). Returns the new ' +
+        'opportunity id + auto-allocated number + audit_id. Always confirm with the user before opening.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          account_id:                { type: 'string', description: 'Required. The account this opp belongs to.' },
+          title:                     { type: 'string', description: 'Required. Short deal name.' },
+          description:               { type: 'string' },
+          transaction_type:          { type: 'string', description: 'Default "spares". Other common values: eps, lars, service, change_order.' },
+          stage:                     { type: 'string', description: 'Default "lead". Use the regular stage endpoint to advance — do NOT bypass via update_opportunity.' },
+          number:                    { type: 'string', description: 'Optional 5-digit number. If omitted, the next sequence value is allocated and zero-padded. Pass only when the user dictates one.' },
+          probability:               { type: 'integer', description: '0–100. Defaults from the stage catalog if omitted.' },
+          estimated_value_usd:       { type: 'number' },
+          expected_close_date:       { type: 'string' },
+          primary_contact_id:        { type: 'string' },
+          owner_user_id:             { type: 'string', description: 'Default: current user.' },
+          salesperson_user_id:       { type: 'string', description: 'Default: current user.' },
+          source:                    { type: 'string', description: 'How the deal came in (referral, conference, inbound web, etc.).' },
+          rfq_format:                { type: 'string' },
+          rfq_received_date:         { type: 'string' },
+          rfq_due_date:              { type: 'string' },
+          rfi_due_date:              { type: 'string' },
+          quoted_date:               { type: 'string' },
+          bant_budget:               { type: 'string' },
+          bant_authority:            { type: 'string' },
+          bant_authority_contact_id: { type: 'string' },
+          bant_need:                 { type: 'string' },
+          bant_timeline:             { type: 'string' },
+          notes_internal:            { type: 'string' },
+          batch_id:                  { type: 'string' },
+          summary:                   { type: 'string' },
+        },
+        required: ['account_id', 'title'],
+      },
+    },
+    {
+      name: 'update_opportunity',
+      description:
+        'Update one or more fields on an existing opportunity. Pass only the fields you want to change. ' +
+        'Returns diffs + audit_id. ' +
+        'IMPORTANT: do NOT change `stage` here — stage transitions need to fire the auto-task chain, ' +
+        'so they go through the regular /opportunities/:id/stage endpoint (which Claudia does not have ' +
+        'access to). If a stage change is needed, tell the user and have them do it from the opp page.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id:                        { type: 'string', description: 'Opportunity id to update.' },
+          title:                     { type: 'string' },
+          description:               { type: 'string' },
+          transaction_type:          { type: 'string' },
+          probability:               { type: 'integer' },
+          estimated_value_usd:       { type: 'number' },
+          expected_close_date:       { type: 'string' },
+          actual_close_date:         { type: 'string' },
+          primary_contact_id:        { type: 'string' },
+          owner_user_id:             { type: 'string' },
+          salesperson_user_id:       { type: 'string' },
+          source:                    { type: 'string' },
+          rfq_format:                { type: 'string' },
+          rfq_received_date:         { type: 'string' },
+          rfq_due_date:              { type: 'string' },
+          rfi_due_date:              { type: 'string' },
+          quoted_date:               { type: 'string' },
+          bant_budget:               { type: 'string' },
+          bant_authority:            { type: 'string' },
+          bant_authority_contact_id: { type: 'string' },
+          bant_need:                 { type: 'string' },
+          bant_timeline:             { type: 'string' },
+          close_reason:              { type: 'string' },
+          loss_reason_tag:           { type: 'string' },
+          customer_po_number:        { type: 'string' },
+          notes_internal:            { type: 'string' },
+          batch_id:                  { type: 'string' },
+          summary:                   { type: 'string' },
+        },
+        required: ['id'],
+      },
+    },
+    {
       name: 'undo_claudia_write',
       description:
         'Reverse a previous Claudia write within the 24-hour undo window. For a CREATE: deletes ' +
@@ -477,6 +640,16 @@ export async function makeAssistantTools({ env, user }) {
         return createAccount(env, user, input);
       case 'update_account':
         return updateAccount(env, user, input);
+      case 'create_activity':
+        return createActivity(env, user, input);
+      case 'update_activity':
+        return updateActivity(env, user, input);
+      case 'complete_activity':
+        return completeActivity(env, user, input);
+      case 'create_opportunity':
+        return createOpportunity(env, user, input);
+      case 'update_opportunity':
+        return updateOpportunity(env, user, input);
       case 'undo_claudia_write':
         return undoClaudiaWrite(env, user, input);
       case 'list_recent_writes':
@@ -897,6 +1070,244 @@ async function updateAccount(env, user, input = {}) {
   const summary = input.summary || `updated account ${id} (${Object.keys(fields).join(', ')})`;
   try {
     const result = await claudiaUpdate(env, user, 'update_account', 'accounts', id, fields, {
+      batchId: input.batch_id,
+      summary,
+    });
+    if (result.no_change) {
+      return { ok: true, id, no_change: true, message: 'Nothing to update — supplied fields already match.' };
+    }
+    return {
+      ok: true,
+      id,
+      audit_id: result.audit_id,
+      diffs: result.diffs,
+      summary,
+    };
+  } catch (err) {
+    return { error: 'update_failed', id, message: err?.message || String(err) };
+  }
+}
+
+// ---------- Activities (tasks / calls / meetings / notes) ----------
+
+async function createActivity(env, user, input = {}) {
+  const subject = trimOrNull(input.subject);
+  if (!subject) throw new Error('create_activity requires a subject.');
+  const type = trimOrNull(input.type) || 'task';
+  const ts = now();
+  const id = uuid();
+  const summary = input.summary || `created ${type} "${subject}"`;
+  const result = await claudiaInsert(env, user, 'create_activity', 'activities', id, {
+    type,
+    subject,
+    body:             trimOrNull(input.body),
+    status:           trimOrNull(input.status) || 'open',
+    direction:        trimOrNull(input.direction),
+    due_at:           trimOrNull(input.due_at),
+    remind_at:        trimOrNull(input.remind_at),
+    opportunity_id:   trimOrNull(input.opportunity_id),
+    account_id:       trimOrNull(input.account_id),
+    contact_id:       trimOrNull(input.contact_id),
+    job_id:           trimOrNull(input.job_id),
+    quote_id:         trimOrNull(input.quote_id),
+    assigned_user_id: trimOrNull(input.assigned_user_id) || user.id,
+    created_at:       ts,
+    updated_at:       ts,
+    created_by_user_id: user.id,
+  }, { batchId: input.batch_id, summary });
+
+  return {
+    ok: true,
+    id: result.id,
+    audit_id: result.audit_id,
+    subject,
+    type,
+    summary,
+  };
+}
+
+async function updateActivity(env, user, input = {}) {
+  const id = String(input.id || '').trim();
+  if (!id) throw new Error('update_activity requires id.');
+
+  const updatable = ['type', 'subject', 'body', 'status', 'direction', 'due_at',
+    'remind_at', 'opportunity_id', 'account_id', 'contact_id', 'job_id',
+    'quote_id', 'assigned_user_id'];
+  const fields = {};
+  for (const k of updatable) {
+    if (k in input) fields[k] = trimOrNull(input[k]);
+  }
+  if (Object.keys(fields).length === 0) {
+    return { error: 'no_fields', id, message: 'No updatable fields supplied.' };
+  }
+
+  const summary = input.summary || `updated activity ${id} (${Object.keys(fields).join(', ')})`;
+  try {
+    const result = await claudiaUpdate(env, user, 'update_activity', 'activities', id, fields, {
+      batchId: input.batch_id,
+      summary,
+    });
+    if (result.no_change) {
+      return { ok: true, id, no_change: true, message: 'Nothing to update — supplied fields already match.' };
+    }
+    return {
+      ok: true,
+      id,
+      audit_id: result.audit_id,
+      diffs: result.diffs,
+      summary,
+    };
+  } catch (err) {
+    return { error: 'update_failed', id, message: err?.message || String(err) };
+  }
+}
+
+async function completeActivity(env, user, input = {}) {
+  const id = String(input.id || '').trim();
+  if (!id) throw new Error('complete_activity requires id.');
+  const ts = now();
+  const summary = input.summary || `completed activity ${id}`;
+  try {
+    const result = await claudiaUpdate(env, user, 'complete_activity', 'activities', id, {
+      status: 'completed',
+      completed_at: ts,
+    }, { batchId: input.batch_id, summary });
+    if (result.no_change) {
+      return { ok: true, id, no_change: true, message: 'Already completed.' };
+    }
+    return {
+      ok: true,
+      id,
+      audit_id: result.audit_id,
+      completed_at: ts,
+      diffs: result.diffs,
+      summary,
+    };
+  } catch (err) {
+    return { error: 'complete_failed', id, message: err?.message || String(err) };
+  }
+}
+
+// ---------- Opportunities (deals) ----------
+
+async function createOpportunity(env, user, input = {}) {
+  const account_id = String(input.account_id || '').trim();
+  const title = trimOrNull(input.title);
+  if (!account_id) throw new Error('create_opportunity requires account_id.');
+  if (!title) throw new Error('create_opportunity requires a title.');
+
+  const acct = await one(env.DB, 'SELECT id, name, is_active FROM accounts WHERE id = ?', [account_id]);
+  if (!acct) {
+    return { error: 'account_not_found', account_id, message: `No account with id ${account_id}.` };
+  }
+
+  // Allocate the next sequence number unless the caller dictated one.
+  // Mirrors the human-driven path in functions/opportunities/index.js so
+  // the auto-allocate counter stays aligned.
+  let number = trimOrNull(input.number);
+  if (!number) {
+    const allocated = await nextSequenceValue(env.DB, 'opportunity');
+    number = String(allocated).padStart(5, '0');
+  }
+
+  const ts = now();
+  const id = uuid();
+  const transaction_type = trimOrNull(input.transaction_type) || 'spares';
+  const stage = trimOrNull(input.stage) || 'lead';
+  const probability = Number.isFinite(input.probability) ? input.probability : 0;
+  const summary = input.summary || `opened opp ${number}: "${title}" for ${acct.name}`;
+
+  const result = await claudiaInsert(env, user, 'create_opportunity', 'opportunities', id, {
+    number,
+    account_id,
+    primary_contact_id:        trimOrNull(input.primary_contact_id),
+    title,
+    description:               trimOrNull(input.description),
+    transaction_type,
+    stage,
+    stage_entered_at:          ts,
+    probability,
+    estimated_value_usd:       Number.isFinite(input.estimated_value_usd) ? input.estimated_value_usd : null,
+    currency:                  'USD',
+    expected_close_date:       trimOrNull(input.expected_close_date),
+    actual_close_date:         null,
+    source:                    trimOrNull(input.source),
+    rfq_format:                trimOrNull(input.rfq_format),
+    rfq_received_date:         trimOrNull(input.rfq_received_date),
+    rfq_due_date:              trimOrNull(input.rfq_due_date),
+    rfi_due_date:              trimOrNull(input.rfi_due_date),
+    quoted_date:               trimOrNull(input.quoted_date),
+    bant_budget:               trimOrNull(input.bant_budget),
+    bant_authority:            trimOrNull(input.bant_authority),
+    bant_authority_contact_id: trimOrNull(input.bant_authority_contact_id),
+    bant_need:                 trimOrNull(input.bant_need),
+    bant_timeline:             trimOrNull(input.bant_timeline),
+    notes_internal:            trimOrNull(input.notes_internal),
+    owner_user_id:             trimOrNull(input.owner_user_id) || user.id,
+    salesperson_user_id:       trimOrNull(input.salesperson_user_id) || user.id,
+    created_at:                ts,
+    updated_at:                ts,
+    created_by_user_id:        user.id,
+  }, { batchId: input.batch_id, summary });
+
+  return {
+    ok: true,
+    id: result.id,
+    audit_id: result.audit_id,
+    number,
+    account_id,
+    account_name: acct.name,
+    title,
+    transaction_type,
+    stage,
+    summary,
+  };
+}
+
+async function updateOpportunity(env, user, input = {}) {
+  const id = String(input.id || '').trim();
+  if (!id) throw new Error('update_opportunity requires id.');
+
+  // Note: `stage` is intentionally NOT in updatable. Stage transitions
+  // need to fire the auto-task chain, which only the
+  // /opportunities/:id/stage endpoint handles. Bypassing it here would
+  // leave the auto-task system out of sync.
+  const updatable = ['title', 'description', 'transaction_type', 'probability',
+    'estimated_value_usd', 'expected_close_date', 'actual_close_date',
+    'primary_contact_id', 'owner_user_id', 'salesperson_user_id',
+    'source', 'rfq_format', 'rfq_received_date', 'rfq_due_date', 'rfi_due_date',
+    'quoted_date', 'bant_budget', 'bant_authority', 'bant_authority_contact_id',
+    'bant_need', 'bant_timeline', 'close_reason', 'loss_reason_tag',
+    'customer_po_number', 'notes_internal'];
+  const fields = {};
+  for (const k of updatable) {
+    if (k in input) {
+      // Numbers stay as numbers, strings get trimmed.
+      const raw = input[k];
+      if (k === 'probability' || k === 'estimated_value_usd') {
+        fields[k] = Number.isFinite(raw) ? raw : null;
+      } else {
+        fields[k] = trimOrNull(raw);
+      }
+    }
+  }
+  if (Object.keys(fields).length === 0) {
+    return { error: 'no_fields', id, message: 'No updatable fields supplied.' };
+  }
+  if ('stage' in input) {
+    return {
+      error: 'stage_change_blocked',
+      id,
+      message:
+        'Stage transitions go through /opportunities/:id/stage so the auto-task chain fires correctly. ' +
+        'Tell the user to advance the stage from the opportunity page; do not retry update_opportunity ' +
+        'with `stage` set.',
+    };
+  }
+
+  const summary = input.summary || `updated opportunity ${id} (${Object.keys(fields).join(', ')})`;
+  try {
+    const result = await claudiaUpdate(env, user, 'update_opportunity', 'opportunities', id, fields, {
       batchId: input.batch_id,
       summary,
     });
