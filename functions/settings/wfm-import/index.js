@@ -51,8 +51,10 @@ export async function onRequestGet(context) {
     ${settingsSubNav('wfm-import', true, user?.email === 'wes.yoakum@c-lars.com')}
 
     <section class="card" style="margin-top:1rem">
-      <div class="card-header">
-        <h1>WFM import</h1>
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap">
+        <h1 style="margin:0">WFM import</h1>
+        <a href="/settings/wfm-import/history" class="btn"
+           style="font-size:.85rem">View import history →</a>
       </div>
       <p class="muted" style="margin-top:0">
         Pull records from WorkflowMax (BlueRock) into Pipeline.

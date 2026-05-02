@@ -851,6 +851,69 @@ async function enrichUserFromStaff(env, st) {
 
 // ---------- Main entry point ----------
 
+// Build a lightweight summary of what the user submitted, for the
+// persisted run log. We capture {kind, id, uuid, name} per record
+// rather than full WFM payloads so the row stays small.
+function summarizeSelection(samples) {
+  const out = [];
+  if (!samples || typeof samples !== 'object') return out;
+  for (const [plural, arr] of Object.entries(samples)) {
+    if (!Array.isArray(arr)) continue;
+    // Strip the trailing 's' for a cleaner singular kind label.
+    const kind = plural.endsWith('s') ? plural.slice(0, -1) : plural;
+    for (const rec of arr) {
+      out.push({
+        kind,
+        id:   rec?.ID || '',
+        uuid: rec?.UUID || '',
+        name: rec?.Name || rec?.ID || rec?.UUID || '',
+      });
+    }
+  }
+  return out;
+}
+
+// Persist one row in wfm_import_runs at the tail of every commit
+// invocation (success or failure). Best-effort — if the write fails
+// we still return the import result to the caller.
+async function recordImportRun(env, runRow) {
+  try {
+    await run(env.DB,
+      `INSERT INTO wfm_import_runs
+         (id, started_at, finished_at, triggered_by, ok, summary,
+          counts_json, errors_json, links_json,
+          selection_summary_json, selection_size)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        runRow.id,
+        runRow.started_at,
+        runRow.finished_at,
+        runRow.triggered_by || null,
+        runRow.ok ? 1 : 0,
+        runRow.summary || null,
+        JSON.stringify(runRow.counts || {}),
+        JSON.stringify(runRow.errors || []),
+        JSON.stringify(runRow.links || []),
+        JSON.stringify(runRow.selection_summary || []),
+        runRow.selection_size || 0,
+      ]
+    );
+  } catch (err) {
+    // Don't fail the whole import on a logging failure — but surface
+    // it on the server console so we know to investigate.
+    console.error('[wfm-import] failed to persist run row:', err);
+  }
+}
+
+function genRunId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Fallback for envs without crypto.randomUUID (vanishingly rare on
+  // modern Workers). Random 16-byte hex string.
+  return 'run-' + Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
+}
+
 export async function onRequestPost(context) {
   const { env, request, data } = context;
   const user = data?.user;
@@ -862,6 +925,12 @@ export async function onRequestPost(context) {
   catch { return json({ ok: false, error: 'invalid_json' }, 400); }
 
   const samples = body?.samples || {};
+
+  // Bookkeeping for the persisted run log.
+  const runId        = genRunId();
+  const runStartedAt = nowIso();
+  const triggeredBy  = user?.email || '';
+  const selectionSummary = summarizeSelection(samples);
 
   // Build lookup maps as we go.
   const accountByWfmUuid = new Map();
@@ -1026,34 +1095,67 @@ export async function onRequestPost(context) {
       } catch (e) { errors.push('job ' + (job?.Name || '?') + ': ' + e.message); }
     }
 
+    const summary =
+      counts.accounts + ' accounts'
+      + ' · ' + counts.contacts + ' contacts'
+      + ' · ' + counts.opportunities + ' opps from leads'
+      + ' · ' + counts.quotes + ' quotes (' + counts.quote_lines + ' line items)'
+      + ' · ' + counts.jobs + ' opps from jobs'
+      + ' · ' + counts.users + ' users enriched'
+      + ' · ' + counts.skipped + ' skipped (FK unresolved)'
+      + ((counts.accounts_cascaded + counts.contacts_cascaded + counts.opportunities_cascaded) > 0
+          ? ' · auto-cascaded: ' + counts.accounts_cascaded + ' accounts, '
+            + counts.contacts_cascaded + ' contacts, '
+            + counts.opportunities_cascaded + ' opps'
+          : '')
+      + ((counts.accounts_claimed + counts.contacts_claimed) > 0
+          ? ' · claimed (matched existing Pipeline rows by name): '
+            + counts.accounts_claimed + ' accounts, '
+            + counts.contacts_claimed + ' contacts'
+          : '');
+
+    // Cap errors at 50 so the row-size stays bounded in D1; the UI
+    // also caps display at 50.
+    const cappedErrors = errors.slice(0, 50);
+    const cappedLinks  = links.slice(0, 30);
+
+    await recordImportRun(env, {
+      id: runId,
+      started_at: runStartedAt,
+      finished_at: nowIso(),
+      triggered_by: triggeredBy,
+      ok: true,
+      summary,
+      counts,
+      errors: cappedErrors,
+      links: cappedLinks,
+      selection_summary: selectionSummary,
+      selection_size: selectionSummary.length,
+    });
+
     return json({
       ok: true,
+      run_id: runId,
       counts,
-      summary:
-        counts.accounts + ' accounts'
-        + ' · ' + counts.contacts + ' contacts'
-        + ' · ' + counts.opportunities + ' opps from leads'
-        + ' · ' + counts.quotes + ' quotes (' + counts.quote_lines + ' line items)'
-        + ' · ' + counts.jobs + ' opps from jobs'
-        + ' · ' + counts.users + ' users enriched'
-        + ' · ' + counts.skipped + ' skipped (FK unresolved)'
-        + ((counts.accounts_cascaded + counts.contacts_cascaded + counts.opportunities_cascaded) > 0
-            ? ' · auto-cascaded: ' + counts.accounts_cascaded + ' accounts, '
-              + counts.contacts_cascaded + ' contacts, '
-              + counts.opportunities_cascaded + ' opps'
-            : '')
-        + ((counts.accounts_claimed + counts.contacts_claimed) > 0
-            ? ' · claimed (matched existing Pipeline rows by name): '
-              + counts.accounts_claimed + ' accounts, '
-              + counts.contacts_claimed + ' contacts'
-            : ''),
-      links: links.slice(0, 30),  // cap so the UI stays readable
-      // Cap raised from 10 → 50: per-record skip reasons now go in
-      // here too, so a "selected 30 quotes, all skipped" import needs
-      // headroom to surface every reason.
-      errors: errors.slice(0, 50),
+      summary,
+      links: cappedLinks,
+      errors: cappedErrors,
     });
   } catch (err) {
-    return json({ ok: false, error: String(err.message || err), counts, links, errors }, 500);
+    const fatalMsg = String(err.message || err);
+    await recordImportRun(env, {
+      id: runId,
+      started_at: runStartedAt,
+      finished_at: nowIso(),
+      triggered_by: triggeredBy,
+      ok: false,
+      summary: 'fatal: ' + fatalMsg,
+      counts,
+      errors: errors.concat(['fatal: ' + fatalMsg]).slice(0, 50),
+      links: links.slice(0, 30),
+      selection_summary: selectionSummary,
+      selection_size: selectionSummary.length,
+    });
+    return json({ ok: false, run_id: runId, error: fatalMsg, counts, links, errors }, 500);
   }
 }
