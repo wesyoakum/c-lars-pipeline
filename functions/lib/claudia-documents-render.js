@@ -1,19 +1,60 @@
 // functions/lib/claudia-documents-render.js
 //
-// Shared HTML rendering for Claudia's documents panel — used by:
-//   * functions/sandbox/assistant/index.js (initial server render)
-//   * functions/sandbox/assistant/documents/index.js (upload swap target)
-//   * functions/sandbox/assistant/documents/[id]/retention.js (after a
-//     keep/trash flip; returns the refreshed panel for HTMX swap)
+// Renders the two sidebars on /sandbox/assistant:
+//   * left  — claudia-audio-panel  (audio recordings + transcripts)
+//   * right — claudia-docs-panel   (everything else: PDF / DOCX / XLSX /
+//                                    images / text)
 //
-// All HTML output is escaped at the leaves; opts.errors strings ARE
-// trusted to be plain text (caller should already have stripped any
-// markup before passing them in — current callers pass raw error
-// messages from extractText / fetch failures, which are fine).
+// On any upload or retention change, BOTH panels need to refresh so a
+// file can move between them (e.g. nothing's audio today, then you
+// drop a wav). We do that with HTMX out-of-band swaps:
+// renderBothPanels emits two top-level <div>s with
+// hx-swap-oob="outerHTML". The HTMX action attribute on per-row
+// buttons uses hx-swap="none" so HTMX picks up the OOB swaps without
+// also swapping the target; the JS upload path parses the response
+// and applies both replacements by id.
+//
+// renderDocumentsPanel is kept as an alias of renderBothPanels for
+// existing call sites in the upload + retention endpoints.
 
-export function renderDocumentsPanel(docs, opts = {}) {
+const AUDIO_EXTS = new Set([
+  'mp3', 'wav', 'm4a', 'mp4', 'ogg', 'oga', 'flac', 'webm', 'aac', 'wma',
+]);
+
+export function partitionDocs(docs) {
+  const audio = [];
+  const other = [];
+  for (const d of docs) {
+    if (isAudio(d)) audio.push(d);
+    else other.push(d);
+  }
+  return { audio, other };
+}
+
+function isAudio(d) {
+  const ct = String(d.content_type || '').toLowerCase();
+  if (ct.startsWith('audio/')) return true;
+  const ext = String(d.filename || '').toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+  return ext ? AUDIO_EXTS.has(ext) : false;
+}
+
+export function renderBothPanels(allDocs, opts = {}) {
+  const { audio, other } = partitionDocs(allDocs);
+  // Both panels are top-level OOB-swap targets. Caller emits both into
+  // the response body; HTMX (or the client-side JS upload path) picks
+  // up each by id and replaces independently.
+  return renderAudioPanel(audio, { ...opts, oob: true })
+       + renderDocsPanel(other, { ...opts, oob: true });
+}
+
+// Back-compat alias used by the upload + retention endpoints.
+export const renderDocumentsPanel = renderBothPanels;
+
+// ---------- Right sidebar: non-audio documents ----------
+
+export function renderDocsPanel(docs, opts = {}) {
+  const oob = opts.oob ? ' hx-swap-oob="outerHTML"' : '';
   const errors = Array.isArray(opts.errors) ? opts.errors : [];
-  const rows = docs.map(renderDocRow).join('');
   const errorList = errors.length > 0
     ? `<div class="claudia-doc-flash error">
          <strong>Some files didn't go in:</strong>
@@ -21,12 +62,11 @@ export function renderDocumentsPanel(docs, opts = {}) {
        </div>`
     : '';
   if (docs.length === 0 && errors.length === 0) {
-    // Empty placeholder so HTMX swap targets stay visible.
-    return `<div id="claudia-docs-panel" class="claudia-docs-panel claudia-docs-panel-empty"></div>`;
+    return `<div id="claudia-docs-panel" class="claudia-docs-panel claudia-docs-panel-empty"${oob}></div>`;
   }
-  return `<div id="claudia-docs-panel" class="claudia-docs-panel">
+  return `<div id="claudia-docs-panel" class="claudia-docs-panel"${oob}>
     ${errorList}
-    <div class="claudia-docs-list">${rows}</div>
+    <div class="claudia-docs-list">${docs.map(renderDocRow).join('')}</div>
   </div>`;
 }
 
@@ -37,20 +77,14 @@ function renderDocRow(d) {
     formatBytes(d.size_bytes),
     contentTypeShort(d.content_type, d.filename),
     formatRelative(d.created_at),
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  ].filter(Boolean).join(' · ');
   const retention = d.retention || 'auto';
   const retentionBadge = retention === 'keep_forever'
-    ? '<span class="claudia-doc-badge keep">★ kept</span>'
-    : '';
+    ? '<span class="claudia-doc-badge keep">★ kept</span>' : '';
   const statusBadge = d.extraction_status === 'error'
     ? `<span class="claudia-doc-badge error" title="${escapeAttr(d.extraction_error || '')}">extract failed</span>`
     : d.extraction_status === 'partial'
-    ? '<span class="claudia-doc-badge warn">partial extract</span>'
-    : '';
-
-  // Two-button toggle: keep / trash. Active state shown by retention.
+    ? '<span class="claudia-doc-badge warn">partial extract</span>' : '';
   const isKept = retention === 'keep_forever';
   const keepHref = isKept ? 'auto' : 'keep_forever';
   const keepLabel = isKept ? 'Unkeep' : 'Keep forever';
@@ -69,18 +103,73 @@ function renderDocRow(d) {
               class="claudia-doc-btn ${keepClass}"
               title="${escapeAttr(keepLabel)}"
               hx-post="/sandbox/assistant/documents/${id}/retention?to=${keepHref}"
-              hx-target="#claudia-docs-panel"
-              hx-swap="outerHTML">★</button>
+              hx-swap="none">★</button>
       <button type="button"
               class="claudia-doc-btn danger"
               title="Move to trash"
               hx-post="/sandbox/assistant/documents/${id}/retention?to=trashed"
-              hx-target="#claudia-docs-panel"
-              hx-swap="outerHTML"
+              hx-swap="none"
               hx-confirm="Move this document to trash? You can restore it later from the database.">×</button>
     </div>
   </div>`;
 }
+
+// ---------- Left sidebar: audio recordings + transcripts ----------
+
+export function renderAudioPanel(docs, opts = {}) {
+  const oob = opts.oob ? ' hx-swap-oob="outerHTML"' : '';
+  if (docs.length === 0) {
+    return `<div id="claudia-audio-panel" class="claudia-audio-panel claudia-audio-panel-empty"${oob}></div>`;
+  }
+  return `<div id="claudia-audio-panel" class="claudia-audio-panel"${oob}>
+    <div class="claudia-audio-list">${docs.map(renderAudioRow).join('')}</div>
+  </div>`;
+}
+
+function renderAudioRow(d) {
+  const id = escapeAttr(d.id);
+  const filename = escapeHtml(d.filename || 'recording');
+  const when = formatRelative(d.created_at);
+  const meta = [formatBytes(d.size_bytes), when].filter(Boolean).join(' · ');
+  const retention = d.retention || 'auto';
+  const retentionBadge = retention === 'keep_forever'
+    ? '<span class="claudia-doc-badge keep">★ kept</span>' : '';
+  const statusBadge = d.extraction_status === 'error'
+    ? `<span class="claudia-doc-badge error" title="${escapeAttr(d.extraction_error || '')}">transcription failed</span>`
+    : d.extraction_status === 'partial'
+    ? '<span class="claudia-doc-badge warn">partial</span>' : '';
+  const isKept = retention === 'keep_forever';
+  const keepHref = isKept ? 'auto' : 'keep_forever';
+  const keepLabel = isKept ? 'Unkeep' : 'Keep forever';
+  const keepClass = isKept ? 'active' : '';
+  const transcriptText = String(d.preview || '').trim();
+  const transcriptHtml = transcriptText
+    ? `<div class="claudia-audio-transcript">${escapeHtml(transcriptText)}</div>`
+    : '<div class="claudia-audio-transcript empty">(no transcript)</div>';
+
+  return `<div class="claudia-audio-item" id="claudia-audio-${id}">
+    <div class="claudia-audio-head">
+      <span class="claudia-audio-filename" title="${escapeAttr(filename)}">${filename}</span>
+      <div class="claudia-doc-actions">
+        <button type="button"
+                class="claudia-doc-btn ${keepClass}"
+                title="${escapeAttr(keepLabel)}"
+                hx-post="/sandbox/assistant/documents/${id}/retention?to=${keepHref}"
+                hx-swap="none">★</button>
+        <button type="button"
+                class="claudia-doc-btn danger"
+                title="Move to trash"
+                hx-post="/sandbox/assistant/documents/${id}/retention?to=trashed"
+                hx-swap="none"
+                hx-confirm="Move this recording to trash? You can restore it later from the database.">×</button>
+      </div>
+    </div>
+    ${transcriptHtml}
+    <div class="claudia-audio-meta">${escapeHtml(meta)}${retentionBadge ? ' ' + retentionBadge : ''}${statusBadge ? ' ' + statusBadge : ''}</div>
+  </div>`;
+}
+
+// ---------- Helpers ----------
 
 function contentTypeShort(ct, filename) {
   const ext = String(filename || '').toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];

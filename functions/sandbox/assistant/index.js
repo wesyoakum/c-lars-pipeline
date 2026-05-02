@@ -10,7 +10,11 @@
 
 import { all, one } from '../../lib/db.js';
 import { layout, html, escape, htmlResponse, raw, subnavTabs } from '../../lib/layout.js';
-import { renderDocumentsPanel } from '../../lib/claudia-documents-render.js';
+import {
+  renderDocsPanel,
+  renderAudioPanel,
+  partitionDocs,
+} from '../../lib/claudia-documents-render.js';
 import { ICON_PAPERCLIP, ICON_MIC } from '../../lib/icons.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
@@ -75,22 +79,25 @@ export async function onRequestGet(context) {
   );
 
   // Drop-zone documents (newest 30, non-trashed) for the initial render.
+  // Preview is bumped to 600 chars so the audio sidebar can show a real
+  // transcript snippet; the right docs sidebar doesn't render preview.
   const documents = await all(
     env.DB,
     `SELECT id, filename, content_type, size_bytes, retention,
             extraction_status, extraction_error, created_at,
-            substr(coalesce(full_text, ''), 1, 200) AS preview
+            substr(coalesce(full_text, ''), 1, 600) AS preview
        FROM claudia_documents
       WHERE user_id = ? AND retention != 'trashed'
       ORDER BY created_at DESC
       LIMIT 30`,
     [user.id]
   );
+  const { audio: audioDocs, other: otherDocs } = partitionDocs(documents);
 
   const tabs = subnavTabs(
     [
-      { href: '/sandbox', label: 'Flow Chart' },
       { href: '/sandbox/assistant', label: 'Claudia' },
+      { href: '/sandbox', label: 'Flow Chart' },
     ],
     '/sandbox/assistant'
   );
@@ -172,19 +179,28 @@ export async function onRequestGet(context) {
       .assistant-empty-icon {
         display: flex; flex-direction: column; align-items: center; gap: 0.6rem;
       }
-      /* ---- Layout: chat + docs sidebar ---- */
+      /* Break out of the global .site-main 1100px max-width so the
+         three-column layout can use the full viewport. Scoped to the
+         Claudia page — this <style> block only renders here. */
+      main.site-main {
+        max-width: none !important;
+        padding-left: 0 !important;
+        padding-right: 0 !important;
+      }
+      /* ---- Layout: three columns (audio | chat | docs) ---- */
       .assistant-layout {
-        display: flex; gap: 1rem;
-        max-width: 1280px; margin: 0 auto; padding: 0 1rem;
-        align-items: flex-start;
+        display: grid;
+        grid-template-columns: 300px minmax(0, 1fr) 300px;
+        gap: 1rem;
+        max-width: 1500px; margin: 0 auto; padding: 0 1rem;
+        align-items: start;
       }
       .assistant-layout .assistant-wrap {
-        flex: 1; min-width: 0; padding: 1rem 0; max-width: none;
+        min-width: 0; padding: 1rem 0; max-width: none;
       }
-      .claudia-docs-sidebar {
-        flex: 0 0 300px;
+      .claudia-side {
         position: sticky; top: 16px;
-        align-self: flex-start;
+        align-self: start;
         max-height: calc(100vh - 100px);
         overflow-y: auto;
         background: #f8fafc;
@@ -193,17 +209,59 @@ export async function onRequestGet(context) {
         padding: 0.6rem 0.7rem;
         margin-top: 1rem;
       }
-      .claudia-docs-sidebar h3 {
+      .claudia-side h3 {
         margin: 0 0 0.5rem 0; font-size: 11px; font-weight: 600;
         text-transform: uppercase; letter-spacing: 0.05em; color: #64748b;
       }
-      .claudia-docs-sidebar-empty {
+      .claudia-side-empty {
         font-size: 12px; color: #94a3b8; font-style: italic; line-height: 1.5;
       }
-      @media (max-width: 900px) {
-        .assistant-layout { flex-direction: column; }
-        .claudia-docs-sidebar { width: 100%; flex: 1 1 auto; position: static; max-height: none; margin-top: 0; }
+      @media (max-width: 1100px) {
+        /* Tablet: stack docs on top, hide audio sidebar (rare on the
+           road) — user can still find recordings via search/list_documents. */
+        .assistant-layout {
+          grid-template-columns: minmax(0, 1fr) 280px;
+        }
+        .claudia-side.audio-side { display: none; }
       }
+      @media (max-width: 800px) {
+        .assistant-layout {
+          grid-template-columns: 1fr;
+        }
+        .claudia-side {
+          position: static; max-height: none; margin-top: 0;
+        }
+        .claudia-side.audio-side { display: block; }
+      }
+
+      /* ---- Audio panel rows (left sidebar) ---- */
+      .claudia-audio-panel-empty { display: none; }
+      .claudia-audio-list { display: flex; flex-direction: column; gap: 6px; }
+      .claudia-audio-item {
+        background: #fff; border: 1px solid #e2e8f0; border-radius: 6px;
+        padding: 6px 8px;
+      }
+      .claudia-audio-head {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 0.4rem; margin-bottom: 4px;
+      }
+      .claudia-audio-filename {
+        font-size: 11px; color: #64748b;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        flex: 1; min-width: 0;
+      }
+      .claudia-audio-transcript {
+        font-size: 12px; color: #1f2937; line-height: 1.45;
+        white-space: pre-wrap; word-wrap: break-word;
+        display: -webkit-box; -webkit-box-orient: vertical;
+        -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden;
+        cursor: pointer;
+      }
+      .claudia-audio-transcript.expanded {
+        -webkit-line-clamp: unset; line-clamp: unset;
+      }
+      .claudia-audio-transcript.empty { color: #94a3b8; font-style: italic; cursor: default; }
+      .claudia-audio-meta { font-size: 10px; color: #94a3b8; margin-top: 4px; }
 
       /* ---- Documents panel (rendered inside the sidebar) ---- */
       .claudia-docs-panel {
@@ -308,6 +366,11 @@ export async function onRequestGet(context) {
       </div>
     ` : ''}
     <div class="assistant-layout">
+    <aside class="claudia-side audio-side" id="claudia-side-audio">
+      <h3>Voice notes</h3>
+      ${raw(renderAudioPanel(audioDocs))}
+      ${audioDocs.length === 0 ? html`<div class="claudia-side-empty">No recordings yet. Hit the mic next to the message box to capture a voice note — Claudia transcribes it via Whisper and you can ask her about it from the chat.</div>` : ''}
+    </aside>
     <div class="assistant-wrap">
       <div id="assistant-messages" class="assistant-messages">
         ${messages.length === 0
@@ -348,10 +411,10 @@ export async function onRequestGet(context) {
         <button type="submit" id="send-btn">Send</button>
       </form>
     </div>
-    <aside class="claudia-docs-sidebar" id="claudia-docs-sidebar">
+    <aside class="claudia-side docs-side" id="claudia-side-docs">
       <h3>Documents</h3>
-      ${raw(renderDocumentsPanel(documents))}
-      ${documents.length === 0 ? html`<div class="claudia-docs-sidebar-empty">No documents yet. Use the attach button to upload a file (PDF, DOCX, XLSX, image, audio, TXT, MD), drag-drop anywhere on the chat, or hit the mic to record a voice note.</div>` : ''}
+      ${raw(renderDocsPanel(otherDocs))}
+      ${otherDocs.length === 0 ? html`<div class="claudia-side-empty">No documents yet. Use the attach button or drag-drop anywhere on the chat to upload (PDF, DOCX, XLSX, image, TXT, MD).</div>` : ''}
     </aside>
     </div>
     <script>
@@ -413,7 +476,21 @@ export async function onRequestGet(context) {
         const attachBtn = document.getElementById('attach-btn');
         const fileInput = document.getElementById('attach-input');
         const wrap = document.querySelector('.assistant-wrap');
-        const docsPanelSelector = '#claudia-docs-panel';
+        const PANEL_IDS = ['claudia-audio-panel', 'claudia-docs-panel'];
+
+        function applyPanelHtml(html) {
+          // The server returns BOTH panels with hx-swap-oob attributes.
+          // For the JS upload path we don't have HTMX in the loop, so
+          // parse the response and replace each panel by id.
+          const tmp = document.createElement('template');
+          tmp.innerHTML = html;
+          for (const id of PANEL_IDS) {
+            const incoming = tmp.content.querySelector('#' + id);
+            if (!incoming) continue;
+            const existing = document.getElementById(id);
+            if (existing) existing.replaceWith(incoming);
+          }
+        }
 
         async function uploadFiles(files) {
           if (!files || files.length === 0) return;
@@ -423,13 +500,7 @@ export async function onRequestGet(context) {
             for (const f of files) fd.append('file', f);
             const res = await fetch('/sandbox/assistant/documents', { method: 'POST', body: fd });
             const html = await res.text();
-            const existing = document.querySelector(docsPanelSelector);
-            if (existing) {
-              existing.outerHTML = html;
-            } else {
-              // Inject before .assistant-wrap if the panel hadn't been rendered yet.
-              wrap?.insertAdjacentHTML('beforebegin', html);
-            }
+            applyPanelHtml(html);
           } catch (err) {
             console.error('upload failed:', err);
           } finally {
@@ -437,6 +508,15 @@ export async function onRequestGet(context) {
             if (fileInput) fileInput.value = '';
           }
         }
+
+        // Click-to-expand on transcript snippets in the left sidebar.
+        // Uses event delegation so it survives panel swaps.
+        document.addEventListener('click', (e) => {
+          const t = e.target;
+          if (t && t.classList && t.classList.contains('claudia-audio-transcript') && !t.classList.contains('empty')) {
+            t.classList.toggle('expanded');
+          }
+        });
 
         if (attachBtn && fileInput) {
           attachBtn.addEventListener('click', () => fileInput.click());

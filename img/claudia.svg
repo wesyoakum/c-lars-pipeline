@@ -1,0 +1,17 @@
+<svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Claudia">
+  <title>Claudia</title>
+  <path d="M24 11 C 14 11, 6 19, 6 28 C 2 30, 2 38, 6 41 C 5 47, 10 53, 17 53 C 18 56, 22 58, 26 56 C 28 58, 33 57, 33 53 L 33 16 C 33 13, 30 11, 27 11 L 24 11 Z" fill="#2566ff"/>
+  <g fill="none" stroke="#ffffff" stroke-width="2.2" stroke-linecap="round">
+    <path d="M14 22 Q 22 20, 28 23"/>
+    <path d="M10 32 Q 18 32, 28 32"/>
+    <path d="M14 42 Q 22 44, 28 41"/>
+  </g>
+  <g stroke="#2566ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M33 22 H46"/>
+    <path d="M33 32 H48"/>
+    <path d="M33 42 H40 V50 H46"/>
+  </g>
+  <circle cx="50" cy="22" r="3.5" fill="#2566ff"/>
+  <circle cx="52" cy="32" r="3"   fill="#ffffff" stroke="#2566ff" stroke-width="3"/>
+  <circle cx="50" cy="50" r="3.5" fill="#2566ff"/>
+</svg>
