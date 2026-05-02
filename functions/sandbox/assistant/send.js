@@ -32,7 +32,14 @@ export async function onRequestPost(context) {
     return htmlFragment('<div class="assistant-msg assistant">(empty message)</div>');
   }
 
-  const thread = await ensureThread(env.DB, user);
+  // Multi-thread routing: ?thread=<id> in the URL OR thread_id in the
+  // form body decides which thread receives this message. Empty/missing
+  // → most recently updated thread (or create one if the user has none
+  // yet — preserves the prior single-thread behavior on a brand-new
+  // account).
+  const url = new URL(request.url);
+  const requestedThreadId = url.searchParams.get('thread') || form.thread_id || null;
+  const thread = await ensureThread(env.DB, user, requestedThreadId);
   const ts = now();
   await run(
     env.DB,
@@ -44,6 +51,21 @@ export async function onRequestPost(context) {
     'UPDATE assistant_threads SET updated_at = ? WHERE id = ?',
     [ts, thread.id]
   );
+
+  // First user message in a brand-new thread → auto-title from a
+  // truncated version of that message. Cheap and good enough for now;
+  // an LLM-generated title is a future polish. Wes can rename via the
+  // sidebar at any time.
+  if (!thread.title || thread.title === 'New chat') {
+    const newTitle = autoTitleFromMessage(text);
+    if (newTitle) {
+      await run(
+        env.DB,
+        'UPDATE assistant_threads SET title = ? WHERE id = ?',
+        [newTitle, thread.id]
+      );
+    }
+  }
 
   // Pull the LATEST N turns (DESC then reverse) so the just-inserted
   // user message is always included and the array ends on the user
@@ -144,7 +166,19 @@ export async function onRequestPost(context) {
   return htmlFragment(all_messages.map(renderRow).join(''));
 }
 
-async function ensureThread(db, user) {
+async function ensureThread(db, user, requestedId) {
+  // Specific thread requested? Validate it belongs to the user, then
+  // return it. Mismatched/missing → fall through to "most recent" so a
+  // stale URL with a deleted thread still works.
+  if (requestedId) {
+    const owned = await one(
+      db,
+      'SELECT id, title FROM assistant_threads WHERE id = ? AND user_id = ?',
+      [requestedId, user.id]
+    );
+    if (owned) return owned;
+  }
+
   const existing = await one(
     db,
     'SELECT id, title FROM assistant_threads WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1',
@@ -156,9 +190,24 @@ async function ensureThread(db, user) {
   await run(
     db,
     'INSERT INTO assistant_threads (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-    [id, user.id, 'Main', ts, ts]
+    [id, user.id, 'New chat', ts, ts]
   );
-  return { id, title: 'Main' };
+  return { id, title: 'New chat' };
+}
+
+/**
+ * Pick a short title from the first user message. Strip newlines,
+ * collapse whitespace, hard-cap at 60 chars on a word boundary when
+ * possible. Returns null if the message is empty or the heuristic
+ * produces nothing useful.
+ */
+function autoTitleFromMessage(text) {
+  const cleaned = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!cleaned) return null;
+  if (cleaned.length <= 60) return cleaned;
+  // Truncate at the last space before char 60 so we don't break a word.
+  const cut = cleaned.lastIndexOf(' ', 57);
+  return (cut > 30 ? cleaned.slice(0, cut) : cleaned.slice(0, 57)) + '…';
 }
 
 function buildSystemPrompt(user, tableNames, recentUploads = []) {

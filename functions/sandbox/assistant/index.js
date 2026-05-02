@@ -17,6 +17,7 @@ import {
 } from '../../lib/claudia-documents-render.js';
 import { ICON_PAPERCLIP, ICON_MIC } from '../../lib/icons.js';
 import { renderMarkdown } from '../../lib/claudia-markdown.js';
+import { renderThreadRow } from '../../lib/claudia-threads-render.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 
@@ -41,17 +42,40 @@ const CLAUDIA_ICON_SVG = `<svg class="claudia-icon" viewBox="0 0 64 64" fill="no
 </svg>`;
 
 export async function onRequestGet(context) {
-  const { env, data } = context;
+  const { env, data, request } = context;
   const user = data?.user;
   if (!user || user.email !== SANDBOX_OWNER) {
     return new Response('Not found', { status: 404 });
   }
 
-  const thread = await one(
+  // Multi-thread: ?thread=<id> selects a specific thread; without it,
+  // fall back to the most recently updated thread (preserves the prior
+  // single-thread behavior for users who haven't switched yet). The
+  // thread list itself is always loaded so the sidebar can render.
+  const url = new URL(request.url);
+  const requestedThreadId = url.searchParams.get('thread') || null;
+
+  const threadList = await all(
     env.DB,
-    'SELECT id, title FROM assistant_threads WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1',
+    `SELECT t.id, t.title, t.updated_at,
+            (SELECT COUNT(*) FROM assistant_messages WHERE thread_id = t.id) AS message_count
+       FROM assistant_threads t
+      WHERE t.user_id = ?
+      ORDER BY t.updated_at DESC`,
     [user.id]
   );
+
+  let thread = null;
+  if (requestedThreadId) {
+    thread = threadList.find((t) => t.id === requestedThreadId) || null;
+    if (!thread) {
+      // The id either doesn't exist or belongs to another user. 404
+      // rather than silently fall back, so a stale link is obvious.
+      return new Response('Thread not found', { status: 404 });
+    }
+  } else if (threadList.length > 0) {
+    thread = threadList[0]; // most recently updated
+  }
 
   const messages = thread
     ? await all(
@@ -478,6 +502,83 @@ export async function onRequestGet(context) {
       }
       .claudia-obs-dismiss:hover { background: rgba(0,0,0,0.06); color: #4a3a1a; }
 
+      /* ---- Threads strip (horizontal scroll above the chat) ----
+         Each thread is a chip; active gets the primary color. The
+         strip lives above the 3-col layout so it stays accessible at
+         every breakpoint without 4-col gymnastics. */
+      .threads-strip {
+        max-width: 1500px; margin: 0.75rem auto 0; padding: 0 1rem;
+        display: flex; align-items: center; gap: 0.4rem;
+      }
+      .threads-strip-scroll {
+        flex: 1; min-width: 0;
+        display: flex; gap: 0.4rem; overflow-x: auto;
+        scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0.08) transparent;
+        padding-bottom: 4px; /* leave room for the scrollbar without clipping chips */
+      }
+      .threads-strip-scroll::-webkit-scrollbar { height: 4px; }
+      .threads-strip-scroll::-webkit-scrollbar-thumb {
+        background: rgba(0,0,0,0.08); border-radius: 2px;
+      }
+      .threads-row {
+        position: relative; flex: 0 0 auto;
+        display: flex; align-items: center; gap: 4px;
+        background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 999px;
+        padding: 4px 6px 4px 12px; font-size: 12px;
+        max-width: 220px;
+      }
+      .threads-row--active {
+        background: #2566ff; border-color: #2566ff; color: #fff;
+      }
+      .threads-row--active .threads-row-meta { color: rgba(255,255,255,0.8); }
+      .threads-row--active .threads-row-btn { color: rgba(255,255,255,0.85); }
+      .threads-row--active .threads-row-btn:hover { background: rgba(255,255,255,0.18); color: #fff; }
+      .threads-row-link {
+        display: flex; flex-direction: column; gap: 0;
+        text-decoration: none; color: inherit; min-width: 0; max-width: 160px;
+        line-height: 1.2;
+      }
+      .threads-row-title {
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-weight: 500;
+      }
+      .threads-row-meta {
+        font-size: 10px; color: #64748b; line-height: 1.1;
+      }
+      .threads-row-actions {
+        display: flex; gap: 2px; flex-shrink: 0;
+      }
+      .threads-row-btn {
+        background: transparent; border: 0; color: #64748b; cursor: pointer;
+        padding: 4px; border-radius: 999px; line-height: 0;
+        opacity: 0; transition: opacity 0.12s;
+      }
+      .threads-row:hover .threads-row-btn,
+      .threads-row:focus-within .threads-row-btn { opacity: 1; }
+      .threads-row-btn:hover { background: rgba(0,0,0,0.06); color: #1a1a22; }
+      .threads-row-rename-form {
+        position: absolute; inset: 0;
+        display: flex; align-items: center;
+        background: #fff; border: 2px solid #2566ff; border-radius: 999px;
+        padding: 0 8px;
+      }
+      .threads-row-rename-form input {
+        flex: 1; border: 0; outline: none; background: transparent;
+        font: inherit; font-size: 12px; color: #1a1a22;
+        min-width: 0;
+      }
+      .threads-strip .threads-new-btn {
+        flex-shrink: 0;
+        background: #fff; border: 1px dashed #cbd5e1; color: #475569;
+        padding: 4px 12px; border-radius: 999px; font-size: 12px;
+        cursor: pointer; display: inline-flex; align-items: center; gap: 4px;
+        white-space: nowrap;
+      }
+      .threads-strip .threads-new-btn:hover { background: #f1f5f9; border-color: #94a3b8; color: #1a1a22; }
+      .threads-strip-empty {
+        font-size: 12px; color: #94a3b8; font-style: italic;
+      }
+
       /* ============================================================
          Mobile (≤ 640px). Goal: usable chat from a phone.
          The desktop layout already collapses to 1 column at 800px;
@@ -588,6 +689,21 @@ export async function onRequestGet(context) {
           font-size: 13px; line-height: 1.5; max-width: 92%;
         }
         .claudia-icon-lg { width: 44px; height: 44px; }
+
+        /* Threads strip on phone — narrower chips, the rename/delete
+           buttons stay always-visible (no hover on touch) so tap
+           targets are real. */
+        .threads-strip { padding: 0 0.4rem; gap: 0.3rem; margin-top: 0.5rem; }
+        .threads-row { max-width: 180px; padding: 4px 4px 4px 10px; }
+        .threads-row-link { max-width: 130px; }
+        .threads-row-btn {
+          opacity: 0.6;  /* always slightly visible on touch */
+          min-width: 28px; min-height: 28px;
+          display: inline-flex; align-items: center; justify-content: center;
+        }
+        .threads-strip .threads-new-btn {
+          padding: 8px 12px; min-height: 34px;
+        }
       }
     </style>
     ${tabs}
@@ -596,6 +712,25 @@ export async function onRequestGet(context) {
         ${observations.map(renderObservation)}
       </div>
     ` : ''}
+    <div class="threads-strip">
+      <div class="threads-strip-scroll" id="threads-strip-scroll">
+        ${threadList.length > 0
+          ? threadList.map((t) => renderThreadRow(t, thread?.id))
+          : html`<span class="threads-strip-empty">No threads yet — say hi to start one.</span>`}
+      </div>
+      <form
+        hx-post="/sandbox/assistant/threads/new"
+        hx-swap="none"
+        style="margin:0">
+        <button type="submit" class="threads-new-btn" title="Start a new chat thread">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" width="12" height="12">
+            <line x1="12" y1="5" x2="12" y2="19"/>
+            <line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          New chat
+        </button>
+      </form>
+    </div>
     <div class="assistant-layout">
     <aside class="claudia-side audio-side" id="claudia-side-audio">
       <h3>Voice notes</h3>
@@ -629,7 +764,7 @@ export async function onRequestGet(context) {
       </div>
       <form
         class="assistant-form"
-        hx-post="/sandbox/assistant/send"
+        hx-post="/sandbox/assistant/send${thread ? `?thread=${encodeURIComponent(thread.id)}` : ''}"
         hx-target="#assistant-messages"
         hx-swap="innerHTML"
         hx-disabled-elt="find textarea, find #send-btn"
@@ -660,6 +795,24 @@ export async function onRequestGet(context) {
     </div>
     <script>
       const CLAUDIA_ICON_HTML = ${raw(JSON.stringify(CLAUDIA_ICON_SVG))};
+
+      // Threads strip — inline rename. The rename button on each row
+      // calls this with the thread id; we hide the link, show the
+      // hidden form, and focus the input. ESC restores via the input's
+      // onkeydown; submit goes through HTMX which swaps the row HTML.
+      function claudiaThreadRename(threadId) {
+        const row = document.getElementById('thread-row-' + threadId);
+        if (!row) return;
+        const link = row.querySelector('.threads-row-link');
+        const form = row.querySelector('.threads-row-rename-form');
+        const input = form?.querySelector('input[name="title"]');
+        if (!link || !form || !input) return;
+        link.style.display = 'none';
+        form.style.display = 'flex';
+        input.focus();
+        input.select();
+      }
+
       (function () {
         const form = document.querySelector('.assistant-form');
         if (!form) return;
