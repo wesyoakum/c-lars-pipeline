@@ -126,6 +126,23 @@ export function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'get_calendar_events',
+      description:
+        "Fetch upcoming events from the user's Outlook published-calendar feed. Requires the .ics " +
+        'URL to be saved in memory under the key "calendar.outlook_ics_url" (via set_memory). ' +
+        'Returns up to 100 events overlapping the [start, end] window, sorted by start time. ' +
+        'Defaults: start=now, end=start+7 days. Server caches the .ics fetch for 5 minutes per URL, ' +
+        'so do not worry about calling this repeatedly. ' +
+        'If no URL is set, returns an error explaining how to configure one — pass that on to the user.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          start: { type: 'string', description: 'ISO datetime (or date) for the start of the window. Default: now.' },
+          end: { type: 'string', description: 'ISO datetime (or date) for the end of the window. Default: start + 7 days.' },
+        },
+      },
+    },
+    {
       name: 'query_db',
       description:
         'Run a single read-only SELECT (or WITH ... SELECT) against the Pipeline D1 database. Returns ' +
@@ -161,6 +178,8 @@ export function makeAssistantTools({ env, user }) {
         return describeSchema(env, input);
       case 'query_db':
         return queryDb(env, input);
+      case 'get_calendar_events':
+        return getCalendarEvents(env, user, input);
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -313,6 +332,157 @@ async function queryDb(env, { sql }) {
   const finalSql = /\blimit\s+\d+/i.test(stmt) ? stmt : `${stmt} LIMIT 200`;
   const rows = await all(env.DB, finalSql);
   return { rows, count: rows.length, sql: finalSql };
+}
+
+// ---------- Calendar (Outlook published .ics URL) ----------
+
+const CALENDAR_URL_KEY = 'calendar.outlook_ics_url';
+const CALENDAR_CACHE_SECONDS = 300;
+
+async function getCalendarEvents(env, user, { start, end } = {}) {
+  const urlRow = await one(
+    env.DB,
+    'SELECT value FROM assistant_memory WHERE user_id = ? AND key = ?',
+    [user.id, CALENDAR_URL_KEY]
+  );
+  if (!urlRow || !urlRow.value) {
+    return {
+      error: 'no_calendar_url',
+      message:
+        'No Outlook calendar URL configured. To set one up: in Outlook web → Settings → Calendar → Shared calendars → Publish a calendar (read-only / "Can view all details"). Copy the ICS link, then call set_memory with key "' +
+        CALENDAR_URL_KEY +
+        '" and value = the URL. After that I can fetch events.',
+    };
+  }
+  const url = String(urlRow.value).trim();
+  if (!/^https?:\/\//i.test(url)) {
+    return { error: 'invalid_url', message: 'Stored calendar URL is not http(s).' };
+  }
+
+  const startMs = start ? Date.parse(start) : Date.now();
+  const endMs = end ? Date.parse(end) : startMs + 7 * 86400000;
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    return { error: 'invalid_window', message: 'start/end could not be parsed, or end < start.' };
+  }
+
+  let icsText;
+  try {
+    icsText = await fetchIcsCached(url);
+  } catch (err) {
+    return { error: 'fetch_failed', message: err.message || String(err) };
+  }
+
+  const raw = parseIcs(icsText);
+  const events = raw
+    .map(normalizeEvent)
+    .filter((e) => e.start_ms != null)
+    .filter((e) => e.start_ms < endMs && (e.end_ms ?? e.start_ms) > startMs)
+    .sort((a, b) => a.start_ms - b.start_ms)
+    .slice(0, 100)
+    .map((e) => ({
+      summary: e.summary,
+      start: e.start,
+      end: e.end,
+      all_day: e.all_day,
+      location: e.location || undefined,
+      organizer: e.organizer || undefined,
+    }));
+
+  return {
+    events,
+    count: events.length,
+    window: { start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString() },
+  };
+}
+
+async function fetchIcsCached(url) {
+  const cache = caches.default;
+  const cacheKey = new Request(url, { method: 'GET' });
+  let resp = await cache.match(cacheKey);
+  if (!resp) {
+    const upstream = await fetch(url, { headers: { Accept: 'text/calendar' } });
+    if (!upstream.ok) {
+      throw new Error(`Calendar fetch failed: ${upstream.status} ${upstream.statusText}`);
+    }
+    // Re-wrap with our own Cache-Control so the Cache API stores it.
+    const body = await upstream.text();
+    resp = new Response(body, {
+      status: 200,
+      headers: {
+        'content-type': upstream.headers.get('content-type') || 'text/calendar',
+        'cache-control': `public, max-age=${CALENDAR_CACHE_SECONDS}`,
+      },
+    });
+    await cache.put(cacheKey, resp.clone());
+  }
+  return resp.text();
+}
+
+function parseIcs(text) {
+  // RFC 5545 line-unfolding: a CRLF followed by a space or tab is a continuation.
+  const unfolded = text.replace(/\r?\n[ \t]/g, '');
+  const lines = unfolded.split(/\r?\n/);
+  const events = [];
+  let cur = null;
+  for (const line of lines) {
+    if (line === 'BEGIN:VEVENT') {
+      cur = {};
+    } else if (line === 'END:VEVENT') {
+      if (cur) events.push(cur);
+      cur = null;
+    } else if (cur) {
+      const colonIdx = line.indexOf(':');
+      if (colonIdx === -1) continue;
+      const keyPart = line.slice(0, colonIdx);
+      const value = line.slice(colonIdx + 1);
+      const key = keyPart.split(';')[0]; // strip params (e.g. DTSTART;TZID=...)
+      // Don't overwrite repeated keys (e.g. multiple ATTENDEE) — first wins for our needs.
+      if (!(key in cur)) cur[key] = value;
+    }
+  }
+  return events;
+}
+
+function normalizeEvent(raw) {
+  const start = parseIcsDate(raw.DTSTART);
+  const end = parseIcsDate(raw.DTEND);
+  return {
+    summary: unescapeIcs(raw.SUMMARY || ''),
+    location: unescapeIcs(raw.LOCATION || ''),
+    organizer: (raw.ORGANIZER || '').replace(/^MAILTO:/i, ''),
+    start: start?.iso ?? null,
+    end: end?.iso ?? null,
+    start_ms: start?.ms ?? null,
+    end_ms: end?.ms ?? null,
+    all_day: !!start?.allDay,
+  };
+}
+
+function parseIcsDate(s) {
+  if (!s) return null;
+  // YYYYMMDDTHHMMSS(Z) — datetime, optionally UTC.
+  let m = s.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z)?$/);
+  if (m) {
+    const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7] ? 'Z' : ''}`;
+    const ms = Date.parse(iso);
+    return Number.isFinite(ms) ? { iso, ms, allDay: false } : null;
+  }
+  // YYYYMMDD — all-day.
+  m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (m) {
+    const iso = `${m[1]}-${m[2]}-${m[3]}`;
+    const ms = Date.parse(iso + 'T00:00:00Z');
+    return Number.isFinite(ms) ? { iso, ms, allDay: true } : null;
+  }
+  return null;
+}
+
+function unescapeIcs(s) {
+  return String(s)
+    .replace(/\\n/gi, '\n')
+    .replace(/\\,/g, ',')
+    .replace(/\\;/g, ';')
+    .replace(/\\\\/g, '\\');
 }
 
 async function setMemory(env, user, { key, value }) {
