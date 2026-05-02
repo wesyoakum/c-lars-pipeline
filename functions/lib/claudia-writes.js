@@ -13,6 +13,27 @@
 
 import { all, one, run, batch as d1Batch, stmt } from './db.js';
 import { now, uuid } from './ids.js';
+import { auditStmt, diff as auditDiff } from './audit.js';
+
+// Map a writable table name to the entity_type used in the standard
+// audit_events trail. Pipeline's existing handlers use these singulars
+// (account, contact) — keep them aligned so Claudia's changes show up
+// alongside human-driven ones in any history view.
+const ENTITY_TYPE_BY_TABLE = {
+  accounts: 'account',
+  contacts: 'contact',
+};
+
+// Whitelisted fields per table for the diff computation on UPDATEs.
+// Anything not in this list is excluded from the audit_events
+// changes_json — keeps timestamps and IDs out of the trail.
+const AUDIT_FIELDS_BY_TABLE = {
+  accounts: ['name', 'segment', 'alias', 'parent_group', 'owner_user_id',
+    'phone', 'website', 'email', 'notes', 'address_billing', 'address_physical',
+    'is_active'],
+  contacts: ['account_id', 'first_name', 'last_name', 'title', 'email', 'phone',
+    'mobile', 'is_primary', 'notes'],
+};
 
 const UNDO_WINDOW_HOURS = 24;
 
@@ -46,25 +67,41 @@ export async function claudiaInsert(env, user, action, table, id, columnValues, 
   const insertSql = `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`;
   const insertParams = cols.map((c) => fullRow[c]);
 
-  const auditId = uuid();
+  const claudiaAuditId = uuid();
   const ts = now();
-  const auditSql = `INSERT INTO claudia_writes
+  const claudiaWriteSql = `INSERT INTO claudia_writes
     (id, user_id, action, ref_table, ref_id, before_json, after_json, batch_id, summary, created_at)
     VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`;
-  const auditParams = [
-    auditId, user.id, action, table, id,
+  const claudiaWriteParams = [
+    claudiaAuditId, user.id, action, table, id,
     JSON.stringify(fullRow),
     opts.batchId ?? null,
     opts.summary ?? null,
     ts,
   ];
 
-  await d1Batch(env.DB, [
+  // Also write to the standard Pipeline audit_events table so the
+  // change shows up in the normal history trail (alongside writes
+  // made via the regular UI). user_id is the human Claudia acted on
+  // behalf of; the summary tags it as "(via Claudia)" so anyone
+  // reviewing the history can tell.
+  const stmts = [
     stmt(env.DB, insertSql, insertParams),
-    stmt(env.DB, auditSql, auditParams),
-  ]);
+    stmt(env.DB, claudiaWriteSql, claudiaWriteParams),
+  ];
+  const entityType = ENTITY_TYPE_BY_TABLE[table];
+  if (entityType) {
+    stmts.push(auditStmt(env.DB, {
+      entityType,
+      entityId: id,
+      eventType: 'created',
+      user,
+      summary: ((opts.summary || `created ${entityType} ${id}`) + ' (via Claudia)').slice(0, 500),
+    }));
+  }
 
-  return { id, audit_id: auditId, action, ref_table: table, ref_id: id, after: fullRow };
+  await d1Batch(env.DB, stmts);
+  return { id, audit_id: claudiaAuditId, action, ref_table: table, ref_id: id, after: fullRow };
 }
 
 /**
@@ -114,12 +151,12 @@ export async function claudiaUpdate(env, user, action, table, id, columnValues, 
 
   const after = { ...before, ...columnValues };
 
-  const auditId = uuid();
-  const auditSql = `INSERT INTO claudia_writes
+  const claudiaAuditId = uuid();
+  const claudiaWriteSql = `INSERT INTO claudia_writes
     (id, user_id, action, ref_table, ref_id, before_json, after_json, batch_id, summary, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
-  const auditParams = [
-    auditId, user.id, action, table, id,
+  const claudiaWriteParams = [
+    claudiaAuditId, user.id, action, table, id,
     JSON.stringify(before),
     JSON.stringify(after),
     opts.batchId ?? null,
@@ -127,12 +164,31 @@ export async function claudiaUpdate(env, user, action, table, id, columnValues, 
     ts,
   ];
 
-  await d1Batch(env.DB, [
+  // Standard Pipeline audit trail too (changes-aware diff so the
+  // history view can show field-level deltas, same shape regular UI
+  // handlers produce).
+  const stmts = [
     stmt(env.DB, updateSql, updateParams),
-    stmt(env.DB, auditSql, auditParams),
-  ]);
+    stmt(env.DB, claudiaWriteSql, claudiaWriteParams),
+  ];
+  const entityType = ENTITY_TYPE_BY_TABLE[table];
+  const fields = AUDIT_FIELDS_BY_TABLE[table];
+  if (entityType && fields) {
+    const auditableDiff = auditDiff(before, after, fields);
+    if (auditableDiff) {
+      stmts.push(auditStmt(env.DB, {
+        entityType,
+        entityId: id,
+        eventType: 'updated',
+        user,
+        summary: ((opts.summary || `updated ${entityType} ${id}`) + ' (via Claudia)').slice(0, 500),
+        changes: auditableDiff,
+      }));
+    }
+  }
 
-  return { id, audit_id: auditId, before, after, diffs };
+  await d1Batch(env.DB, stmts);
+  return { id, audit_id: claudiaAuditId, before, after, diffs };
 }
 
 /**
@@ -199,7 +255,24 @@ export async function claudiaUndo(env, user, auditId, opts = {}) {
     [ts, opts.reason ?? null, auditId]
   );
 
-  await d1Batch(env.DB, [reverseStmt, markUndoneStmt]);
+  // Also reflect the undo in the standard audit_events trail so the
+  // history view shows the create + the revert (or update + the
+  // revert) in chronological order.
+  const stmts = [reverseStmt, markUndoneStmt];
+  const entityType = ENTITY_TYPE_BY_TABLE[audit.ref_table];
+  if (entityType) {
+    const reasonNote = opts.reason ? ` — ${opts.reason}` : '';
+    const eventType = audit.before_json == null ? 'created_reverted' : 'updated_reverted';
+    stmts.push(auditStmt(env.DB, {
+      entityType,
+      entityId: audit.ref_id,
+      eventType,
+      user,
+      summary: `Reverted Claudia write ${audit.action}${reasonNote} (via Claudia undo)`.slice(0, 500),
+    }));
+  }
+
+  await d1Batch(env.DB, stmts);
 
   return {
     ok: true,
