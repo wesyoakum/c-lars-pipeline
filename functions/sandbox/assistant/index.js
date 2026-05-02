@@ -9,9 +9,29 @@
 // conversation list for an in-place swap (no full reload).
 
 import { all, one } from '../../lib/db.js';
-import { layout, html, escape, htmlResponse, subnavTabs } from '../../lib/layout.js';
+import { layout, html, escape, htmlResponse, raw, subnavTabs } from '../../lib/layout.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
+
+// Stylized brain + neural-circuit icon used for both the empty-state
+// intro and the optimistic typing indicator (where the three circuit
+// nodes are CSS-animated via .claudia-node-{1,2,3}).
+const CLAUDIA_ICON_SVG = `<svg class="claudia-icon" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <path d="M24 11 C 14 11, 6 19, 6 28 C 2 30, 2 38, 6 41 C 5 47, 10 53, 17 53 C 18 56, 22 58, 26 56 C 28 58, 33 57, 33 53 L 33 16 C 33 13, 30 11, 27 11 L 24 11 Z" fill="currentColor"/>
+  <g fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round">
+    <path d="M14 22 Q 22 20, 28 23"/>
+    <path d="M10 32 Q 18 32, 28 32"/>
+    <path d="M14 42 Q 22 44, 28 41"/>
+  </g>
+  <g stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M33 22 H46"/>
+    <path d="M33 32 H48"/>
+    <path d="M33 42 H40 V50 H46"/>
+  </g>
+  <circle class="claudia-node claudia-node-1" cx="50" cy="22" r="3.5" fill="currentColor"/>
+  <circle class="claudia-node claudia-node-2" cx="52" cy="32" r="3"   fill="#fff" stroke="currentColor" stroke-width="3"/>
+  <circle class="claudia-node claudia-node-3" cx="50" cy="50" r="3.5" fill="currentColor"/>
+</svg>`;
 
 export async function onRequestGet(context) {
   const { env, data } = context;
@@ -107,13 +127,36 @@ export async function onRequestGet(context) {
       }
       .assistant-form button:hover { background: #1245cc; }
       .assistant-form button:disabled { opacity: 0.6; cursor: wait; }
-      .assistant-pending {
-        align-self: flex-start; background: #f1f3f7; color: #888;
-        padding: 0.6rem 0.85rem; border-radius: 10px; font-style: italic;
-        font-size: 14px;
+      .claudia-icon {
+        width: 28px; height: 28px;
+        color: #2566ff;
+        flex-shrink: 0;
       }
-      .htmx-request .assistant-pending { display: block; }
-      .assistant-pending { display: none; }
+      .claudia-icon-lg { width: 56px; height: 56px; }
+      .assistant-typing {
+        align-self: flex-start;
+        display: inline-flex; align-items: center;
+        background: transparent;
+        padding: 0.4rem 0.5rem;
+      }
+      /* Animate the three circuit nodes inside the icon when it lives
+         in a typing indicator. transform-box keeps SVG transforms
+         centered on each node's own bounding box. */
+      .assistant-typing .claudia-node {
+        transform-box: fill-box;
+        transform-origin: center;
+        animation: claudia-node-pulse 1.4s infinite ease-in-out both;
+      }
+      .assistant-typing .claudia-node-1 { animation-delay: 0s; }
+      .assistant-typing .claudia-node-2 { animation-delay: 0.2s; }
+      .assistant-typing .claudia-node-3 { animation-delay: 0.4s; }
+      @keyframes claudia-node-pulse {
+        0%, 100% { opacity: 0.45; transform: scale(0.85); }
+        50%      { opacity: 1;    transform: scale(1.25); }
+      }
+      .assistant-empty-icon {
+        display: flex; flex-direction: column; align-items: center; gap: 0.6rem;
+      }
       .claudia-obs-panel {
         max-width: 880px; margin: 0.75rem auto 0; padding: 0 1rem;
         display: flex; flex-direction: column; gap: 0.5rem;
@@ -143,10 +186,14 @@ export async function onRequestGet(context) {
       <div id="assistant-messages" class="assistant-messages">
         ${messages.length === 0
           ? html`<div class="assistant-empty">
-              <strong>Claudia</strong> — your personal Pipeline assistant. Read-only access to
-              every account, opportunity, task, quote, contact, and the rest of the schema.
-              Ask about your funnel, your next due task, who owns what — or tell me something
-              to remember (travel prefs, ongoing context, "remind me about X").
+              <div class="assistant-empty-icon">
+                ${raw(CLAUDIA_ICON_SVG.replace('claudia-icon"', 'claudia-icon claudia-icon-lg"'))}
+                <strong>Claudia</strong>
+              </div>
+              Your personal Pipeline assistant. Read-only access to every account, opportunity,
+              task, quote, contact, and the rest of the schema. Ask about your funnel, your
+              next due task, who owns what — or tell me something to remember
+              (travel prefs, ongoing context, "remind me about X").
             </div>`
           : messages.map(renderMessage)}
       </div>
@@ -156,7 +203,6 @@ export async function onRequestGet(context) {
         hx-target="#assistant-messages"
         hx-swap="innerHTML"
         hx-disabled-elt="find textarea, find button"
-        hx-on::after-request="if(event.detail.successful){ this.querySelector('textarea').value=''; this.querySelector('textarea').focus(); document.getElementById('assistant-messages').scrollTop = 999999; }"
       >
         <textarea
           name="text"
@@ -170,15 +216,59 @@ export async function onRequestGet(context) {
       </form>
     </div>
     <script>
-      // Auto-grow textarea up to its max-height.
+      const CLAUDIA_ICON_HTML = ${raw(JSON.stringify(CLAUDIA_ICON_SVG))};
       (function () {
-        const ta = document.querySelector('.assistant-form textarea');
-        if (!ta) return;
+        const form = document.querySelector('.assistant-form');
+        if (!form) return;
+        const ta = form.querySelector('textarea');
+        const list = document.getElementById('assistant-messages');
+
+        // Auto-grow textarea up to its max-height.
         const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 180) + 'px'; };
         ta.addEventListener('input', grow);
-        // Scroll to bottom on initial load.
-        const list = document.getElementById('assistant-messages');
+
+        // Initial scroll-to-bottom.
         if (list) list.scrollTop = list.scrollHeight;
+
+        // BEFORE the HTMX request fires: optimistically append the user's
+        // message and a typing indicator so the chat feels instant.
+        // The server's response replaces #assistant-messages entirely, so
+        // both of these get superseded by the canonical content.
+        form.addEventListener('htmx:beforeRequest', () => {
+          const value = ta.value.trim();
+          if (!value || !list) return;
+
+          // Drop the empty-state intro on first send.
+          const empty = list.querySelector('.assistant-empty');
+          if (empty) empty.remove();
+
+          // Optimistic user bubble.
+          const userMsg = document.createElement('div');
+          userMsg.className = 'assistant-msg user';
+          userMsg.textContent = value;
+          list.appendChild(userMsg);
+
+          // Brain-circuit typing indicator (animated via CSS).
+          const typing = document.createElement('div');
+          typing.className = 'assistant-typing';
+          typing.id = 'assistant-typing-indicator';
+          typing.innerHTML = CLAUDIA_ICON_HTML;
+          list.appendChild(typing);
+
+          // Clear textarea and shrink it back to one row immediately.
+          ta.value = '';
+          grow();
+          list.scrollTop = list.scrollHeight;
+        });
+
+        // AFTER the response: refocus and re-scroll. The optimistic bubble
+        // and typing indicator are gone because the swap replaced the list.
+        form.addEventListener('htmx:afterRequest', (event) => {
+          if (event.detail && event.detail.successful) {
+            ta.focus();
+            if (list) list.scrollTop = list.scrollHeight;
+          }
+        });
       })();
     </script>
   `;
