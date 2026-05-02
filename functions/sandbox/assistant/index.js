@@ -16,6 +16,7 @@ import {
   partitionDocs,
 } from '../../lib/claudia-documents-render.js';
 import { ICON_PAPERCLIP, ICON_MIC } from '../../lib/icons.js';
+import { renderMarkdown } from '../../lib/claudia-markdown.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 
@@ -107,11 +108,11 @@ export async function onRequestGet(context) {
       .assistant-wrap {
         max-width: 880px; margin: 0 auto; padding: 1rem;
         display: flex; flex-direction: column;
-        height: calc(100vh - 160px); min-height: 480px;
+        min-height: calc(100vh - 200px);
       }
       .assistant-messages {
-        flex: 1; overflow-y: auto; padding: 0.5rem 0;
-        display: flex; flex-direction: column; gap: 0.75rem;
+        flex: 1; padding: 0.5rem 0;
+        display: flex; flex-direction: column; gap: 0.85rem;
       }
       /* Minimalist scrollbar — same shape as the table scrollbars in
          pipeline.css (.opp-list-hscroll). Applies to the chat messages
@@ -135,38 +136,105 @@ export async function onRequestGet(context) {
       /* Floating scroll-to-top / scroll-to-bottom buttons over the
          messages pane. Hidden by default; .visible class toggled by JS
          based on current scroll position. */
+      /* Scroll-to-top / scroll-to-bottom: page-level since the chat is
+         now page-scrollable. Pinned to the right of the chat column,
+         just above the sticky form. Visible only when the page has
+         enough scroll AND the user isn't already at that edge. */
       .chat-scroll-jump {
-        position: absolute; right: 14px; z-index: 4;
-        width: 30px; height: 30px; border-radius: 50%;
-        background: rgba(255, 255, 255, 0.92);
+        position: fixed; right: 332px; z-index: 7;
+        width: 32px; height: 32px; border-radius: 50%;
+        background: rgba(255, 255, 255, 0.95);
         border: 1px solid #d0d0d5; color: #4b5563; cursor: pointer;
         display: flex; align-items: center; justify-content: center;
         opacity: 0; pointer-events: none;
-        transition: opacity 0.15s ease, transform 0.15s ease;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        transition: opacity 0.15s ease;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
       }
       .chat-scroll-jump:hover { color: #1a1a22; background: #fff; }
       .chat-scroll-jump.visible { opacity: 1; pointer-events: auto; }
-      #chat-scroll-top    { top: 90px; }
-      #chat-scroll-bottom { bottom: 90px; }
+      #chat-scroll-top    { bottom: 168px; }
+      #chat-scroll-bottom { bottom: 124px; }
       .chat-scroll-jump svg { width: 14px; height: 14px; }
+      @media (max-width: 1100px) {
+        /* Right sidebar at 280px in this breakpoint per .assistant-layout */
+        .chat-scroll-jump { right: 312px; }
+      }
+      @media (max-width: 800px) {
+        /* Sidebars stacked below; pin buttons to the right edge. */
+        .chat-scroll-jump { right: 16px; }
+      }
       .assistant-empty {
         margin: auto; color: #666; font-style: italic; text-align: center;
         max-width: 420px; line-height: 1.6;
       }
       .assistant-msg {
-        max-width: 80%; padding: 0.6rem 0.85rem; border-radius: 10px;
-        line-height: 1.45; white-space: pre-wrap; word-wrap: break-word;
-        font-size: 14px;
+        max-width: 80%; padding: 0.65rem 0.95rem; border-radius: 10px;
+        line-height: 1.55; word-wrap: break-word;
+        font-size: 14px; position: relative;
       }
       .assistant-msg.user {
         align-self: flex-end; background: #2566ff; color: #fff;
         border-bottom-right-radius: 2px;
       }
+      .assistant-msg.user .assistant-msg-body span {
+        white-space: pre-wrap; /* preserve user newlines without rendering markdown */
+      }
       .assistant-msg.assistant {
         align-self: flex-start; background: #f1f3f7; color: #1a1a22;
         border-bottom-left-radius: 2px;
+        max-width: 92%; /* her replies are usually denser; give them more room */
       }
+      /* Markdown-rendered body styling — tighter than default browser
+         margins, friendlier line-height, indented lists. */
+      .assistant-msg-body { margin: 0; }
+      .assistant-msg-body > *:first-child { margin-top: 0; }
+      .assistant-msg-body > *:last-child  { margin-bottom: 0; }
+      .assistant-msg-body p { margin: 0 0 0.5em; }
+      .assistant-msg-body p:last-child { margin-bottom: 0; }
+      .assistant-msg-body strong { font-weight: 600; }
+      .assistant-msg-body em { font-style: italic; }
+      .assistant-msg-body code {
+        background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 0.92em;
+      }
+      .assistant-msg.user .assistant-msg-body code {
+        background: rgba(255,255,255,0.18); color: inherit;
+      }
+      .assistant-msg-body a { color: inherit; text-decoration: underline; }
+      .assistant-msg-body ul,
+      .assistant-msg-body ol { margin: 0.25em 0 0.5em; padding-left: 1.4em; }
+      .assistant-msg-body ul:last-child,
+      .assistant-msg-body ol:last-child { margin-bottom: 0; }
+      .assistant-msg-body li { margin: 0.15em 0; }
+      .assistant-msg-body h3,
+      .assistant-msg-body h4,
+      .assistant-msg-body h5,
+      .assistant-msg-body h6 {
+        margin: 0.35em 0 0.25em; font-weight: 600; font-size: 1em;
+      }
+
+      /* Per-message copy button — hover-only. Sits in the top-right of
+         the bubble, fades in on hover, fades out otherwise. */
+      .assistant-msg-copy {
+        position: absolute; top: 4px; right: 4px;
+        background: rgba(255,255,255,0.7); border: 1px solid rgba(0,0,0,0.1);
+        color: #6b7280; cursor: pointer;
+        padding: 3px 5px; border-radius: 4px; line-height: 0;
+        opacity: 0; transition: opacity 0.12s, background 0.12s, color 0.12s;
+      }
+      .assistant-msg-copy svg { width: 13px; height: 13px; display: block; }
+      .assistant-msg:hover .assistant-msg-copy { opacity: 1; }
+      .assistant-msg-copy:hover { background: #fff; color: #1a1a22; }
+      .assistant-msg-copy.copied {
+        background: #dcfce7; color: #15803d; border-color: #86efac; opacity: 1;
+      }
+      .assistant-msg.user .assistant-msg-copy {
+        background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.3); color: rgba(255,255,255,0.9);
+      }
+      .assistant-msg.user .assistant-msg-copy:hover { background: #fff; color: #1a1a22; }
+      /* The system-trigger ghost notes shouldn't have a copy button. */
+      .assistant-msg.system-trigger .assistant-msg-copy { display: none; }
       /* Auto-fired "[Just uploaded: ...]" trigger — small centered note,
          not a regular user bubble. */
       .assistant-msg.system-trigger {
@@ -179,7 +247,14 @@ export async function onRequestGet(context) {
       }
       .assistant-form {
         display: flex; gap: 0.5rem; align-items: flex-end;
-        padding-top: 0.75rem; border-top: 1px solid #e5e7eb;
+        padding: 0.75rem 0.75rem;
+        position: sticky; bottom: 0; z-index: 6;
+        background: rgba(248, 250, 252, 0.92);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        border-top: 1px solid #e5e7eb;
+        margin: 0 -0.5rem;
+        border-radius: 0;
       }
       .assistant-form textarea {
         flex: 1; resize: none; min-height: 44px; max-height: 180px;
@@ -483,8 +558,14 @@ export async function onRequestGet(context) {
         const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 180) + 'px'; };
         ta.addEventListener('input', grow);
 
-        // Initial scroll-to-bottom.
-        if (list) list.scrollTop = list.scrollHeight;
+        // Helper: scroll the WINDOW to the bottom of the page (chat
+        // is page-scroll now, not internal).
+        function scrollPageToBottom(behavior) {
+          window.scrollTo({ top: document.documentElement.scrollHeight, behavior: behavior || 'auto' });
+        }
+
+        // Initial scroll-to-bottom on load.
+        scrollPageToBottom();
 
         // BEFORE the HTMX request fires: optimistically append the user's
         // message and a typing indicator so the chat feels instant.
@@ -514,7 +595,7 @@ export async function onRequestGet(context) {
           // Clear textarea and shrink it back to one row immediately.
           ta.value = '';
           grow();
-          list.scrollTop = list.scrollHeight;
+          scrollPageToBottom();
         });
 
         // AFTER the response: refocus and re-scroll. The optimistic bubble
@@ -522,7 +603,7 @@ export async function onRequestGet(context) {
         form.addEventListener('htmx:afterRequest', (event) => {
           if (event.detail && event.detail.successful) {
             ta.focus();
-            if (list) list.scrollTop = list.scrollHeight;
+            scrollPageToBottom('smooth');
           }
         });
 
@@ -582,7 +663,7 @@ export async function onRequestGet(context) {
               note.style.color = '#b91c1c';
               note.textContent = 'Upload rejected — ' + rejectionMessages.join('; ');
               list.appendChild(note);
-              list.scrollTop = list.scrollHeight;
+              scrollPageToBottom();
             }
             if (successNames.length > 0) {
               triggerUploadAnalysis(successNames);
@@ -595,7 +676,7 @@ export async function onRequestGet(context) {
               note.style.color = '#b91c1c';
               note.textContent = 'Upload failed: ' + (err?.message || String(err));
               list.appendChild(note);
-              list.scrollTop = list.scrollHeight;
+              scrollPageToBottom();
             }
           } finally {
             attachBtn?.setAttribute('aria-busy', 'false');
@@ -620,7 +701,7 @@ export async function onRequestGet(context) {
             typing.id = 'assistant-typing-indicator';
             typing.innerHTML = CLAUDIA_ICON_HTML;
             list.appendChild(typing);
-            list.scrollTop = list.scrollHeight;
+            scrollPageToBottom();
           }
           try {
             const fd = new FormData();
@@ -629,7 +710,7 @@ export async function onRequestGet(context) {
             const respHtml = await res.text();
             if (list) {
               list.innerHTML = respHtml;
-              list.scrollTop = list.scrollHeight;
+              scrollPageToBottom();
             }
           } catch (err) {
             console.error('upload analysis trigger failed:', err);
@@ -645,35 +726,64 @@ export async function onRequestGet(context) {
           }
         });
 
-        // Floating scroll-to-top / scroll-to-bottom buttons. Visible
-        // only when (a) the messages pane is actually scrollable AND
-        // (b) the user isn't already pinned to that edge.
+        // Per-message copy button. Event delegation on the messages
+        // container so it survives HTMX swaps.
+        if (list) {
+          list.addEventListener('click', async (e) => {
+            const btn = e.target.closest('.assistant-msg-copy');
+            if (!btn) return;
+            const msg = btn.closest('.assistant-msg');
+            if (!msg) return;
+            // Prefer the original markdown source stored on the message
+            // div; fall back to rendered innerText if missing (e.g.
+            // optimistic bubbles that haven't been swapped yet).
+            let text = msg.dataset.copyText;
+            if (!text) {
+              const body = msg.querySelector('.assistant-msg-body');
+              text = body ? body.innerText : msg.innerText;
+            }
+            try {
+              await navigator.clipboard.writeText(text);
+              btn.classList.add('copied');
+              setTimeout(() => btn.classList.remove('copied'), 1100);
+            } catch (err) {
+              console.warn('clipboard write failed:', err);
+            }
+          });
+        }
+
+        // Floating scroll-to-top / scroll-to-bottom buttons. The chat
+        // is page-scroll now, so these operate on the WINDOW. Visible
+        // only when the page has enough scroll AND the user isn't
+        // already pinned to that edge.
         const scrollTopBtn = document.getElementById('chat-scroll-top');
         const scrollBottomBtn = document.getElementById('chat-scroll-bottom');
-        const SCROLL_EDGE_PX = 32;
+        const SCROLL_EDGE_PX = 64;
         function updateScrollButtons() {
-          if (!list || !scrollTopBtn || !scrollBottomBtn) return;
-          const scrollable = list.scrollHeight - list.clientHeight > SCROLL_EDGE_PX;
+          if (!scrollTopBtn || !scrollBottomBtn) return;
+          const docH = document.documentElement.scrollHeight;
+          const winH = window.innerHeight;
+          const scrollY = window.scrollY || window.pageYOffset || 0;
+          const scrollable = docH - winH > SCROLL_EDGE_PX;
           if (!scrollable) {
             scrollTopBtn.classList.remove('visible');
             scrollBottomBtn.classList.remove('visible');
             return;
           }
-          const atTop = list.scrollTop <= SCROLL_EDGE_PX;
-          const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight <= SCROLL_EDGE_PX;
+          const atTop = scrollY <= SCROLL_EDGE_PX;
+          const atBottom = docH - scrollY - winH <= SCROLL_EDGE_PX;
           scrollTopBtn.classList.toggle('visible', !atTop);
           scrollBottomBtn.classList.toggle('visible', !atBottom);
         }
-        if (list) list.addEventListener('scroll', updateScrollButtons, { passive: true });
+        window.addEventListener('scroll', updateScrollButtons, { passive: true });
+        window.addEventListener('resize', updateScrollButtons);
         if (scrollTopBtn) {
           scrollTopBtn.addEventListener('click', () => {
-            list?.scrollTo({ top: 0, behavior: 'smooth' });
+            window.scrollTo({ top: 0, behavior: 'smooth' });
           });
         }
         if (scrollBottomBtn) {
-          scrollBottomBtn.addEventListener('click', () => {
-            list?.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
-          });
+          scrollBottomBtn.addEventListener('click', () => scrollPageToBottom('smooth'));
         }
         // Recompute after any HTMX swap (new messages can change scrollability)
         // and on initial load. Use a small timeout so layout has settled.
@@ -809,7 +919,26 @@ export async function onRequestGet(context) {
 }
 
 function renderMessage(m) {
-  return html`<div class="assistant-msg ${m.role}">${escape(m.text)}</div>`;
+  // Synthetic upload-trigger messages render as a centered ghost note.
+  const isUploadTrigger = m.role === 'user' && /^\[(?:just\s+)?uploaded:/i.test(String(m.text || '').trim());
+  if (isUploadTrigger) {
+    return html`<div class="assistant-msg user system-trigger">${escape(m.text)}</div>`;
+  }
+  // Assistant turns: render markdown (bold, lists, links, code spans).
+  // User turns: plain escaped text wrapped in a span so white-space:
+  // pre-wrap works (preserves line breaks the user typed).
+  // data-copy-text holds the original markdown source for the copy
+  // button. The body is wrapped in .assistant-msg-body so the copy
+  // button (a sibling) is excluded from innerText fallbacks.
+  const body = m.role === 'assistant'
+    ? raw(renderMarkdown(m.text))
+    : html`<span>${m.text}</span>`;
+  return html`<div class="assistant-msg ${m.role}" data-copy-text="${m.text}">
+    <div class="assistant-msg-body">${body}</div>
+    <button type="button" class="assistant-msg-copy" aria-label="Copy message" title="Copy">
+      ${raw('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>')}
+    </button>
+  </div>`;
 }
 
 function renderObservation(o) {

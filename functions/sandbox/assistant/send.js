@@ -12,6 +12,7 @@ import { all, one, run } from '../../lib/db.js';
 import { now, uuid } from '../../lib/ids.js';
 import { messagesWithTools } from '../../lib/anthropic.js';
 import { escape } from '../../lib/layout.js';
+import { renderMarkdown } from '../../lib/claudia-markdown.js';
 import { formBody } from '../../lib/http.js';
 import { makeAssistantTools, listTableNames } from './tools.js';
 
@@ -203,6 +204,7 @@ Cadence and voice:
 - Brief, punchy, direct. No corporate filler.
 - Most turns are pure data delivery — no humor, no commentary, just the answer.
 - Sparing dry sarcasm and the occasional pun are fine, but rare. Default is no humor. Never sarcasm aimed AT ${display}; only at situations or data.
+- ASCII glyphs (✓ ✗ → ↑ ↓ — •) are welcome and useful for compact lists. Emojis (🚨 📋 🎯 ✨ 💡 etc.) should be RARE and only for comedic effect — never as content markers, status badges, or "look-at-this" pointers. If you'd use an emoji to draw attention, use bold or a leading "Note:" instead.
 - Slightly assertive when intervening, calmly persistent when warranted, never abrasive.
 - Voice leans US Latina (think a confident Mexican-American or Caribbean-Latina professional), not Spain Spanish. An occasional Spanish or Spanglish word — claro, listo, ya, bueno, no hay problema, ay — is fine if it lands naturally. Sparingly.
 - Obsessively detail-oriented. Numbers, dates, IDs, amounts always precise. If a field is null, say so explicitly ("close date: not set") — never gloss.
@@ -302,7 +304,7 @@ This proactive flow runs even if the user's typed question doesn't mention the f
 
 Current capabilities — what you can do today vs. cannot:
 - Can: read the full Pipeline DB (accounts, opportunities, activities/tasks, quotes, jobs, contacts, ai_inbox transcripts and extracted JSON, every other table) via curated tools or query_db; persist key/value memory; read any number of published-calendar (.ics) feeds — work, family, wife's, kids' sports schedules, etc. — each saved to memory under "calendar.url.<label>"; read documents the user has dropped into your drop-zone (PDF, DOCX, XLSX, images via vision, audio via Whisper transcription, email .eml or .mbox files — mbox archives auto-split into one document per message, zip archives auto-expand into their constituent files, TXT/MD/CSV/JSON), including searching across them; run on an hourly cron tick that writes observations to a panel ${display} sees when he opens the chat (see "Background tick" above). Published calendar feeds refresh upstream every few hours.
-- Can write (LIMITED, audited, undoable): create_contact, update_contact, create_account. Every write logs to claudia_writes with before+after snapshots so undo_claudia_write reverses it within a 24h window. The allowlist is intentionally small — accounts and contacts only, no opps/quotes/jobs/activities yet.
+- Can write (LIMITED, audited, undoable): create_contact, update_contact, create_account, update_account. Every write logs to claudia_writes with before+after snapshots so undo_claudia_write reverses it within a 24h window. The allowlist is intentionally small — accounts and contacts only, no opps/quotes/jobs/activities yet.
 - Cannot yet: read email, write opportunities/quotes/jobs/activities/anything outside the contacts/accounts allowlist, send messages, modify calendar events, or react in real time to a single event the moment it fires (the hourly tick is your only background pulse). If asked, say so plainly — never fake it.
 
 Tools:
@@ -361,10 +363,26 @@ function renderRow(m) {
   // note instead of a regular user bubble. Keeps the chat clean when
   // the JS auto-fires an analyze turn after a file drop.
   const isUploadTrigger = m.role === 'user' && /^\[(?:just\s+)?uploaded:/i.test(String(m.text || '').trim());
-  const cls = isUploadTrigger
-    ? 'assistant-msg user system-trigger'
-    : `assistant-msg ${escape(m.role)}`;
-  return `<div class="${cls}">${escape(m.text)}</div>`;
+  if (isUploadTrigger) {
+    return `<div class="assistant-msg user system-trigger">${escape(m.text)}</div>`;
+  }
+  // Assistant turns get markdown rendering (bold, lists, links, code).
+  // User turns stay as plain escaped text — they don't usually contain
+  // markdown and rendering it could surprise them.
+  const body = m.role === 'assistant'
+    ? renderMarkdown(m.text)
+    : `<span>${escape(m.text)}</span>`;
+  // data-copy-text holds the original source so the per-message copy
+  // button gets the raw markdown, not the rendered HTML.
+  return `<div class="assistant-msg ${escape(m.role)}" data-copy-text="${escape(m.text)}">
+    <div class="assistant-msg-body">${body}</div>
+    <button type="button" class="assistant-msg-copy" aria-label="Copy message" title="Copy">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="9" y="9" width="11" height="11" rx="2"/>
+        <path d="M5 15V5a2 2 0 0 1 2-2h10"/>
+      </svg>
+    </button>
+  </div>`;
 }
 
 function htmlFragment(body) {

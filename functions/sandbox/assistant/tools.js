@@ -268,6 +268,36 @@ export function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'update_account',
+      description:
+        'Update specific fields on an existing account. Pass only the fields you want to change. ' +
+        'Returns the diffs applied + an audit_id for undo. Common uses: rename a stub account to ' +
+        'its full company name, set or change the alias, fill in segment / parent_group / website / ' +
+        'notes after research. Always confirm with the user before renaming an existing account ' +
+        '(it will be visible to other Pipeline users and shows up in opp / quote / contact links).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id:               { type: 'string', description: 'Account id to update.' },
+          name:             { type: 'string' },
+          segment:          { type: 'string' },
+          alias:            { type: 'string' },
+          parent_group:     { type: 'string' },
+          owner_user_id:    { type: 'string' },
+          phone:            { type: 'string' },
+          website:          { type: 'string' },
+          email:            { type: 'string' },
+          notes:            { type: 'string' },
+          address_billing:  { type: 'string' },
+          address_physical: { type: 'string' },
+          is_active:        { type: 'boolean' },
+          batch_id:         { type: 'string' },
+          summary:          { type: 'string' },
+        },
+        required: ['id'],
+      },
+    },
+    {
       name: 'create_account',
       description:
         'Create a new account (company / customer). Required: name. Optional: segment, alias, ' +
@@ -418,6 +448,8 @@ export function makeAssistantTools({ env, user }) {
         return updateContact(env, user, input);
       case 'create_account':
         return createAccount(env, user, input);
+      case 'update_account':
+        return updateAccount(env, user, input);
       case 'undo_claudia_write':
         return undoClaudiaWrite(env, user, input);
       case 'list_recent_writes':
@@ -818,6 +850,42 @@ async function createAccount(env, user, input = {}) {
     name,
     summary,
   };
+}
+
+async function updateAccount(env, user, input = {}) {
+  const id = String(input.id || '').trim();
+  if (!id) throw new Error('update_account requires id.');
+
+  const updatable = ['name', 'segment', 'alias', 'parent_group', 'owner_user_id',
+    'phone', 'website', 'email', 'notes', 'address_billing', 'address_physical'];
+  const fields = {};
+  for (const k of updatable) {
+    if (k in input) fields[k] = trimOrNull(input[k]);
+  }
+  if ('is_active' in input) fields.is_active = input.is_active ? 1 : 0;
+  if (Object.keys(fields).length === 0) {
+    return { error: 'no_fields', id, message: 'No updatable fields supplied.' };
+  }
+
+  const summary = input.summary || `updated account ${id} (${Object.keys(fields).join(', ')})`;
+  try {
+    const result = await claudiaUpdate(env, user, 'update_account', 'accounts', id, fields, {
+      batchId: input.batch_id,
+      summary,
+    });
+    if (result.no_change) {
+      return { ok: true, id, no_change: true, message: 'Nothing to update — supplied fields already match.' };
+    }
+    return {
+      ok: true,
+      id,
+      audit_id: result.audit_id,
+      diffs: result.diffs,
+      summary,
+    };
+  } catch (err) {
+    return { error: 'update_failed', id, message: err?.message || String(err) };
+  }
 }
 
 async function undoClaudiaWrite(env, user, { audit_id, reason } = {}) {
