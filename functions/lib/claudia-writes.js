@@ -14,6 +14,22 @@
 import { all, one, run, batch as d1Batch, stmt } from './db.js';
 import { now, uuid } from './ids.js';
 import { auditStmt, diff as auditDiff } from './audit.js';
+import { CLAUDIA_USER_ID } from './auth.js';
+
+// One in-memory cached lookup of Claudia's users-table row. The row
+// is seeded by migrations/0073 and never mutates at runtime, so a
+// per-process memo is fine.
+let _claudiaUserCache = null;
+async function getClaudiaUser(env) {
+  if (_claudiaUserCache) return _claudiaUserCache;
+  const row = await one(
+    env.DB,
+    'SELECT id, email, display_name, role FROM users WHERE id = ?',
+    [CLAUDIA_USER_ID]
+  );
+  if (row) _claudiaUserCache = row;
+  return row;
+}
 
 // Map a writable table name to the entity_type used in the standard
 // audit_events trail. Pipeline's existing handlers use these singulars
@@ -81,22 +97,24 @@ export async function claudiaInsert(env, user, action, table, id, columnValues, 
   ];
 
   // Also write to the standard Pipeline audit_events table so the
-  // change shows up in the normal history trail (alongside writes
-  // made via the regular UI). user_id is the human Claudia acted on
-  // behalf of; the summary tags it as "(via Claudia)" so anyone
-  // reviewing the history can tell.
+  // change shows up in the normal history trail. user_id is set to
+  // Claudia (her users-table row) so the entity history naturally
+  // renders "Claudia" wherever it renders user names. The summary
+  // tags which human triggered her so accountability is preserved.
   const stmts = [
     stmt(env.DB, insertSql, insertParams),
     stmt(env.DB, claudiaWriteSql, claudiaWriteParams),
   ];
   const entityType = ENTITY_TYPE_BY_TABLE[table];
   if (entityType) {
+    const claudiaUser = await getClaudiaUser(env);
+    const triggeredBy = user.display_name || user.email || user.id;
     stmts.push(auditStmt(env.DB, {
       entityType,
       entityId: id,
       eventType: 'created',
-      user,
-      summary: ((opts.summary || `created ${entityType} ${id}`) + ' (via Claudia)').slice(0, 500),
+      user: claudiaUser || user, // fall back to the human if Claudia's row is missing
+      summary: ((opts.summary || `created ${entityType} ${id}`) + ` (triggered by ${triggeredBy})`).slice(0, 500),
     }));
   }
 
@@ -166,7 +184,8 @@ export async function claudiaUpdate(env, user, action, table, id, columnValues, 
 
   // Standard Pipeline audit trail too (changes-aware diff so the
   // history view can show field-level deltas, same shape regular UI
-  // handlers produce).
+  // handlers produce). Attributed to Claudia's user record; summary
+  // notes which human triggered the change.
   const stmts = [
     stmt(env.DB, updateSql, updateParams),
     stmt(env.DB, claudiaWriteSql, claudiaWriteParams),
@@ -176,12 +195,14 @@ export async function claudiaUpdate(env, user, action, table, id, columnValues, 
   if (entityType && fields) {
     const auditableDiff = auditDiff(before, after, fields);
     if (auditableDiff) {
+      const claudiaUser = await getClaudiaUser(env);
+      const triggeredBy = user.display_name || user.email || user.id;
       stmts.push(auditStmt(env.DB, {
         entityType,
         entityId: id,
         eventType: 'updated',
-        user,
-        summary: ((opts.summary || `updated ${entityType} ${id}`) + ' (via Claudia)').slice(0, 500),
+        user: claudiaUser || user,
+        summary: ((opts.summary || `updated ${entityType} ${id}`) + ` (triggered by ${triggeredBy})`).slice(0, 500),
         changes: auditableDiff,
       }));
     }
@@ -263,12 +284,14 @@ export async function claudiaUndo(env, user, auditId, opts = {}) {
   if (entityType) {
     const reasonNote = opts.reason ? ` — ${opts.reason}` : '';
     const eventType = audit.before_json == null ? 'created_reverted' : 'updated_reverted';
+    const claudiaUser = await getClaudiaUser(env);
+    const triggeredBy = user.display_name || user.email || user.id;
     stmts.push(auditStmt(env.DB, {
       entityType,
       entityId: audit.ref_id,
       eventType,
-      user,
-      summary: `Reverted Claudia write ${audit.action}${reasonNote} (via Claudia undo)`.slice(0, 500),
+      user: claudiaUser || user,
+      summary: `Reverted Claudia write ${audit.action}${reasonNote} (triggered by ${triggeredBy})`.slice(0, 500),
     }));
   }
 

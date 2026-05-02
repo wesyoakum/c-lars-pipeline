@@ -20,6 +20,13 @@ import { uuid, now } from './ids.js';
 const DEV_USER_EMAIL = 'wes.yoakum@c-lars.com';
 const DEV_USER_NAME = 'Wes Yoakum';
 
+// Claudia is a real users-table row used for attributing AI-driven
+// Pipeline writes. The email is synthetic — there is no real inbox.
+// We REJECT any incoming Cloudflare Access request claiming this
+// email so the AI user can never be impersonated as a login.
+export const CLAUDIA_USER_ID = 'claudia-ai';
+export const CLAUDIA_USER_EMAIL = 'claudia@c-lars.com';
+
 /**
  * Resolve the current user for a Pages Functions request context.
  *
@@ -43,6 +50,13 @@ export async function resolveUser(request, env) {
 
   let email = headerEmail;
   let displayName = null;
+
+  // Defense in depth: refuse to authenticate as the synthetic Claudia
+  // user. She's never a real Access principal; if her email ever
+  // shows up in the header, treat it as a 401.
+  if (email && email === CLAUDIA_USER_EMAIL) {
+    return null;
+  }
 
   if (!email) {
     if (isProd) {
@@ -153,7 +167,10 @@ function emailToName(email) {
  */
 export function hasRole(user, minRole) {
   if (!user) return false;
-  const rank = { viewer: 1, sales: 2, admin: 3 };
+  // 'ai' sits below viewer — no rank-based permissions for Claudia.
+  // She mutates Pipeline only through her own code path
+  // (functions/lib/claudia-writes.js), which has its own table allowlist.
+  const rank = { ai: 0, viewer: 1, sales: 2, admin: 3 };
   if (minRole === 'service') return user.role === 'service' || user.role === 'admin';
   return (rank[user.role] ?? 0) >= (rank[minRole] ?? 0);
 }
