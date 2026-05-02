@@ -19,20 +19,42 @@
 // whether to flag the row visibly.
 
 import PizZip from 'pizzip';
+import * as XLSX from 'xlsx';
 import { aiBaseUrl, gatewayHeaders } from './ai-gateway.js';
+import { transcribeAudio } from './openai.js';
 
 const ANTHROPIC_VERSION = '2023-06-01';
 const PDF_EXTRACT_MODEL = 'claude-haiku-4-5-20251001'; // fast + cheap; full text dump doesn't need Sonnet
+const IMAGE_DESCRIBE_MODEL = 'claude-haiku-4-5-20251001';
 
 const TEXT_LIKE_TYPES = new Set([
   'text/plain',
   'text/markdown',
   'text/csv',
+  'text/tab-separated-values',
   'text/html',
   'text/xml',
   'application/json',
   'application/xml',
 ]);
+
+const IMAGE_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/jpg',
+  'image/gif',
+  'image/webp',
+]);
+
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp']);
+const XLSX_TYPES = new Set([
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+]);
+const XLSX_EXTS = new Set(['xlsx', 'xls', 'xlsm']);
+
+const AUDIO_TYPE_PREFIXES = ['audio/'];
+const AUDIO_EXTS = new Set(['mp3', 'wav', 'm4a', 'mp4', 'ogg', 'oga', 'flac', 'webm', 'aac', 'wma']);
 
 /**
  * Decide whether a content type is one we know how to extract.
@@ -49,8 +71,11 @@ export function classifyContentType(contentType, filename) {
   ) {
     return 'docx';
   }
+  if (IMAGE_TYPES.has(ct) || IMAGE_EXTS.has(ext)) return 'image';
+  if (XLSX_TYPES.has(ct) || XLSX_EXTS.has(ext)) return 'xlsx';
+  if (AUDIO_TYPE_PREFIXES.some((p) => ct.startsWith(p)) || AUDIO_EXTS.has(ext)) return 'audio';
   // Unknown content types but with a text-ish extension → treat as text.
-  if (['txt', 'md', 'markdown', 'csv', 'json', 'log'].includes(ext)) return 'text';
+  if (['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'log', 'xml', 'yaml', 'yml'].includes(ext)) return 'text';
   return null;
 }
 
@@ -84,6 +109,18 @@ export async function extractText(env, buffer, contentType, filename) {
     }
     if (kind === 'pdf') {
       const text = await extractPdfTextViaClaude(env, buffer);
+      return { text, status: text ? 'ready' : 'partial' };
+    }
+    if (kind === 'image') {
+      const text = await extractImageDescriptionViaClaude(env, buffer, contentType, filename);
+      return { text, status: text ? 'ready' : 'partial' };
+    }
+    if (kind === 'xlsx') {
+      const text = extractXlsxText(buffer);
+      return { text, status: text ? 'ready' : 'partial' };
+    }
+    if (kind === 'audio') {
+      const text = await extractAudioTranscript(env, buffer, contentType, filename);
       return { text, status: text ? 'ready' : 'partial' };
     }
   } catch (err) {
@@ -182,6 +219,108 @@ async function extractPdfTextViaClaude(env, buffer) {
     .join('')
     .trim();
   return text;
+}
+
+// ---------- Images (via Claude vision) ----------
+
+async function extractImageDescriptionViaClaude(env, buffer, contentType, filename) {
+  const key = env.ANTHROPIC_API_KEY;
+  if (!key) throw new Error('ANTHROPIC_API_KEY not configured for image description.');
+  const mediaType = normalizeImageMediaType(contentType, filename);
+  const base64 = bufferToBase64(buffer);
+  const body = {
+    model: env.ANTHROPIC_IMAGE_MODEL || IMAGE_DESCRIBE_MODEL,
+    max_tokens: 1500,
+    temperature: 0,
+    system:
+      'You convert images to plain text for a search index and Q&A. Describe the image so the ' +
+      'text is enough to answer questions about it later. Be specific. ' +
+      'If the image contains text (signs, slides, screenshots, scanned pages, equipment labels, ' +
+      'data sheets), transcribe ALL visible text verbatim — including numbers, units, model ' +
+      'numbers, and dates. ' +
+      'If it is a photograph, describe what is shown: subject, setting, key objects, any people ' +
+      '(by role/position only, never identify by name), notable details. ' +
+      'If it is a diagram, chart, or technical drawing, describe the structure (axes, sections, ' +
+      'flow, layout) and call out every label and numeric value. ' +
+      'Output PLAIN TEXT only — no markdown headings, no preamble, no commentary about being an ' +
+      'AI. Begin with one sentence summarizing what the image is, then the details.',
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: mediaType, data: base64 },
+          },
+          { type: 'text', text: `Filename: ${filename}\nDescribe this image.` },
+        ],
+      },
+    ],
+  };
+
+  const url = `${aiBaseUrl(env, 'anthropic')}/messages`;
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'x-api-key': key,
+      'anthropic-version': ANTHROPIC_VERSION,
+      'content-type': 'application/json',
+      ...gatewayHeaders(env),
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => '');
+    throw new Error(`Image description failed (${resp.status}): ${detail.slice(0, 400)}`);
+  }
+  const data = await resp.json();
+  return (data?.content || [])
+    .filter((b) => b?.type === 'text')
+    .map((b) => b.text)
+    .join('')
+    .trim();
+}
+
+function normalizeImageMediaType(contentType, filename) {
+  const ct = String(contentType || '').toLowerCase();
+  if (IMAGE_TYPES.has(ct) && ct !== 'image/jpg') return ct;
+  const ext = String(filename || '').toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '';
+  if (ext === 'png') return 'image/png';
+  if (ext === 'jpg' || ext === 'jpeg' || ct === 'image/jpg') return 'image/jpeg';
+  if (ext === 'gif') return 'image/gif';
+  if (ext === 'webp') return 'image/webp';
+  return 'image/png'; // safe fallback
+}
+
+// ---------- Audio (Whisper / gpt-4o-transcribe) ----------
+
+async function extractAudioTranscript(env, buffer, contentType, filename) {
+  // Re-wrap as a File so the existing transcribeAudio helper (which
+  // appends to FormData under the key 'file') receives a proper Blob
+  // with a sensible filename and content type.
+  const blob = new File([buffer], filename || 'audio', {
+    type: contentType || 'audio/mpeg',
+  });
+  const result = await transcribeAudio(env, blob);
+  return (result?.text || '').trim();
+}
+
+// ---------- Spreadsheets (xlsx) ----------
+
+function extractXlsxText(buffer) {
+  const wb = XLSX.read(new Uint8Array(buffer), { type: 'array' });
+  const parts = [];
+  for (const sheetName of wb.SheetNames) {
+    const sheet = wb.Sheets[sheetName];
+    if (!sheet) continue;
+    const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false }).trim();
+    if (!csv) continue;
+    parts.push(`# Sheet: ${sheetName}`);
+    parts.push(csv);
+    parts.push('');
+  }
+  return parts.join('\n').trim();
 }
 
 function bufferToBase64(buffer) {

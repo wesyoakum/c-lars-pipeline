@@ -11,7 +11,7 @@
 import { all, one } from '../../lib/db.js';
 import { layout, html, escape, htmlResponse, raw, subnavTabs } from '../../lib/layout.js';
 import { renderDocumentsPanel } from '../../lib/claudia-documents-render.js';
-import { ICON_PAPERCLIP } from '../../lib/icons.js';
+import { ICON_PAPERCLIP, ICON_MIC } from '../../lib/icons.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 
@@ -172,25 +172,56 @@ export async function onRequestGet(context) {
       .assistant-empty-icon {
         display: flex; flex-direction: column; align-items: center; gap: 0.6rem;
       }
-      /* ---- Documents panel + drop zone ---- */
+      /* ---- Layout: chat + docs sidebar ---- */
+      .assistant-layout {
+        display: flex; gap: 1rem;
+        max-width: 1280px; margin: 0 auto; padding: 0 1rem;
+        align-items: flex-start;
+      }
+      .assistant-layout .assistant-wrap {
+        flex: 1; min-width: 0; padding: 1rem 0; max-width: none;
+      }
+      .claudia-docs-sidebar {
+        flex: 0 0 300px;
+        position: sticky; top: 16px;
+        align-self: flex-start;
+        max-height: calc(100vh - 100px);
+        overflow-y: auto;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 0.6rem 0.7rem;
+        margin-top: 1rem;
+      }
+      .claudia-docs-sidebar h3 {
+        margin: 0 0 0.5rem 0; font-size: 11px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.05em; color: #64748b;
+      }
+      .claudia-docs-sidebar-empty {
+        font-size: 12px; color: #94a3b8; font-style: italic; line-height: 1.5;
+      }
+      @media (max-width: 900px) {
+        .assistant-layout { flex-direction: column; }
+        .claudia-docs-sidebar { width: 100%; flex: 1 1 auto; position: static; max-height: none; margin-top: 0; }
+      }
+
+      /* ---- Documents panel (rendered inside the sidebar) ---- */
       .claudia-docs-panel {
-        max-width: 880px; margin: 0.5rem auto 0; padding: 0 1rem;
+        margin: 0; padding: 0;
       }
       .claudia-docs-panel-empty { display: none; }
       .claudia-docs-list {
         display: flex; flex-direction: column; gap: 4px;
-        background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
-        padding: 6px;
       }
       .claudia-doc {
-        display: flex; align-items: center; gap: 0.5rem;
-        padding: 6px 10px; border-radius: 6px;
-        background: #fff; border: 1px solid transparent;
+        display: flex; align-items: flex-start; gap: 0.4rem;
+        padding: 6px 8px; border-radius: 6px;
+        background: #fff; border: 1px solid #e2e8f0;
       }
-      .claudia-doc:hover { border-color: #d0d0d5; }
+      .claudia-doc:hover { border-color: #cbd5e1; }
       .claudia-doc-main { flex: 1; min-width: 0; }
-      .claudia-doc-title { display: flex; gap: 6px; align-items: center; font-size: 13px; font-weight: 500; color: #1a1a22; }
-      .claudia-doc-filename { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 540px; }
+      .claudia-doc-title { display: flex; gap: 4px; align-items: center; font-size: 12px; font-weight: 500; color: #1a1a22; flex-wrap: wrap; }
+      .claudia-doc-filename { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
       .claudia-doc-meta { font-size: 11px; color: #6b7280; margin-top: 1px; }
       .claudia-doc-badge {
         font-size: 10px; padding: 1px 6px; border-radius: 999px;
@@ -217,7 +248,7 @@ export async function onRequestGet(context) {
 
       /* ---- Drop zone overlay (visible when dragging files over the wrap) ---- */
       .assistant-wrap.drag-active::after {
-        content: 'Drop to upload (PDF / DOCX / TXT / MD up to 25 MB)';
+        content: 'Drop to upload (PDF · DOCX · XLSX · images · audio · TXT/MD — up to 25 MB)';
         position: absolute; inset: 0;
         background: rgba(37, 102, 255, 0.08);
         border: 2px dashed #2566ff; border-radius: 12px;
@@ -228,14 +259,29 @@ export async function onRequestGet(context) {
       .assistant-wrap { position: relative; }
 
       /* ---- Attach button + busy spinner ---- */
-      .assistant-form .attach-btn {
+      .assistant-form .attach-btn,
+      .assistant-form .mic-btn {
         background: transparent; border: 1px solid #d0d0d5; color: #6b7280;
         padding: 10px 12px; border-radius: 8px; cursor: pointer;
         display: inline-flex; align-items: center; justify-content: center;
       }
-      .assistant-form .attach-btn:hover { background: #f1f3f7; color: #1a1a22; }
+      .assistant-form .attach-btn:hover,
+      .assistant-form .mic-btn:hover { background: #f1f3f7; color: #1a1a22; }
       .assistant-form .attach-btn[aria-busy="true"] { opacity: 0.6; cursor: wait; }
       .assistant-form input[type="file"] { display: none; }
+      /* Mic recording visual: pulsing red outline + dot. */
+      .assistant-form .mic-btn.recording {
+        background: #fee2e2; border-color: #ef4444; color: #b91c1c;
+        animation: claudia-mic-pulse 1.4s infinite ease-in-out;
+      }
+      @keyframes claudia-mic-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.5); }
+        50%      { box-shadow: 0 0 0 6px rgba(239, 68, 68, 0); }
+      }
+      .mic-recording-meta {
+        display: none; font-size: 11px; color: #b91c1c; margin-top: 4px;
+      }
+      .assistant-form.recording .mic-recording-meta { display: inline-flex; gap: 4px; align-items: center; }
       .claudia-obs-panel {
         max-width: 880px; margin: 0.75rem auto 0; padding: 0 1rem;
         display: flex; flex-direction: column; gap: 0.5rem;
@@ -261,7 +307,7 @@ export async function onRequestGet(context) {
         ${observations.map(renderObservation)}
       </div>
     ` : ''}
-    ${raw(renderDocumentsPanel(documents))}
+    <div class="assistant-layout">
     <div class="assistant-wrap">
       <div id="assistant-messages" class="assistant-messages">
         ${messages.length === 0
@@ -284,10 +330,13 @@ export async function onRequestGet(context) {
         hx-swap="innerHTML"
         hx-disabled-elt="find textarea, find #send-btn"
       >
-        <button type="button" class="attach-btn" id="attach-btn" aria-label="Attach document" title="Attach a document (PDF / DOCX / TXT / MD)">
+        <button type="button" class="attach-btn" id="attach-btn" aria-label="Attach document" title="Attach (PDF · DOCX · XLSX · image · audio · TXT / MD)">
           ${raw(ICON_PAPERCLIP)}
         </button>
-        <input type="file" id="attach-input" multiple accept=".pdf,.docx,.txt,.md,.markdown,.csv,.json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,text/csv,application/json">
+        <button type="button" class="mic-btn" id="mic-btn" aria-label="Record audio" title="Record audio (transcribed via Whisper)">
+          ${raw(ICON_MIC)}
+        </button>
+        <input type="file" id="attach-input" multiple accept=".pdf,.docx,.xlsx,.xls,.xlsm,.png,.jpg,.jpeg,.gif,.webp,.mp3,.wav,.m4a,.mp4,.ogg,.oga,.flac,.webm,.aac,.txt,.md,.markdown,.csv,.tsv,.json,.xml,.yaml,.yml,.log,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,image/png,image/jpeg,image/gif,image/webp,audio/*,text/plain,text/markdown,text/csv,text/tab-separated-values,application/json,application/xml">
         <textarea
           name="text"
           placeholder="Message..."
@@ -298,6 +347,12 @@ export async function onRequestGet(context) {
         ></textarea>
         <button type="submit" id="send-btn">Send</button>
       </form>
+    </div>
+    <aside class="claudia-docs-sidebar" id="claudia-docs-sidebar">
+      <h3>Documents</h3>
+      ${raw(renderDocumentsPanel(documents))}
+      ${documents.length === 0 ? html`<div class="claudia-docs-sidebar-empty">No documents yet. Use the attach button to upload a file (PDF, DOCX, XLSX, image, audio, TXT, MD), drag-drop anywhere on the chat, or hit the mic to record a voice note.</div>` : ''}
+    </aside>
     </div>
     <script>
       const CLAUDIA_ICON_HTML = ${raw(JSON.stringify(CLAUDIA_ICON_SVG))};
@@ -419,6 +474,85 @@ export async function onRequestGet(context) {
             dragDepth = 0;
             wrap.classList.remove('drag-active');
             uploadFiles(e.dataTransfer.files);
+          });
+        }
+
+        // ---- Microphone capture (browser → Whisper-transcribed audio file) ----
+        const micBtn = document.getElementById('mic-btn');
+        let mediaRecorder = null;
+        let recStream = null;
+        let recChunks = [];
+
+        function pickAudioMime() {
+          const candidates = [
+            'audio/webm;codecs=opus',
+            'audio/webm',
+            'audio/mp4',
+            'audio/ogg;codecs=opus',
+            'audio/ogg',
+          ];
+          for (const m of candidates) {
+            if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) {
+              return m;
+            }
+          }
+          return ''; // browser default
+        }
+
+        async function startRecording() {
+          if (!navigator.mediaDevices || !window.MediaRecorder) {
+            alert('Your browser does not support microphone capture.');
+            return;
+          }
+          try {
+            recStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          } catch (err) {
+            alert('Microphone access denied: ' + (err && err.message ? err.message : err));
+            return;
+          }
+          recChunks = [];
+          const mime = pickAudioMime();
+          mediaRecorder = mime ? new MediaRecorder(recStream, { mimeType: mime }) : new MediaRecorder(recStream);
+          mediaRecorder.addEventListener('dataavailable', (e) => {
+            if (e.data && e.data.size > 0) recChunks.push(e.data);
+          });
+          mediaRecorder.addEventListener('stop', async () => {
+            try {
+              recStream.getTracks().forEach((t) => t.stop());
+            } catch {}
+            recStream = null;
+            const blobType = mediaRecorder.mimeType || 'audio/webm';
+            const ext = blobType.includes('mp4') ? 'm4a' : blobType.includes('ogg') ? 'ogg' : 'webm';
+            const blob = new Blob(recChunks, { type: blobType });
+            const file = new File([blob], 'voice-note-' + Date.now() + '.' + ext, { type: blobType });
+            await uploadFiles([file]);
+            mediaRecorder = null;
+            recChunks = [];
+          });
+          mediaRecorder.start();
+          micBtn.classList.add('recording');
+          form.classList.add('recording');
+          micBtn.setAttribute('aria-pressed', 'true');
+          micBtn.title = 'Stop recording and upload';
+        }
+
+        function stopRecording() {
+          if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            try { mediaRecorder.stop(); } catch {}
+          }
+          micBtn.classList.remove('recording');
+          form.classList.remove('recording');
+          micBtn.setAttribute('aria-pressed', 'false');
+          micBtn.title = 'Record audio (transcribed via Whisper)';
+        }
+
+        if (micBtn) {
+          micBtn.addEventListener('click', () => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+              stopRecording();
+            } else {
+              startRecording();
+            }
           });
         }
       })();

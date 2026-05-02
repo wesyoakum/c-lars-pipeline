@@ -156,11 +156,14 @@ export function makeAssistantTools({ env, user }) {
     {
       name: 'list_documents',
       description:
-        "List documents the user has dropped into Claudia's drop-zone. Returns id, filename, " +
-        'content_type, size_bytes, retention, extraction_status, created_at, and a short preview ' +
-        'of the extracted text. Use this when the user asks about what is in their dropped files, ' +
-        'or before suggesting cleanups (filter to retention=auto for trashable candidates). ' +
-        'Trashed documents are excluded by default; pass include_trashed: true to see them.',
+        "List documents the user has dropped into Claudia's drop-zone. Files can be PDF, DOCX, " +
+        'XLSX, images (PNG / JPG / GIF / WEBP — extracted as a vision-generated description), ' +
+        'audio (MP3 / WAV / M4A / etc — transcribed via Whisper), or plain text variants ' +
+        '(TXT / MD / CSV / JSON / XML / YAML). Returns id, filename, content_type, size_bytes, ' +
+        'retention, extraction_status, created_at, and a short preview. Use this when the user ' +
+        'asks about what is in their dropped files, or before suggesting cleanups (filter to ' +
+        'retention=auto for trashable candidates). Trashed documents are excluded by default; ' +
+        'pass include_trashed: true to see them.',
       input_schema: {
         type: 'object',
         properties: {
