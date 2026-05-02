@@ -128,17 +128,28 @@ export function makeAssistantTools({ env, user }) {
     {
       name: 'get_calendar_events',
       description:
-        "Fetch upcoming events from the user's Outlook published-calendar feed. Requires the .ics " +
-        'URL to be saved in memory under the key "calendar.outlook_ics_url" (via set_memory). ' +
-        'Returns up to 100 events overlapping the [start, end] window, sorted by start time. ' +
-        'Defaults: start=now, end=start+7 days. Server caches the .ics fetch for 5 minutes per URL, ' +
-        'so do not worry about calling this repeatedly. ' +
-        'If no URL is set, returns an error explaining how to configure one — pass that on to the user.',
+        'Fetch events from any of the user\'s configured published-calendar feeds (Outlook, Google, ' +
+        'iCloud, sports schedules — anything that exposes an .ics URL). Each calendar URL is stored ' +
+        'in memory under a key of the form "calendar.url.<label>" — e.g. "calendar.url.work", ' +
+        '"calendar.url.family", "calendar.url.wife", "calendar.url.son_baseball". When the user ' +
+        'gives you a new URL conversationally, pick a short lowercase descriptive label and save ' +
+        'it via set_memory under that pattern. Ask the user for a label if it is ambiguous. ' +
+        'Behavior: with no `sources` arg, returns events merged across ALL configured calendars; ' +
+        'pass `sources: ["work", "family"]` to scope to specific labels. Each returned event has a ' +
+        '`source` field so you can tell which calendar it came from. Hard cap: 100 events, sorted ' +
+        'by start time. Defaults: now → now+7 days. The .ics fetch is cached server-side for 5 min ' +
+        'per URL — call freely. If NO calendars are configured, returns setup instructions you ' +
+        'should pass to the user.',
       input_schema: {
         type: 'object',
         properties: {
-          start: { type: 'string', description: 'ISO datetime (or date) for the start of the window. Default: now.' },
-          end: { type: 'string', description: 'ISO datetime (or date) for the end of the window. Default: start + 7 days.' },
+          start: { type: 'string', description: 'ISO datetime/date for window start. Default: now.' },
+          end: { type: 'string', description: 'ISO datetime/date for window end. Default: start + 7 days.' },
+          sources: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional list of label names (without the "calendar.url." prefix) to scope the query. Omit to query all configured calendars merged.',
+          },
         },
       },
     },
@@ -334,29 +345,45 @@ async function queryDb(env, { sql }) {
   return { rows, count: rows.length, sql: finalSql };
 }
 
-// ---------- Calendar (Outlook published .ics URL) ----------
+// ---------- Calendar (published .ics URLs, multi-source) ----------
 
-const CALENDAR_URL_KEY = 'calendar.outlook_ics_url';
+const CALENDAR_URL_KEY_PREFIX = 'calendar.url.';
 const CALENDAR_CACHE_SECONDS = 300;
 
-async function getCalendarEvents(env, user, { start, end } = {}) {
-  const urlRow = await one(
+const SETUP_INSTRUCTIONS =
+  'No calendar URLs configured yet. To add one: publish or share a calendar that exposes an .ics ' +
+  'feed (Outlook web → Settings → Calendar → Shared calendars → "Publish a calendar"; Google ' +
+  'Calendar → Settings → secret iCal URL; or any team / sports schedule that gives you an .ics ' +
+  'link). Then call set_memory with key "' + CALENDAR_URL_KEY_PREFIX + '<label>" and value = the ' +
+  'URL. The label is whatever short, lowercase descriptor you want — e.g. "work", "family", ' +
+  '"wife", "son_baseball". Multiple calendars are supported; add as many as you want.';
+
+async function getCalendarEvents(env, user, { start, end, sources } = {}) {
+  const rows = await all(
     env.DB,
-    'SELECT value FROM assistant_memory WHERE user_id = ? AND key = ?',
-    [user.id, CALENDAR_URL_KEY]
+    "SELECT key, value FROM assistant_memory WHERE user_id = ? AND key LIKE 'calendar.url.%'",
+    [user.id]
   );
-  if (!urlRow || !urlRow.value) {
-    return {
-      error: 'no_calendar_url',
-      message:
-        'No Outlook calendar URL configured. To set one up: in Outlook web → Settings → Calendar → Shared calendars → Publish a calendar (read-only / "Can view all details"). Copy the ICS link, then call set_memory with key "' +
-        CALENDAR_URL_KEY +
-        '" and value = the URL. After that I can fetch events.',
-    };
+
+  const allConfigured = rows
+    .map((r) => ({ label: r.key.slice(CALENDAR_URL_KEY_PREFIX.length), url: String(r.value || '').trim() }))
+    .filter((s) => /^https?:\/\//i.test(s.url));
+
+  if (allConfigured.length === 0) {
+    return { error: 'no_calendar_url', message: SETUP_INSTRUCTIONS };
   }
-  const url = String(urlRow.value).trim();
-  if (!/^https?:\/\//i.test(url)) {
-    return { error: 'invalid_url', message: 'Stored calendar URL is not http(s).' };
+
+  let working = allConfigured;
+  if (Array.isArray(sources) && sources.length > 0) {
+    const wanted = new Set(sources.map((s) => String(s).toLowerCase()));
+    working = allConfigured.filter((s) => wanted.has(s.label.toLowerCase()));
+    if (working.length === 0) {
+      return {
+        error: 'unknown_sources',
+        message: 'None of the requested sources matched any configured calendar.',
+        configured_labels: allConfigured.map((s) => s.label),
+      };
+    }
   }
 
   const startMs = start ? Date.parse(start) : Date.now();
@@ -365,33 +392,47 @@ async function getCalendarEvents(env, user, { start, end } = {}) {
     return { error: 'invalid_window', message: 'start/end could not be parsed, or end < start.' };
   }
 
-  let icsText;
-  try {
-    icsText = await fetchIcsCached(url);
-  } catch (err) {
-    return { error: 'fetch_failed', message: err.message || String(err) };
-  }
+  // Fetch + parse each calendar concurrently.
+  const fetched = await Promise.all(working.map(async (s) => {
+    try {
+      const text = await fetchIcsCached(s.url);
+      const raw = parseIcs(text);
+      const events = raw
+        .map(normalizeEvent)
+        .filter((e) => e.start_ms != null)
+        .filter((e) => e.start_ms < endMs && (e.end_ms ?? e.start_ms) > startMs)
+        .map((e) => ({
+          source: s.label,
+          summary: e.summary,
+          start: e.start,
+          end: e.end,
+          all_day: e.all_day,
+          location: e.location || undefined,
+          organizer: e.organizer || undefined,
+          start_ms: e.start_ms,
+        }));
+      return { source: s.label, ok: true, events };
+    } catch (err) {
+      return { source: s.label, ok: false, error: err.message || String(err), events: [] };
+    }
+  }));
 
-  const raw = parseIcs(icsText);
-  const events = raw
-    .map(normalizeEvent)
-    .filter((e) => e.start_ms != null)
-    .filter((e) => e.start_ms < endMs && (e.end_ms ?? e.start_ms) > startMs)
+  const merged = fetched
+    .flatMap((r) => r.events)
     .sort((a, b) => a.start_ms - b.start_ms)
     .slice(0, 100)
-    .map((e) => ({
-      summary: e.summary,
-      start: e.start,
-      end: e.end,
-      all_day: e.all_day,
-      location: e.location || undefined,
-      organizer: e.organizer || undefined,
-    }));
+    .map(({ start_ms, ...rest }) => rest); // drop internal sort key
 
   return {
-    events,
-    count: events.length,
+    events: merged,
+    count: merged.length,
     window: { start: new Date(startMs).toISOString(), end: new Date(endMs).toISOString() },
+    sources: fetched.map((r) => ({
+      label: r.source,
+      ok: r.ok,
+      count: r.events.length,
+      ...(r.error ? { error: r.error } : {}),
+    })),
   };
 }
 
