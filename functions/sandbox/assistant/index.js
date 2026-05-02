@@ -130,6 +130,13 @@ export async function onRequestGet(context) {
         align-self: flex-start; background: #f1f3f7; color: #1a1a22;
         border-bottom-left-radius: 2px;
       }
+      /* Auto-fired "[Just uploaded: ...]" trigger — small centered note,
+         not a regular user bubble. */
+      .assistant-msg.system-trigger {
+        align-self: center; background: transparent; color: #94a3b8;
+        font-size: 11px; font-style: italic; padding: 2px 8px;
+        max-width: none; border-radius: 0;
+      }
       .assistant-msg-meta {
         font-size: 11px; color: #888; margin-top: 4px;
       }
@@ -495,17 +502,55 @@ export async function onRequestGet(context) {
         async function uploadFiles(files) {
           if (!files || files.length === 0) return;
           attachBtn?.setAttribute('aria-busy', 'true');
+          const filenames = Array.from(files).map((f) => f && f.name).filter(Boolean);
           try {
             const fd = new FormData();
             for (const f of files) fd.append('file', f);
             const res = await fetch('/sandbox/assistant/documents', { method: 'POST', body: fd });
             const html = await res.text();
             applyPanelHtml(html);
+            // Now that the doc(s) are in D1 with extraction complete, fire
+            // an analyze turn so Claudia acknowledges + reads + suggests
+            // actions without the user having to ask.
+            if (filenames.length > 0) triggerUploadAnalysis(filenames);
           } catch (err) {
             console.error('upload failed:', err);
           } finally {
             attachBtn?.setAttribute('aria-busy', 'false');
             if (fileInput) fileInput.value = '';
+          }
+        }
+
+        async function triggerUploadAnalysis(filenames) {
+          const text = '[Just uploaded: ' + filenames.join(', ') + ']';
+          if (list) {
+            // Drop the empty-state intro on first activity.
+            const empty = list.querySelector('.assistant-empty');
+            if (empty) empty.remove();
+            // Centered ghost note (matches server-side .system-trigger styling).
+            const note = document.createElement('div');
+            note.className = 'assistant-msg user system-trigger';
+            note.textContent = text;
+            list.appendChild(note);
+            // Typing indicator while Claudia analyzes.
+            const typing = document.createElement('div');
+            typing.className = 'assistant-typing';
+            typing.id = 'assistant-typing-indicator';
+            typing.innerHTML = CLAUDIA_ICON_HTML;
+            list.appendChild(typing);
+            list.scrollTop = list.scrollHeight;
+          }
+          try {
+            const fd = new FormData();
+            fd.append('text', text);
+            const res = await fetch('/sandbox/assistant/send', { method: 'POST', body: fd });
+            const respHtml = await res.text();
+            if (list) {
+              list.innerHTML = respHtml;
+              list.scrollTop = list.scrollHeight;
+            }
+          } catch (err) {
+            console.error('upload analysis trigger failed:', err);
           }
         }
 

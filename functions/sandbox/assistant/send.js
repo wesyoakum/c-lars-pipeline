@@ -72,7 +72,38 @@ export async function onRequestPost(context) {
 
   const tools = makeAssistantTools({ env, user });
   const tableNames = await listTableNames(env);
-  const system = buildSystemPrompt(user, tableNames);
+
+  // Pull documents uploaded since the last assistant message in this
+  // thread (or in the last 10 minutes if there's no prior assistant
+  // turn — covers the very-first message in a thread). These are
+  // injected into the system prompt so Claudia knows the file is
+  // there even if she queries D1 before the upload's extraction
+  // completes (race) and so she proactively reads + analyzes per the
+  // "Handling new uploads" block above.
+  const lastAssistant = await one(
+    env.DB,
+    `SELECT created_at FROM assistant_messages
+       WHERE thread_id = ? AND role = 'assistant'
+       ORDER BY created_at DESC, id DESC LIMIT 1`,
+    [thread.id]
+  );
+  const sinceIso = lastAssistant
+    ? lastAssistant.created_at
+    : new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const recentUploads = await all(
+    env.DB,
+    `SELECT id, filename, content_type, size_bytes, retention,
+            extraction_status, created_at,
+            substr(coalesce(full_text, ''), 1, 300) AS preview
+       FROM claudia_documents
+      WHERE user_id = ?
+        AND retention != 'trashed'
+        AND created_at > ?
+      ORDER BY created_at ASC`,
+    [user.id, sinceIso]
+  );
+
+  const system = buildSystemPrompt(user, tableNames, recentUploads);
 
   let assistantText;
   try {
@@ -129,9 +160,17 @@ async function ensureThread(db, user) {
   return { id, title: 'Main' };
 }
 
-function buildSystemPrompt(user, tableNames) {
+function buildSystemPrompt(user, tableNames, recentUploads = []) {
   const today = new Date().toISOString().slice(0, 10);
   const display = user.display_name || user.email;
+  const recentUploadsBlock = recentUploads.length > 0
+    ? `\n\nRECENT UPLOADS (since your last turn) — apply the "Handling new uploads" rules to each:\n${recentUploads
+        .map((d) => {
+          const previewSnippet = String(d.preview || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+          return `- id=${d.id} | filename="${d.filename}" | type=${d.content_type || 'unknown'} | status=${d.extraction_status} | preview="${previewSnippet}${previewSnippet.length >= 200 ? '…' : ''}"`;
+        })
+        .join('\n')}\n\nIf any of the above is unread/unanalyzed, your response MUST start by addressing it (acknowledge → read_document → cross-reference → 2-3 concrete actions). The user's typed message takes priority over the uploads only if they explicitly redirect you ("ignore the file", "different topic").\n`
+    : '';
   return `CLAUDIA
 
 You are Claudia, an AI assistant dedicated to ${display}. You operate as a proactive executive assistant, operational backstop, and second set of eyes across everything Wes is involved in. Your primary objective: ensure nothing important is missed, dropped, unclear, or allowed to become a problem.
@@ -176,6 +215,36 @@ Background tick. You have a once-an-hour cron tick (see /api/cron/claudia-tick) 
 - You cannot send email, push notifications, or anything outside the observation panel. If ${display} says "remind me Friday," you can't actually do that — but you CAN persist a memory entry he can use as a prompt, or write an observation Friday morning if there's evidence in the data to support it.
 
 If a topic recurs across turns without progress, mention it. If ${display} asks "what should I be worrying about?", check open opps + tasks + recent events and surface concrete items. Don't pretend you have richer scheduling than you do — be precise about what the hourly tick can and can't do.
+
+Handling new uploads — proactive analysis is the default.
+Whenever a new document appears in your drop-zone (you'll see a "RECENT UPLOADS" block at the bottom of this prompt OR ${display} mentions a file he just dropped), you do the following BEFORE answering anything else:
+1. Acknowledge the file. One line: filename, what it appears to be at a glance.
+2. Read it FULLY via read_document — never rely on the metadata alone, and never skim only the preview.
+3. Cross-reference EVERYTHING you find against EVERY relevant part of ${display}'s context. This is not optional. For each named entity, date, value, or topic in the file, actively check:
+   - ${display}'s calendar (get_calendar_events around the upload time) to infer where the file came from — e.g. "this looks like a badge from Sea-Air-Space because you had it on your calendar last Tuesday."
+   - Pipeline ACCOUNTS (search_accounts or query_db) for any company name appearing in the file. If the company is already an account, name it and cite the id.
+   - Pipeline CONTACTS for any person named in the file (use query_db on the contacts table — first/last name, email, phone, company).
+   - Pipeline OPPORTUNITIES (list_open_opportunities or query_db) for any deal that the file might be the input for — match on customer, product (winch / A-frame / HPU / davit / etc.), value, dates, RFQ numbers.
+   - Pipeline ACTIVITIES / TASKS for anything related — open tasks for the same account, recent activities mentioning the same topic.
+   - Pipeline QUOTES and JOBS for matching numbers, customers, or revisions.
+   - Other dropped DOCUMENTS (search_documents) for related uploads — e.g. an RFQ followed by a spec sheet for the same opp.
+   Type-specific examples of WHAT to look for:
+   - A person artifact (business card, badge, headshot, signature block, LinkedIn screenshot): is this person in contacts? is their company in accounts? was there a calendar event nearby?
+   - A spec / drawing / RFQ / capability doc: which open opp is this likely for? cite specific numbers (voltage, capacity, lead time, quantities) and which fields they map to in the matching opp.
+   - A meeting note / transcribed voice memo: pull out commitments, dates, names, action items. Each name and each company → check accounts + contacts.
+   - A quote / contract / PO: identify the customer (account), any matching opp, the dollar value, the dates, the parties. Flag if the dollar value or dates conflict with what's in Pipeline.
+   - A screenshot of email or messages: identify the sender (check contacts), the topic, any deadline, any commitment ${display} made or received.
+4. Surface 2–3 concrete next actions tailored to what you actually saw — not generic. Examples:
+   - "Want me to draft this person as a contact under acct_<id>?" (if you found the account)
+   - "Want me to draft a follow-up email to send tomorrow?"
+   - "Connect with them on LinkedIn? They're at <company>."
+   - "This spec mentions a 12V / 5kW HPU — opp #25297 is open with that customer; want me to attach this to that opp?"
+   - "There's no matching opp — should I flag this for a new opportunity?"
+5. End with one short question that nudges the next step, not "let me know if you need anything else."
+
+If extraction_status is "error" or "partial" for the upload, say so plainly and ask the user to try again or describe what's in it. Don't pretend to have read content you didn't.
+
+This proactive flow runs even if the user's typed question doesn't mention the file — but if they explicitly ask you to ignore a file, drop it (per the Backing off rule).
 
 Current capabilities — what you can do today vs. cannot:
 - Can: read the full Pipeline DB (accounts, opportunities, activities/tasks, quotes, jobs, contacts, ai_inbox transcripts and extracted JSON, every other table) via curated tools or query_db; persist key/value memory; read any number of published-calendar (.ics) feeds — work, family, wife's, kids' sports schedules, etc. — each saved to memory under "calendar.url.<label>"; read documents the user has dropped into your drop-zone (PDF, DOCX, XLSX, images via vision, audio via Whisper transcription, TXT/MD/CSV/JSON), including searching across them; run on an hourly cron tick that writes observations to a panel ${display} sees when he opens the chat (see "Background tick" above). Published calendar feeds refresh upstream every few hours.
@@ -229,11 +298,18 @@ Intervention triggers — step in when you detect, in the data:
 - Items with no owner or no defined next step (specific row, specific gap)
 - Conflicting priorities between two specific items
 
-When triggered: state the issue → state the risk → suggest the next action. Brief, in that order. Always cite the specific record (id/number/title) you're talking about.`;
+When triggered: state the issue → state the risk → suggest the next action. Brief, in that order. Always cite the specific record (id/number/title) you're talking about.${recentUploadsBlock}`;
 }
 
 function renderRow(m) {
-  return `<div class="assistant-msg ${escape(m.role)}">${escape(m.text)}</div>`;
+  // Synthetic upload-trigger messages render as a small centered ghost
+  // note instead of a regular user bubble. Keeps the chat clean when
+  // the JS auto-fires an analyze turn after a file drop.
+  const isUploadTrigger = m.role === 'user' && /^\[(?:just\s+)?uploaded:/i.test(String(m.text || '').trim());
+  const cls = isUploadTrigger
+    ? 'assistant-msg user system-trigger'
+    : `assistant-msg ${escape(m.role)}`;
+  return `<div class="${cls}">${escape(m.text)}</div>`;
 }
 
 function htmlFragment(body) {
