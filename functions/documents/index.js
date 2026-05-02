@@ -63,11 +63,11 @@ export async function onRequestPost(context) {
       `INSERT INTO documents
          (id, opportunity_id, quote_id, job_id, account_id, cost_build_id, kind, title,
           original_filename, r2_key, mime_type, size_bytes, notes,
-          uploaded_at, uploaded_by_user_id)
-       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          uploaded_at, uploaded_by_user_id, created_at, updated_at)
+       VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [docId, opportunityId, quoteId, accountId, costBuildId, kind, displayTitle,
        originalFilename, r2Key, file.type || 'application/octet-stream',
-       file.size, notes, ts, user?.id]),
+       file.size, notes, ts, user?.id, ts, ts]),
     auditStmt(env.DB, {
       entityType: 'document',
       entityId: docId,

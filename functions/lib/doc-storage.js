@@ -72,11 +72,11 @@ export async function storeGeneratedDoc(env, {
       `INSERT INTO documents
          (id, opportunity_id, quote_id, job_id, account_id, cost_build_id,
           kind, title, original_filename, r2_key, mime_type, size_bytes,
-          notes, uploaded_at, uploaded_by_user_id)
-       VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+          notes, uploaded_at, uploaded_by_user_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
       [docId, opportunityId, quoteId ?? null, jobId ?? null,
        kind, displayTitle, filename, r2Key, mimeType,
-       buffer.byteLength, ts, user?.id ?? null]),
+       buffer.byteLength, ts, user?.id ?? null, ts, ts]),
     auditStmt(env.DB, {
       entityType: 'document',
       entityId: docId,

@@ -39,7 +39,9 @@ export async function onRequestPost(context) {
   }
 
   await batch(env.DB, [
-    stmt(env.DB, `UPDATE documents SET ${field} = ? WHERE id = ?`, [newValue, docId]),
+    stmt(env.DB,
+      `UPDATE documents SET ${field} = ?, updated_at = ? WHERE id = ?`,
+      [newValue, ts, docId]),
     auditStmt(env.DB, {
       entityType: 'document',
       entityId: docId,

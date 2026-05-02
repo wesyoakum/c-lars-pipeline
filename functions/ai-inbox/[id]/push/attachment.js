@@ -80,9 +80,9 @@ export async function onRequestPost(context) {
     INSERT INTO documents (
       id, opportunity_id, account_id, contact_id, quote_id, job_id,
       title, kind, r2_key, mime_type, size_bytes, original_filename,
-      uploaded_at, uploaded_by_user_id
+      uploaded_at, uploaded_by_user_id, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
   const alreadyAssoc = await isAlreadyAssociated(env.DB, params.id, refType, refId);
@@ -98,7 +98,7 @@ export async function onRequestPost(context) {
     stmt(env.DB, sql, [
       docId, oppId, accountId, contactId, quoteId,
       docTitle, att.kind, att.r2_key, att.mime_type, att.size_bytes, att.filename,
-      ts, user.id,
+      ts, user.id, ts, ts,
     ]),
     auditStmt(env.DB, {
       entityType: 'document',

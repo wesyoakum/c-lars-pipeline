@@ -314,10 +314,10 @@ export async function onRequestPost(context) {
     stmt(env.DB,
       `INSERT INTO resources
          (id, title, category, original_filename, r2_key, mime_type, size_bytes, notes,
-          uploaded_at, uploaded_by_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          uploaded_at, uploaded_by_user_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, title, category, originalFilename, r2Key,
-       file.type || 'application/octet-stream', file.size, notes, ts, user?.id]
+       file.type || 'application/octet-stream', file.size, notes, ts, user?.id, ts, ts]
     ),
     auditStmt(env.DB, {
       entityType: 'resource',

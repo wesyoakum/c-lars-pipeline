@@ -91,8 +91,9 @@ export async function onRequestPost(context) {
         env.DB,
         `INSERT INTO documents
            (id, opportunity_id, activity_id, kind, title, original_filename,
-            r2_key, mime_type, size_bytes, uploaded_at, uploaded_by_user_id)
-         VALUES (?, ?, ?, 'note_image', ?, ?, ?, ?, ?, ?, ?)`,
+            r2_key, mime_type, size_bytes, uploaded_at, uploaded_by_user_id,
+            created_at, updated_at)
+         VALUES (?, ?, ?, 'note_image', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           docId,
           oppId,
@@ -104,6 +105,8 @@ export async function onRequestPost(context) {
           sizeBytes,
           ts,
           user?.id ?? null,
+          ts,
+          ts,
         ]
       )
     );

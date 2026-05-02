@@ -130,8 +130,8 @@ export async function setQuoteTermDefault(env, quoteType, field, value, user) {
   await batch(env.DB, [
     stmt(
       env.DB,
-      `INSERT INTO quote_term_defaults (quote_type, field, value, updated_at, updated_by)
-       VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?)
+      `INSERT INTO quote_term_defaults (quote_type, field, value, created_at, updated_at, updated_by)
+       VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
        ON CONFLICT (quote_type, field) DO UPDATE SET
          value      = excluded.value,
          updated_at = excluded.updated_at,

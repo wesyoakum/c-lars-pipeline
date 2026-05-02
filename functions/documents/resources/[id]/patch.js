@@ -37,7 +37,11 @@ export async function onRequestPost(context) {
   }
 
   await batch(env.DB, [
-    stmt(env.DB, `UPDATE resources SET ${field} = ? WHERE id = ?`, [newValue, resourceId]),
+    stmt(env.DB,
+      `UPDATE resources SET ${field} = ?,
+              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+        WHERE id = ?`,
+      [newValue, resourceId]),
     auditStmt(env.DB, {
       entityType: 'resource',
       entityId: resourceId,

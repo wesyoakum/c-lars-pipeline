@@ -135,13 +135,14 @@ export async function savePrefs(db, userId, patch) {
     await run(
       db,
       `INSERT INTO board_user_prefs
-         (user_id, module_order, module_collapsed, hidden_until, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
+         (user_id, module_order, module_collapsed, hidden_until, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       [
         userId,
         JSON.stringify(merged.module_order),
         JSON.stringify(merged.module_collapsed),
         merged.hidden_until,
+        ts,
         ts,
       ]
     );
