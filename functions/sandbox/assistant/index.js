@@ -10,6 +10,8 @@
 
 import { all, one } from '../../lib/db.js';
 import { layout, html, escape, htmlResponse, raw, subnavTabs } from '../../lib/layout.js';
+import { renderDocumentsPanel } from '../../lib/claudia-documents-render.js';
+import { ICON_PAPERCLIP } from '../../lib/icons.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 
@@ -69,6 +71,19 @@ export async function onRequestGet(context) {
         AND created_at > datetime('now', '-24 hours')
       ORDER BY created_at DESC
       LIMIT 5`,
+    [user.id]
+  );
+
+  // Drop-zone documents (newest 30, non-trashed) for the initial render.
+  const documents = await all(
+    env.DB,
+    `SELECT id, filename, content_type, size_bytes, retention,
+            extraction_status, extraction_error, created_at,
+            substr(coalesce(full_text, ''), 1, 200) AS preview
+       FROM claudia_documents
+      WHERE user_id = ? AND retention != 'trashed'
+      ORDER BY created_at DESC
+      LIMIT 30`,
     [user.id]
   );
 
@@ -157,6 +172,70 @@ export async function onRequestGet(context) {
       .assistant-empty-icon {
         display: flex; flex-direction: column; align-items: center; gap: 0.6rem;
       }
+      /* ---- Documents panel + drop zone ---- */
+      .claudia-docs-panel {
+        max-width: 880px; margin: 0.5rem auto 0; padding: 0 1rem;
+      }
+      .claudia-docs-panel-empty { display: none; }
+      .claudia-docs-list {
+        display: flex; flex-direction: column; gap: 4px;
+        background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+        padding: 6px;
+      }
+      .claudia-doc {
+        display: flex; align-items: center; gap: 0.5rem;
+        padding: 6px 10px; border-radius: 6px;
+        background: #fff; border: 1px solid transparent;
+      }
+      .claudia-doc:hover { border-color: #d0d0d5; }
+      .claudia-doc-main { flex: 1; min-width: 0; }
+      .claudia-doc-title { display: flex; gap: 6px; align-items: center; font-size: 13px; font-weight: 500; color: #1a1a22; }
+      .claudia-doc-filename { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 540px; }
+      .claudia-doc-meta { font-size: 11px; color: #6b7280; margin-top: 1px; }
+      .claudia-doc-badge {
+        font-size: 10px; padding: 1px 6px; border-radius: 999px;
+        font-weight: 500; letter-spacing: 0.02em;
+      }
+      .claudia-doc-badge.keep { background: #fef3c7; color: #92400e; }
+      .claudia-doc-badge.warn { background: #fef9c3; color: #854d0e; }
+      .claudia-doc-badge.error { background: #fee2e2; color: #991b1b; }
+      .claudia-doc-actions { display: flex; gap: 4px; flex-shrink: 0; }
+      .claudia-doc-btn {
+        background: transparent; border: 1px solid transparent; color: #6b7280;
+        cursor: pointer; padding: 2px 8px; border-radius: 4px; font-size: 14px;
+        line-height: 1; min-width: 26px;
+      }
+      .claudia-doc-btn:hover { background: #f1f3f7; color: #1a1a22; border-color: #e2e8f0; }
+      .claudia-doc-btn.active { color: #b45309; }
+      .claudia-doc-btn.danger:hover { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
+      .claudia-doc-flash {
+        background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;
+        padding: 0.5rem 0.75rem; border-radius: 6px; font-size: 12px;
+        margin-bottom: 6px;
+      }
+      .claudia-doc-flash ul { margin: 4px 0 0 1.25rem; padding: 0; }
+
+      /* ---- Drop zone overlay (visible when dragging files over the wrap) ---- */
+      .assistant-wrap.drag-active::after {
+        content: 'Drop to upload (PDF / DOCX / TXT / MD up to 25 MB)';
+        position: absolute; inset: 0;
+        background: rgba(37, 102, 255, 0.08);
+        border: 2px dashed #2566ff; border-radius: 12px;
+        display: flex; align-items: center; justify-content: center;
+        color: #1a4ab8; font-weight: 500; font-size: 14px;
+        pointer-events: none; z-index: 5;
+      }
+      .assistant-wrap { position: relative; }
+
+      /* ---- Attach button + busy spinner ---- */
+      .assistant-form .attach-btn {
+        background: transparent; border: 1px solid #d0d0d5; color: #6b7280;
+        padding: 10px 12px; border-radius: 8px; cursor: pointer;
+        display: inline-flex; align-items: center; justify-content: center;
+      }
+      .assistant-form .attach-btn:hover { background: #f1f3f7; color: #1a1a22; }
+      .assistant-form .attach-btn[aria-busy="true"] { opacity: 0.6; cursor: wait; }
+      .assistant-form input[type="file"] { display: none; }
       .claudia-obs-panel {
         max-width: 880px; margin: 0.75rem auto 0; padding: 0 1rem;
         display: flex; flex-direction: column; gap: 0.5rem;
@@ -182,6 +261,7 @@ export async function onRequestGet(context) {
         ${observations.map(renderObservation)}
       </div>
     ` : ''}
+    ${raw(renderDocumentsPanel(documents))}
     <div class="assistant-wrap">
       <div id="assistant-messages" class="assistant-messages">
         ${messages.length === 0
@@ -202,8 +282,12 @@ export async function onRequestGet(context) {
         hx-post="/sandbox/assistant/send"
         hx-target="#assistant-messages"
         hx-swap="innerHTML"
-        hx-disabled-elt="find textarea, find button"
+        hx-disabled-elt="find textarea, find #send-btn"
       >
+        <button type="button" class="attach-btn" id="attach-btn" aria-label="Attach document" title="Attach a document (PDF / DOCX / TXT / MD)">
+          ${raw(ICON_PAPERCLIP)}
+        </button>
+        <input type="file" id="attach-input" multiple accept=".pdf,.docx,.txt,.md,.markdown,.csv,.json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,text/csv,application/json">
         <textarea
           name="text"
           placeholder="Message..."
@@ -212,7 +296,7 @@ export async function onRequestGet(context) {
           autofocus
           onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); this.form.requestSubmit(); }"
         ></textarea>
-        <button type="submit">Send</button>
+        <button type="submit" id="send-btn">Send</button>
       </form>
     </div>
     <script>
@@ -269,6 +353,74 @@ export async function onRequestGet(context) {
             if (list) list.scrollTop = list.scrollHeight;
           }
         });
+
+        // ---- Document upload: attach button, file input, drag-drop ----
+        const attachBtn = document.getElementById('attach-btn');
+        const fileInput = document.getElementById('attach-input');
+        const wrap = document.querySelector('.assistant-wrap');
+        const docsPanelSelector = '#claudia-docs-panel';
+
+        async function uploadFiles(files) {
+          if (!files || files.length === 0) return;
+          attachBtn?.setAttribute('aria-busy', 'true');
+          try {
+            const fd = new FormData();
+            for (const f of files) fd.append('file', f);
+            const res = await fetch('/sandbox/assistant/documents', { method: 'POST', body: fd });
+            const html = await res.text();
+            const existing = document.querySelector(docsPanelSelector);
+            if (existing) {
+              existing.outerHTML = html;
+            } else {
+              // Inject before .assistant-wrap if the panel hadn't been rendered yet.
+              wrap?.insertAdjacentHTML('beforebegin', html);
+            }
+          } catch (err) {
+            console.error('upload failed:', err);
+          } finally {
+            attachBtn?.setAttribute('aria-busy', 'false');
+            if (fileInput) fileInput.value = '';
+          }
+        }
+
+        if (attachBtn && fileInput) {
+          attachBtn.addEventListener('click', () => fileInput.click());
+          fileInput.addEventListener('change', (e) => uploadFiles(e.target.files));
+        }
+
+        // Drag-drop on the chat wrap. Counter handles nested dragenter/leave.
+        if (wrap) {
+          let dragDepth = 0;
+          const looksLikeFiles = (e) => {
+            const types = e.dataTransfer && e.dataTransfer.types;
+            if (!types) return false;
+            for (const t of types) if (t === 'Files') return true;
+            return false;
+          };
+          wrap.addEventListener('dragenter', (e) => {
+            if (!looksLikeFiles(e)) return;
+            e.preventDefault();
+            dragDepth++;
+            wrap.classList.add('drag-active');
+          });
+          wrap.addEventListener('dragover', (e) => {
+            if (!looksLikeFiles(e)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+          });
+          wrap.addEventListener('dragleave', (e) => {
+            if (!looksLikeFiles(e)) return;
+            dragDepth = Math.max(0, dragDepth - 1);
+            if (dragDepth === 0) wrap.classList.remove('drag-active');
+          });
+          wrap.addEventListener('drop', (e) => {
+            if (!looksLikeFiles(e)) return;
+            e.preventDefault();
+            dragDepth = 0;
+            wrap.classList.remove('drag-active');
+            uploadFiles(e.dataTransfer.files);
+          });
+        }
       })();
     </script>
   `;

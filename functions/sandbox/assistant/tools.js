@@ -154,6 +154,73 @@ export function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'list_documents',
+      description:
+        "List documents the user has dropped into Claudia's drop-zone. Returns id, filename, " +
+        'content_type, size_bytes, retention, extraction_status, created_at, and a short preview ' +
+        'of the extracted text. Use this when the user asks about what is in their dropped files, ' +
+        'or before suggesting cleanups (filter to retention=auto for trashable candidates). ' +
+        'Trashed documents are excluded by default; pass include_trashed: true to see them.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          include_trashed: { type: 'boolean', description: 'Include documents whose retention is "trashed". Default false.' },
+          retention: { type: 'string', enum: ['auto', 'keep_forever', 'trashed'], description: 'Optional exact-match retention filter.' },
+          limit: { type: 'integer', description: 'Max rows to return. Default 30, hard cap 100.' },
+        },
+      },
+    },
+    {
+      name: 'search_documents',
+      description:
+        'Find documents whose filename or extracted text contains the query string (case-insensitive). ' +
+        'Returns the same row shape as list_documents plus a snippet showing the matched context. ' +
+        'Trashed documents are excluded. Use this when the user asks about something that might be ' +
+        'in a dropped file (e.g. "what did the customer say about timeline" or ' +
+        '"find the spec with the 12V requirement"). Hard cap 20 matches.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Substring to match against filename + full_text.' },
+          limit: { type: 'integer', description: 'Max rows. Default 20, hard cap 50.' },
+        },
+        required: ['query'],
+      },
+    },
+    {
+      name: 'read_document',
+      description:
+        'Return the FULL extracted text of one document so you can answer detailed questions about ' +
+        'its contents. Updates last_accessed_at on the row (used to gauge value during cleanup ' +
+        'recommendations). For very large documents the text is truncated to ~50k characters; ' +
+        'note the truncation flag if present and warn the user.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Document id from list_documents / search_documents.' },
+        },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'set_document_retention',
+      description:
+        "Change a document's retention. " +
+        '"keep_forever" pins it (you must NOT recommend trashing it). ' +
+        '"auto" is the default (eligible for your cleanup recommendations). ' +
+        '"trashed" soft-deletes it (hidden from list/search/read) — only use this when the user ' +
+        'explicitly asks. Always confirm with the user before flipping to trashed; never trash a ' +
+        'doc on your own initiative.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Document id.' },
+          retention: { type: 'string', enum: ['auto', 'keep_forever', 'trashed'], description: 'New retention value.' },
+        },
+        required: ['id', 'retention'],
+      },
+    },
+    {
       name: 'query_db',
       description:
         'Run a single read-only SELECT (or WITH ... SELECT) against the Pipeline D1 database. Returns ' +
@@ -191,6 +258,14 @@ export function makeAssistantTools({ env, user }) {
         return queryDb(env, input);
       case 'get_calendar_events':
         return getCalendarEvents(env, user, input);
+      case 'list_documents':
+        return listDocuments(env, user, input);
+      case 'search_documents':
+        return searchDocuments(env, user, input);
+      case 'read_document':
+        return readDocument(env, user, input);
+      case 'set_document_retention':
+        return setDocumentRetention(env, user, input);
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -343,6 +418,136 @@ async function queryDb(env, { sql }) {
   const finalSql = /\blimit\s+\d+/i.test(stmt) ? stmt : `${stmt} LIMIT 200`;
   const rows = await all(env.DB, finalSql);
   return { rows, count: rows.length, sql: finalSql };
+}
+
+// ---------- Claudia drop-zone documents ----------
+
+const READ_DOCUMENT_MAX_CHARS = 50_000;
+
+async function listDocuments(env, user, { include_trashed, retention, limit } = {}) {
+  const cap = Math.min(Math.max(Number(limit) || 30, 1), 100);
+  const params = [user.id];
+  let where = 'user_id = ?';
+  if (retention) {
+    where += ' AND retention = ?';
+    params.push(retention);
+  } else if (!include_trashed) {
+    where += " AND retention != 'trashed'";
+  }
+  params.push(cap);
+  const rows = await all(
+    env.DB,
+    `SELECT id, filename, content_type, size_bytes, retention,
+            extraction_status, extraction_error, created_at, last_accessed_at,
+            substr(coalesce(full_text, ''), 1, 200) AS preview
+       FROM claudia_documents
+      WHERE ${where}
+      ORDER BY created_at DESC
+      LIMIT ?`,
+    params
+  );
+  return { rows, count: rows.length };
+}
+
+async function searchDocuments(env, user, { query, limit } = {}) {
+  const q = String(query || '').trim();
+  if (!q) return { rows: [], count: 0, note: 'Empty query.' };
+  const cap = Math.min(Math.max(Number(limit) || 20, 1), 50);
+  const like = `%${q}%`;
+  const rows = await all(
+    env.DB,
+    `SELECT id, filename, content_type, size_bytes, retention, created_at,
+            substr(coalesce(full_text, ''), 1, 200) AS preview
+       FROM claudia_documents
+      WHERE user_id = ?
+        AND retention != 'trashed'
+        AND (filename LIKE ? OR full_text LIKE ?)
+      ORDER BY created_at DESC
+      LIMIT ?`,
+    [user.id, like, like, cap]
+  );
+
+  // Build a small snippet around the first hit in full_text (or filename)
+  // for each row so Claudia gets context, not just metadata.
+  const lcQuery = q.toLowerCase();
+  const enriched = await Promise.all(rows.map(async (r) => {
+    const ftRow = await one(
+      env.DB,
+      'SELECT full_text FROM claudia_documents WHERE id = ?',
+      [r.id]
+    );
+    const text = String(ftRow?.full_text || '');
+    const idx = text.toLowerCase().indexOf(lcQuery);
+    let snippet = null;
+    if (idx >= 0) {
+      const start = Math.max(0, idx - 80);
+      const end = Math.min(text.length, idx + q.length + 120);
+      snippet = (start > 0 ? '… ' : '') + text.slice(start, end) + (end < text.length ? ' …' : '');
+    }
+    return { ...r, snippet };
+  }));
+
+  return { rows: enriched, count: enriched.length };
+}
+
+async function readDocument(env, user, { id } = {}) {
+  if (!id) throw new Error('read_document requires an id.');
+  const row = await one(
+    env.DB,
+    `SELECT id, filename, content_type, size_bytes, retention,
+            extraction_status, extraction_error, full_text, created_at
+       FROM claudia_documents
+      WHERE id = ? AND user_id = ?`,
+    [id, user.id]
+  );
+  if (!row) {
+    return { error: 'not_found', id };
+  }
+  if (row.retention === 'trashed') {
+    return { error: 'trashed', id, filename: row.filename };
+  }
+  // Bump last_accessed_at — non-blocking, ignore failures.
+  try {
+    await run(
+      env.DB,
+      'UPDATE claudia_documents SET last_accessed_at = ? WHERE id = ?',
+      [now(), id]
+    );
+  } catch {}
+
+  const fullText = String(row.full_text || '');
+  const truncated = fullText.length > READ_DOCUMENT_MAX_CHARS;
+  return {
+    id: row.id,
+    filename: row.filename,
+    content_type: row.content_type,
+    size_bytes: row.size_bytes,
+    retention: row.retention,
+    extraction_status: row.extraction_status,
+    extraction_error: row.extraction_error,
+    truncated,
+    text: truncated ? fullText.slice(0, READ_DOCUMENT_MAX_CHARS) : fullText,
+  };
+}
+
+const RETENTION_VALUES = new Set(['auto', 'keep_forever', 'trashed']);
+
+async function setDocumentRetention(env, user, { id, retention } = {}) {
+  if (!id) throw new Error('set_document_retention requires an id.');
+  if (!RETENTION_VALUES.has(retention)) {
+    throw new Error(`set_document_retention requires retention in: auto, keep_forever, trashed.`);
+  }
+  const ts = now();
+  const result = await run(
+    env.DB,
+    `UPDATE claudia_documents
+        SET retention = ?,
+            updated_at = ?,
+            trashed_at = CASE WHEN ? = 'trashed' THEN ? ELSE NULL END
+      WHERE id = ? AND user_id = ?`,
+    [retention, ts, retention, ts, id, user.id]
+  );
+  return { ok: true, id, retention, updated_at: ts, changes: result?.meta?.changes ?? null };
 }
 
 // ---------- Calendar (published .ics URLs, multi-source) ----------
