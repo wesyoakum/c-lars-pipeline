@@ -41,6 +41,8 @@ const ENTITY_TYPE_BY_TABLE = {
   contacts:      'contact',
   activities:    'activity',
   opportunities: 'opportunity',
+  quotes:        'quote',
+  jobs:          'job',
 };
 
 // Whitelisted fields per table for the diff computation on UPDATEs.
@@ -67,6 +69,11 @@ const AUDIT_FIELDS_BY_TABLE = {
     'quoted_date', 'bant_budget', 'bant_authority', 'bant_authority_contact_id',
     'bant_need', 'bant_timeline', 'close_reason', 'loss_reason_tag',
     'owner_user_id', 'salesperson_user_id', 'customer_po_number', 'notes_internal'],
+  quotes: ['opportunity_id', 'quote_type', 'change_order_id', 'status',
+    'title', 'description', 'valid_until', 'incoterms', 'payment_terms',
+    'delivery_terms', 'delivery_estimate', 'notes_internal', 'notes_customer'],
+  jobs: ['opportunity_id', 'job_type', 'status', 'title',
+    'customer_po_number', 'ntp_required'],
 };
 
 const UNDO_WINDOW_HOURS = 24;
@@ -75,7 +82,10 @@ const UNDO_WINDOW_HOURS = 24;
 // Add intentionally; the per-tool definitions in tools.js still gate
 // individual fields (e.g. she can update an activity's status but the
 // tool definition decides which columns are settable).
-const WRITABLE_TABLES = new Set(['contacts', 'accounts', 'activities', 'opportunities']);
+const WRITABLE_TABLES = new Set([
+  'contacts', 'accounts', 'activities', 'opportunities',
+  'quotes', 'jobs',
+]);
 
 /**
  * Insert a new row + log to claudia_writes in a single batch.

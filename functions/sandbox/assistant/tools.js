@@ -9,7 +9,9 @@
 
 import Papa from 'papaparse';
 import { all, one, run } from '../../lib/db.js';
-import { now, uuid, nextSequenceValue } from '../../lib/ids.js';
+import { now, uuid, nextSequenceValue, nextNumber, currentYear } from '../../lib/ids.js';
+import { CLAUDIA_USER_ID } from '../../lib/auth.js';
+import { changeOppStage } from '../../lib/stage-transitions.js';
 import {
   claudiaInsert,
   claudiaUpdate,
@@ -503,6 +505,91 @@ export async function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'change_opportunity_stage',
+      description:
+        'Move an opportunity to a new stage in its workflow (e.g. lead → rfq_received → quote_drafted → ' +
+        'quote_submitted → closed_won). Calls the same code path as the manual stage button on the opp ' +
+        'page so the auto-task chain fires correctly — do NOT bypass via update_opportunity. Returns ' +
+        '{ changed, from, to, reason? }. ' +
+        'Rules: ' +
+        '(1) Always confirm with the user before moving a stage; stage moves cascade into auto-tasks ' +
+        '    and notifications. ' +
+        '(2) Terminal stages (closed_won / closed_lost / closed_died) require an explicit reason — ' +
+        '    pass it via the `reason` field. ' +
+        '(3) If the function returns { changed: false }, surface the reason verbatim — common values: ' +
+        '    "already at target", "would regress" (when onlyForward was true and the target is behind), ' +
+        '    "unknown stage", "opp not found". ' +
+        '(4) NOT undoable via undo_claudia_write — auto-task firings can\'t be unfired. To reverse, ' +
+        '    advance forward through closed_lost or have the user use the regular UI.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id:           { type: 'string', description: 'Opportunity id.' },
+          stage:        { type: 'string', description: 'Target stage_key (e.g. quote_drafted, oc_submitted, closed_won). Use describe_schema or query_db on stage_definitions if unsure which keys are valid for this opp\'s transaction_type.' },
+          reason:       { type: 'string', description: 'Short note appended to the audit row. REQUIRED when moving to a terminal stage (closed_won / closed_lost / closed_died).' },
+          only_forward: { type: 'boolean', description: 'If true, refuse to regress the stage. Default false.' },
+        },
+        required: ['id', 'stage'],
+      },
+    },
+    {
+      name: 'create_quote_draft',
+      description:
+        'Open a new quote in DRAFT status under an existing opportunity. SHELL ONLY — no line items ' +
+        'via Claudia yet. Required: opportunity_id, quote_type. Optional: title, description, ' +
+        'valid_until, incoterms, payment_terms, delivery_terms, delivery_estimate, notes_internal, ' +
+        'notes_customer, change_order_id (for CO quotes). ' +
+        'Auto-allocates the next quote number (Q{opp_number}-{seq}) and revision (v1). ' +
+        'Auto-syncs the opp stage forward to quote_drafted (or change_order_drafted for CO quotes), ' +
+        'mirroring the manual quote-create flow. ' +
+        'Returns the new quote id, number, and audit_id for undo. ' +
+        'When the user wants line items: AFTER creating the shell, suggest the line list in the chat ' +
+        '(qty / description / price) for them to enter manually — you do NOT have a line-write tool.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          opportunity_id:    { type: 'string', description: 'Required. Parent opportunity id.' },
+          quote_type:        { type: 'string', description: 'Required. Usually matches the opp transaction_type — common values: spares, eps, lars, service.' },
+          change_order_id:   { type: 'string', description: 'Optional. Bind this quote to a change order; advances opp through CO stages instead of baseline quote stages.' },
+          title:             { type: 'string' },
+          description:       { type: 'string' },
+          valid_until:       { type: 'string', description: 'ISO date when the quote expires.' },
+          incoterms:         { type: 'string' },
+          payment_terms:     { type: 'string' },
+          delivery_terms:    { type: 'string' },
+          delivery_estimate: { type: 'string' },
+          notes_internal:    { type: 'string' },
+          notes_customer:    { type: 'string' },
+          batch_id:          { type: 'string' },
+          summary:           { type: 'string' },
+        },
+        required: ['opportunity_id', 'quote_type'],
+      },
+    },
+    {
+      name: 'create_job',
+      description:
+        'Open a new job under a won opportunity. Bare-metadata creation only — name, opp link, type, ' +
+        'PO number. Milestones come from quote acceptance, NOT from this tool. ' +
+        'Required: opportunity_id. Optional: title (defaults to opp.title), customer_po_number ' +
+        '(defaults to opp.customer_po_number). ' +
+        'Job number auto-allocates as JOB-{YYYY}-{seq}. ' +
+        'Hard rule: one open job per opportunity. If a non-cancelled job already exists for the opp, ' +
+        'the call fails with { error: "duplicate_job", existing_number }. Surface that to the user ' +
+        'plainly and ask if they want to look at the existing one.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          opportunity_id:     { type: 'string', description: 'Required. Parent opportunity id. Should normally be at closed_won; the function does not enforce that, but creating a job on a still-open opp is unusual.' },
+          title:              { type: 'string', description: 'Defaults to opp.title.' },
+          customer_po_number: { type: 'string', description: 'Defaults to opp.customer_po_number.' },
+          batch_id:           { type: 'string' },
+          summary:            { type: 'string' },
+        },
+        required: ['opportunity_id'],
+      },
+    },
+    {
       name: 'undo_claudia_write',
       description:
         'Reverse a previous Claudia write within the 24-hour undo window. For a CREATE: deletes ' +
@@ -650,6 +737,12 @@ export async function makeAssistantTools({ env, user }) {
         return createOpportunity(env, user, input);
       case 'update_opportunity':
         return updateOpportunity(env, user, input);
+      case 'change_opportunity_stage':
+        return changeOpportunityStage(env, user, input);
+      case 'create_quote_draft':
+        return createQuoteDraft(env, user, input);
+      case 'create_job':
+        return createJob(env, user, input);
       case 'undo_claudia_write':
         return undoClaudiaWrite(env, user, input);
       case 'list_recent_writes':
@@ -1324,6 +1417,255 @@ async function updateOpportunity(env, user, input = {}) {
   } catch (err) {
     return { error: 'update_failed', id, message: err?.message || String(err) };
   }
+}
+
+// ---------- Stage transitions (NOT via claudia-writes — fires auto-tasks) ----------
+
+const TERMINAL_STAGES = new Set(['closed_won', 'closed_lost', 'closed_died', 'change_order_won']);
+
+async function changeOpportunityStage(env, user, input = {}) {
+  const oppId = String(input.id || '').trim();
+  const toStage = trimOrNull(input.stage);
+  const reason = trimOrNull(input.reason);
+  if (!oppId) throw new Error('change_opportunity_stage requires id.');
+  if (!toStage) throw new Error('change_opportunity_stage requires a target stage.');
+
+  if (TERMINAL_STAGES.has(toStage) && !reason) {
+    return {
+      changed: false,
+      from: null,
+      to: toStage,
+      reason: 'reason_required_for_terminal_stage',
+      message: 'Terminal stages need a reason. Ask the user "won — why? (e.g. price, timing, technical fit)" or "lost — what was the deciding factor?" and pass the answer in the reason field.',
+    };
+  }
+
+  // Synthetic context: changeOppStage uses data.user for audit_events
+  // attribution. Pass Claudia's user so the standard Pipeline history
+  // shows her as the actor; encode the human trigger in the reason
+  // string so the audit summary still names whoever asked.
+  const claudiaUser = await one(
+    env.DB,
+    'SELECT id, email, display_name, role FROM users WHERE id = ?',
+    [CLAUDIA_USER_ID]
+  );
+  const triggeredBy = user.display_name || user.email || user.id;
+  const composedReason = reason
+    ? `${reason} — triggered by ${triggeredBy}`
+    : `triggered by ${triggeredBy}`;
+
+  const ctx = {
+    env,
+    data: { user: claudiaUser || user },
+    // No waitUntil: the auto-task fire runs synchronously instead.
+    // Slightly slower, but correct — and stage changes are rare enough
+    // that the latency cost is negligible.
+  };
+
+  const result = await changeOppStage(ctx, oppId, toStage, {
+    reason: composedReason,
+    onlyForward: input.only_forward === true,
+  });
+
+  return {
+    ok: result.changed === true,
+    ...result,
+  };
+}
+
+// ---------- Quotes (shell-only — no line items via Claudia) ----------
+
+async function createQuoteDraft(env, user, input = {}) {
+  const oppId = String(input.opportunity_id || '').trim();
+  const quoteType = trimOrNull(input.quote_type);
+  if (!oppId) throw new Error('create_quote_draft requires opportunity_id.');
+  if (!quoteType) throw new Error('create_quote_draft requires quote_type.');
+
+  const opp = await one(
+    env.DB,
+    'SELECT id, number, transaction_type FROM opportunities WHERE id = ?',
+    [oppId]
+  );
+  if (!opp) {
+    return { error: 'opp_not_found', opportunity_id: oppId, message: `No opportunity with id ${oppId}.` };
+  }
+
+  // Validate change_order_id if provided.
+  const changeOrderId = trimOrNull(input.change_order_id);
+  let changeOrder = null;
+  if (changeOrderId) {
+    changeOrder = await one(
+      env.DB,
+      'SELECT id, number, opportunity_id FROM change_orders WHERE id = ?',
+      [changeOrderId]
+    );
+    if (!changeOrder || changeOrder.opportunity_id !== oppId) {
+      return {
+        error: 'change_order_mismatch',
+        change_order_id: changeOrderId,
+        message: 'change_order_id does not exist or belongs to a different opportunity.',
+      };
+    }
+  }
+
+  // Allocate the next quote_seq within this opp. Mirrors the manual
+  // path in functions/opportunities/[id]/quotes/index.js so the
+  // numbering scheme stays consistent.
+  const siblings = await all(
+    env.DB,
+    'SELECT quote_seq FROM quotes WHERE opportunity_id = ?',
+    [oppId]
+  );
+  const maxSeq = siblings.reduce((m, s) => Math.max(m, Number(s.quote_seq ?? 0)), 0);
+  const quoteSeq = maxSeq + 1;
+  const revision = 'v1';
+  const number = `Q${opp.number}-${quoteSeq}`;
+
+  const ts = now();
+  const id = uuid();
+  const isCO = !!changeOrder;
+  const summary = input.summary || (isCO
+    ? `drafted CO quote ${number} on ${opp.number}`
+    : `drafted quote ${number} on ${opp.number}`);
+
+  // Use claudiaInsert so the write also lands in claudia_writes for
+  // undo + the standard audit_events row attributes to Claudia with
+  // the "(triggered by ...)" suffix.
+  const result = await claudiaInsert(env, user, 'create_quote_draft', 'quotes', id, {
+    number,
+    opportunity_id:    oppId,
+    revision,
+    quote_seq:         quoteSeq,
+    quote_type:        quoteType,
+    change_order_id:   changeOrderId,
+    status:            'draft',
+    title:             trimOrNull(input.title) || '',
+    description:       trimOrNull(input.description),
+    valid_until:       trimOrNull(input.valid_until),
+    currency:          'USD',
+    subtotal_price:    0,
+    tax_amount:        0,
+    total_price:       0,
+    incoterms:         trimOrNull(input.incoterms),
+    payment_terms:     trimOrNull(input.payment_terms),
+    delivery_terms:    trimOrNull(input.delivery_terms),
+    delivery_estimate: trimOrNull(input.delivery_estimate),
+    cost_build_id:     null,
+    notes_internal:    trimOrNull(input.notes_internal),
+    notes_customer:    trimOrNull(input.notes_customer),
+    show_discounts:    0,
+    created_at:        ts,
+    updated_at:        ts,
+    created_by_user_id: user.id,
+  }, { batchId: input.batch_id, summary });
+
+  // Sync the opp stage forward to quote_drafted (or change_order_drafted
+  // for CO quotes). onlyForward avoids regressing already-advanced opps.
+  // Failure of this step does NOT roll back the quote — mirrors the
+  // human-driven handler.
+  let stageResult = null;
+  try {
+    const claudiaUser = await one(
+      env.DB,
+      'SELECT id, email, display_name, role FROM users WHERE id = ?',
+      [CLAUDIA_USER_ID]
+    );
+    const triggeredBy = user.display_name || user.email || user.id;
+    const ctx = { env, data: { user: claudiaUser || user } };
+    const draftedStage = isCO ? 'change_order_drafted' : 'quote_drafted';
+    stageResult = await changeOppStage(ctx, oppId, draftedStage, {
+      reason: isCO
+        ? `New change-order quote draft ${number} (triggered by ${triggeredBy})`
+        : `New quote draft ${number} (triggered by ${triggeredBy})`,
+      onlyForward: true,
+    });
+  } catch (err) {
+    console.error('[create_quote_draft] stage sync failed:', err?.message || err);
+    stageResult = { changed: false, error: err?.message || String(err) };
+  }
+
+  return {
+    ok: true,
+    id: result.id,
+    audit_id: result.audit_id,
+    number,
+    revision,
+    quote_seq: quoteSeq,
+    opportunity_id: oppId,
+    opportunity_number: opp.number,
+    quote_type: quoteType,
+    change_order_id: changeOrderId,
+    stage_sync: stageResult,
+    summary,
+  };
+}
+
+// ---------- Jobs (bare metadata; milestones come from quote acceptance) ----------
+
+async function createJob(env, user, input = {}) {
+  const oppId = String(input.opportunity_id || '').trim();
+  if (!oppId) throw new Error('create_job requires opportunity_id.');
+
+  const opp = await one(
+    env.DB,
+    `SELECT id, number, title, transaction_type, customer_po_number
+       FROM opportunities WHERE id = ?`,
+    [oppId]
+  );
+  if (!opp) {
+    return { error: 'opp_not_found', opportunity_id: oppId, message: `No opportunity with id ${oppId}.` };
+  }
+
+  // One job per opp (excluding cancelled). Mirrors the manual handler
+  // and the auto-create-on-closed_won path so Claudia can't double up.
+  const existing = await one(
+    env.DB,
+    "SELECT id, number FROM jobs WHERE opportunity_id = ? AND status != 'cancelled'",
+    [oppId]
+  );
+  if (existing) {
+    return {
+      error: 'duplicate_job',
+      opportunity_id: oppId,
+      existing_id: existing.id,
+      existing_number: existing.number,
+      message: `A job (${existing.number}) already exists for this opportunity.`,
+    };
+  }
+
+  const id = uuid();
+  const number = await nextNumber(env.DB, `JOB-${currentYear()}`);
+  const ts = now();
+  const title = trimOrNull(input.title) || opp.title;
+  const customerPo = trimOrNull(input.customer_po_number) || opp.customer_po_number || null;
+  const oppTypes = String(opp.transaction_type || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const isEps = oppTypes.includes('eps');
+  const summary = input.summary || `created job ${number} from opp ${opp.number}`;
+
+  const result = await claudiaInsert(env, user, 'create_job', 'jobs', id, {
+    number,
+    opportunity_id:     oppId,
+    job_type:           opp.transaction_type,
+    status:             'created',
+    title,
+    customer_po_number: customerPo,
+    ntp_required:       isEps ? 1 : 0,
+    created_at:         ts,
+    updated_at:         ts,
+    created_by_user_id: user.id,
+  }, { batchId: input.batch_id, summary });
+
+  return {
+    ok: true,
+    id: result.id,
+    audit_id: result.audit_id,
+    number,
+    opportunity_id: oppId,
+    opportunity_number: opp.number,
+    title,
+    job_type: opp.transaction_type,
+    summary,
+  };
 }
 
 async function undoClaudiaWrite(env, user, { audit_id, reason } = {}) {

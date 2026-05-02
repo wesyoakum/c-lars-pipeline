@@ -81,7 +81,27 @@ export const PERMISSION_GATED_ACTIONS_CATALOG = [
     action: 'update_opportunity',
     category: 'opportunities',
     label: 'Update opportunities',
-    description: 'Edit opportunity fields — title, description, value, expected close date, BANT, RFQ dates, owner, etc. Stage transitions are NOT exposed here — use the dedicated stage endpoint to keep the auto-task chain consistent.',
+    description: 'Edit opportunity fields — title, description, value, expected close date, BANT, RFQ dates, owner, etc. Stage transitions go through change_opportunity_stage so the auto-task chain fires.',
+  },
+  {
+    action: 'change_opportunity_stage',
+    category: 'opportunities',
+    label: 'Move opportunities through stages',
+    description: 'Advance (or, with a reason, regress) an opportunity through its stage workflow — e.g. lead → rfq_received → quote_drafted → quote_submitted. Calls the same code path as the manual stage button so the auto-task chain fires correctly. Terminal stages (closed_won / closed_lost) require a reason.',
+  },
+  // quotes (shell only — no line items via Claudia yet)
+  {
+    action: 'create_quote_draft',
+    category: 'quotes',
+    label: 'Draft new quotes (shell)',
+    description: 'Open a new quote in draft status under an existing opportunity. Header only — no line items via Claudia yet (she can still suggest the line list in chat for the user to enter manually). Auto-syncs the opp stage to quote_drafted, mirroring the manual quote-create flow.',
+  },
+  // jobs (post-sale execution records)
+  {
+    action: 'create_job',
+    category: 'jobs',
+    label: 'Create jobs',
+    description: 'Open a new job under a won opportunity. Bare-metadata creation — name, opp link, type, PO number — without milestones (those come from quotes when they\'re accepted). One job per opportunity is enforced; duplicates are rejected.',
   },
   // documents
   {
@@ -124,7 +144,17 @@ export const PERMISSION_CATEGORIES = [
   {
     key: 'opportunities',
     label: 'Opportunities',
-    blurb: 'Mutations on the opportunities table. Stage transitions are intentionally NOT exposed here — those need to fire the auto-task chain via the regular stage endpoint, not a raw column write.',
+    blurb: 'Mutations on the opportunities table. Stage transitions get their own toggle because they fire the auto-task chain — gate them separately from plain field edits.',
+  },
+  {
+    key: 'quotes',
+    label: 'Quotes',
+    blurb: 'Quote drafting only — Claudia can open a draft shell, but issuing / revising / OC / NTP still belong to humans. Lines are not exposed; she can suggest a line list in chat for you to enter.',
+  },
+  {
+    key: 'jobs',
+    label: 'Jobs',
+    blurb: 'Post-sale execution records. Claudia can open a job under a won opportunity; milestones come from quote acceptance, not from her.',
   },
   {
     key: 'documents',
