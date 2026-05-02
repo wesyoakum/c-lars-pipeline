@@ -14,6 +14,8 @@ import { CLAUDIA_USER_ID } from '../../lib/auth.js';
 import { audit, auditStmt } from '../../lib/audit.js';
 import { changeOppStage } from '../../lib/stage-transitions.js';
 import { fireEvent } from '../../lib/auto-tasks.js';
+import { stagesFor, evaluateGate, loadGateContext } from '../../lib/stages.js';
+import { checkInactivateBlockers } from '../../lib/inactivate-blocker.js';
 import {
   claudiaInsert,
   claudiaUpdate,
@@ -507,6 +509,28 @@ export async function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'inspect_opportunity_stages',
+      description:
+        'Read-only inspection of an opportunity\'s stage workflow. For each stage in the opp\'s ' +
+        'transaction_type, returns whether the move would advance/regress, plus any gate ' +
+        'violations (missing fields, unfilled BANT, etc.) and terminal-stage blockers (pending ' +
+        'tasks, active quotes) that would prevent it. Use this BEFORE proposing a stage move ' +
+        'so you can tell the user WHICH things need to happen first instead of just "it\'s ' +
+        'blocked." Also useful when change_opportunity_stage returns "would regress" or fails — ' +
+        'inspect to surface the specific blockers. Returns: ' +
+        '{ current: {stage_key, label}, transaction_type, stages: [{stage_key, label, ' +
+        'sort_order, direction, gate_violations, terminal_blockers}] }. ' +
+        'Note: GATE_MODE is currently "warn" — gate violations are reported but don\'t actually ' +
+        'block the transition (so they\'re informational hints, not hard stops).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Opportunity id to inspect.' },
+        },
+        required: ['id'],
+      },
+    },
+    {
       name: 'change_opportunity_stage',
       description:
         'Move an opportunity to a new stage in its workflow (e.g. lead → rfq_received → quote_drafted → ' +
@@ -520,7 +544,9 @@ export async function makeAssistantTools({ env, user }) {
         '    pass it via the `reason` field. ' +
         '(3) If the function returns { changed: false }, surface the reason verbatim — common values: ' +
         '    "already at target", "would regress" (when onlyForward was true and the target is behind), ' +
-        '    "unknown stage", "opp not found". ' +
+        '    "unknown stage", "opp not found". For deeper diagnosis (gate violations, pending tasks, ' +
+        '    active quotes), call inspect_opportunity_stages — it walks every stage and returns the ' +
+        '    specific blockers per target. ' +
         '(4) NOT undoable via undo_claudia_write — auto-task firings can\'t be unfired. To reverse, ' +
         '    advance forward through closed_lost or have the user use the regular UI.',
       input_schema: {
@@ -818,6 +844,8 @@ export async function makeAssistantTools({ env, user }) {
         return createOpportunity(env, user, input);
       case 'update_opportunity':
         return updateOpportunity(env, user, input);
+      case 'inspect_opportunity_stages':
+        return inspectOpportunityStages(env, user, input);
       case 'change_opportunity_stage':
         return changeOpportunityStage(env, user, input);
       case 'create_quote_draft':
@@ -1512,6 +1540,92 @@ async function updateOpportunity(env, user, input = {}) {
 // ---------- Stage transitions (NOT via claudia-writes — fires auto-tasks) ----------
 
 const TERMINAL_STAGES = new Set(['closed_won', 'closed_lost', 'closed_died', 'change_order_won']);
+
+/**
+ * Read-only inspection of every stage reachable from an opp's current
+ * stage. For each stage in the opp's transaction_type catalog: walks
+ * gate rules + (for terminal stages) inactivate-blockers, returning a
+ * structured "what would block this move?" report.
+ *
+ * Uses the same gate evaluator the human-driven stage endpoint uses,
+ * so Claudia's analysis matches what Wes sees on the opp page.
+ */
+async function inspectOpportunityStages(env, user, { id } = {}) {
+  const oppId = String(id || '').trim();
+  if (!oppId) throw new Error('inspect_opportunity_stages requires id.');
+
+  const opp = await one(env.DB, 'SELECT * FROM opportunities WHERE id = ?', [oppId]);
+  if (!opp) return { error: 'opp_not_found', id: oppId };
+
+  const stages = await stagesFor(env.DB, opp.transaction_type);
+  if (stages.length === 0) {
+    return {
+      error: 'no_stages_for_transaction_type',
+      transaction_type: opp.transaction_type,
+      message: `No stage_definitions rows for transaction_type=${opp.transaction_type}. Check the catalog.`,
+    };
+  }
+
+  const currentDef = stages.find((s) => s.stage_key === opp.stage);
+  const currentSort = currentDef?.sort_order ?? 0;
+  const gateCtx = await loadGateContext(env.DB, opp);
+
+  // Run gate eval + terminal-blocker check for every stage. Cheap (one
+  // DB read per check) — the catalog is usually <= 15 stages per
+  // transaction_type. Done in parallel.
+  const analyses = await Promise.all(stages.map(async (s) => {
+    const sort = s.sort_order ?? 0;
+    const direction = s.stage_key === opp.stage
+      ? 'current'
+      : sort > currentSort
+        ? 'forward'
+        : sort < currentSort
+          ? 'backward'
+          : 'sibling';
+
+    let gateViolations = [];
+    try {
+      const result = await evaluateGate(env.DB, opp.transaction_type, s.stage_key, gateCtx);
+      gateViolations = result.violations || [];
+    } catch (err) {
+      // Don't fail the whole inspection if one stage's check throws —
+      // surface the error inline so Claudia can mention it.
+      gateViolations = [{ check: 'evaluator_error', severity: 'soft', message: err?.message || String(err) }];
+    }
+
+    let terminalBlockers = [];
+    if (s.is_terminal) {
+      try {
+        terminalBlockers = await checkInactivateBlockers(env.DB, 'opportunity', oppId);
+      } catch {
+        terminalBlockers = [];
+      }
+    }
+
+    return {
+      stage_key: s.stage_key,
+      label: s.label,
+      sort_order: sort,
+      direction,
+      is_terminal: !!s.is_terminal,
+      is_won: !!s.is_won,
+      reachable_now: gateViolations.length === 0 && terminalBlockers.length === 0,
+      gate_violations: gateViolations,
+      terminal_blockers: terminalBlockers,
+    };
+  }));
+
+  return {
+    opportunity_id: oppId,
+    opportunity_number: opp.number,
+    transaction_type: opp.transaction_type,
+    current: currentDef
+      ? { stage_key: currentDef.stage_key, label: currentDef.label, sort_order: currentDef.sort_order }
+      : { stage_key: opp.stage, label: opp.stage, sort_order: null, missing_from_catalog: true },
+    stages: analyses,
+    note: 'GATE_MODE is currently "warn" so gate_violations are informational and would not actually block the move. Terminal_blockers (open tasks/quotes) DO block in practice via the inactivate-blocker checks.',
+  };
+}
 
 async function changeOpportunityStage(env, user, input = {}) {
   const oppId = String(input.id || '').trim();
