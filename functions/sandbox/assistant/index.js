@@ -477,6 +477,118 @@ export async function onRequestGet(context) {
         flex-shrink: 0;
       }
       .claudia-obs-dismiss:hover { background: rgba(0,0,0,0.06); color: #4a3a1a; }
+
+      /* ============================================================
+         Mobile (≤ 640px). Goal: usable chat from a phone.
+         The desktop layout already collapses to 1 column at 800px;
+         this block tightens the rest — touch-target sizing, iOS
+         keyboard quirks, safe-area insets, smaller margins so the
+         conversation isn't pushed below the fold.
+         ============================================================ */
+      @media (max-width: 640px) {
+        /* The global .site-main override at the top removed page
+           padding; restore minimal edges on phones so the chat
+           bubbles aren't kissing the screen edge. */
+        .assistant-layout {
+          padding: 0 0.4rem;
+          gap: 0.5rem;
+        }
+        .assistant-layout .assistant-wrap {
+          padding: 0.5rem 0;
+        }
+        .claudia-obs-panel { padding: 0 0.4rem; }
+        .claudia-obs {
+          padding: 0.5rem 0.6rem; font-size: 13px; gap: 0.4rem;
+        }
+        .claudia-obs-dismiss {
+          /* Bigger tap target — Apple HIG / Material both want ~44px
+             but 36 is enough here without dwarfing the bubble. */
+          font-size: 18px; padding: 6px 10px;
+          min-width: 36px; min-height: 36px;
+          display: flex; align-items: center; justify-content: center;
+        }
+
+        /* Chat bubbles wider on phone so they don't waste space. */
+        .assistant-msg { max-width: 92%; font-size: 15px; padding: 0.6rem 0.85rem; }
+        .assistant-msg.assistant { max-width: 96%; }
+        /* Copy buttons should stay accessible without hover-only fade
+           (no hover on touch). */
+        .assistant-msg-copy {
+          opacity: 0.55;
+          padding: 5px 7px;
+        }
+        .assistant-msg-copy svg { width: 15px; height: 15px; }
+
+        /* The textarea is the most-touched element. Two iOS quirks:
+           (a) font-size < 16px triggers auto-zoom on focus → bump to
+               16px so the page doesn't visually zoom every send;
+           (b) the sticky-bottom form needs safe-area inset padding so
+               it clears the home indicator and doesn't overlap content
+               behind the on-screen keyboard. */
+        .assistant-form {
+          padding: 0.55rem 0.5rem;
+          padding-bottom: calc(0.55rem + env(safe-area-inset-bottom, 0px));
+          gap: 0.35rem;
+          margin: 0;
+        }
+        .assistant-form textarea {
+          font-size: 16px;
+          padding: 9px 11px;
+          min-height: 40px;
+          border-radius: 10px;
+        }
+        /* Bigger touch targets for attach + mic + send. 44x44 is the
+           Apple HIG minimum; 42 is a tolerable squeeze when stacked
+           4-wide on a 360px viewport. */
+        .assistant-form .attach-btn,
+        .assistant-form .mic-btn,
+        .assistant-form button[type="submit"] {
+          min-width: 42px; min-height: 42px;
+          padding: 0 12px;
+          font-size: 14px;
+          border-radius: 10px;
+        }
+        .assistant-form .attach-btn,
+        .assistant-form .mic-btn {
+          padding: 0;  /* icon-only buttons */
+        }
+
+        /* Stacked sidebars get tighter padding so they don't dominate. */
+        .claudia-side {
+          padding: 0.5rem 0.55rem;
+          margin-top: 0.5rem;
+        }
+        .claudia-side h3 { font-size: 10px; margin-bottom: 0.4rem; }
+        .claudia-doc { padding: 8px 10px; }
+        .claudia-doc-title { font-size: 13px; }
+        .claudia-doc-meta { font-size: 11px; }
+        /* Doc action buttons larger so they're tappable. */
+        .claudia-doc-btn {
+          min-width: 36px; min-height: 36px;
+          padding: 6px 10px; font-size: 16px;
+        }
+        .claudia-audio-item { padding: 8px 10px; }
+        .claudia-audio-transcript { font-size: 13px; }
+
+        /* Page-floating scroll jump buttons get in the way of the
+           sticky form on a small screen — gesture-scrolling is faster
+           on touch anyway. Hide them. */
+        .chat-scroll-jump { display: none !important; }
+
+        /* Drop-zone overlay text is too long for narrow viewports —
+           shorter message that still tells the user what's happening. */
+        .assistant-wrap.drag-active::after {
+          content: 'Drop to upload';
+          font-size: 13px; padding: 1rem;
+        }
+
+        /* Empty-state intro shrinks so it doesn't push the input out
+           of reach on first load. */
+        .assistant-empty {
+          font-size: 13px; line-height: 1.5; max-width: 92%;
+        }
+        .claudia-icon-lg { width: 44px; height: 44px; }
+      }
     </style>
     ${tabs}
     ${observations.length > 0 ? html`
