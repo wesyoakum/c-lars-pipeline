@@ -632,7 +632,11 @@ async function syncQuoteLines(env, pipelineQuoteId, wfmQuoteUuid, ctx) {
     const extCost   = quantity * unitCost;
 
     lines.push({
-      external_id: s(c.UUID) || ('cost-' + sortOrder),
+      // WFM sometimes returns Cost entries with empty UUID. Scoping
+      // the fallback to the parent WFM quote UUID keeps the global
+      // unique index on (quote_lines.external_source, external_id)
+      // happy across multiple imported quotes.
+      external_id: s(c.UUID) || (wfmQuoteUuid + ':cost:' + sortOrder),
       sort_order:  sortOrder, item_type: 'product',
       title:       s(c.Title) || '',
       part_number: partNumber,
@@ -660,7 +664,8 @@ async function syncQuoteLines(env, pipelineQuoteId, wfmQuoteUuid, ctx) {
     const extCost  = qty * cost;
 
     lines.push({
-      external_id: s(t.UUID) || ('task-' + sortOrder),
+      // Same scoping fix as the Cost branch above.
+      external_id: s(t.UUID) || (wfmQuoteUuid + ':task:' + sortOrder),
       sort_order:  sortOrder, item_type: 'labor',
       title:       s(t.Title) || s(t.Name) || '',
       part_number: '',
