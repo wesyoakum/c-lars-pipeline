@@ -510,6 +510,46 @@ export async function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'read_account_intel',
+      description:
+        'Read the AI-driven intel notes you maintain on one account — a markdown blob distinct from ' +
+        'the human-edited notes column on the account. Use this BEFORE responding to any question ' +
+        'about an account so you don\'t lose continuity with what you already know about them. Returns ' +
+        '{ account_id, intel_notes, intel_updated_at, freshness_minutes }. If intel_notes is null, ' +
+        'this account has no intel yet — that\'s your cue to compose a starter version (call ' +
+        'set_account_intel after gathering context via search/query_db) IF the user is asking about ' +
+        'this account in any depth.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          account_id: { type: 'string', description: 'Account id.' },
+        },
+        required: ['account_id'],
+      },
+    },
+    {
+      name: 'set_account_intel',
+      description:
+        'Upsert the AI-driven intel notes for one account. Markdown blob — rolling document, you ' +
+        'rewrite the WHOLE thing each call (not append-only), so always include any prior content ' +
+        'you want to keep. Suggested structure: ' +
+        '"## Key people — who decides, who blocks, who advocates. ' +
+        '## Recent context — last few interactions / state changes. ' +
+        '## Watch-outs — things to be careful about (rate-sensitive, slow procurement, etc.). ' +
+        '## Open opportunities — short summary, leave the details to the opp records." ' +
+        'Hard rule: NEVER overwrite intel_notes without first reading the existing version (call ' +
+        'read_account_intel first). Pass null/empty to CLEAR the field. Direct UPDATE — does not ' +
+        'go through claudia_writes / undo_claudia_write; if you mess it up, just rewrite it.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          account_id:  { type: 'string', description: 'Account id.' },
+          intel_notes: { type: 'string', description: 'Full markdown body. Pass empty string to clear.' },
+        },
+        required: ['account_id', 'intel_notes'],
+      },
+    },
+    {
       name: 'read_brief',
       description:
         'Read the cached "catch me up" brief — a single-row markdown snapshot of what matters right ' +
@@ -875,6 +915,10 @@ export async function makeAssistantTools({ env, user }) {
         return createOpportunity(env, user, input);
       case 'update_opportunity':
         return updateOpportunity(env, user, input);
+      case 'read_account_intel':
+        return readAccountIntel(env, user, input);
+      case 'set_account_intel':
+        return setAccountIntel(env, user, input);
       case 'read_brief':
         return readBrief(env, user);
       case 'refresh_brief':
@@ -921,6 +965,55 @@ export async function listTableNames(env) {
 }
 
 // ---------- Implementations ----------
+
+async function readAccountIntel(env, user, { account_id } = {}) {
+  const id = String(account_id || '').trim();
+  if (!id) throw new Error('read_account_intel requires account_id.');
+  const row = await one(
+    env.DB,
+    'SELECT id, name, intel_notes, intel_updated_at FROM accounts WHERE id = ?',
+    [id]
+  );
+  if (!row) return { error: 'account_not_found', account_id: id };
+  const ageMin = row.intel_updated_at
+    ? Math.round((Date.now() - Date.parse(row.intel_updated_at)) / 60_000)
+    : null;
+  return {
+    account_id: row.id,
+    account_name: row.name,
+    intel_notes: row.intel_notes || null,
+    intel_updated_at: row.intel_updated_at || null,
+    freshness_minutes: ageMin,
+  };
+}
+
+async function setAccountIntel(env, user, { account_id, intel_notes } = {}) {
+  const id = String(account_id || '').trim();
+  if (!id) throw new Error('set_account_intel requires account_id.');
+  const acct = await one(env.DB, 'SELECT id, name FROM accounts WHERE id = ?', [id]);
+  if (!acct) return { error: 'account_not_found', account_id: id };
+
+  // Empty/null clears the field. The column is nullable.
+  const body = (intel_notes == null || String(intel_notes).trim() === '')
+    ? null
+    : String(intel_notes);
+  const ts = now();
+  await run(
+    env.DB,
+    `UPDATE accounts
+        SET intel_notes = ?, intel_updated_at = ?, updated_at = ?
+      WHERE id = ?`,
+    [body, body == null ? null : ts, ts, id]
+  );
+  return {
+    ok: true,
+    account_id: id,
+    account_name: acct.name,
+    cleared: body == null,
+    bytes: body ? body.length : 0,
+    intel_updated_at: body == null ? null : ts,
+  };
+}
 
 async function searchAccounts(env, { query, include_inactive }) {
   const q = String(query || '').trim();

@@ -44,6 +44,12 @@ export const PERMISSION_GATED_ACTIONS_CATALOG = [
     label: 'Update accounts',
     description: 'Edit account fields — name, alias, segment, parent group, addresses, website, notes, etc.',
   },
+  {
+    action: 'set_account_intel',
+    category: 'accounts',
+    label: 'Maintain AI intel notes',
+    description: 'Update the AI-driven intel notes field on an account — a separate markdown blob from the human notes column. Used to capture "what I know about this customer" (key people, recent context, watch-outs) that Claudia maintains as new info comes in.',
+  },
   // contacts
   {
     action: 'create_contact',

@@ -18,6 +18,7 @@ import {
 } from '../../lib/validators.js';
 import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
 import { ICON_MIC } from '../../lib/icons.js';
+import { renderMarkdown } from '../../lib/claudia-markdown.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 import {
@@ -448,6 +449,18 @@ export async function onRequestGet(context) {
 
       <h3 style="margin-top:1rem">Notes</h3>
       ${inlineTextarea('notes', account.notes, { placeholder: 'Click to add notes…' })}
+
+      ${account.intel_notes ? html`
+        <h3 style="margin-top:1.25rem;display:flex;align-items:center;gap:0.5rem">
+          <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#2566ff"></span>
+          AI intel
+          ${account.intel_updated_at ? html`<span class="muted" style="font-size:11px;font-weight:400">Updated ${escape(account.intel_updated_at.slice(0, 16).replace('T', ' '))}</span>` : ''}
+        </h3>
+        <div class="account-intel-notes" style="background:#f8fafc;border-left:3px solid #2566ff;padding:0.75rem 1rem;border-radius:0 6px 6px 0;font-size:13px;line-height:1.55;color:#1e293b">
+          ${raw(renderMarkdown(account.intel_notes))}
+        </div>
+        <p class="muted" style="font-size:11px;margin-top:4px">Maintained by Claudia. Distinct from the Notes field above (which is for human edits).</p>
+      ` : ''}
     </section>
 
     ${siblings.length > 0
