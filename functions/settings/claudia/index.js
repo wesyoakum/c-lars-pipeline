@@ -24,6 +24,7 @@ import {
   PERMISSION_CATEGORIES,
   ensurePermissionRows,
 } from '../../lib/claudia-permissions.js';
+import { claudiaAuditTabs } from '../../lib/claudia-audit-render.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 
@@ -61,6 +62,7 @@ export async function onRequestGet(context) {
 
   const body = html`
     ${settingsSubNav('claudia', isAdmin, true)}
+    ${claudiaAuditTabs('permissions')}
 
     <section class="card">
       <div class="card-header">
