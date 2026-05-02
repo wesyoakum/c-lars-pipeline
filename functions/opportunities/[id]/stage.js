@@ -19,6 +19,7 @@ import { notifyStmt } from '../../lib/notify.js';
 import { notifyExternal, NOTIFICATION_EVENTS } from '../../lib/notify-external.js';
 import { checkInactivateBlockers, summarizeBlockers } from '../../lib/inactivate-blocker.js';
 import { fireEvent } from '../../lib/auto-tasks.js';
+import { queueClaudiaEvent } from '../../lib/claudia-events.js';
 
 function isAjaxRequest(request, input) {
   if (input?.source === 'wizard' || input?.source === 'modal') return true;
@@ -180,6 +181,15 @@ export async function onRequestPost(context) {
   ];
 
   await batch(env.DB, statements);
+
+  // Best-effort enqueue for Claudia's hourly tick. Never throws.
+  await queueClaudiaEvent(
+    env,
+    user,
+    'opp_stage_change',
+    oppId,
+    `Opp ${opp.number} (${opp.title}): ${opp.stage} → ${targetDef.stage_key}`
+  );
 
   // T4.2 Phase 1 — fan out an in-app notification to every other active
   // user so they see the stage change as a toast. Failures here should

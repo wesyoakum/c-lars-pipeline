@@ -19,7 +19,7 @@
   //   curl -X POST https://c-lars-pms-cron.<account>.workers.dev/__run \
   //     -H "x-cron-secret: $CRON_SECRET"
   //
-  // Two scheduled triggers:
+  // Three scheduled triggers:
   //   1. Daily auto-task sweep — 14:00 UTC = 09:00 America/Chicago.
   //      One tick per day is plenty; each sweep's window bucket is a
   //      UTC day, so running more often just hits the dedup gate.
@@ -29,6 +29,12 @@
   //      notification_log idempotency keys so re-runs are safe.
   //      Bump back to */5 once testing is done — the 1-min cadence
   //      is fine cost-wise but generates a lot of log noise.
+  //   3. Claudia hourly tick — top of every hour. Drains the
+  //      claudia_events_pending queue and gives Claudia a chance to
+  //      generate observations Wes will see when he opens the chat.
+  //      The Pages endpoint self-throttles (no-ops if nothing changed
+  //      and the last observation is recent), so it's safe to run on
+  //      a fixed cadence.
   // The Worker dispatches based on event.cron — see src/index.js.
   "name": "c-lars-pms-cron",
   "main": "src/index.js",
@@ -36,6 +42,7 @@
   "triggers": {
     "crons": [
       "0 14 * * *",      // daily sweep
+      "0 * * * *",       // Claudia hourly tick
       "* * * * *"        // notifications tick — every minute (testing)
     ]
   },

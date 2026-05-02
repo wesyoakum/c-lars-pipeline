@@ -11,6 +11,7 @@ import { now } from '../../lib/ids.js';
 import { redirectWithFlash } from '../../lib/http.js';
 import { fireEvent } from '../../lib/auto-tasks.js';
 import { advanceStageOnTaskComplete } from '../../lib/stage-transitions.js';
+import { queueClaudiaEvent } from '../../lib/claudia-events.js';
 
 export async function onRequestPost(context) {
   const { env, data, params, request } = context;
@@ -35,6 +36,17 @@ export async function onRequestPost(context) {
       summary: `Completed ${act.type}: ${act.subject}`,
     }),
   ]);
+
+  // Best-effort enqueue for Claudia's hourly tick. Never throws.
+  if (!alreadyCompleted && act.type === 'task') {
+    await queueClaudiaEvent(
+      env,
+      user,
+      'task_completed',
+      actId,
+      `Task completed: ${act.subject}`
+    );
+  }
 
   // Only run the completion side effects when this is the edge
   // (pending/cancelled → completed), never on a repeat press.

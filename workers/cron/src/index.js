@@ -28,16 +28,17 @@
 
 export default {
   async scheduled(event, env, ctx) {
-    // Two cron schedules. The daily sweep is the once-per-day tick
-    // (`0 14 * * *`); anything else (currently `* * * * *`, was
-    // `*/5 * * * *`) is the notifications tick. Matching by the
-    // exact daily cron string instead of the notifications one means
-    // we don't have to update this file when the notifications
-    // cadence changes.
-    const isDailySweep = event.cron === '0 14 * * *';
-    if (isDailySweep) {
+    // Three cron schedules dispatched by the exact cron string:
+    //   '0 14 * * *' → daily auto-task sweep
+    //   '0 * * * *'  → Claudia hourly tick
+    //   anything else (currently '* * * * *') → notifications tick
+    if (event.cron === '0 14 * * *') {
       ctx.waitUntil(callPipeline(env, '/api/cron/sweep', 'sweep').catch((err) => {
         console.error('cron sweep run failed:', err?.message || err);
+      }));
+    } else if (event.cron === '0 * * * *') {
+      ctx.waitUntil(callPipeline(env, '/api/cron/claudia-tick', 'claudia-tick').catch((err) => {
+        console.error('cron claudia-tick run failed:', err?.message || err);
       }));
     } else {
       ctx.waitUntil(callPipeline(env, '/api/cron/notifications', 'notifications').catch((err) => {
@@ -72,6 +73,15 @@ export default {
         return new Response('Unauthorized', { status: 401 });
       }
       const result = await callPipeline(env, '/api/cron/notifications', 'notifications');
+      return jsonResponse(result, result.ok ? 200 : 502);
+    }
+
+    if (request.method === 'POST' && url.pathname === '/__run-claudia') {
+      const provided = request.headers.get('x-cron-secret') || '';
+      if (!secretsMatch(provided, env.CRON_SECRET || '')) {
+        return new Response('Unauthorized', { status: 401 });
+      }
+      const result = await callPipeline(env, '/api/cron/claudia-tick', 'claudia-tick');
       return jsonResponse(result, result.ok ? 200 : 502);
     }
 

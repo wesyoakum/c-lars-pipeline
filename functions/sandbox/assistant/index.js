@@ -37,6 +37,21 @@ export async function onRequestGet(context) {
       )
     : [];
 
+  // Surface up to 5 non-dismissed observations from the last 24 hours,
+  // newest first. The hourly cron writes into claudia_observations;
+  // this panel is how Wes sees the output.
+  const observations = await all(
+    env.DB,
+    `SELECT id, body, created_at
+       FROM claudia_observations
+      WHERE user_id = ?
+        AND dismissed_at IS NULL
+        AND created_at > datetime('now', '-24 hours')
+      ORDER BY created_at DESC
+      LIMIT 5`,
+    [user.id]
+  );
+
   const tabs = subnavTabs(
     [
       { href: '/sandbox', label: 'Flow Chart' },
@@ -99,8 +114,31 @@ export async function onRequestGet(context) {
       }
       .htmx-request .assistant-pending { display: block; }
       .assistant-pending { display: none; }
+      .claudia-obs-panel {
+        max-width: 880px; margin: 0.75rem auto 0; padding: 0 1rem;
+        display: flex; flex-direction: column; gap: 0.5rem;
+      }
+      .claudia-obs {
+        display: flex; gap: 0.5rem; align-items: flex-start;
+        background: #fff7e6; border: 1px solid #facc8a; border-radius: 8px;
+        padding: 0.55rem 0.75rem; font-size: 13px; line-height: 1.45;
+        color: #4a3a1a;
+      }
+      .claudia-obs-body { flex: 1; white-space: pre-wrap; word-wrap: break-word; }
+      .claudia-obs-meta { font-size: 11px; color: #8a6f3a; margin-bottom: 2px; }
+      .claudia-obs-dismiss {
+        background: transparent; border: 0; color: #8a6f3a; cursor: pointer;
+        font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: 4px;
+        flex-shrink: 0;
+      }
+      .claudia-obs-dismiss:hover { background: rgba(0,0,0,0.06); color: #4a3a1a; }
     </style>
     ${tabs}
+    ${observations.length > 0 ? html`
+      <div id="claudia-obs-panel" class="claudia-obs-panel">
+        ${observations.map(renderObservation)}
+      </div>
+    ` : ''}
     <div class="assistant-wrap">
       <div id="assistant-messages" class="assistant-messages">
         ${messages.length === 0
@@ -150,6 +188,38 @@ export async function onRequestGet(context) {
 
 function renderMessage(m) {
   return html`<div class="assistant-msg ${m.role}">${escape(m.text)}</div>`;
+}
+
+function renderObservation(o) {
+  const when = formatRelative(o.created_at);
+  return html`
+    <div class="claudia-obs" id="claudia-obs-${escape(o.id)}">
+      <div class="claudia-obs-body">
+        <div class="claudia-obs-meta">${escape(when)}</div>
+        ${escape(o.body)}
+      </div>
+      <button
+        type="button"
+        class="claudia-obs-dismiss"
+        title="Dismiss"
+        aria-label="Dismiss observation"
+        hx-post="/sandbox/assistant/dismiss-observation?id=${encodeURIComponent(o.id)}"
+        hx-target="#claudia-obs-${escape(o.id)}"
+        hx-swap="outerHTML"
+      >×</button>
+    </div>
+  `;
+}
+
+function formatRelative(iso) {
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return iso;
+  const diffMin = Math.round((Date.now() - ms) / 60000);
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return `${diffMin} min ago`;
+  const diffHr = Math.round(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} hr ago`;
+  return new Date(ms).toLocaleString();
 }
 
 // Exported so send.js can reuse the exact same row markup when returning
