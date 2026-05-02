@@ -60,6 +60,7 @@ export async function onRequestGet(context) {
             c.linkedin_url_source,
             c.is_primary,
             c.updated_at,
+            c.external_source,
             a.name AS account_name
        FROM contacts c
        LEFT JOIN accounts a ON a.id = c.account_id
@@ -78,6 +79,9 @@ export async function onRequestGet(context) {
     { key: 'mobile',       label: 'Mobile',       sort: 'text',   filter: 'text',   default: false },
     { key: 'linkedin',     label: 'LinkedIn',     sort: 'text',   filter: 'text',   default: true },
     { key: 'is_primary',   label: 'Primary',      sort: 'text',   filter: 'select', default: true },
+    // WFM-imported vs Pipeline-native. Off by default; flip on via the
+    // column-picker when auditing import coverage.
+    { key: 'source',       label: 'Source',       sort: 'text',   filter: 'select', default: false },
     { key: 'updated',      label: 'Updated',      sort: 'date',   filter: 'text',   default: true },
     { key: 'delete',       label: '',             sort: null,     filter: null,     default: true },
   ];
@@ -98,6 +102,7 @@ export async function onRequestGet(context) {
     // the select-filter dropdown handle it uniformly; the patch handler
     // coerces back to 0/1 for storage.
     is_primary: r.is_primary === 1 ? '1' : '0',
+    source: r.external_source ? 'wfm' : 'pipeline',
     updated: (r.updated_at ?? '').slice(0, 10),
   }));
 
@@ -159,6 +164,9 @@ export async function onRequestGet(context) {
                     </td>
                     <td class="col-is_primary" data-col="is_primary">
                       ${ieSelect('is_primary', r.is_primary, PRIMARY_OPTIONS)}
+                    </td>
+                    <td class="col-source" data-col="source">
+                      <span class="cell-text muted" style="font-size:.78rem">${escape(r.source)}</span>
                     </td>
                     <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
                     <td class="col-delete" data-col="delete">

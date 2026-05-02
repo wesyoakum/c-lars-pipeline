@@ -78,7 +78,7 @@ export async function onRequestGet(context) {
   const rows = await all(
     env.DB,
     `SELECT a.id, a.name, a.alias, a.parent_group, a.segment, a.phone, a.website, a.updated_at,
-            a.is_active,
+            a.is_active, a.external_source,
             (SELECT COUNT(*) FROM contacts c WHERE c.account_id = a.id) AS contact_count,
             (SELECT COUNT(*) FROM opportunities o WHERE o.account_id = a.id) AS opp_count
        FROM accounts a
@@ -106,6 +106,11 @@ export async function onRequestGet(context) {
     { key: 'parent_group',  label: 'Group',     sort: 'text',   filter: 'select', default: false },
     { key: 'segment',       label: 'Segment',   sort: 'text',   filter: 'select', default: true },
     { key: 'status',        label: 'Status',    sort: 'text',   filter: 'select', default: true },
+    // Source distinguishes WFM-imported rows from Pipeline-native ones.
+    // Off by default to keep the list compact; turn on via the column-
+    // picker (gear icon) when auditing what came from WFM vs. what
+    // didn't.
+    { key: 'source',        label: 'Source',    sort: 'text',   filter: 'select', default: false },
     { key: 'phone',         label: 'Phone',     sort: 'text',   filter: 'text',   default: true },
     { key: 'contact_count', label: 'Contacts',  sort: 'number', filter: 'range',  default: true },
     { key: 'opp_count',     label: 'Opps',      sort: 'number', filter: 'range',  default: true },
@@ -149,6 +154,11 @@ export async function onRequestGet(context) {
     opp_count: r.opp_count ?? 0,
     website: r.website ?? '',
     updated: (r.updated_at ?? '').slice(0, 10),
+    // Coarse source tag: WFM-imported rows have a non-null
+    // external_source ('wfm'/'wfm-lead'/etc.); Pipeline-native rows
+    // have NULL. Normalized to 'wfm' / 'pipeline' so the select-filter
+    // dropdown is binary.
+    source: r.external_source ? 'wfm' : 'pipeline',
   }));
 
   // When `prefs.group_rollup` is on, accounts that share a parent_group
@@ -177,6 +187,8 @@ export async function onRequestGet(context) {
       const segmentCell = segments.size === 1 ? [...segments][0]
         : segments.size === 0 ? '' : 'Multiple';
       const statusCell = statuses.size === 1 ? [...statuses][0] : 'mixed';
+      const sources = new Set(members.map((m) => m.source));
+      const sourceCell = sources.size === 1 ? [...sources][0] : 'mixed';
       return {
         id: 'group:' + slug,
         is_group: true,
@@ -193,6 +205,7 @@ export async function onRequestGet(context) {
         segment: segmentCell,
         is_active: statuses.size > 1 ? null : (members[0].is_active),
         status: statusCell,
+        source: sourceCell,
         phone: '',
         contact_count: members.reduce((s, m) => s + (m.contact_count || 0), 0),
         opp_count: members.reduce((s, m) => s + (m.opp_count || 0), 0),
@@ -268,6 +281,9 @@ export async function onRequestGet(context) {
                       ${r.is_group
                         ? html`<span class="cell-text">${escape(r.status)}</span>`
                         : ieSelect('is_active', r.status, ACTIVE_OPTIONS)}
+                    </td>
+                    <td class="col-source" data-col="source">
+                      <span class="cell-text muted" style="font-size:.78rem">${escape(r.source)}</span>
                     </td>
                     <td class="col-phone" data-col="phone">
                       ${r.is_group

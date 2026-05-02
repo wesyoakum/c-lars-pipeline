@@ -35,7 +35,7 @@ export async function onRequestGet(context) {
     `SELECT q.id, q.number, q.revision, q.quote_type, q.status,
             q.title, q.total_price, q.valid_until,
             q.created_at, q.updated_at,
-            q.opportunity_id,
+            q.opportunity_id, q.external_source,
             o.number AS opp_number, o.title AS opp_title,
             a.name AS account_name, a.id AS account_id,
             a.alias AS account_alias, a.parent_group AS account_parent_group
@@ -68,6 +68,9 @@ export async function onRequestGet(context) {
     { key: 'valid_until',  label: 'Valid until',   sort: 'date',   filter: 'text',   default: true },
     { key: 'updated',      label: 'Updated',      sort: 'date',   filter: 'text',   default: true },
     { key: 'created',      label: 'Created',      sort: 'date',   filter: 'text',   default: false },
+    // WFM-imported vs Pipeline-native. Off by default; flip on via the
+    // column-picker when auditing import coverage.
+    { key: 'source',       label: 'Source',       sort: 'text',   filter: 'select', default: false },
     // Delete affordance \u2014 only renders the button for draft / revision-
     // draft rows; other statuses get a hyphen. Server-side route blocks
     // the destructive action on locked statuses regardless.
@@ -116,6 +119,7 @@ export async function onRequestGet(context) {
       valid_until: r.valid_until ?? '',
       updated: (r.updated_at ?? '').slice(0, 10),
       created: (r.created_at ?? '').slice(0, 10),
+      source: r.external_source ? 'wfm' : 'pipeline',
     };
   });
 
@@ -178,6 +182,9 @@ export async function onRequestGet(context) {
                     </td>
                     <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
                     <td class="col-created" data-col="created"><small class="muted">${escape(r.created)}</small></td>
+                    <td class="col-source" data-col="source">
+                      <span class="cell-text muted" style="font-size:.78rem">${escape(r.source)}</span>
+                    </td>
                     <td class="col-actions" data-col="actions" style="text-align:right;white-space:nowrap">
                       ${DELETABLE_STATUSES.has(r.status) ? html`
                         <form method="post"

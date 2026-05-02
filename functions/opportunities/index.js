@@ -54,6 +54,7 @@ export async function onRequestGet(context) {
             o.created_at, o.updated_at,
             o.expected_close_date, o.rfq_received_date, o.rfq_due_date,
             o.rfi_due_date, o.quoted_date,
+            o.external_source,
             a.name AS account_name, a.alias AS account_alias,
             a.parent_group AS account_parent_group,
             a.id AS account_id
@@ -82,6 +83,10 @@ export async function onRequestGet(context) {
     { key: 'close',        label: 'Close',        sort: 'date',   filter: 'text',   default: true },
     { key: 'updated',      label: 'Updated',      sort: 'date',   filter: 'text',   default: true },
     { key: 'created',      label: 'Created',      sort: 'date',   filter: 'text',   default: false },
+    // WFM-imported (wfm-lead / wfm-job / wfm-quote-orphan) vs.
+    // Pipeline-native (NULL external_source). Off by default; flip on
+    // via the column-picker when auditing import coverage.
+    { key: 'source',       label: 'Source',       sort: 'text',   filter: 'select', default: false },
     { key: 'rfq_received', label: 'RFQ received', sort: 'date',   filter: 'text',   default: false },
     { key: 'rfq_due',      label: 'RFQ due',      sort: 'date',   filter: 'text',   default: false },
     { key: 'rfi_due',      label: 'RFI due',      sort: 'date',   filter: 'text',   default: false },
@@ -115,6 +120,10 @@ export async function onRequestGet(context) {
     close: r.expected_close_date ?? '',
     updated: (r.updated_at ?? '').slice(0, 10),
     created: (r.created_at ?? '').slice(0, 10),
+    // 'wfm' covers wfm-lead / wfm-job / wfm-quote-orphan; 'pipeline'
+    // for null external_source. Binary so the select-filter dropdown
+    // is simple.
+    source: r.external_source ? 'wfm' : 'pipeline',
     rfq_received: r.rfq_received_date ?? '',
     rfq_due: r.rfq_due_date ?? '',
     rfi_due: r.rfi_due_date ?? '',
@@ -155,7 +164,8 @@ export async function onRequestGet(context) {
                         data-rfq_received="${escape(r.rfq_received)}"
                         data-rfq_due="${escape(r.rfq_due)}"
                         data-rfi_due="${escape(r.rfi_due)}"
-                        data-quoted="${escape(r.quoted)}">
+                        data-quoted="${escape(r.quoted)}"
+                        data-source="${escape(r.source)}">
                       <td class="col-number" data-col="number"><a href="/opportunities/${escape(r.id)}"><code>${escape(r.number)}</code></a></td>
                       <td class="col-title" data-col="title">
                         ${ieText('title', r.title)}
@@ -178,6 +188,9 @@ export async function onRequestGet(context) {
                       </td>
                       <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
                       <td class="col-created" data-col="created"><small class="muted">${escape(r.created)}</small></td>
+                      <td class="col-source" data-col="source">
+                        <span class="cell-text muted" style="font-size:.78rem">${escape(r.source)}</span>
+                      </td>
                       <td class="col-rfq_received" data-col="rfq_received">
                         ${ieText('rfq_received_date', r.rfq_received, { inputType: 'date' })}
                       </td>
