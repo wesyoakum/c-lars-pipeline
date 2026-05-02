@@ -14,6 +14,15 @@
 //
 // Sandbox scope: only fires for the assistant owner (Wes). Reusing
 // the cron worker's existing x-cron-secret auth.
+//
+// Model: this is the one place where we run Claude Opus by default
+// instead of the chat's Sonnet. The tick is a single one-shot
+// (no tool-use loop), runs on a hard once-an-hour cadence, and
+// produces 0-3 observations Wes will skim — exactly the kind of
+// "fewer calls, better reasoning per call" workload Opus is right
+// for. Cost is bounded (~24 calls/day at the floor, less when the
+// tick self-throttles to "quiet"). Override via env.CLAUDIA_TICK_MODEL
+// if you want to A/B against Sonnet.
 
 import { all, one, run } from '../../lib/db.js';
 import { now, uuid } from '../../lib/ids.js';
@@ -22,6 +31,7 @@ import { messagesJson } from '../../lib/anthropic.js';
 const SANDBOX_OWNER_EMAIL = 'wes.yoakum@c-lars.com';
 const STALE_OBSERVATION_MINUTES = 55;
 const MAX_EVENTS_PER_TICK = 50;
+const CLAUDIA_TICK_MODEL_DEFAULT = 'claude-opus-4-7';
 
 function jsonResponse(payload, status = 200) {
   return new Response(JSON.stringify(payload), {
@@ -169,6 +179,7 @@ export async function onRequestPost(context) {
     const result = await messagesJson(env, {
       system,
       user: stateBlob,
+      model: env.CLAUDIA_TICK_MODEL || CLAUDIA_TICK_MODEL_DEFAULT,
       cacheSystem: true,
       maxTokens: 1500,
       temperature: 0.3,
