@@ -16,6 +16,7 @@ import { changeOppStage } from '../../lib/stage-transitions.js';
 import { fireEvent } from '../../lib/auto-tasks.js';
 import { stagesFor, evaluateGate, loadGateContext } from '../../lib/stages.js';
 import { checkInactivateBlockers } from '../../lib/inactivate-blocker.js';
+import { readBrief, regenerateBrief } from '../../lib/claudia-brief.js';
 import {
   claudiaInsert,
   claudiaUpdate,
@@ -509,6 +510,36 @@ export async function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'read_brief',
+      description:
+        'Read the cached "catch me up" brief — a single-row markdown snapshot of what matters right ' +
+        'now (today\'s tasks, opps at risk, opps closing this week, recent completions, tasks ' +
+        'others assigned to you). The hourly cron tick keeps this fresh in the background, so you ' +
+        'are NOT computing it from scratch every time the user asks. Returns ' +
+        '{ body, generated_at, freshness_minutes, source_event }. ' +
+        'When to call: any time the user says "catch me up" / "what\'s on my plate" / "what\'s ' +
+        'happening" / similar. Surface body verbatim (it\'s already markdown). If freshness_minutes ' +
+        'is large (> 90), mention you\'ll regenerate — call refresh_brief next. If the brief is ' +
+        'missing entirely, this tool auto-generates one on first call.',
+      input_schema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+    {
+      name: 'refresh_brief',
+      description:
+        'Force-regenerate the "catch me up" brief. Use sparingly — the brief is normally kept fresh ' +
+        'by the hourly cron tick, so calling this on every "catch me up" ask wastes Claude calls. ' +
+        'Only call when: (a) read_brief returned a stale freshness_minutes (>90), or (b) the user ' +
+        'just did something material (closed a quote, completed a batch of tasks) and explicitly ' +
+        'wants the brief to reflect it. Returns the freshly-generated row.',
+      input_schema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+    {
       name: 'inspect_opportunity_stages',
       description:
         'Read-only inspection of an opportunity\'s stage workflow. For each stage in the opp\'s ' +
@@ -844,6 +875,10 @@ export async function makeAssistantTools({ env, user }) {
         return createOpportunity(env, user, input);
       case 'update_opportunity':
         return updateOpportunity(env, user, input);
+      case 'read_brief':
+        return readBrief(env, user);
+      case 'refresh_brief':
+        return regenerateBrief(env, user, { sourceEvent: 'tool_refresh' });
       case 'inspect_opportunity_stages':
         return inspectOpportunityStages(env, user, input);
       case 'change_opportunity_stage':

@@ -28,6 +28,7 @@ import { all, one, run } from '../../lib/db.js';
 import { now, uuid } from '../../lib/ids.js';
 import { messagesJson } from '../../lib/anthropic.js';
 import { CLAUDIA_USER_ID } from '../../lib/auth.js';
+import { regenerateBrief } from '../../lib/claudia-brief.js';
 
 const SANDBOX_OWNER_EMAIL = 'wes.yoakum@c-lars.com';
 const STALE_OBSERVATION_MINUTES = 55;
@@ -252,11 +253,24 @@ export async function onRequestPost(context) {
     );
   }
 
+  // Regenerate the "catch me up" brief alongside observations. Cheap
+  // (Haiku, ~700 tokens out, ~7c/day at hourly cadence). Failures here
+  // are swallowed so a brief outage doesn't break the rest of the
+  // tick — read_brief will just surface a slightly stale snapshot.
+  let briefError = null;
+  try {
+    await regenerateBrief(env, user, { sourceEvent: 'cron_tick' });
+  } catch (err) {
+    briefError = err?.message || String(err);
+    console.error('[claudia-tick] brief regen failed:', briefError);
+  }
+
   return jsonResponse({
     ok: true,
     user_id: user.id,
     pending_events_processed: events.length,
     observations_written: observations.length,
     model_error: modelError,
+    brief_error: briefError,
   });
 }
