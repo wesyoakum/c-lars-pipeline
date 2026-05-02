@@ -549,6 +549,16 @@ async function fetchQuoteDetail(env, wfmUuid, cache) {
   return q;
 }
 
+async function fetchJobDetail(env, wfmUuid, cache) {
+  if (!wfmUuid) return null;
+  if (cache.has('job:' + wfmUuid)) return cache.get('job:' + wfmUuid);
+  const r = await apiGet(env, '/job.api/get/' + encodeURIComponent(wfmUuid));
+  if (!r.ok) { cache.set('job:' + wfmUuid, null); return null; }
+  const j = recordList(r.body, 'Job')[0] || null;
+  cache.set('job:' + wfmUuid, j);
+  return j;
+}
+
 // Walk DetailedQuote.{Costs,Tasks} arrays and produce Pipeline
 // quote_lines rows. Each line gets its own per-line cost_build
 // (manual-mode, total_cost_source='manual') storing the WFM cost
@@ -800,6 +810,30 @@ async function ensureOpportunityFromLead(env, wfmLeadUuid, ctx) {
   return o.id;
 }
 
+// Get-or-import a job-derived opportunity by WFM Job UUID. Cascades
+// account if the parent client isn't in our maps. Mirrors
+// ensureOpportunityFromLead but for the JobUUID FK path that quotes
+// can take when there's no parent Lead.
+async function ensureOpportunityFromJob(env, wfmJobUuid, ctx) {
+  if (!wfmJobUuid) return null;
+  if (ctx.oppByWfmUuid.has(wfmJobUuid)) return ctx.oppByWfmUuid.get(wfmJobUuid);
+  const job = await fetchJobDetail(env, wfmJobUuid, ctx.fetchCache);
+  if (!job) return null;
+
+  const accountId = job.Client?.UUID
+    ? await ensureAccount(env, job.Client.UUID, ctx)
+    : null;
+  if (!accountId) return null;
+  const ownerId = job.Manager?.UUID
+    ? (ctx.userByWfmUuid.get(job.Manager.UUID) || null)
+    : null;
+
+  const o = await upsertOpportunityFromJob(env, job, accountId, ownerId);
+  ctx.oppByWfmUuid.set(wfmJobUuid, o.id);
+  ctx.counts.opportunities_cascaded++;
+  return o.id;
+}
+
 async function enrichUserFromStaff(env, st) {
   const email = String(st.Email || '').toLowerCase().trim();
   if (!email) return null;
@@ -913,7 +947,15 @@ export async function onRequestPost(context) {
         const accountId = lead.Client?.UUID
           ? await ensureAccount(env, lead.Client.UUID, ctx)
           : null;
-        if (!accountId) { counts.skipped++; continue; }
+        if (!accountId) {
+          counts.skipped++;
+          errors.push('lead "' + (lead?.Name || lead?.UUID || '?') +
+            '" skipped: ' +
+            (lead.Client?.UUID
+              ? 'client UUID ' + lead.Client.UUID + ' could not be resolved (cascade fetch failed?)'
+              : 'no Client.UUID on lead'));
+          continue;
+        }
         const contactId = lead.Contact?.UUID ? contactByWfmUuid.get(lead.Contact.UUID) : null;
         const ownerId   = lead.Owner?.UUID   ? userByWfmUuid.get(lead.Owner.UUID)      : null;
         const o = await upsertOpportunityFromLead(env, lead, accountId, contactId, ownerId);
@@ -926,14 +968,27 @@ export async function onRequestPost(context) {
     // -------- Quotes ---------
     for (const q of (samples.quotes || [])) {
       try {
-        // Auto-cascade: if the quote's parent Lead isn't in the
-        // current batch and isn't in Pipeline, fetch the Lead (which
-        // recursively cascades the Client) and import it.
+        // Auto-cascade: if the quote's parent Lead/Job isn't in the
+        // current batch and isn't in Pipeline, fetch it from WFM
+        // (which recursively cascades the Client) and import on the fly.
         let oppId = null;
         if (q.LeadUUID) oppId = await ensureOpportunityFromLead(env, q.LeadUUID, ctx);
-        // (JobUUID cascade — not yet wired; falls through to skip.)
-        if (!oppId && q.JobUUID) oppId = oppByWfmUuid.get(q.JobUUID) || null;
-        if (!oppId) { counts.skipped++; continue; }
+        if (!oppId && q.JobUUID) oppId = await ensureOpportunityFromJob(env, q.JobUUID, ctx);
+        if (!oppId) {
+          counts.skipped++;
+          let reason;
+          if (!q.LeadUUID && !q.JobUUID) {
+            reason = 'orphan quote: no LeadUUID and no JobUUID set on the WFM record';
+          } else if (q.LeadUUID && !q.JobUUID) {
+            reason = 'LeadUUID ' + q.LeadUUID + ' present but cascade failed (lead missing/archived/inaccessible in WFM?)';
+          } else if (!q.LeadUUID && q.JobUUID) {
+            reason = 'JobUUID ' + q.JobUUID + ' present but cascade failed (job missing/inaccessible in WFM?)';
+          } else {
+            reason = 'both LeadUUID (' + q.LeadUUID + ') and JobUUID (' + q.JobUUID + ') present, neither cascade succeeded';
+          }
+          errors.push('quote "' + (q?.Name || q?.ID || q?.UUID || '?') + '" skipped: ' + reason);
+          continue;
+        }
         const r = await upsertQuote(env, q, oppId);
         counts.quotes++;
         // Pull the DetailedQuote and write its Costs/Tasks into
@@ -954,7 +1009,15 @@ export async function onRequestPost(context) {
         const accountId = job.Client?.UUID
           ? await ensureAccount(env, job.Client.UUID, ctx)
           : null;
-        if (!accountId) { counts.skipped++; continue; }
+        if (!accountId) {
+          counts.skipped++;
+          errors.push('job "' + (job?.Name || job?.ID || '?') +
+            '" skipped: ' +
+            (job.Client?.UUID
+              ? 'client UUID ' + job.Client.UUID + ' could not be resolved (cascade fetch failed?)'
+              : 'no Client.UUID on job'));
+          continue;
+        }
         const ownerId = job.Manager?.UUID ? userByWfmUuid.get(job.Manager.UUID) : null;
         const o = await upsertOpportunityFromJob(env, job, accountId, ownerId);
         oppByWfmUuid.set(job.UUID, o.id);
@@ -985,7 +1048,10 @@ export async function onRequestPost(context) {
               + counts.contacts_claimed + ' contacts'
             : ''),
       links: links.slice(0, 30),  // cap so the UI stays readable
-      errors: errors.slice(0, 10),
+      // Cap raised from 10 → 50: per-record skip reasons now go in
+      // here too, so a "selected 30 quotes, all skipped" import needs
+      // headroom to surface every reason.
+      errors: errors.slice(0, 50),
     });
   } catch (err) {
     return json({ ok: false, error: String(err.message || err), counts, links, errors }, 500);
