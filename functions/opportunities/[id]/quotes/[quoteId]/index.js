@@ -39,6 +39,7 @@ import {
 import { templateTypeForQuote, templateManagerHtml } from '../../../../lib/template-catalog.js';
 import { loadQuoteTermDefaultsMap, getEffectiveValidityDays } from '../../../../lib/quote-term-defaults.js';
 import { loadEpsSchedule } from '../../../../lib/eps-schedule.js';
+import { loadMilestoneMap } from '../../../../lib/katana-milestones.js';
 
 const READ_ONLY_STATUSES = new Set([
   'issued', 'revision_issued', 'accepted', 'rejected', 'expired', 'dead',
@@ -49,6 +50,122 @@ const UPDATE_FIELDS = [
   'payment_terms', 'delivery_terms', 'delivery_estimate',
   'tax_amount', 'notes_internal', 'notes_customer',
 ];
+
+// Phase 2c — Alpine store backing the "Push to Katana" button + modal
+// at the top of the quote detail page. State is bootstrapped from
+// window.__KATANA_PUSH_STATE__ which the GET handler injects. The
+// store's getters (amountsSum, amountsMatch) keep the modal's "must
+// equal $X" footer reactive as the user edits per-milestone amounts.
+const KATANA_PUSH_SCRIPT = `
+document.addEventListener('alpine:init', function () {
+  var s = window.__KATANA_PUSH_STATE__ || {};
+  Alpine.store('katanaPush', {
+    showSection: !!s.showSection,
+    alreadyPushed: !!s.alreadyPushed,
+    canPush: !!s.canPush,
+    blockReason: s.blockReason || '',
+    salesOrderId: s.salesOrderId || null,
+    pushedAt: s.pushedAt || null,
+    katanaCustomerId: s.katanaCustomerId || null,
+    katanaCustomerName: s.katanaCustomerName || '',
+    quoteNumber: s.quoteNumber || '',
+    quoteTotal: Number(s.quoteTotal) || 0,
+    oppId: s.oppId,
+    quoteId: s.quoteId,
+    milestones: (s.milestones || []).map(function (m) {
+      return {
+        percent: Number(m.percent) || 0,
+        label: String(m.label || ''),
+        katana_variant_id: Number(m.katana_variant_id) || 0,
+        katana_sku: String(m.katana_sku || ''),
+        amount: Number(m.amount) || 0,
+      };
+    }),
+    modalOpen: false,
+    busy: false,
+    orderNo: s.quoteNumber || '',
+    customerRef: '',
+    deliveryDate: '',
+    additionalInfo: '',
+    get amountsSum() {
+      var sum = 0;
+      for (var i = 0; i < this.milestones.length; i++) {
+        var n = Number(this.milestones[i].amount);
+        if (Number.isFinite(n)) sum += n;
+      }
+      return Math.round(sum * 100) / 100;
+    },
+    get amountsMatch() {
+      return Math.abs(this.amountsSum - this.quoteTotal) < 0.01;
+    },
+    openModal: function () {
+      if (!this.canPush) {
+        alert('Cannot push: ' + (this.blockReason || 'unknown reason'));
+        return;
+      }
+      this.modalOpen = true;
+    },
+    closeModal: function () {
+      if (this.busy) return;
+      this.modalOpen = false;
+    },
+    push: function () {
+      if (!this.amountsMatch) return;
+      var self = this;
+      self.busy = true;
+      fetch('/opportunities/' + encodeURIComponent(self.oppId) + '/quotes/' + encodeURIComponent(self.quoteId) + '/push-to-katana', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          order_no: self.orderNo,
+          customer_ref: self.customerRef,
+          delivery_date: self.deliveryDate,
+          additional_info: self.additionalInfo,
+          milestones: self.milestones.map(function (m) {
+            return { amount: Number(m.amount) || 0 };
+          }),
+        }),
+      }).then(function (r) {
+        if (!r.ok) return r.json().then(function (d) { throw new Error(d && d.error || ('HTTP ' + r.status)); });
+        return r.json();
+      }).then(function (data) {
+        self.salesOrderId = data.katana_sales_order_id;
+        self.pushedAt = data.katana_sales_order_pushed_at;
+        self.alreadyPushed = true;
+        self.canPush = false;
+        self.modalOpen = false;
+        self.busy = false;
+        // No reload — the badge updates in place.
+      }).catch(function (err) {
+        self.busy = false;
+        alert('Push failed: ' + (err && err.message ? err.message : 'unknown error'));
+      });
+    },
+    unlink: function () {
+      if (!confirm('Unlink Katana sales order #' + this.salesOrderId + '? The Katana record stays in place; Pipeline just forgets the link, and the "Push" button reappears.')) return;
+      var self = this;
+      self.busy = true;
+      fetch('/opportunities/' + encodeURIComponent(self.oppId) + '/quotes/' + encodeURIComponent(self.quoteId) + '/katana-unlink', {
+        method: 'POST',
+        credentials: 'same-origin',
+      }).then(function (r) {
+        if (!r.ok) return r.json().then(function (d) { throw new Error(d && d.error || ('HTTP ' + r.status)); });
+        return r.json();
+      }).then(function () {
+        self.salesOrderId = null;
+        self.pushedAt = null;
+        self.alreadyPushed = false;
+        self.canPush = self.blockReason ? false : true;
+        self.busy = false;
+      }).catch(function (err) {
+        self.busy = false;
+        alert('Unlink failed: ' + (err && err.message ? err.message : 'unknown error'));
+      });
+    },
+  });
+});
+`;
 
 export async function onRequestGet(context) {
   const { env, data, request, params } = context;
@@ -63,6 +180,7 @@ export async function onRequestGet(context) {
             o.transaction_type AS opp_transaction_type,
             o.account_id,
             a.name AS account_name,
+            a.katana_customer_id, a.katana_customer_name,
             c.first_name AS contact_first, c.last_name AS contact_last,
             c.email AS contact_email, c.phone AS contact_phone, c.title AS contact_title,
             sup.number AS supersedes_number, sup.revision AS supersedes_revision,
@@ -131,6 +249,59 @@ export async function onRequestGet(context) {
   // the configured rows instead of the old hardcoded 25/25/25/15/10
   // string. Hybrid/non-EPS quotes ignore this blob.
   const epsSchedule = await loadEpsSchedule(env);
+
+  // Phase 2c — Katana push state. Used by the "Push to Katana"
+  // button + modal injected into the action bar. The button only
+  // appears when status === 'accepted'; what it does is gated on the
+  // four prerequisites below (account mapped, milestones configured,
+  // total > 0, not already pushed).
+  const milestoneMap = await loadMilestoneMap(env);
+  const quoteTotal = Number(quote.total_price) || 0;
+  const katanaBlockReasons = [];
+  if (!quote.katana_customer_id) katanaBlockReasons.push('Account is not mapped to a Katana customer (Settings → Katana customers)');
+  if (!milestoneMap || !milestoneMap.milestones?.length) katanaBlockReasons.push('Milestone map is not configured (Settings → Katana milestones)');
+  if (quoteTotal <= 0) katanaBlockReasons.push('Quote total is $0');
+  // "already pushed" is handled separately as a different UI state, not a block.
+  const katanaState = {
+    showSection: quote.status === 'accepted',
+    alreadyPushed: !!quote.katana_sales_order_id,
+    canPush: quote.status === 'accepted' && !quote.katana_sales_order_id && katanaBlockReasons.length === 0,
+    blockReason: katanaBlockReasons.join('; '),
+    salesOrderId: quote.katana_sales_order_id || null,
+    pushedAt: quote.katana_sales_order_pushed_at || null,
+    katanaCustomerId: quote.katana_customer_id || null,
+    katanaCustomerName: quote.katana_customer_name || '',
+    quoteNumber: quote.number,
+    quoteTotal,
+    oppId,
+    quoteId,
+    milestones: (milestoneMap?.milestones || []).map((m) => ({
+      percent: m.percent,
+      label: m.label,
+      katana_variant_id: m.katana_variant_id,
+      katana_sku: m.katana_sku,
+      amount: 0, // filled below so per-milestone defaults sum exactly to quoteTotal
+    })),
+  };
+  // Compute default per-milestone amounts that sum exactly to quoteTotal.
+  // Each row = round(total * pct / 100, 2). Whatever 1-cent rounding
+  // drift is left over goes onto the last row so the post body sums
+  // cleanly past the route handler's tolerance check.
+  if (katanaState.milestones.length > 0 && quoteTotal > 0) {
+    let rolling = 0;
+    for (let i = 0; i < katanaState.milestones.length; i++) {
+      const m = katanaState.milestones[i];
+      const raw = quoteTotal * (Number(m.percent) || 0) / 100;
+      m.amount = Math.round(raw * 100) / 100;
+      rolling += m.amount;
+    }
+    const drift = quoteTotal - rolling;
+    if (Math.abs(drift) > 0.001) {
+      const last = katanaState.milestones[katanaState.milestones.length - 1];
+      last.amount = Math.round((last.amount + drift) * 100) / 100;
+    }
+  }
+  const katanaStateJson = JSON.stringify(katanaState).replace(/</g, '\\u003c');
 
   // Expiration display (Batch 6, migration 0038):
   //   * If the quote already has a valid_until, show it as-is.
@@ -246,6 +417,20 @@ export async function onRequestGet(context) {
               <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/start-oc" class="inline-form">
                 <button class="btn primary" type="submit" title="Create (or jump to) the job for this opportunity and open the Issue OC form">Start Order Confirmation</button>
               </form>
+              <template x-if="$store.katanaPush && $store.katanaPush.alreadyPushed">
+                <span class="katana-pushed-badge" :title="'Pushed ' + ($store.katanaPush.pushedAt || '')">
+                  &check; Pushed to Katana: SO #<span x-text="$store.katanaPush.salesOrderId"></span>
+                  <button type="button" class="katana-pushed-unlink" @click="$store.katanaPush.unlink()" :disabled="$store.katanaPush.busy" title="Unlink (Katana sales order is left in place)">&times;</button>
+                </span>
+              </template>
+              <template x-if="$store.katanaPush && !$store.katanaPush.alreadyPushed">
+                <button type="button" class="btn"
+                        @click="$store.katanaPush.openModal()"
+                        :disabled="!$store.katanaPush.canPush"
+                        :title="$store.katanaPush.canPush ? 'Push this quote to Katana as a sales order' : ('Cannot push: ' + $store.katanaPush.blockReason)">
+                  Push to Katana
+                </button>
+              </template>
             ` : ''}
             ${quote.status === 'accepted' || quote.status === 'rejected' || quote.status === 'expired' ? html`
               <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
@@ -1606,7 +1791,111 @@ export async function onRequestGet(context) {
     ? html`<script defer src="/js/audio-recorder.js"></script><script defer src="/js/ai-capture.js"></script>`
     : '';
 
-  const body = html`${headerSection}<div class="quote-doc">${bannerCard}${detailsSection}${linesSection}${footerSection}</div>${scripts}${captureScripts}`;
+  // Phase 2c — Push-to-Katana modal lives at body root so it overlays
+  // the page regardless of the trigger button's DOM position. Alpine
+  // store ($store.katanaPush) wires the button in headerSection to
+  // this modal.
+  const katanaPushModal = katanaState.showSection
+    ? html`
+      <div x-show="$store.katanaPush.modalOpen" x-cloak
+           class="katana-push-modal-backdrop"
+           @click.self="$store.katanaPush.closeModal()">
+        <div class="katana-push-modal-panel" role="dialog" aria-labelledby="katana-push-title">
+          <div class="katana-push-modal-header">
+            <h2 id="katana-push-title" style="margin:0">Push to Katana</h2>
+            <button type="button" class="katana-push-modal-close" @click="$store.katanaPush.closeModal()" :disabled="$store.katanaPush.busy" aria-label="Close">&times;</button>
+          </div>
+          <div class="katana-push-modal-body">
+            <p class="muted" style="margin:0 0 .75rem">
+              Creates one Katana sales order with one row per milestone.
+              Adjust amounts inline if the standard split needs tweaking
+              for this project &mdash; the total must match the quote total
+              ($<span x-text="$store.katanaPush.quoteTotal.toFixed(2)"></span>).
+            </p>
+
+            <table class="meta-table" style="width:100%;font-size:.9rem">
+              <tbody>
+                <tr>
+                  <td style="width:8rem"><strong>Customer</strong></td>
+                  <td>
+                    <span x-text="$store.katanaPush.katanaCustomerName"></span>
+                    <span class="muted" style="font-size:.85em">(Katana #<span x-text="$store.katanaPush.katanaCustomerId"></span>)</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Order #</strong></td>
+                  <td><input type="text" x-model="$store.katanaPush.orderNo" maxlength="80" style="width:100%"></td>
+                </tr>
+                <tr>
+                  <td><strong>Customer ref</strong></td>
+                  <td><input type="text" x-model="$store.katanaPush.customerRef" maxlength="200" placeholder="optional &mdash; e.g. PO number" style="width:100%"></td>
+                </tr>
+                <tr>
+                  <td><strong>Delivery date</strong></td>
+                  <td><input type="date" x-model="$store.katanaPush.deliveryDate" style="width:auto"></td>
+                </tr>
+                <tr>
+                  <td style="vertical-align:top"><strong>Notes</strong></td>
+                  <td><textarea x-model="$store.katanaPush.additionalInfo" rows="2" maxlength="2000" placeholder="optional &mdash; appears in Katana's additional_info" style="width:100%"></textarea></td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h3 style="margin:1rem 0 .25rem">Milestones</h3>
+            <table class="meta-table" style="width:100%;font-size:.9rem">
+              <thead>
+                <tr>
+                  <th style="text-align:right;width:4rem">%</th>
+                  <th style="text-align:left">Label</th>
+                  <th style="text-align:left;width:12rem">Katana variant</th>
+                  <th style="text-align:right;width:9rem">Amount ($)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(m, idx) in $store.katanaPush.milestones" :key="idx">
+                  <tr>
+                    <td style="text-align:right" x-text="m.percent"></td>
+                    <td x-text="m.label"></td>
+                    <td>
+                      <code style="font-size:.8em" x-text="m.katana_sku"></code>
+                      <span class="muted" style="font-size:.75em">#<span x-text="m.katana_variant_id"></span></span>
+                    </td>
+                    <td style="text-align:right">
+                      <input type="number" min="0" step="0.01" x-model.number="m.amount" style="width:7.5rem;text-align:right">
+                    </td>
+                  </tr>
+                </template>
+                <tr>
+                  <td colspan="3" style="text-align:right"><strong>Total:</strong></td>
+                  <td style="text-align:right">
+                    <strong x-text="'$' + $store.katanaPush.amountsSum.toFixed(2)"
+                            :style="$store.katanaPush.amountsMatch ? 'color:#1a7f37' : 'color:#b3261e'"></strong>
+                  </td>
+                </tr>
+                <tr x-show="!$store.katanaPush.amountsMatch">
+                  <td colspan="4" style="text-align:right;font-size:.85em;color:#b3261e">
+                    Must equal $<span x-text="$store.katanaPush.quoteTotal.toFixed(2)"></span>
+                    (off by $<span x-text="Math.abs($store.katanaPush.quoteTotal - $store.katanaPush.amountsSum).toFixed(2)"></span>)
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="katana-push-modal-footer">
+            <button type="button" class="btn" @click="$store.katanaPush.closeModal()" :disabled="$store.katanaPush.busy">Cancel</button>
+            <button type="button" class="btn primary"
+                    @click="$store.katanaPush.push()"
+                    :disabled="$store.katanaPush.busy || !$store.katanaPush.amountsMatch"
+                    x-text="$store.katanaPush.busy ? 'Pushing…' : 'Push to Katana'"></button>
+          </div>
+        </div>
+      </div>
+      <script>window.__KATANA_PUSH_STATE__ = ${raw(katanaStateJson)};</script>
+      <script>${raw(KATANA_PUSH_SCRIPT)}</script>
+    `
+    : '';
+
+  const body = html`${headerSection}<div class="quote-doc">${bannerCard}${detailsSection}${linesSection}${footerSection}</div>${katanaPushModal}${scripts}${captureScripts}`;
 
   return htmlResponse(
     layout(

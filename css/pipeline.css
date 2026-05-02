@@ -161,6 +161,87 @@ code {
   white-space: nowrap;
 }
 
+/* ---------- Katana push (quote detail action bar) ---------- */
+/* Already-pushed badge that replaces the "Push to Katana" button
+   once a quote has been pushed. */
+.katana-pushed-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.6rem;
+  background: #e6f4ea;
+  border: 1px solid #9bcfa6;
+  border-radius: var(--radius);
+  color: #1a7f37;
+  font-size: 0.85em;
+  font-weight: 600;
+}
+.katana-pushed-unlink {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0;
+  color: inherit;
+  opacity: 0.7;
+}
+.katana-pushed-unlink:hover { opacity: 1; }
+.katana-pushed-unlink:disabled { cursor: not-allowed; opacity: 0.4; }
+
+/* Push-to-Katana confirmation modal. Backdrop covers the whole
+   viewport; panel is centered with a max-width and scrollable body
+   for tall milestone lists. */
+.katana-push-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+.katana-push-modal-panel {
+  background: var(--bg);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+  width: 100%;
+  max-width: 44rem;
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+}
+.katana-push-modal-header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.katana-push-modal-close {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 1.5rem;
+  line-height: 1;
+  padding: 0 0.25rem;
+  color: var(--fg-muted);
+}
+.katana-push-modal-close:hover:not(:disabled) { color: var(--fg); }
+.katana-push-modal-body {
+  padding: 1rem;
+  overflow-y: auto;
+  flex: 1;
+}
+.katana-push-modal-footer {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
 /* Hamburger toggle. Only visible at mobile widths via media query
    below; desktop hides it and shows the inline nav. */
 .nav-toggle {
