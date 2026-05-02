@@ -9,7 +9,14 @@
 
 import Papa from 'papaparse';
 import { all, one, run } from '../../lib/db.js';
-import { now } from '../../lib/ids.js';
+import { now, uuid } from '../../lib/ids.js';
+import {
+  claudiaInsert,
+  claudiaUpdate,
+  claudiaUndo,
+  claudiaListRecentWrites,
+  CLAUDIA_WRITES,
+} from '../../lib/claudia-writes.js';
 
 /**
  * Build the toolset bound to a particular request (env + acting user).
@@ -207,6 +214,118 @@ export function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'create_contact',
+      description:
+        'Create a new contact under an existing account. Required: account_id, last_name (or first_name). ' +
+        'Optional: first_name, email, phone, mobile, title, notes, is_primary. Returns the new ' +
+        'contact id and an audit_id you should surface to the user so they can undo within 24h. ' +
+        'NEVER call this without explicit user confirmation. For batch flows (e.g. importing 12 ' +
+        'contacts from a CSV) call it once per row, but only after the user has approved the batch ' +
+        '("yes, create these"). Pass batch_id to group multiple writes so undo_claudia_write can ' +
+        'reverse the whole batch atomically.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          account_id: { type: 'string', description: 'Required. The account this contact belongs to. Use search_accounts or query_db to find it.' },
+          first_name: { type: 'string' },
+          last_name:  { type: 'string' },
+          email:      { type: 'string' },
+          phone:      { type: 'string' },
+          mobile:     { type: 'string' },
+          title:      { type: 'string' },
+          notes:      { type: 'string' },
+          is_primary: { type: 'boolean', description: 'Default false. Only set true when the user explicitly asks.' },
+          batch_id:   { type: 'string', description: 'Optional. Group writes by passing the same batch_id across multiple calls so undo_claudia_write can reverse the whole batch.' },
+          summary:    { type: 'string', description: 'Optional one-line description of the write for the audit log.' },
+        },
+        required: ['account_id'],
+      },
+    },
+    {
+      name: 'update_contact',
+      description:
+        'Update specific fields on an existing contact. Pass only the fields you want to change. ' +
+        'Returns the diffs applied + an audit_id for undo. NEVER call without explicit user ' +
+        'confirmation, especially for batch updates. Use the same batch_id pattern as create_contact ' +
+        'when updating many rows from one CSV.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id:         { type: 'string', description: 'Contact id to update.' },
+          first_name: { type: 'string' },
+          last_name:  { type: 'string' },
+          email:      { type: 'string' },
+          phone:      { type: 'string' },
+          mobile:     { type: 'string' },
+          title:      { type: 'string' },
+          notes:      { type: 'string' },
+          is_primary: { type: 'boolean' },
+          account_id: { type: 'string', description: 'Re-parent the contact to a different account. Rare; confirm explicitly.' },
+          batch_id:   { type: 'string' },
+          summary:    { type: 'string' },
+        },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'create_account',
+      description:
+        'Create a new account (company / customer). Required: name. Optional: segment, alias, ' +
+        'parent_group, owner_user_id, phone, website, email, notes, address_billing, address_physical. ' +
+        'Returns the new account id + audit_id for undo. Use this BEFORE create_contact when the ' +
+        'dedupe report says "needs_new_account". Always confirm with the user before creating an ' +
+        'account — accounts cascade-delete contacts when removed.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          name:             { type: 'string', description: 'Required. Company / customer display name.' },
+          segment:          { type: 'string' },
+          alias:            { type: 'string' },
+          parent_group:     { type: 'string' },
+          owner_user_id:    { type: 'string', description: 'Default: the current user.' },
+          phone:            { type: 'string' },
+          website:          { type: 'string' },
+          email:            { type: 'string' },
+          notes:            { type: 'string' },
+          address_billing:  { type: 'string' },
+          address_physical: { type: 'string' },
+          batch_id:         { type: 'string' },
+          summary:          { type: 'string' },
+        },
+        required: ['name'],
+      },
+    },
+    {
+      name: 'undo_claudia_write',
+      description:
+        'Reverse a previous Claudia write within the 24-hour undo window. For a CREATE: deletes ' +
+        'the row. For an UPDATE: restores the snapshot from before the write. The audit row stays ' +
+        'in the table but is marked undone. Use when the user says "undo that" / "revert" / "I ' +
+        'didn\'t mean to do that" — pull the audit_id from the response of the original write or ' +
+        'from list_recent_writes.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          audit_id: { type: 'string', description: 'The audit log id returned by the original write.' },
+          reason:   { type: 'string', description: 'Optional one-line reason for the undo.' },
+        },
+        required: ['audit_id'],
+      },
+    },
+    {
+      name: 'list_recent_writes',
+      description:
+        'List the user\'s recent Claudia-driven writes with audit ids — useful when the user says ' +
+        '"undo what you just did" and you need to find the right audit_id. Newest first; default 25, ' +
+        'hard cap 200.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          limit: { type: 'integer' },
+        },
+      },
+    },
+    {
       name: 'propose_contact_imports',
       description:
         'Analyze an uploaded contacts CSV (Outlook export, Google Contacts export, etc.) and ' +
@@ -293,6 +412,16 @@ export function makeAssistantTools({ env, user }) {
         return setDocumentRetention(env, user, input);
       case 'propose_contact_imports':
         return proposeContactImports(env, user, input);
+      case 'create_contact':
+        return createContact(env, user, input);
+      case 'update_contact':
+        return updateContact(env, user, input);
+      case 'create_account':
+        return createAccount(env, user, input);
+      case 'undo_claudia_write':
+        return undoClaudiaWrite(env, user, input);
+      case 'list_recent_writes':
+        return listRecentWrites(env, user, input);
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -575,6 +704,136 @@ async function setDocumentRetention(env, user, { id, retention } = {}) {
     [retention, ts, retention, ts, id, user.id]
   );
   return { ok: true, id, retention, updated_at: ts, changes: result?.meta?.changes ?? null };
+}
+
+// ---------- Pipeline writes (audited via lib/claudia-writes.js) ----------
+
+async function createContact(env, user, input = {}) {
+  const account_id = String(input.account_id || '').trim();
+  if (!account_id) throw new Error('create_contact requires account_id.');
+  const first_name = trimOrNull(input.first_name);
+  const last_name  = trimOrNull(input.last_name);
+  if (!first_name && !last_name) {
+    throw new Error('create_contact requires at least first_name or last_name.');
+  }
+
+  // Fail fast if the parent account doesn't exist (FK would error anyway,
+  // but this gives the model a clearer message it can pass to the user).
+  const acct = await one(env.DB, 'SELECT id, name FROM accounts WHERE id = ?', [account_id]);
+  if (!acct) {
+    return { error: 'account_not_found', account_id, message: `No account with id ${account_id}.` };
+  }
+
+  const ts = now();
+  const id = uuid();
+  const summary = input.summary || `created contact ${first_name || ''} ${last_name || ''}`.trim() + ` under ${acct.name}`;
+  const result = await claudiaInsert(env, user, 'create_contact', 'contacts', id, {
+    account_id,
+    first_name,
+    last_name,
+    title:      trimOrNull(input.title),
+    email:      trimOrNull(input.email),
+    phone:      trimOrNull(input.phone),
+    mobile:     trimOrNull(input.mobile),
+    is_primary: input.is_primary ? 1 : 0,
+    notes:      trimOrNull(input.notes),
+    created_at: ts,
+    updated_at: ts,
+    created_by_user_id: user.id,
+  }, { batchId: input.batch_id, summary });
+
+  return {
+    ok: true,
+    id: result.id,
+    audit_id: result.audit_id,
+    account_id,
+    account_name: acct.name,
+    summary,
+  };
+}
+
+async function updateContact(env, user, input = {}) {
+  const id = String(input.id || '').trim();
+  if (!id) throw new Error('update_contact requires id.');
+
+  const updatable = ['first_name', 'last_name', 'email', 'phone', 'mobile', 'title', 'notes', 'account_id'];
+  const fields = {};
+  for (const k of updatable) {
+    if (k in input) fields[k] = trimOrNull(input[k]);
+  }
+  if ('is_primary' in input) fields.is_primary = input.is_primary ? 1 : 0;
+  if (Object.keys(fields).length === 0) {
+    return { error: 'no_fields', id, message: 'No updatable fields supplied.' };
+  }
+
+  const summary = input.summary || `updated contact ${id} (${Object.keys(fields).join(', ')})`;
+  try {
+    const result = await claudiaUpdate(env, user, 'update_contact', 'contacts', id, fields, {
+      batchId: input.batch_id,
+      summary,
+    });
+    if (result.no_change) {
+      return { ok: true, id, no_change: true, message: 'Nothing to update — supplied fields already match.' };
+    }
+    return {
+      ok: true,
+      id,
+      audit_id: result.audit_id,
+      diffs: result.diffs,
+      summary,
+    };
+  } catch (err) {
+    return { error: 'update_failed', id, message: err?.message || String(err) };
+  }
+}
+
+async function createAccount(env, user, input = {}) {
+  const name = trimOrNull(input.name);
+  if (!name) throw new Error('create_account requires a name.');
+  const ts = now();
+  const id = uuid();
+  const summary = input.summary || `created account ${name}`;
+  const result = await claudiaInsert(env, user, 'create_account', 'accounts', id, {
+    name,
+    segment:          trimOrNull(input.segment),
+    alias:            trimOrNull(input.alias),
+    parent_group:     trimOrNull(input.parent_group),
+    address_billing:  trimOrNull(input.address_billing),
+    address_physical: trimOrNull(input.address_physical),
+    phone:            trimOrNull(input.phone),
+    website:          trimOrNull(input.website),
+    email:            trimOrNull(input.email),
+    notes:            trimOrNull(input.notes),
+    owner_user_id:    trimOrNull(input.owner_user_id) || user.id,
+    is_active:        1,
+    created_at:       ts,
+    updated_at:       ts,
+    created_by_user_id: user.id,
+  }, { batchId: input.batch_id, summary });
+
+  return {
+    ok: true,
+    id: result.id,
+    audit_id: result.audit_id,
+    name,
+    summary,
+  };
+}
+
+async function undoClaudiaWrite(env, user, { audit_id, reason } = {}) {
+  if (!audit_id) throw new Error('undo_claudia_write requires audit_id.');
+  return claudiaUndo(env, user, audit_id, { reason });
+}
+
+async function listRecentWrites(env, user, { limit } = {}) {
+  const rows = await claudiaListRecentWrites(env, user, limit ?? 25);
+  return { rows, count: rows.length };
+}
+
+function trimOrNull(v) {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s || null;
 }
 
 // ---------- Contact imports (CSV → dedupe proposal) ----------
