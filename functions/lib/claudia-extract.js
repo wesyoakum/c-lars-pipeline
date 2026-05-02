@@ -27,6 +27,11 @@ const ANTHROPIC_VERSION = '2023-06-01';
 const PDF_EXTRACT_MODEL = 'claude-haiku-4-5-20251001'; // fast + cheap; full text dump doesn't need Sonnet
 const IMAGE_DESCRIBE_MODEL = 'claude-haiku-4-5-20251001';
 
+// D1 has a per-cell size limit of ~1 MB. We cap full_text at 750 KB to
+// leave headroom for the row's other columns and any JSON encoding
+// overhead; anything bigger is truncated and the row is marked partial.
+const MAX_FULL_TEXT_CHARS = 750_000;
+
 const TEXT_LIKE_TYPES = new Set([
   'text/plain',
   'text/markdown',
@@ -229,28 +234,35 @@ export async function extractText(env, buffer, contentType, filename) {
 
   try {
     if (kind === 'text') {
-      const text = new TextDecoder('utf-8', { fatal: false }).decode(buffer).trim();
-      return { text, status: 'ready' };
+      let text = new TextDecoder('utf-8', { fatal: false }).decode(buffer).trim();
+      // Email-like content (.eml, .mbox, message/rfc822) often has
+      // base64-encoded attachments inline. Strip those before storing —
+      // the readable headers + body text are what's useful for search;
+      // the raw bytes already live in R2 if we ever need them.
+      if (looksLikeEmail(contentType, filename)) {
+        text = stripBase64Blocks(text);
+      }
+      return capExtractedText({ text, status: 'ready' });
     }
     if (kind === 'docx') {
       const text = extractDocxText(buffer);
-      return { text, status: text ? 'ready' : 'partial' };
+      return capExtractedText({ text, status: text ? 'ready' : 'partial' });
     }
     if (kind === 'pdf') {
       const text = await extractPdfTextViaClaude(env, buffer);
-      return { text, status: text ? 'ready' : 'partial' };
+      return capExtractedText({ text, status: text ? 'ready' : 'partial' });
     }
     if (kind === 'image') {
       const text = await extractImageDescriptionViaClaude(env, buffer, contentType, filename);
-      return { text, status: text ? 'ready' : 'partial' };
+      return capExtractedText({ text, status: text ? 'ready' : 'partial' });
     }
     if (kind === 'xlsx') {
       const text = extractXlsxText(buffer);
-      return { text, status: text ? 'ready' : 'partial' };
+      return capExtractedText({ text, status: text ? 'ready' : 'partial' });
     }
     if (kind === 'audio') {
       const text = await extractAudioTranscript(env, buffer, contentType, filename);
-      return { text, status: text ? 'ready' : 'partial' };
+      return capExtractedText({ text, status: text ? 'ready' : 'partial' });
     }
   } catch (err) {
     return {
@@ -260,6 +272,42 @@ export async function extractText(env, buffer, contentType, filename) {
     };
   }
   return { text: '', status: 'error', error: 'unreachable' };
+}
+
+function looksLikeEmail(contentType, filename) {
+  const ct = String(contentType || '').toLowerCase();
+  if (ct === 'message/rfc822' || ct === 'application/mbox') return true;
+  const ext = String(filename || '').toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+  return ext === 'eml' || ext === 'mbox';
+}
+
+/**
+ * Heuristically strip base64-encoded attachment bodies from a MIME
+ * blob. Looks for runs of 4+ consecutive lines that match a base64
+ * line shape (60–80 chars of base64 alphabet) and replaces them with
+ * a single placeholder. Imperfect by design — won't strip every
+ * possible MIME pathology — but reliably catches the common case
+ * where Outlook attaches a PDF or image and inflates the .eml into
+ * a multi-MB file that won't fit in a D1 cell.
+ */
+function stripBase64Blocks(text) {
+  return text.replace(
+    /(?:^[A-Za-z0-9+/=]{60,80}\r?\n){4,}[A-Za-z0-9+/]{0,80}={0,2}\r?\n?/gm,
+    '\n[base64 attachment block stripped for storage]\n'
+  );
+}
+
+function capExtractedText(result) {
+  if (!result || typeof result.text !== 'string') return result;
+  if (result.text.length <= MAX_FULL_TEXT_CHARS) return result;
+  return {
+    ...result,
+    text: result.text.slice(0, MAX_FULL_TEXT_CHARS),
+    status: result.status === 'ready' ? 'partial' : result.status,
+    error: result.error
+      ? result.error + ' Also truncated to ' + MAX_FULL_TEXT_CHARS + ' chars (D1 cell limit).'
+      : 'Truncated to ' + MAX_FULL_TEXT_CHARS + ' chars (D1 cell limit).',
+  };
 }
 
 // ---------- DOCX ----------
