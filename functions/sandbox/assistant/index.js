@@ -113,6 +113,43 @@ export async function onRequestGet(context) {
         flex: 1; overflow-y: auto; padding: 0.5rem 0;
         display: flex; flex-direction: column; gap: 0.75rem;
       }
+      /* Minimalist scrollbar — same shape as the table scrollbars in
+         pipeline.css (.opp-list-hscroll). Applies to the chat messages
+         pane and both sidebars. */
+      .assistant-messages::-webkit-scrollbar,
+      .claudia-side::-webkit-scrollbar { width: 6px; }
+      .assistant-messages::-webkit-scrollbar-track,
+      .claudia-side::-webkit-scrollbar-track { background: transparent; }
+      .assistant-messages::-webkit-scrollbar-thumb,
+      .claudia-side::-webkit-scrollbar-thumb {
+        background: rgba(0, 0, 0, 0.1);
+        border-radius: 3px;
+      }
+      .assistant-messages::-webkit-scrollbar-thumb:hover,
+      .claudia-side::-webkit-scrollbar-thumb:hover {
+        background: rgba(0, 0, 0, 0.2);
+      }
+      .assistant-messages { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0.1) transparent; }
+      .claudia-side       { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0.1) transparent; }
+
+      /* Floating scroll-to-top / scroll-to-bottom buttons over the
+         messages pane. Hidden by default; .visible class toggled by JS
+         based on current scroll position. */
+      .chat-scroll-jump {
+        position: absolute; right: 14px; z-index: 4;
+        width: 30px; height: 30px; border-radius: 50%;
+        background: rgba(255, 255, 255, 0.92);
+        border: 1px solid #d0d0d5; color: #4b5563; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        opacity: 0; pointer-events: none;
+        transition: opacity 0.15s ease, transform 0.15s ease;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+      }
+      .chat-scroll-jump:hover { color: #1a1a22; background: #fff; }
+      .chat-scroll-jump.visible { opacity: 1; pointer-events: auto; }
+      #chat-scroll-top    { top: 90px; }
+      #chat-scroll-bottom { bottom: 90px; }
+      .chat-scroll-jump svg { width: 14px; height: 14px; }
       .assistant-empty {
         margin: auto; color: #666; font-style: italic; text-align: center;
         max-width: 420px; line-height: 1.6;
@@ -379,6 +416,16 @@ export async function onRequestGet(context) {
       ${audioDocs.length === 0 ? html`<div class="claudia-side-empty">No recordings yet. Hit the mic next to the message box to capture a voice note — Claudia transcribes it via Whisper and you can ask her about it from the chat.</div>` : ''}
     </aside>
     <div class="assistant-wrap">
+      <button type="button" id="chat-scroll-top" class="chat-scroll-jump" aria-label="Scroll to top of conversation" title="Top of conversation">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="6 15 12 9 18 15"/>
+        </svg>
+      </button>
+      <button type="button" id="chat-scroll-bottom" class="chat-scroll-jump" aria-label="Scroll to latest message" title="Latest message">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
       <div id="assistant-messages" class="assistant-messages">
         ${messages.length === 0
           ? html`<div class="assistant-empty">
@@ -562,6 +609,45 @@ export async function onRequestGet(context) {
             t.classList.toggle('expanded');
           }
         });
+
+        // Floating scroll-to-top / scroll-to-bottom buttons. Visible
+        // only when (a) the messages pane is actually scrollable AND
+        // (b) the user isn't already pinned to that edge.
+        const scrollTopBtn = document.getElementById('chat-scroll-top');
+        const scrollBottomBtn = document.getElementById('chat-scroll-bottom');
+        const SCROLL_EDGE_PX = 32;
+        function updateScrollButtons() {
+          if (!list || !scrollTopBtn || !scrollBottomBtn) return;
+          const scrollable = list.scrollHeight - list.clientHeight > SCROLL_EDGE_PX;
+          if (!scrollable) {
+            scrollTopBtn.classList.remove('visible');
+            scrollBottomBtn.classList.remove('visible');
+            return;
+          }
+          const atTop = list.scrollTop <= SCROLL_EDGE_PX;
+          const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight <= SCROLL_EDGE_PX;
+          scrollTopBtn.classList.toggle('visible', !atTop);
+          scrollBottomBtn.classList.toggle('visible', !atBottom);
+        }
+        if (list) list.addEventListener('scroll', updateScrollButtons, { passive: true });
+        if (scrollTopBtn) {
+          scrollTopBtn.addEventListener('click', () => {
+            list?.scrollTo({ top: 0, behavior: 'smooth' });
+          });
+        }
+        if (scrollBottomBtn) {
+          scrollBottomBtn.addEventListener('click', () => {
+            list?.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
+          });
+        }
+        // Recompute after any HTMX swap (new messages can change scrollability)
+        // and on initial load. Use a small timeout so layout has settled.
+        const recomputeSoon = () => setTimeout(updateScrollButtons, 50);
+        if (form) {
+          form.addEventListener('htmx:afterRequest', recomputeSoon);
+          form.addEventListener('htmx:afterSwap', recomputeSoon);
+        }
+        recomputeSoon();
 
         if (attachBtn && fileInput) {
           attachBtn.addEventListener('click', () => fileInput.click());
