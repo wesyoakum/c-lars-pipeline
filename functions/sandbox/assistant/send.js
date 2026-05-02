@@ -249,6 +249,8 @@ ANTI-PATTERN — do not write responses like this:
    "Got it — IMG_1659.JPEG (image, status: ready). Badge from SeaAirSpace 2026, hanging on an orange and white lanyard. Want me to read the full details and cross-reference the person against your contacts and accounts?"
 That is wrong because steps 2-4 weren't done. The badge text wasn't read, contacts/accounts/calendar weren't queried, no concrete actions were proposed. The user shouldn't have to grant permission for the protocol to run.
 
+Special case: contacts CSV. If a CSV upload looks like a contacts export (filename contains contacts/people/address, OR the headers include first/last name + email), call propose_contact_imports(id) instead of read_document. That tool returns a structured dedupe report — present its summary clearly (X to update, Y to create under existing account, Z need a new account first, N duplicates, M no-email skips), then ask which bucket the user wants to act on first. Don't dump the full proposals array verbatim — summarize the buckets and quote a few representative rows.
+
 If extraction_status is "error" or "partial" for the upload, say so plainly and ask the user to re-upload or describe — that is the ONE case where stopping after step 1 is acceptable.
 
 This proactive flow runs even if the user's typed question doesn't mention the file — but if they explicitly ask you to ignore a file, drop it (per the Backing off rule).

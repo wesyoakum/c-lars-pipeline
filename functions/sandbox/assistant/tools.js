@@ -7,6 +7,7 @@
 // over real Pipeline data yet (no creating tasks / accounts / etc.) —
 // that's a deliberate Phase-1 boundary.
 
+import Papa from 'papaparse';
 import { all, one, run } from '../../lib/db.js';
 import { now } from '../../lib/ids.js';
 
@@ -206,6 +207,27 @@ export function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'propose_contact_imports',
+      description:
+        'Analyze an uploaded contacts CSV (Outlook export, Google Contacts export, etc.) and ' +
+        'produce a structured dedupe + import proposal. For each row: matches against existing ' +
+        'Pipeline contacts by email; matches against existing accounts by company name; classifies ' +
+        'as update_existing_contact / create_under_account / needs_new_account / duplicate_in_csv ' +
+        '/ skipped_no_email. Returns the per-row proposals plus summary counts. ' +
+        'Use this whenever the user drops a CSV that looks like contacts (filename mentions ' +
+        '"contacts" / "people" / "address" OR the columns include first/last name + email). ' +
+        'Currently you cannot WRITE to the contacts table directly — present the report and offer ' +
+        'to format a clean ready-to-import CSV the user can run themselves.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Document id from list_documents.' },
+          max_rows: { type: 'integer', description: 'Cap on rows analyzed. Default 500, hard cap 2000.' },
+        },
+        required: ['id'],
+      },
+    },
+    {
       name: 'set_document_retention',
       description:
         "Change a document's retention. " +
@@ -269,6 +291,8 @@ export function makeAssistantTools({ env, user }) {
         return readDocument(env, user, input);
       case 'set_document_retention':
         return setDocumentRetention(env, user, input);
+      case 'propose_contact_imports':
+        return proposeContactImports(env, user, input);
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -551,6 +575,222 @@ async function setDocumentRetention(env, user, { id, retention } = {}) {
     [retention, ts, retention, ts, id, user.id]
   );
   return { ok: true, id, retention, updated_at: ts, changes: result?.meta?.changes ?? null };
+}
+
+// ---------- Contact imports (CSV → dedupe proposal) ----------
+
+const CONTACT_COLUMN_GUESSES = {
+  first_name: ['first name', 'first', 'given name', 'firstname', 'givenname'],
+  last_name:  ['last name', 'last', 'surname', 'family name', 'lastname', 'familyname'],
+  email:      ['email', 'e-mail', 'email address', 'e-mail address', 'primary email', 'email 1', 'email1', 'mail'],
+  phone:      ['phone', 'business phone', 'work phone', 'business phone 1', 'business phone 2', 'office phone', 'phone number'],
+  mobile:     ['mobile', 'mobile phone', 'cell', 'cell phone', 'mobile phone 1'],
+  company:    ['company', 'organization', 'organisation', 'employer', 'company name'],
+  title:      ['title', 'job title', 'position', 'role'],
+};
+
+function detectContactColumns(headers) {
+  const lowerToOriginal = new Map();
+  for (const h of headers) {
+    lowerToOriginal.set(String(h || '').toLowerCase().trim(), h);
+  }
+  const mapping = {};
+  for (const [field, guesses] of Object.entries(CONTACT_COLUMN_GUESSES)) {
+    for (const g of guesses) {
+      if (lowerToOriginal.has(g)) {
+        mapping[field] = lowerToOriginal.get(g);
+        break;
+      }
+    }
+  }
+  return mapping;
+}
+
+async function proposeContactImports(env, user, { id, max_rows } = {}) {
+  if (!id) throw new Error('propose_contact_imports requires a doc id.');
+
+  const doc = await one(
+    env.DB,
+    `SELECT id, filename, content_type, retention, full_text
+       FROM claudia_documents
+      WHERE id = ? AND user_id = ?`,
+    [id, user.id]
+  );
+  if (!doc) return { error: 'not_found', id };
+  if (doc.retention === 'trashed') return { error: 'trashed', id, filename: doc.filename };
+
+  const text = String(doc.full_text || '');
+  if (!text.trim()) {
+    return { error: 'no_text', id, filename: doc.filename, message: 'Document has no extracted text to parse.' };
+  }
+
+  const cap = Math.min(Math.max(Number(max_rows) || 500, 1), 2000);
+  const parsed = Papa.parse(text, { header: true, skipEmptyLines: true });
+  const headers = (parsed.meta && parsed.meta.fields) || [];
+  const mapping = detectContactColumns(headers);
+
+  if (!mapping.email) {
+    return {
+      error: 'no_email_column',
+      id,
+      filename: doc.filename,
+      detected_headers: headers,
+      detected_columns: mapping,
+      message:
+        'No recognizable email column in the headers. Expected one of: ' +
+        CONTACT_COLUMN_GUESSES.email.join(', ') + '. Either the file is not a contacts CSV ' +
+        'or the column name is non-standard — ask the user how to map it.',
+    };
+  }
+
+  const rows = (parsed.data || []).slice(0, cap);
+
+  // One query for all existing emails — much faster than per-row lookups.
+  const existingContacts = await all(
+    env.DB,
+    `SELECT id, account_id, first_name, last_name, email, phone, mobile, title
+       FROM contacts
+      WHERE email IS NOT NULL AND email != ''`
+  );
+  const byEmail = new Map();
+  for (const c of existingContacts) {
+    byEmail.set(String(c.email).toLowerCase().trim(), c);
+  }
+
+  // Active accounts for company → account matching.
+  const activeAccounts = await all(
+    env.DB,
+    `SELECT id, name, alias FROM accounts WHERE is_active = 1`
+  );
+  const accountIndex = activeAccounts.map((a) => ({
+    id: a.id,
+    name: a.name,
+    alias: a.alias,
+    nameLower: String(a.name || '').toLowerCase().trim(),
+    aliasLower: String(a.alias || '').toLowerCase().trim(),
+  }));
+
+  const seenEmails = new Set();
+  const proposals = [];
+  const summary = {
+    update_existing_contact: 0,
+    create_under_account: 0,
+    needs_new_account: 0,
+    duplicate_in_csv: 0,
+    skipped_no_email: 0,
+  };
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const candidate = {
+      first_name: getMappedField(row, mapping.first_name),
+      last_name:  getMappedField(row, mapping.last_name),
+      email:      getMappedField(row, mapping.email),
+      phone:      getMappedField(row, mapping.phone),
+      mobile:     getMappedField(row, mapping.mobile),
+      company:    getMappedField(row, mapping.company),
+      title:      getMappedField(row, mapping.title),
+    };
+
+    if (!candidate.email) {
+      summary.skipped_no_email++;
+      proposals.push({ row_index: i, classification: 'skipped_no_email', candidate });
+      continue;
+    }
+
+    const emailLower = candidate.email.toLowerCase();
+    if (seenEmails.has(emailLower)) {
+      summary.duplicate_in_csv++;
+      proposals.push({ row_index: i, classification: 'duplicate_in_csv', candidate });
+      continue;
+    }
+    seenEmails.add(emailLower);
+
+    const existing = byEmail.get(emailLower);
+    if (existing) {
+      const diffs = {};
+      for (const f of ['first_name', 'last_name', 'phone', 'mobile', 'title']) {
+        const incoming = candidate[f];
+        const current = existing[f];
+        if (incoming && incoming !== current) {
+          diffs[f] = { from: current || null, to: incoming };
+        }
+      }
+      summary.update_existing_contact++;
+      proposals.push({
+        row_index: i,
+        classification: 'update_existing_contact',
+        candidate,
+        existing_id: existing.id,
+        existing_account_id: existing.account_id,
+        diffs,
+      });
+      continue;
+    }
+
+    // Try to match the company string to an existing account.
+    const companyLower = String(candidate.company || '').toLowerCase().trim();
+    let matchedAccount = null;
+    if (companyLower) {
+      matchedAccount = accountIndex.find(
+        (a) => a.nameLower === companyLower || a.aliasLower === companyLower
+      );
+      if (!matchedAccount) {
+        // Soft fuzzy: substring either direction. Cheap; surfaces obvious matches
+        // like "Acme Offshore Inc." vs "Acme Offshore" without a similarity lib.
+        matchedAccount = accountIndex.find(
+          (a) =>
+            (a.nameLower && (companyLower.includes(a.nameLower) || a.nameLower.includes(companyLower))) ||
+            (a.aliasLower && (companyLower.includes(a.aliasLower) || a.aliasLower.includes(companyLower)))
+        );
+      }
+    }
+
+    if (matchedAccount) {
+      summary.create_under_account++;
+      proposals.push({
+        row_index: i,
+        classification: 'create_under_account',
+        candidate,
+        matched_account: { id: matchedAccount.id, name: matchedAccount.name },
+      });
+    } else {
+      summary.needs_new_account++;
+      proposals.push({
+        row_index: i,
+        classification: 'needs_new_account',
+        candidate,
+      });
+    }
+  }
+
+  // Cap the proposals returned to keep the model's context manageable.
+  // Counts in `summary` always reflect the full set.
+  const PROPOSAL_RETURN_CAP = 100;
+  const truncated = proposals.length > PROPOSAL_RETURN_CAP;
+
+  return {
+    doc: { id: doc.id, filename: doc.filename },
+    detected_columns: mapping,
+    detected_headers: headers,
+    total_rows_in_csv: parsed.data ? parsed.data.length : 0,
+    total_rows_analyzed: rows.length,
+    summary,
+    proposals: proposals.slice(0, PROPOSAL_RETURN_CAP),
+    truncated,
+    note_no_writes_yet:
+      'Claudia is currently read-only on Pipeline. To act on this report you can either ' +
+      'manually create the contacts/accounts via the UI, or ask Claudia to format a clean ' +
+      'ready-to-import CSV for the rows in update_existing_contact + create_under_account.',
+  };
+}
+
+function getMappedField(row, key) {
+  if (!key) return null;
+  const v = row[key];
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s || null;
 }
 
 // ---------- Calendar (published .ics URLs, multi-source) ----------
