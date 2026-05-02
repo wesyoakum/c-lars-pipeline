@@ -22,6 +22,7 @@ import PizZip from 'pizzip';
 import * as XLSX from 'xlsx';
 import { aiBaseUrl, gatewayHeaders } from './ai-gateway.js';
 import { transcribeAudio } from './openai.js';
+import { emailToReadableText } from './claudia-mime.js';
 
 const ANTHROPIC_VERSION = '2023-06-01';
 const PDF_EXTRACT_MODEL = 'claude-haiku-4-5-20251001'; // fast + cheap; full text dump doesn't need Sonnet
@@ -235,12 +236,15 @@ export async function extractText(env, buffer, contentType, filename) {
   try {
     if (kind === 'text') {
       let text = new TextDecoder('utf-8', { fatal: false }).decode(buffer).trim();
-      // Email-like content (.eml, .mbox, message/rfc822) often has
-      // base64-encoded attachments inline. Strip those before storing —
-      // the readable headers + body text are what's useful for search;
-      // the raw bytes already live in R2 if we ever need them.
+      // Email-like content (.eml, .mbox-individual-message,
+      // message/rfc822) goes through a real MIME parser:
+      // walks multipart trees, decodes base64 / quoted-printable,
+      // keeps text/* leaves, drops binary attachments cleanly.
+      // Falls back to the regex strip-base64 heuristic if parsing
+      // returns null (malformed, missing boundary, etc.).
       if (looksLikeEmail(contentType, filename)) {
-        text = stripBase64Blocks(text);
+        const parsed = emailToReadableText(text);
+        text = (parsed && parsed.length > 0) ? parsed : stripBase64Blocks(text);
       }
       return capExtractedText({ text, status: 'ready' });
     }
