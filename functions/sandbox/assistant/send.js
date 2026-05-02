@@ -44,15 +44,26 @@ export async function onRequestPost(context) {
     [ts, thread.id]
   );
 
-  // Pull recent history including the just-inserted user turn.
-  const history = await all(
+  // Pull the LATEST N turns (DESC then reverse) so the just-inserted
+  // user message is always included and the array ends on the user
+  // turn — Claude rejects conversations that don't end on a user role.
+  const recentDesc = await all(
     env.DB,
     `SELECT role, text FROM assistant_messages
       WHERE thread_id = ?
-      ORDER BY created_at ASC, id ASC
+      ORDER BY created_at DESC, id DESC
       LIMIT ?`,
     [thread.id, MAX_HISTORY_TURNS]
   );
+  const history = recentDesc.slice().reverse();
+
+  // Anthropic also rejects conversations that don't START on a user
+  // turn. If our window happens to begin with an assistant message
+  // (because the prior user turn fell outside the window), strip the
+  // leading assistant turns.
+  while (history.length > 0 && history[0].role !== 'user') {
+    history.shift();
+  }
 
   const apiMessages = history.map((m) => ({
     role: m.role,
