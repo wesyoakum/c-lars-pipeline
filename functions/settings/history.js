@@ -124,7 +124,7 @@ export async function onRequestGet(context) {
     '/settings/history' + (n > 1 ? `?page=${n}` : '');
 
   const body = html`
-    ${settingsSubNav('history', true)}
+    ${settingsSubNav('history', true, user?.email === 'wes.yoakum@c-lars.com')}
 
     <section class="card">
       <div class="card-header">

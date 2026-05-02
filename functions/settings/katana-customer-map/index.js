@@ -155,7 +155,7 @@ export async function onRequestGet(context) {
   const pageStateJson = JSON.stringify(pageState).replace(/</g, '\\u003c');
 
   const body = html`
-    ${settingsSubNav('katana-customer-map', true)}
+    ${settingsSubNav('katana-customer-map', true, user?.email === 'wes.yoakum@c-lars.com')}
 
     <section class="card" style="margin-top:1rem" x-data="katanaCustomerMap()" x-init="init()">
       <div class="card-header">

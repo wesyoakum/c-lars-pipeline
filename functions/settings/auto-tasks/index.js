@@ -137,7 +137,7 @@ async function renderList(context, { values = {}, errors = {} }) {
   const errText = (k) => (errors[k] ? html`<small class="error">${errors[k]}</small>` : '');
 
   const body = html`
-    ${settingsSubNav('auto-tasks', true)}
+    ${settingsSubNav('auto-tasks', true, user?.email === 'wes.yoakum@c-lars.com')}
 
     <section class="card">
       <div class="card-header">

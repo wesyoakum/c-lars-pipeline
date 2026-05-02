@@ -90,7 +90,7 @@ export async function onRequestGet(context) {
   const probeJson = JSON.stringify(downloadPayload);
 
   const body = html`
-    ${settingsSubNav('katana-probe', true)}
+    ${settingsSubNav('katana-probe', true, user?.email === 'wes.yoakum@c-lars.com')}
 
     <section class="card" style="margin-top:1rem">
       <div class="card-header">

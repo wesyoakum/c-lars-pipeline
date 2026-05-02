@@ -71,7 +71,7 @@ export async function onRequestPost(context) {
     content: m.text,
   }));
 
-  const tools = makeAssistantTools({ env, user });
+  const tools = await makeAssistantTools({ env, user });
   const tableNames = await listTableNames(env);
 
   // Pull documents uploaded since the last assistant message in this

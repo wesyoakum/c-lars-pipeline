@@ -44,7 +44,7 @@ export async function onRequestGet(context) {
   }
 
   const body = html`
-    ${settingsSubNav('fake-names', true)}
+    ${settingsSubNav('fake-names', true, user?.email === 'wes.yoakum@c-lars.com')}
 
     <section class="card" style="margin-top:1rem">
       <div class="card-header">

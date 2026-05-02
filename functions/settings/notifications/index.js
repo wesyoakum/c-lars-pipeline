@@ -73,7 +73,7 @@ export async function onRequestGet(context) {
   const channelTypes = Object.values(NOTIFICATION_CHANNELS);
 
   const body = html`
-    ${settingsSubNav('notifications', isAdmin)}
+    ${settingsSubNav('notifications', isAdmin, user.email === 'wes.yoakum@c-lars.com')}
 
     <section class="card">
       <div class="card-header">

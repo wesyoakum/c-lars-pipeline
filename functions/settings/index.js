@@ -78,7 +78,7 @@ export async function onRequestGet(context) {
   const pw = prefs.show_postits_widget     != null ? (prefs.show_postits_widget     ? 1 : 0) : 1;
 
   const body = html`
-    ${settingsSubNav('preferences', isAdmin)}
+    ${settingsSubNav('preferences', isAdmin, user.email === 'wes.yoakum@c-lars.com')}
 
     <section class="card" x-data="settingsPrefs(${sa}, ${gr}, ${ao}, ${isAdmin ? 'true' : 'false'}, ${tw}, ${cw}, ${pw})">
       <div class="card-header">

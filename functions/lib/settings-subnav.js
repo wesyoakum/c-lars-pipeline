@@ -21,13 +21,18 @@ import { html } from './layout.js';
 
 /**
  * Top-level groups, in render order. Each entry is either:
- *   { type: 'link', key, label, href, adminOnly }
- *   { type: 'dropdown', label, adminOnly, items: [{ key, label, href }] }
+ *   { type: 'link', key, label, href, adminOnly, wesOnly }
+ *   { type: 'dropdown', label, adminOnly, items: [{ key, label, href, wesOnly }] }
  *
  * Non-admin users only see entries with adminOnly === false. Inside a
- * dropdown, every item inherits the parent's adminOnly flag — there's
- * no per-item gating today (every item under an admin dropdown is
- * itself admin-only).
+ * dropdown, every item inherits the parent's adminOnly flag.
+ *
+ * `wesOnly` is a per-item flag for the small set of pages that gate on
+ * the literal email wes.yoakum@c-lars.com (Sandbox, Claudia perms,
+ * AI Inbox surfaces). It does NOT replace adminOnly — it's an
+ * additional restriction, only honored when isWes === true at render
+ * time. wesOnly entries on a dropdown must still respect the dropdown's
+ * adminOnly flag.
  */
 const GROUPS = [
   { type: 'link', key: 'preferences',   label: 'Preferences',    href: '/settings',                adminOnly: false },
@@ -48,32 +53,38 @@ const GROUPS = [
       { key: 'fake-names',   label: 'Fake names',      href: '/settings/fake-names' },
       { key: 'history',      label: 'History',         href: '/settings/history' },
       { key: 'data-refresh', label: 'Data refresh',    href: '/settings/data-refresh' },
+      { key: 'claudia',      label: 'Claudia',         href: '/settings/claudia', wesOnly: true },
     ],
   },
 ];
 
 /**
  * Render the Settings sub-nav.
- * @param {string} active   — current page key (see GROUPS for valid values)
- * @param {boolean} isAdmin — include admin-only entries when true
+ * @param {string}  active   — current page key (see GROUPS for valid values)
+ * @param {boolean} isAdmin  — include admin-only entries when true
+ * @param {boolean} [isWes]  — include wesOnly entries when true (defaults to false)
  */
-export function settingsSubNav(active, isAdmin) {
-  const visible = GROUPS.filter((g) => isAdmin || !g.adminOnly);
+export function settingsSubNav(active, isAdmin, isWes = false) {
+  const visible = GROUPS
+    .filter((g) => isAdmin || !g.adminOnly)
+    .filter((g) => isWes || !g.wesOnly);
 
   const rendered = visible.map((g) => {
     if (g.type === 'link') {
       const isActive = active === g.key;
       return html`<a class="nav-link ${isActive ? 'active' : ''}" href="${g.href}">${g.label}</a>`;
     }
-    // dropdown
-    const isActive = g.items.some((i) => i.key === active);
+    // dropdown — also filter wesOnly items inside it
+    const items = g.items.filter((i) => isWes || !i.wesOnly);
+    if (items.length === 0) return '';
+    const isActive = items.some((i) => i.key === active);
     return html`
       <div class="nav-dropdown">
         <button type="button" class="nav-link nav-dropdown-trigger ${isActive ? 'active' : ''}" aria-haspopup="true">
           ${g.label} <span class="nav-dropdown-caret" aria-hidden="true">&#9662;</span>
         </button>
         <div class="nav-dropdown-menu" role="menu">
-          ${g.items.map((i) => html`
+          ${items.map((i) => html`
             <a class="nav-link ${active === i.key ? 'active' : ''}" href="${i.href}" role="menuitem">${i.label}</a>
           `)}
         </div>

@@ -25,7 +25,7 @@ export async function onRequestGet(context) {
   const url = new URL(request.url);
 
   const body = html`
-    ${settingsSubNav('data-refresh', true)}
+    ${settingsSubNav('data-refresh', true, user?.email === 'wes.yoakum@c-lars.com')}
 
     <section class="card" style="margin-top:1rem">
       <div class="card-header">

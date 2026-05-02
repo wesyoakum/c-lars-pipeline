@@ -76,7 +76,7 @@ export async function onRequestGet(context) {
   }));
 
   const body = html`
-    ${settingsSubNav('users', true)}
+    ${settingsSubNav('users', true, user?.email === 'wes.yoakum@c-lars.com')}
 
     <section class="card">
       <div class="card-header">

@@ -48,7 +48,7 @@ export async function onRequestGet(context) {
   const ready       = hasOauthApp && hasRefresh;
 
   const body = html`
-    ${settingsSubNav('wfm-import', true)}
+    ${settingsSubNav('wfm-import', true, user?.email === 'wes.yoakum@c-lars.com')}
 
     <section class="card" style="margin-top:1rem">
       <div class="card-header">

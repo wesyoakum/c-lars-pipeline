@@ -17,13 +17,27 @@ import {
   claudiaListRecentWrites,
   CLAUDIA_WRITES,
 } from '../../lib/claudia-writes.js';
+import {
+  PERMISSION_GATED_ACTIONS,
+  loadPermissionMap,
+} from '../../lib/claudia-permissions.js';
 
 /**
  * Build the toolset bound to a particular request (env + acting user).
  * Returns Anthropic-format tool definitions plus an executeTool() that
  * dispatches by name. Pass `executeTool` straight into messagesWithTools().
+ *
+ * Async so it can read claudia_permissions and filter mutation tools
+ * Wes has disabled at /settings/claudia.
  */
-export function makeAssistantTools({ env, user }) {
+export async function makeAssistantTools({ env, user }) {
+  const permissions = await loadPermissionMap(env);
+  const isAllowed = (action) => {
+    if (!PERMISSION_GATED_ACTIONS.has(action)) return true;
+    // Missing row → enabled (defensive default).
+    return permissions[action] !== false;
+  };
+
   const definitions = [
     {
       name: 'search_accounts',
@@ -414,7 +428,20 @@ export function makeAssistantTools({ env, user }) {
     },
   ];
 
+  // Filter out disabled mutation tools so Claude never sees them in the
+  // toolset (preferred — she can't even propose using a tool she can't
+  // see). The execute() check below is defense-in-depth in case a stale
+  // schema makes it through anyway.
+  const filteredDefinitions = definitions.filter((d) => isAllowed(d.name));
+
   async function execute(name, input) {
+    if (!isAllowed(name)) {
+      return {
+        error: 'permission_denied',
+        action: name,
+        message: `The "${name}" tool is currently disabled by ${user.display_name || user.email} at /settings/claudia. Tell him plainly that you can't do that right now and ask if he wants to enable it.`,
+      };
+    }
     switch (name) {
       case 'search_accounts':
         return searchAccounts(env, input);
@@ -459,7 +486,7 @@ export function makeAssistantTools({ env, user }) {
     }
   }
 
-  return { definitions, execute };
+  return { definitions: filteredDefinitions, execute, permissions };
 }
 
 /**
