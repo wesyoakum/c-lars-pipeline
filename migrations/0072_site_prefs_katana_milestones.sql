@@ -1,0 +1,25 @@
+-- =====================================================================
+-- Migration 0072 — Katana milestone-variant map on site_prefs.
+--
+-- Phase 2c. Pairs each EPS milestone with the Katana variant_id it
+-- pushes against. The /settings/katana-milestones admin page edits
+-- this; the "Push to Katana" route on the quote detail page reads it
+-- to compute the sales-order rows.
+--
+-- Stored as JSON on site_prefs.katana_milestone_map (single-row
+-- table, id = 1). Same pattern as site_prefs.eps_schedule.
+--
+-- Shape (validated by lib/katana-milestones.js):
+--   {
+--     "milestones": [
+--       { "percent": 10, "label": "Order Confirmation",
+--         "katana_variant_id": 40099667, "katana_sku": "MS-1ST-10%-OC" },
+--       ...
+--     ]
+--   }
+--
+-- Order of the array IS the milestone order (1st, 2nd, …). Percentages
+-- must sum to 100. Each variant_id must exist in Katana at push time.
+-- =====================================================================
+
+ALTER TABLE site_prefs ADD COLUMN katana_milestone_map TEXT;

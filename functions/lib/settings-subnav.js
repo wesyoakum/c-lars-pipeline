@@ -41,9 +41,10 @@ const GROUPS = [
   {
     type: 'dropdown', label: 'Integrations', adminOnly: true,
     items: [
-      { key: 'wfm-import',          label: 'WFM import',       href: '/settings/wfm-import' },
-      { key: 'katana-probe',        label: 'Katana probe',     href: '/settings/katana-probe' },
-      { key: 'katana-customer-map', label: 'Katana customers', href: '/settings/katana-customer-map' },
+      { key: 'wfm-import',          label: 'WFM import',         href: '/settings/wfm-import' },
+      { key: 'katana-probe',        label: 'Katana probe',       href: '/settings/katana-probe' },
+      { key: 'katana-customer-map', label: 'Katana customers',   href: '/settings/katana-customer-map' },
+      { key: 'katana-milestones',   label: 'Katana milestones',  href: '/settings/katana-milestones' },
     ],
   },
   {
