@@ -73,6 +73,11 @@ export async function onRequestGet(context) {
           ${creds?.updated_at
             ? html`<span class="muted" style="font-size:.85em">last refreshed: ${escape(creds.updated_at)}</span>`
             : ''}
+          ${hasOauthApp ? html`
+            <button type="button" class="btn"
+                    onclick="document.getElementById('reconnect-panel').style.display = (document.getElementById('reconnect-panel').style.display === 'none') ? 'block' : 'none'"
+                    style="margin-left:auto;font-size:.82rem">Reconnect…</button>
+          ` : ''}
         </div>
         ${!hasOauthApp ? html`
           <p class="muted" style="margin:.5rem 0 0 0;font-size:.85em">
@@ -87,18 +92,24 @@ export async function onRequestGet(context) {
           </p>` : ''}
       </div>
 
-      ${!ready ? html`
-        <!-- =============== First-time refresh-token form =============== -->
-        <section class="card" style="margin-top:1rem;border-color:#d4a72c">
-          <h2 style="margin-top:0">Connect WFM</h2>
+      ${hasOauthApp ? html`
+        <!-- =============== Refresh-token paste form (for first-time + recovery) =============== -->
+        <section id="reconnect-panel" class="card"
+                 style="margin-top:1rem;border-color:#d4a72c;display:${ready ? 'none' : 'block'}">
+          <h2 style="margin-top:0">${ready ? 'Reconnect WFM' : 'Connect WFM'}</h2>
           <p class="muted" style="margin-top:0">
-            Paste the <code>WFM_REFRESH_TOKEN</code> from your local
-            <code>.env.local</code>. The server stores it in the
-            <code>wfm_credentials</code> table; on every API call it
-            uses the token to fetch a fresh access token (and rolls
-            the refresh token forward — BlueRock rotates it on every
-            use).
+            ${ready
+              ? html`<strong>Paste a fresh refresh token here when re-authentication is needed</strong> (e.g. after a "Refresh token reuse detected" error from BlueRock).`
+              : html`Paste the <code>WFM_REFRESH_TOKEN</code> here to connect.`}
+            BlueRock rotates the token on every refresh; we persist the
+            new value back to D1 immediately. If a transient D1 timeout
+            ever loses the rotated token, re-bootstrap via:
           </p>
+          <ol class="muted" style="margin:.4rem 0 .6rem 1.2rem;font-size:.85em;line-height:1.5">
+            <li>Open the BlueRock OAuth authorize URL in a browser, sign in, copy the <code>code=</code> param from the redirect.</li>
+            <li>Locally: <code style="background:rgba(0,0,0,0.05);padding:.1rem .3rem;border-radius:3px">node scripts/wfm/api-client.mjs --bootstrap-token &lt;CODE&gt;</code></li>
+            <li>Copy the new <code>WFM_REFRESH_TOKEN</code> from <code>.env.local</code> and paste it below.</li>
+          </ol>
           <form id="creds-form" style="display:flex;gap:.5rem;align-items:flex-start;flex-wrap:wrap">
             <input type="password" name="refresh_token" placeholder="WFM refresh token" required
                    style="flex:1;min-width:280px;font-family:ui-monospace,monospace;font-size:.85rem;padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px">

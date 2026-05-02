@@ -100,14 +100,41 @@ export async function getAccessToken(env, { force = false } = {}) {
   const orgId = extractOrgIdFromJwt(decodeJwtPayload(access)) || creds.org_id || '';
   const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
-  await run(
-    env.DB,
-    `UPDATE wfm_credentials
-        SET refresh_token = ?, access_token = ?, access_expires_at = ?,
-            org_id = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-      WHERE id = 1`,
-    [newRefresh, access, expiresAt, orgId]
-  );
+  // CRITICAL: at this point BlueRock has already rotated the refresh
+  // token — the OLD one we just used is dead. If the D1 write below
+  // fails, we lose the new token forever and the next refresh will
+  // hit "Refresh token reuse detected" because we'll re-send a
+  // BlueRock-invalidated value. So retry hard before bailing.
+  let lastErr;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      await run(
+        env.DB,
+        `UPDATE wfm_credentials
+            SET refresh_token = ?, access_token = ?, access_expires_at = ?,
+                org_id = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+          WHERE id = 1`,
+        [newRefresh, access, expiresAt, orgId]
+      );
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+      // Brief backoff: 50, 200, 600 ms.
+      const sleepMs = [50, 200, 600][attempt] || 600;
+      await new Promise((r) => setTimeout(r, sleepMs));
+    }
+  }
+  if (lastErr) {
+    // The tokens we hold in memory are still valid for the rest of this
+    // request even though we couldn't persist them. Surface a loud
+    // error so the next request fails fast (and a human can re-auth)
+    // rather than silently using a stale refresh_token next time.
+    throw new Error(
+      `OAuth tokens rotated but D1 write failed after retries — RECONNECT REQUIRED. ` +
+      `Underlying error: ${String(lastErr.message || lastErr)}`
+    );
+  }
 
   return { access, orgId };
 }
