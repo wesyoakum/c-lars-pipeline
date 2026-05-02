@@ -27,6 +27,7 @@
 import { all, one, run } from '../../lib/db.js';
 import { now, uuid } from '../../lib/ids.js';
 import { messagesJson } from '../../lib/anthropic.js';
+import { CLAUDIA_USER_ID } from '../../lib/auth.js';
 
 const SANDBOX_OWNER_EMAIL = 'wes.yoakum@c-lars.com';
 const STALE_OBSERVATION_MINUTES = 55;
@@ -132,6 +133,30 @@ export async function onRequestPost(context) {
     [user.id]
   );
 
+  // Tasks people have assigned TO Claudia herself. She doesn't act on
+  // them yet (write surface for activities is still gated) — the
+  // hourly tick just surfaces them so Wes (and the assigner) sees
+  // that she received the request and what she'd suggest doing.
+  const myAssignedTasks = await all(
+    env.DB,
+    `SELECT a.id, a.subject, a.body, a.status, a.due_at, a.opportunity_id,
+            a.account_id, a.created_at, a.updated_at, a.created_by_user_id,
+            assignor.display_name AS assigned_by_name,
+            assignor.email AS assigned_by_email,
+            acct.name AS account_name,
+            opp.number AS opp_number, opp.title AS opp_title
+       FROM activities a
+       LEFT JOIN users assignor ON assignor.id = a.created_by_user_id
+       LEFT JOIN accounts acct ON acct.id = a.account_id
+       LEFT JOIN opportunities opp ON opp.id = a.opportunity_id
+      WHERE a.assigned_user_id = ?
+        AND a.completed_at IS NULL
+        AND (a.type = 'task' OR a.type IS NULL)
+      ORDER BY a.due_at IS NULL, a.due_at ASC, a.created_at DESC
+      LIMIT 25`,
+    [CLAUDIA_USER_ID]
+  );
+
   const today = new Date().toISOString().slice(0, 10);
   const display = user.display_name || user.email;
 
@@ -154,6 +179,14 @@ export async function onRequestPost(context) {
     '- "Consider reviewing your funnel." (vague)',
     '- "Hi Wes! Hope your morning is going well!" (filler)',
     '',
+    'TASKS ASSIGNED TO YOU (CLAUDIA):',
+    'The state blob includes a `tasks_assigned_to_claudia` array — these are activities other users have assigned to YOUR user record (claudia-ai). For each unprocessed one, surface a single observation that:',
+    '  - Names the assigner ("Kat assigned you ...") and the task subject.',
+    '  - Cites the linked account/opp if any.',
+    '  - States what you understand the ask to be (one sentence).',
+    '  - Says what you would do — and that you need ' + display + ' to confirm before you do it (you don\'t have a write surface for activities yet, so even when permitted you can\'t mark the task complete on your own).',
+    'Skip a task only if you already wrote an observation about it (check recent_observations). One observation per task; do not batch them.',
+    '',
     'OUTPUT: strict JSON, no prose around it, no markdown fences. Shape:',
     '{ "observations": ["...one observation per string, markdown ok inside, 1-3 sentences..."] }',
     'If nothing is genuinely worth flagging, output { "observations": [] } and we will skip writing anything. Do not invent something to fill the slot.',
@@ -164,6 +197,7 @@ export async function onRequestPost(context) {
       pending_events_since_last_tick: events,
       open_opportunities: openOpps,
       open_tasks: openTasks,
+      tasks_assigned_to_claudia: myAssignedTasks,
       recent_observations: recentObservations,
       minutes_since_last_observation: Number.isFinite(minutesSinceLastObs)
         ? Math.round(minutesSinceLastObs)
