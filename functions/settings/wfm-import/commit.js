@@ -810,6 +810,92 @@ async function ensureOpportunityFromLead(env, wfmLeadUuid, ctx) {
   return o.id;
 }
 
+// WFM Quote.State → Pipeline opportunity stage. Used when synthesizing
+// a stub opportunity from an orphan quote (no parent Lead/Job).
+const QUOTE_STATE_TO_OPP_STAGE = {
+  Draft:    'quote_drafted',
+  Issued:   'quote_submitted',
+  Accepted: 'won',
+  Declined: 'lost',
+  Archived: 'abandoned',
+};
+
+// Synthesize a standalone opportunity from a quote that has no parent
+// Lead/Job in WFM (or whose parent is inaccessible). Used when the
+// user opts into options.synth_orphan_quotes on the import. The
+// account FK is auto-cascaded from quote.Client.UUID. If no client
+// is set or cascade fails, returns null and the quote will skip.
+async function synthesizeOpportunityFromQuote(env, q, ctx) {
+  const accountId = q.Client?.UUID
+    ? await ensureAccount(env, q.Client.UUID, ctx)
+    : null;
+  if (!accountId) return null;
+
+  // Reuse cache key if we've already synthesized this opp in the same
+  // batch (idempotency for the request lifetime).
+  const cacheKey = 'orphan-quote:' + q.UUID;
+  if (ctx.oppByWfmUuid.has(cacheKey)) return ctx.oppByWfmUuid.get(cacheKey);
+
+  // Idempotent at the DB level too: re-keyed on (wfm-quote-orphan, q.UUID).
+  const existing = await one(env.DB,
+    'SELECT id, number FROM opportunities WHERE external_source = ? AND external_id = ?',
+    ['wfm-quote-orphan', q.UUID]);
+
+  const stage = QUOTE_STATE_TO_OPP_STAGE[q.State] || 'quote_drafted';
+  const contactId = q.Contact?.UUID
+    ? (ctx.contactByWfmUuid.get(q.Contact.UUID) || null)
+    : null;
+
+  const noteLine = '[WFM] Synthesized from orphan quote ' +
+    (q.ID || q.UUID || '?') +
+    ' — no parent Lead/Job in WFM at import time.';
+
+  const ts = nowIso();
+  const cols = {
+    title:               s(q.Name) || ('Quote ' + (q.ID || q.UUID || '')),
+    description:         s(q.Description),
+    transaction_type:    'spares',     // best-guess default; user can edit
+    stage,
+    estimated_value_usd: n(q.AmountIncludingTax),
+    account_id:          accountId,
+    primary_contact_id:  contactId,
+    notes_internal:      noteLine,
+    wfm_payload:         JSON.stringify(q),
+    updated_at:          ts,
+  };
+
+  let oppId, oppNumber;
+  if (existing) {
+    const setClause = Object.keys(cols).map((k) => `${k} = ?`).join(', ');
+    await run(env.DB,
+      `UPDATE opportunities SET ${setClause} WHERE id = ?`,
+      [...Object.values(cols), existing.id]);
+    oppId = existing.id; oppNumber = existing.number;
+  } else {
+    oppId = uuid();
+    oppNumber = await allocateNumber(env, 'OPP-WFM');
+    await run(env.DB,
+      `INSERT INTO opportunities
+         (id, number, external_source, external_id,
+          account_id, primary_contact_id,
+          title, description, transaction_type, stage,
+          estimated_value_usd,
+          notes_internal, wfm_payload,
+          stage_entered_at, created_at, updated_at)
+       VALUES (?, ?, 'wfm-quote-orphan', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [oppId, oppNumber, q.UUID,
+       accountId, contactId,
+       cols.title, cols.description, cols.transaction_type, cols.stage,
+       cols.estimated_value_usd,
+       cols.notes_internal, cols.wfm_payload,
+       ts, ts, ts]);
+  }
+
+  ctx.oppByWfmUuid.set(cacheKey, oppId);
+  ctx.counts.opportunities_synthesized = (ctx.counts.opportunities_synthesized || 0) + 1;
+  return oppId;
+}
+
 // Get-or-import a job-derived opportunity by WFM Job UUID. Cascades
 // account if the parent client isn't in our maps. Mirrors
 // ensureOpportunityFromLead but for the JobUUID FK path that quotes
@@ -950,9 +1036,17 @@ export async function onRequestPost(context) {
     'SELECT id, external_id FROM users WHERE external_source = ?', ['wfm']);
   for (const r of priorUsers) userByWfmUuid.set(r.external_id, r.id);
   const priorOpps = await all(env.DB,
-    'SELECT id, external_id FROM opportunities WHERE external_source IN (?, ?)',
-    ['wfm-lead', 'wfm-job']);
+    'SELECT id, external_id FROM opportunities WHERE external_source IN (?, ?, ?)',
+    ['wfm-lead', 'wfm-job', 'wfm-quote-orphan']);
   for (const r of priorOpps) oppByWfmUuid.set(r.external_id, r.id);
+
+  // Import options. Currently:
+  //   synth_orphan_quotes: when a quote has no resolvable parent
+  //     (no LeadUUID/JobUUID, OR cascade fails because parent is
+  //     archived/deleted in WFM), synthesize a stub opportunity from
+  //     the quote's own fields. external_source='wfm-quote-orphan'.
+  const options = (body && body.options) || {};
+  const synthOrphanQuotes = !!options.synth_orphan_quotes;
 
   const counts = {
     accounts: 0, contacts: 0, opportunities: 0, quotes: 0,
@@ -964,6 +1058,9 @@ export async function onRequestPost(context) {
     // and stamped with the WFM external_id (rather than creating a
     // new row alongside the existing one).
     accounts_claimed: 0, contacts_claimed: 0,
+    // Stub opps synthesized from orphan/stranded quotes (when
+    // options.synth_orphan_quotes is on).
+    opportunities_synthesized: 0,
   };
   const links = [];
   const errors = [];
@@ -1041,8 +1138,21 @@ export async function onRequestPost(context) {
         // current batch and isn't in Pipeline, fetch it from WFM
         // (which recursively cascades the Client) and import on the fly.
         let oppId = null;
+        let synthesized = false;
         if (q.LeadUUID) oppId = await ensureOpportunityFromLead(env, q.LeadUUID, ctx);
         if (!oppId && q.JobUUID) oppId = await ensureOpportunityFromJob(env, q.JobUUID, ctx);
+        // Last-resort synthesizer: if cascades failed AND the user opted
+        // in, synthesize a stub opportunity from the quote's own fields.
+        if (!oppId && synthOrphanQuotes) {
+          oppId = await synthesizeOpportunityFromQuote(env, q, ctx);
+          if (oppId) {
+            synthesized = true;
+            links.push({
+              url: '/opportunities/' + oppId,
+              label: 'Synthesized opp: ' + (q.Name || q.ID || q.UUID || '?'),
+            });
+          }
+        }
         if (!oppId) {
           counts.skipped++;
           let reason;
@@ -1054,6 +1164,13 @@ export async function onRequestPost(context) {
             reason = 'JobUUID ' + q.JobUUID + ' present but cascade failed (job missing/inaccessible in WFM?)';
           } else {
             reason = 'both LeadUUID (' + q.LeadUUID + ') and JobUUID (' + q.JobUUID + ') present, neither cascade succeeded';
+          }
+          if (!synthOrphanQuotes) {
+            reason += ' (enable "Synthesize standalone opportunities for orphan quotes" to import anyway)';
+          } else {
+            // Synth was on but still failed — that means the Client
+            // couldn't be resolved either.
+            reason += ' (synthesis attempted but quote.Client.UUID could not be resolved either)';
           }
           errors.push('quote "' + (q?.Name || q?.ID || q?.UUID || '?') + '" skipped: ' + reason);
           continue;
@@ -1107,6 +1224,9 @@ export async function onRequestPost(context) {
           ? ' · auto-cascaded: ' + counts.accounts_cascaded + ' accounts, '
             + counts.contacts_cascaded + ' contacts, '
             + counts.opportunities_cascaded + ' opps'
+          : '')
+      + (counts.opportunities_synthesized > 0
+          ? ' · synthesized: ' + counts.opportunities_synthesized + ' orphan-quote opps'
           : '')
       + ((counts.accounts_claimed + counts.contacts_claimed) > 0
           ? ' · claimed (matched existing Pipeline rows by name): '

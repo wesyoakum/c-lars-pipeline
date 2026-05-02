@@ -80,6 +80,46 @@ export async function onRequestGet(context) {
             const okBadge = row.ok
               ? html`<span style="color:#1a7f37;font-weight:600">✓ ok</span>`
               : html`<span style="color:#cf222e;font-weight:600">✗ failed</span>`;
+
+            // Build the plain-text dump that the Copy buttons paste.
+            // Two flavors: full entry, or errors-only.
+            const fullDump = [
+              'WFM Import Run — ' + fmtTs(row.started_at),
+              'Status: ' + (row.ok ? 'ok' : 'failed'),
+              'By: ' + (row.triggered_by || '?'),
+              'Run ID: ' + row.id,
+              'Selection size: ' + row.selection_size,
+              '',
+              'Summary:',
+              '  ' + (row.summary || '(none)'),
+              '',
+              'Counts:',
+              ...Object.entries(counts).map(([k, v]) => '  ' + k + ': ' + v),
+              '',
+              'Submitted records:',
+              ...(selection.length === 0
+                ? ['  (empty selection)']
+                : selection.map((s) =>
+                    '  - ' + (s.kind || '?') + ': ' +
+                    (s.name || s.id || s.uuid || '?') +
+                    (s.uuid ? ' (' + s.uuid + ')' : ''))),
+              '',
+              'Imported records:',
+              ...(links.length === 0
+                ? ['  (none)']
+                : links.map((l) => '  - ' + l.label + ' → ' + l.url)),
+              '',
+              'Errors / skip reasons:',
+              ...(errors.length === 0
+                ? ['  (none)']
+                : errors.map((e) => '  - ' + e)),
+            ].join('\n');
+
+            const errorsDump = errors.length === 0
+              ? '(no errors recorded)'
+              : ['Errors / skip reasons — ' + fmtTs(row.started_at) + ':',
+                 ...errors.map((e) => '  - ' + e)].join('\n');
+
             return html`
               <details class="card" style="margin:0;padding:.4rem .8rem">
                 <summary style="cursor:pointer;display:flex;gap:.6rem;align-items:baseline;flex-wrap:wrap;list-style:revert">
@@ -95,6 +135,22 @@ export async function onRequestGet(context) {
                     ${escape(row.summary || '(no summary)')}
                   </span>
                 </summary>
+
+                <!-- Copy bar -->
+                <div style="margin-top:.5rem;display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">
+                  <button type="button" class="btn js-copy-run"
+                          data-run-id="${escape(row.id)}"
+                          data-copy-payload="${escape(fullDump)}"
+                          style="font-size:.78rem">Copy entry</button>
+                  ${errors.length > 0 ? html`
+                    <button type="button" class="btn js-copy-run"
+                            data-run-id="${escape(row.id)}"
+                            data-copy-payload="${escape(errorsDump)}"
+                            style="font-size:.78rem">Copy errors only (${errors.length})</button>
+                  ` : ''}
+                  <span class="js-copy-status" data-run-id="${escape(row.id)}"
+                        style="font-size:.78rem;color:#1a7f37"></span>
+                </div>
 
                 <div style="margin-top:.6rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.7rem">
                   <!-- Counts -->
@@ -155,6 +211,41 @@ export async function onRequestGet(context) {
           })}
         </div>
       `}
+
+      <script>
+        // Copy-to-clipboard for any history row's payload. Uses the
+        // modern Clipboard API; falls back to a hidden textarea +
+        // execCommand if the page is served over an insecure context
+        // (rare here, but cheap insurance).
+        document.addEventListener('click', async function (e) {
+          const btn = e.target.closest('.js-copy-run');
+          if (!btn) return;
+          const payload = btn.getAttribute('data-copy-payload') || '';
+          const runId   = btn.getAttribute('data-run-id') || '';
+          const status  = document.querySelector('.js-copy-status[data-run-id="' + runId + '"]');
+          let ok = false;
+          try {
+            await navigator.clipboard.writeText(payload);
+            ok = true;
+          } catch (_) {
+            try {
+              const ta = document.createElement('textarea');
+              ta.value = payload;
+              ta.style.position = 'fixed';
+              ta.style.opacity = '0';
+              document.body.appendChild(ta);
+              ta.focus(); ta.select();
+              ok = document.execCommand('copy');
+              document.body.removeChild(ta);
+            } catch (_) { ok = false; }
+          }
+          if (status) {
+            status.textContent = ok ? '✓ Copied' : '✗ Copy failed';
+            status.style.color = ok ? '#1a7f37' : '#cf222e';
+            setTimeout(function () { status.textContent = ''; }, 2000);
+          }
+        });
+      </script>
     </section>
   `;
 

@@ -385,7 +385,7 @@ export async function onRequestGet(context) {
           </div>
 
           <!-- Import button (shows once a batch is loaded, regardless of source) -->
-          <div style="margin-top:.6rem" x-show="samples">
+          <div style="margin-top:.6rem;display:flex;gap:.8rem;align-items:center;flex-wrap:wrap" x-show="samples">
             <button type="button" class="btn danger"
                     @click="commitImport()"
                     :disabled="busy || !samples || totalSelected() === 0">
@@ -394,6 +394,17 @@ export async function onRequestGet(context) {
               </span>
               <span x-show="busy && phase === 'committing'">Importing…</span>
             </button>
+
+            <!-- Synth-orphan-quotes toggle. Off by default — flip on
+                 when you want quotes with no parent Lead/Job in WFM
+                 (or whose parent is archived/deleted) to import as
+                 standalone Pipeline opportunities. -->
+            <label style="display:flex;align-items:center;gap:.35rem;font-size:.82rem;cursor:pointer"
+                   :title="'When on, a quote whose parent Lead/Job is missing in WFM will be imported as a fresh standalone opportunity (account auto-cascaded from quote.Client, stage derived from quote.State).'"
+                   x-show="hasQuotesSelected()">
+              <input type="checkbox" x-model="synthOrphanQuotes" :disabled="busy">
+              <span class="muted">Synthesize standalone opps for orphan quotes</span>
+            </label>
           </div>
 
           <p class="aii-err-inline" x-show="error" x-text="error" style="color:#cf222e;margin-top:.6rem"></p>
@@ -493,6 +504,8 @@ export async function onRequestGet(context) {
                 searchQuery: '',
                 searchAdvanced: false,
                 searchLimit: 100,
+                // Import-time options. Off by default; user opts in.
+                synthOrphanQuotes: false,
                 searchFilters: {
                   date_field: '', date_preset: '', date_from: '', date_to: '',
                   state: [], category: [], type: [],
@@ -720,6 +733,13 @@ export async function onRequestGet(context) {
                   return out;
                 },
 
+                // Used to gate the "Synthesize standalone opps for
+                // orphan quotes" checkbox — only meaningful when the
+                // user has at least one quote selected.
+                hasQuotesSelected() {
+                  return this.selectedCountInGroup('quotes') > 0;
+                },
+
                 // Search WFM with the current text query and structured
                 // filters. Results populate the same samples state so
                 // the existing card UI + import flow work unchanged.
@@ -805,7 +825,12 @@ export async function onRequestGet(context) {
                     const res = await fetch('/settings/wfm-import/commit', {
                       method: 'POST', credentials: 'same-origin',
                       headers: { 'content-type': 'application/json' },
-                      body: JSON.stringify({ samples: filtered }),
+                      body: JSON.stringify({
+                        samples: filtered,
+                        options: {
+                          synth_orphan_quotes: !!this.synthOrphanQuotes,
+                        },
+                      }),
                     });
                     const j = await res.json();
                     if (!j.ok) throw new Error(j.error || 'import failed');
