@@ -26,6 +26,7 @@
 
 import { all, one, run, stmt, batch } from '../../lib/db.js';
 import { processSamples, buildSummaryLine } from '../../settings/wfm-import/commit.js';
+import { notify } from '../../lib/notify.js';
 
 // Per-tick budget: stop kicking off new sub-batches once we've used
 // this much wall clock. Each commit.processSamples invocation can
@@ -135,7 +136,8 @@ export async function onRequestPost(context) {
   try {
     // 1. Find the latest in-progress full-import run.
     const runRow = await one(env.DB,
-      `SELECT id, options_json, counts_json, errors_json, links_json
+      `SELECT id, options_json, counts_json, errors_json, links_json,
+              triggered_by, started_at
          FROM wfm_import_runs
         WHERE mode = 'full' AND status = 'in_progress'
         ORDER BY started_at DESC
@@ -242,6 +244,29 @@ export async function onRequestPost(context) {
           finishedAt,
           runId,
         ]);
+
+      // Ping the user who started the run via the in-app
+      // notifications stack (bell icon, top right). Best-effort —
+      // notify() swallows its own errors so a notification-row
+      // failure doesn't undo the run-completion.
+      if (runRow.triggered_by) {
+        const userRow = await one(env.DB,
+          'SELECT id FROM users WHERE LOWER(email) = LOWER(?)',
+          [runRow.triggered_by]);
+        if (userRow && userRow.id) {
+          const errorCount = errors.length;
+          await notify(env.DB, {
+            userId:     userRow.id,
+            type:       'wfm_full_import_complete',
+            title:      'WFM full import complete',
+            body:       buildSummaryLine(totals) +
+                        (errorCount > 0 ? ' — ' + errorCount + ' error(s) recorded.' : ''),
+            linkUrl:    '/settings/wfm-import',
+            entityType: 'wfm_import_run',
+            entityId:   runId,
+          });
+        }
+      }
     }
 
     return json({
