@@ -1089,8 +1089,25 @@ export async function onRequestPost(context) {
     }
 
     // -------- Clients (+ nested contacts) ---------
-    for (const c of (samples.clients || [])) {
+    for (const cInput of (samples.clients || [])) {
       try {
+        // The /client.api/list endpoint returns clients WITHOUT their
+        // Contacts array (those live on the per-client detail). When
+        // the caller passed a list-shaped record (no Contacts key),
+        // fetch the detail now so we don't drop the contacts on the
+        // floor. Sample-based imports already pre-fetch detail in
+        // sample.js, so this hits only on the full-import path.
+        let c = cInput;
+        if (!c.Contacts && c.UUID) {
+          try {
+            const detailResp = await apiGet(env, '/client.api/get/' + encodeURIComponent(c.UUID));
+            if (detailResp.ok) {
+              const detailC = recordList(detailResp.body, 'Client')[0];
+              if (detailC) c = detailC;
+            }
+          } catch (_) { /* fall through with list-shaped record */ }
+        }
+
         const a = await upsertAccount(env, c);
         accountByWfmUuid.set(c.UUID, a.id);
         counts.accounts++;
