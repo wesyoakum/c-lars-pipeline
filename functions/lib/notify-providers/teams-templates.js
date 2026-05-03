@@ -17,6 +17,7 @@ export function renderTeamsCard(eventType, data, context) {
   if (eventType === 'quote_status_changed') return quoteStatusCard(data, context);
   if (eventType === 'daily_digest') return dailyDigestCard(data, context);
   if (eventType === 'wfm_full_import_done') return wfmFullImportDoneCard(data, context);
+  if (eventType === 'claudia_message') return claudiaMessageCard(data, context);
   // Fallback — render a generic card so unknown events still surface
   // something useful instead of erroring.
   return genericCard(eventType, data);
@@ -237,6 +238,37 @@ function genericCard(eventType, data) {
     header('C-LARS PMS — ' + eventType),
     text(JSON.stringify(data).slice(0, 400)),
   ]);
+}
+
+/**
+ * Card for messages Claudia sends out-of-band (not tied to a CRM
+ * event). The body is hers to write — anything from a quick "you
+ * asked me to ping you about X — here it is" to a multi-line update.
+ *
+ * data: {
+ *   message: string,        // required — Claudia's message body, can be markdown-ish
+ *   urgency: 'normal'|'urgent',  // optional — drives the header color
+ *   linkLabel?: string, linkUrl?: string,  // optional — adds an Open button
+ * }
+ */
+function claudiaMessageCard(data, context) {
+  const isUrgent = data?.urgency === 'urgent';
+  const headerText = isUrgent
+    ? 'Claudia — heads up'
+    : 'Claudia';
+  const headerColor = isUrgent ? 'Attention' : 'Accent';
+  const body = [
+    header(headerText, headerColor),
+    text(data?.message || '(empty message)'),
+  ];
+  const actions = [];
+  if (data?.linkUrl) {
+    actions.push(openAction(data.linkLabel || 'Open', data.linkUrl));
+  } else {
+    // Default: open the chat so Wes can reply.
+    actions.push(openAction('Open chat', '/sandbox/assistant'));
+  }
+  return envelope(body, actions);
 }
 
 // --- helpers ------------------------------------------------------

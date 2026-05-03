@@ -17,6 +17,7 @@ import { fireEvent } from '../../lib/auto-tasks.js';
 import { stagesFor, evaluateGate, loadGateContext } from '../../lib/stages.js';
 import { checkInactivateBlockers } from '../../lib/inactivate-blocker.js';
 import { readBrief, regenerateBrief } from '../../lib/claudia-brief.js';
+import teamsProvider from '../../lib/notify-providers/teams.js';
 import {
   claudiaInsert,
   claudiaUpdate,
@@ -768,6 +769,42 @@ export async function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'notify_wes',
+      description:
+        'Push a Teams card to ${display}\'s configured webhook. ALWAYS to him, no audience param. ' +
+        'Use sparingly: only when (a) something is genuinely time-sensitive and worth a phone push ' +
+        '(today\'s overdue task, customer just emailed about an active opp, deadline shifting) OR ' +
+        '(b) ${display} explicitly asked her to ping him about something ("ping me on Teams when X" / ' +
+        '"send me a Teams message about Y"). DO NOT call for routine chat replies he\'ll see when he ' +
+        'opens the panel — that\'s noise. ' +
+        'Channel auto-resolves to whatever ${display} has configured (Teams today; email pending). ' +
+        'Returns { ok, status, channel, error? }. If no channel is configured, returns ' +
+        '{ ok: false, error: "no_channel_configured" } — surface that to ${display}.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          message: {
+            type: 'string',
+            description: 'Required. The message body. Plain text or markdown-ish. Lead with the headline; this is going to a Teams card with limited real estate, so be brief and specific.',
+          },
+          urgency: {
+            type: 'string',
+            enum: ['normal', 'urgent'],
+            description: 'Default "normal". "urgent" colors the card header red — reserve for genuinely urgent things (overdue task today, deadline missed, customer escalation).',
+          },
+          link_label: {
+            type: 'string',
+            description: 'Optional. Label for an Open button on the card (e.g. "Open opp 25297"). Pair with link_url. If omitted, the card defaults to an "Open chat" button.',
+          },
+          link_url: {
+            type: 'string',
+            description: 'Optional. Full URL or in-app path (e.g. "/opportunities/<id>") to deep-link from the card.',
+          },
+        },
+        required: ['message'],
+      },
+    },
+    {
       name: 'undo_claudia_write',
       description:
         'Reverse a previous Claudia write within the 24-hour undo window. For a CREATE: deletes ' +
@@ -939,6 +976,8 @@ export async function makeAssistantTools({ env, user }) {
         return mergeAccounts(env, user, input);
       case 'merge_contacts':
         return mergeContacts(env, user, input);
+      case 'notify_wes':
+        return notifyWes(env, user, input);
       case 'undo_claudia_write':
         return undoClaudiaWrite(env, user, input);
       case 'list_recent_writes':
@@ -2232,6 +2271,81 @@ async function mergeRows(env, user, opts) {
     winner_label: winnerLabel,
     repoints: repointCounts,
     summary: `Merged "${loserLabel}" into "${winnerLabel}". ${Object.values(repointCounts).reduce((a, b) => a + b, 0)} FK references repointed.`,
+  };
+}
+
+// ---------- Outbound notifications (Teams today; email pending) ----------
+
+async function notifyWes(env, user, { message, urgency, link_label, link_url } = {}) {
+  const body = String(message || '').trim();
+  if (!body) {
+    return { ok: false, error: 'empty_message', message: 'notify_wes requires a non-empty message.' };
+  }
+
+  // Look up the user's active external channels. We bypass the
+  // notify-external dispatcher's event-prefs lookup because Claudia's
+  // notifications aren't tied to a CRM event_type — they're a custom
+  // channel we always want to send if any active webhook is configured.
+  const channels = await all(
+    env.DB,
+    `SELECT id, channel, target FROM user_notification_channels
+      WHERE user_id = ? AND active = 1
+      ORDER BY channel`,
+    [user.id]
+  );
+  if (channels.length === 0) {
+    return {
+      ok: false,
+      error: 'no_channel_configured',
+      message: 'No active external channels for this user. Add one at /settings/notifications/channels.',
+    };
+  }
+
+  const data = {
+    message: body,
+    urgency: urgency === 'urgent' ? 'urgent' : 'normal',
+    linkLabel: trimOrNull(link_label) || undefined,
+    linkUrl:   trimOrNull(link_url)   || undefined,
+  };
+
+  const sends = [];
+  for (const ch of channels) {
+    if (ch.channel === 'teams') {
+      try {
+        const result = await teamsProvider.send(env, {
+          target: ch.target,
+          eventType: 'claudia_message',
+          data,
+          context: {},
+        });
+        sends.push({ channel: 'teams', status: result.status, error: result.error || null });
+      } catch (err) {
+        sends.push({ channel: 'teams', status: 'failed', error: err?.message || String(err) });
+      }
+    } else if (ch.channel === 'email') {
+      // Email provider isn't wired yet (Phase 7c). Surface honestly so
+      // Claudia doesn't claim a send that didn't happen.
+      sends.push({
+        channel: 'email',
+        status: 'skipped',
+        error: 'email_provider_not_implemented',
+      });
+    } else {
+      sends.push({
+        channel: ch.channel,
+        status: 'skipped',
+        error: 'unknown_channel_provider',
+      });
+    }
+  }
+
+  const anySent = sends.some((s) => s.status === 'sent');
+  return {
+    ok: anySent,
+    sends,
+    summary: anySent
+      ? `Sent via ${sends.filter((s) => s.status === 'sent').map((s) => s.channel).join(', ')}.`
+      : 'No channels delivered the message.',
   };
 }
 

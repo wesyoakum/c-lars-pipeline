@@ -115,6 +115,13 @@ export const PERMISSION_GATED_ACTIONS_CATALOG = [
     label: 'Create jobs',
     description: 'Open a new job under a won opportunity. Bare-metadata creation — name, opp link, type, PO number — without milestones (those come from quotes when they\'re accepted). One job per opportunity is enforced; duplicates are rejected.',
   },
+  // outbound messaging — pings Wes via his configured Teams webhook
+  {
+    action: 'notify_wes',
+    category: 'messaging',
+    label: 'Send Teams message to Wes',
+    description: 'Push a Teams card to Wes\'s configured webhook (one channel today: Teams; email pending). Always to him, not anyone else. Use for time-sensitive things he\'d want pushed to his phone (overdue task today, something he asked her to ping about) or when he explicitly says "ping me on Teams when..." — NOT for routine chat replies he\'ll see when he opens the panel.',
+  },
   // documents
   {
     action: 'set_document_retention',
@@ -203,6 +210,11 @@ export const PERMISSION_CATEGORIES = [
     key: 'documents',
     label: 'Documents',
     blurb: 'Mutations against Claudia\'s drop-zone (claudia_documents). Does not include creating documents — those land via the upload endpoint.',
+  },
+  {
+    key: 'messaging',
+    label: 'Outbound messaging',
+    blurb: 'Push a notification to Wes\'s configured external channel (Teams today; email pending). Always to him, never to anyone else.',
   },
   {
     key: 'auto_tasks',
