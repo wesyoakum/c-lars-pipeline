@@ -1014,13 +1014,17 @@ export async function onRequestGet(context) {
                     }
                     const total = fetchJson.counts.total;
 
+                    // Newline escapes here are doubled on purpose —
+                    // see the comment near the top of the script tag.
+                    // (Single backslash gets eaten by the outer
+                    // tagged-template processing the file as a whole.)
                     if (!confirm(
-                      'Fetched ' + total + ' records from WFM:\n' +
-                      '  Staff:    ' + samples.staff.length + '\n' +
-                      '  Clients:  ' + samples.clients.length + '\n' +
-                      '  Leads:    ' + samples.leads.length + '\n' +
-                      '  Quotes:   ' + samples.quotes.length + '\n' +
-                      '  Jobs:     ' + samples.jobs.length + '\n\n' +
+                      'Fetched ' + total + ' records from WFM:\\n' +
+                      '  Staff:    ' + samples.staff.length + '\\n' +
+                      '  Clients:  ' + samples.clients.length + '\\n' +
+                      '  Leads:    ' + samples.leads.length + '\\n' +
+                      '  Quotes:   ' + samples.quotes.length + '\\n' +
+                      '  Jobs:     ' + samples.jobs.length + '\\n\\n' +
                       'Begin chunked import? Estimated ' + Math.ceil(total / 30) +
                       ' chunks at ~10–20s each.'
                     )) {
