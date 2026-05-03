@@ -203,7 +203,7 @@ export async function onRequestPost(context) {
         // happened. The cron keeps firing every minute but each
         // tick is cheap (one D1 read + one OAuth refresh attempt)
         // until OAuth is repaired.
-        const isOauthFailure = /OAuth token refresh failed|invalid_grant|Refresh token (?:is invalid|reuse detected)|RECONNECT REQUIRED|WFM is not connected/i
+        const isOauthFailure = /OAuth token refresh failed|invalid_grant|Refresh token (?:is invalid|reuse detected|has expired)|RECONNECT[ _]REQUIRED|WFM is not connected/i
           .test(msg);
         if (isOauthFailure) {
           await markPlans(env, planChunk.map((p) => p.id), 'pending');

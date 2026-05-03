@@ -22,7 +22,7 @@
 
 import { hasRole } from '../../../lib/auth.js';
 import { all, one, run, stmt, batch } from '../../../lib/db.js';
-import { apiGet, recordList } from '../../../lib/wfm-client.js';
+import { apiGet, recordList, getAccessToken } from '../../../lib/wfm-client.js';
 
 const LIST_PAGE_SIZE = 100;
 const SINGLE_SHOT_PAGE_SIZE = 1000;
@@ -111,6 +111,17 @@ export async function onRequestPost(context) {
   const runId = newId();
 
   try {
+    // -------- Pre-warm: serial token refresh before parallel calls. --------
+    // BlueRock invalidates the refresh token on every use. If the
+    // five Promise.all calls below all hit "needs refresh" at the
+    // same time (which happens when the cached access token has
+    // expired, e.g. >30 min since last activity), they all post the
+    // same refresh_token — only one wins, the other four get
+    // 'invalid_grant' and the OAuth chain dies. Serializing the
+    // refresh upfront populates the D1 cache; the parallel calls
+    // then all read the cached access_token without racing.
+    await getAccessToken(env);
+
     // -------- Phase 1: walk every WFM list endpoint --------
     // Five list calls in parallel. /staff.api/list is small,
     // /client.api/list paginates, the three /current endpoints are

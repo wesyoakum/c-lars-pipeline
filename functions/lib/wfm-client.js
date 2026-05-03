@@ -84,6 +84,36 @@ export async function getAccessToken(env, { force = false } = {}) {
   });
   const text = await res.text();
   if (!res.ok) {
+    // BlueRock returns 400 with error="invalid_grant" when:
+    //   - The refresh token was already used (reuse detected)
+    //   - The refresh token is expired (60+ days old)
+    //   - The refresh token was manually revoked
+    // In all three cases the token in our D1 row is dead and there
+    // is NOTHING we can do but force the user to re-bootstrap. Hammer
+    // protection: clear the cached access AND refresh tokens so
+    // subsequent callers fail fast with a typed RECONNECT_REQUIRED
+    // error instead of pounding BlueRock with the dead value.
+    const lower = String(text).toLowerCase();
+    const isInvalidGrant = res.status === 400 && (
+      lower.includes('invalid_grant') ||
+      lower.includes('refresh token reuse detected') ||
+      lower.includes('refresh token is invalid') ||
+      lower.includes('refresh token has expired')
+    );
+    if (isInvalidGrant) {
+      try {
+        await run(
+          env.DB,
+          `UPDATE wfm_credentials
+              SET access_token = NULL, access_expires_at = NULL,
+                  refresh_token = NULL,
+                  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            WHERE id = 1`);
+      } catch (_) { /* best-effort cleanup */ }
+      const err = new Error('RECONNECT_REQUIRED: WFM refresh token is dead. Visit /settings/wfm-import → Reconnect to re-bootstrap. Underlying response: ' + text.slice(0, 300));
+      err.code = 'reconnect_required';
+      throw err;
+    }
     throw new Error(`OAuth token refresh failed (${res.status}): ${text.slice(0, 500)}`);
   }
   let payload;
