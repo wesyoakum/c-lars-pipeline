@@ -24,13 +24,17 @@ import {
 const VALID_EVENTS = new Set(Object.values(NOTIFICATION_EVENTS));
 const VALID_CHANNELS = new Set(Object.values(NOTIFICATION_CHANNELS));
 
-export async function onRequestPost(context) {
-  const { env, data, request } = context;
-  const user = data?.user;
-  if (!user) return redirectWithFlash('/settings/notifications', 'Sign in required.', 'error');
-
-  const input = await formBody(request);
-
+/**
+ * Persist the prefs-form payload (event×channel matrix + digest timing
+ * + self-actions toggle) for the given user. Pure data-write — no
+ * redirect / flash. Returns { ok, error }.
+ *
+ * Exported so the /sample handler can call this BEFORE dispatching a
+ * sample, matching the user's intuition: clicking Send sample should
+ * pick up whatever they just checked, even if they haven't clicked
+ * Save changes yet.
+ */
+export async function saveNotificationPrefs(env, user, input) {
   // Multi-value form fields are returned by formBody as either a
   // string (one value) or an array (multiple). Normalize.
   let enabled = input.enabled;
@@ -55,29 +59,16 @@ export async function onRequestPost(context) {
   const hourRaw = parseInt(String(input.digest_hour_local || ''), 10);
   const digestHour = Number.isFinite(hourRaw) && hourRaw >= 0 && hourRaw <= 23 ? hourRaw : 4;
 
-  // Timezone — validate via Intl.DateTimeFormat. Cloudflare Workers
-  // ship full ICU, so any IANA tz name (America/New_York, Europe/Paris,
-  // Asia/Singapore, …) works. A typo like "America/NewYork" or
-  // "Foo/Bar" throws RangeError; we catch + reject the save with a
-  // flash so the prefs page doesn't silently store a string that
-  // breaks the digest cron's per-user time math.
   const rawTz = String(input.timezone || '').trim();
   const tz = rawTz || 'America/New_York';
   if (rawTz) {
     try {
-      // Side-effect: throws RangeError on a bad tz name.
       new Intl.DateTimeFormat('en-US', { timeZone: rawTz });
     } catch (_e) {
-      return redirectWithFlash(
-        '/settings/notifications',
-        `"${rawTz}" is not a valid IANA timezone. Try America/New_York, Europe/London, Asia/Singapore, etc.`,
-        'error'
-      );
+      return { ok: false, error: '"' + rawTz + '" is not a valid IANA timezone. Try America/New_York, Europe/London, Asia/Singapore, etc.' };
     }
   }
 
-  // Self-action notifications: a single per-user toggle. Form sends
-  // 'on' (or unset) for the checkbox; we store 1 / 0.
   const notifySelf = input.notify_self_actions === 'on'
                   || input.notify_self_actions === '1'
                   || input.notify_self_actions === 1
@@ -99,5 +90,18 @@ export async function onRequestPost(context) {
   ];
   await batch(env.DB, stmts);
 
+  return { ok: true };
+}
+
+export async function onRequestPost(context) {
+  const { env, data, request } = context;
+  const user = data?.user;
+  if (!user) return redirectWithFlash('/settings/notifications', 'Sign in required.', 'error');
+
+  const input = await formBody(request);
+  const result = await saveNotificationPrefs(env, user, input);
+  if (!result.ok) {
+    return redirectWithFlash('/settings/notifications', result.error || 'Save failed.', 'error');
+  }
   return redirectWithFlash('/settings/notifications', 'Notification settings saved.');
 }

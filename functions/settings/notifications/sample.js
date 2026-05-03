@@ -14,6 +14,7 @@
 import { all } from '../../lib/db.js';
 import { redirectWithFlash, formBody } from '../../lib/http.js';
 import { notifyExternal, NOTIFICATION_EVENTS, NOTIFICATION_EVENT_LABELS } from '../../lib/notify-external.js';
+import { saveNotificationPrefs } from './prefs.js';
 
 const VALID_EVENTS = new Set(Object.values(NOTIFICATION_EVENTS));
 
@@ -26,6 +27,17 @@ export async function onRequestPost(context) {
   const eventType = String(input.event_type || '').trim();
   if (!VALID_EVENTS.has(eventType)) {
     return redirectWithFlash('/settings/notifications', 'Invalid event type.', 'error');
+  }
+
+  // The "Send sample" button submits the same form as "Save changes",
+  // so the form payload includes whatever boxes the user has just
+  // checked. Persist the matrix BEFORE dispatching the sample so the
+  // dispatcher's prefs lookup sees the freshly-checked rows. Without
+  // this, the user has to click Save → Send sample as two steps,
+  // which is the trap that hit them on first try.
+  const saveResult = await saveNotificationPrefs(env, user, input);
+  if (!saveResult.ok) {
+    return redirectWithFlash('/settings/notifications', saveResult.error || 'Save failed.', 'error');
   }
 
   // Confirm at least one channel is enabled for this event so we can
