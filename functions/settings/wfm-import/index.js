@@ -184,7 +184,9 @@ export async function onRequestGet(context) {
                       style="background:#cf222e;color:white">Cancel</button>
             </div>
 
-            <!-- Progress block — shown only during a run -->
+            <!-- Progress block — shown only during a run.
+                 Hardcoded 5 rows (one per kind) instead of x-for —
+                 simpler markup, less surface area for Alpine quirks. -->
             <div x-show="fullImportRunning || fullImportSummary" x-cloak
                  style="margin-top:.6rem;padding:.5rem .7rem;background:white;border-radius:4px;border:1px solid #e0c97a">
               <div style="display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap;align-items:baseline">
@@ -193,17 +195,36 @@ export async function onRequestGet(context) {
                       x-text="fullImportElapsedLabel"></span>
               </div>
               <div style="margin-top:.4rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.4rem;font-size:.78rem">
-                <template x-for="kind in ['staff','clients','leads','quotes','jobs']" :key="kind">
-                  <div :style="fullImportKindRowStyle(kind)">
-                    <div style="display:flex;justify-content:space-between">
-                      <span style="font-variant:small-caps" x-text="kind"></span>
-                      <span x-text="fullImportKindProgressLabel(kind)"></span>
-                    </div>
-                    <div style="height:4px;background:#eee;border-radius:2px;margin-top:.2rem;overflow:hidden">
-                      <div :style="fullImportKindBarStyle(kind)"></div>
-                    </div>
+                <div style="padding:.3rem .4rem;border:1px solid #eee;border-radius:4px;background:#fafafa">
+                  <div style="display:flex;justify-content:space-between">
+                    <span style="font-variant:small-caps">staff</span>
+                    <span x-text="fullImportTotals.staff.done + ' / ' + fullImportTotals.staff.total"></span>
                   </div>
-                </template>
+                </div>
+                <div style="padding:.3rem .4rem;border:1px solid #eee;border-radius:4px;background:#fafafa">
+                  <div style="display:flex;justify-content:space-between">
+                    <span style="font-variant:small-caps">clients</span>
+                    <span x-text="fullImportTotals.clients.done + ' / ' + fullImportTotals.clients.total"></span>
+                  </div>
+                </div>
+                <div style="padding:.3rem .4rem;border:1px solid #eee;border-radius:4px;background:#fafafa">
+                  <div style="display:flex;justify-content:space-between">
+                    <span style="font-variant:small-caps">leads</span>
+                    <span x-text="fullImportTotals.leads.done + ' / ' + fullImportTotals.leads.total"></span>
+                  </div>
+                </div>
+                <div style="padding:.3rem .4rem;border:1px solid #eee;border-radius:4px;background:#fafafa">
+                  <div style="display:flex;justify-content:space-between">
+                    <span style="font-variant:small-caps">quotes</span>
+                    <span x-text="fullImportTotals.quotes.done + ' / ' + fullImportTotals.quotes.total"></span>
+                  </div>
+                </div>
+                <div style="padding:.3rem .4rem;border:1px solid #eee;border-radius:4px;background:#fafafa">
+                  <div style="display:flex;justify-content:space-between">
+                    <span style="font-variant:small-caps">jobs</span>
+                    <span x-text="fullImportTotals.jobs.done + ' / ' + fullImportTotals.jobs.total"></span>
+                  </div>
+                </div>
               </div>
               <p x-show="fullImportSummary" x-text="fullImportSummary"
                  class="muted" style="margin:.5rem 0 0 0;font-size:.82rem;font-family:ui-monospace,monospace;white-space:pre-wrap"></p>
@@ -941,27 +962,6 @@ export async function onRequestGet(context) {
                 // Idempotent at every step — restarts are safe.
                 // ============================================================
 
-                fullImportKindRowStyle() {
-                  return { padding: '.3rem .4rem', border: '1px solid #eee', borderRadius: '4px', background: '#fafafa' };
-                },
-
-                fullImportKindProgressLabel(kind) {
-                  const t = this.fullImportTotals[kind];
-                  if (!t || t.total === 0) return '0';
-                  return t.done + ' / ' + t.total;
-                },
-
-                fullImportKindBarStyle(kind) {
-                  const t = this.fullImportTotals[kind];
-                  const pct = (t && t.total > 0) ? Math.round(100 * t.done / t.total) : 0;
-                  return {
-                    width: pct + '%',
-                    height: '100%',
-                    background: pct >= 100 ? '#1a7f37' : '#1f6feb',
-                    transition: 'width .3s ease',
-                  };
-                },
-
                 _fullImportTickElapsed() {
                   if (!this.fullImportStartedAt) { this.fullImportElapsedLabel = ''; return; }
                   const ms = Date.now() - this.fullImportStartedAt;
@@ -973,7 +973,7 @@ export async function onRequestGet(context) {
 
                 async fullImportStart() {
                   if (this.fullImportRunning) return;
-                  if (!confirm('Pull every record from WFM and import them all? Browser must stay open for the duration (~30–60 min). This is idempotent — re-running is safe.')) return;
+                  if (!confirm('Pull every record from WFM and import them all? Browser must stay open for the duration (~30–60 min).')) return;
 
                   this.fullImportRunning = true;
                   this.fullImportCancelRequested = false;
