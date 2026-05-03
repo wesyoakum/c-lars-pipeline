@@ -16,6 +16,7 @@ export function renderTeamsCard(eventType, data, context) {
   if (eventType === 'opp_stage_changed') return oppStageCard(data, context);
   if (eventType === 'quote_status_changed') return quoteStatusCard(data, context);
   if (eventType === 'daily_digest') return dailyDigestCard(data, context);
+  if (eventType === 'wfm_full_import_done') return wfmFullImportDoneCard(data, context);
   // Fallback — render a generic card so unknown events still surface
   // something useful instead of erroring.
   return genericCard(eventType, data);
@@ -188,6 +189,47 @@ function dailyDigestCard(data, context) {
   const actions = [];
   actions.push(openAction('Open dashboard', '/'));
   return envelope(body, actions);
+}
+
+function wfmFullImportDoneCard(data, context) {
+  // data: { status, summary, total_processed, error_count, started_at, finished_at }
+  const status = data?.status || 'completed';
+  const headerText = status === 'completed' ? 'WFM full import complete'
+                   : status === 'cancelled' ? 'WFM full import cancelled'
+                   : status === 'failed'    ? 'WFM full import failed'
+                   :                          'WFM full import — ' + status;
+  const headerColor = status === 'completed' ? 'Good'
+                    : status === 'failed'    ? 'Attention'
+                    :                          'Warning';
+
+  const body = [ header(headerText, headerColor) ];
+  if (data?.summary) {
+    body.push(text(data.summary, { wrap: true, size: 'Small' }));
+  }
+  if (data?.total_processed != null) {
+    body.push(pair('Records processed', String(data.total_processed)));
+  }
+  if (data?.error_count) {
+    body.push(pair('Errors', String(data.error_count) + ' (see /settings/wfm-import/history)'));
+  }
+  if (data?.started_at && data?.finished_at) {
+    body.push(pair('Duration', formatDuration(data.started_at, data.finished_at)));
+  }
+
+  const actions = [
+    openAction('Open WFM import', data?.link || '/settings/wfm-import'),
+  ];
+  return envelope(body, actions);
+}
+
+function formatDuration(startIso, endIso) {
+  try {
+    const ms = new Date(endIso).getTime() - new Date(startIso).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return '';
+    const m = Math.floor(ms / 60000);
+    const s = Math.floor((ms % 60000) / 1000);
+    return (m > 0 ? m + ' min ' : '') + s + ' sec';
+  } catch (_) { return ''; }
 }
 
 function genericCard(eventType, data) {

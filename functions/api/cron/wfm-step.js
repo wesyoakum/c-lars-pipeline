@@ -27,6 +27,7 @@
 import { all, one, run, stmt, batch } from '../../lib/db.js';
 import { processSamples, buildSummaryLine } from '../../settings/wfm-import/commit.js';
 import { notify } from '../../lib/notify.js';
+import { notifyExternal, NOTIFICATION_EVENTS } from '../../lib/notify-external.js';
 
 // Per-tick budget: stop kicking off new sub-batches once we've used
 // this much wall clock. Each commit.processSamples invocation can
@@ -245,26 +246,64 @@ export async function onRequestPost(context) {
           runId,
         ]);
 
-      // Ping the user who started the run via the in-app
-      // notifications stack (bell icon, top right). Best-effort —
-      // notify() swallows its own errors so a notification-row
-      // failure doesn't undo the run-completion.
+      // Ping the user who started the run via two complementary
+      // channels:
+      //   1. notify() → in-app notifications row (bell icon, top
+      //      right). Always fires — no per-user opt-in required.
+      //   2. notifyExternal() → Teams webhook + email per the
+      //      user's prefs in /settings/notifications. Fires only
+      //      if the user has the wfm_full_import_done event enabled
+      //      on at least one channel and has configured a target.
+      // Both are best-effort — failures are swallowed (notify())
+      // or logged to notification_log (notifyExternal()) and don't
+      // undo the run-completion.
       if (runRow.triggered_by) {
         const userRow = await one(env.DB,
           'SELECT id FROM users WHERE LOWER(email) = LOWER(?)',
           [runRow.triggered_by]);
         if (userRow && userRow.id) {
           const errorCount = errors.length;
+          const summaryLine = buildSummaryLine(totals);
+          const inAppBody = summaryLine +
+            (errorCount > 0 ? ' — ' + errorCount + ' error(s) recorded.' : '');
+
+          // 1. In-app bell.
           await notify(env.DB, {
             userId:     userRow.id,
-            type:       'wfm_full_import_complete',
+            type:       'wfm_full_import_done',
             title:      'WFM full import complete',
-            body:       buildSummaryLine(totals) +
-                        (errorCount > 0 ? ' — ' + errorCount + ' error(s) recorded.' : ''),
+            body:       inAppBody,
             linkUrl:    '/settings/wfm-import',
             entityType: 'wfm_import_run',
             entityId:   runId,
           });
+
+          // 2. Teams + email per user prefs.
+          try {
+            await notifyExternal(env, {
+              userId:     userRow.id,
+              actorUserId: null,        // cron-triggered, system event
+              eventType:  NOTIFICATION_EVENTS.WFM_FULL_IMPORT_DONE,
+              data: {
+                status:           'completed',
+                summary:          summaryLine,
+                total_processed:  Object.keys(totals).reduce((s, k) =>
+                  ['accounts','contacts','opportunities','quotes','jobs','users']
+                    .includes(k) ? s + (totals[k] || 0) : s, 0),
+                error_count:      errorCount,
+                started_at:       runRow.started_at,
+                finished_at:      finishedAt,
+                link:             '/settings/wfm-import',
+              },
+              context: { ref_type: 'wfm_import_run', ref_id: runId },
+              idempotencyKey: 'wfm-full-import-done:' + runId,
+            });
+          } catch (extErr) {
+            // notifyExternal swallows its own errors; this catch is
+            // a paranoia belt — if the dispatcher itself blew up,
+            // the run is still completed and the in-app bell fired.
+            console.error('notifyExternal failed:', extErr?.message || extErr);
+          }
         }
       }
     }

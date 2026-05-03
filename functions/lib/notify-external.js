@@ -56,6 +56,7 @@ export const NOTIFICATION_EVENTS = Object.freeze({
   OPP_STAGE_CHANGED:    'opp_stage_changed',
   QUOTE_STATUS_CHANGED: 'quote_status_changed',
   DAILY_DIGEST:         'daily_digest',
+  WFM_FULL_IMPORT_DONE: 'wfm_full_import_done',
 });
 
 export const NOTIFICATION_EVENT_LABELS = Object.freeze({
@@ -66,6 +67,7 @@ export const NOTIFICATION_EVENT_LABELS = Object.freeze({
   opp_stage_changed:    'Stage change on my opportunity',
   quote_status_changed: 'Status change on my quote',
   daily_digest:         'Daily digest',
+  wfm_full_import_done: 'WFM full import finishes',
 });
 
 // One-line help text rendered beneath each event name in the matrix.
@@ -81,6 +83,7 @@ export const NOTIFICATION_EVENT_DESCRIPTIONS = Object.freeze({
   opp_stage_changed:    'When the stage changes on an opportunity you own.',
   quote_status_changed: 'When the status changes on a quote you created.',
   daily_digest:         'A once-a-day summary, sent at the local hour you pick below.',
+  wfm_full_import_done: 'When a background WFM full import finishes (or is cancelled / fails).',
 });
 
 export const NOTIFICATION_CHANNELS = Object.freeze({
