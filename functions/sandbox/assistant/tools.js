@@ -2598,17 +2598,35 @@ function parseIcs(text) {
       if (colonIdx === -1) continue;
       const keyPart = line.slice(0, colonIdx);
       const value = line.slice(colonIdx + 1);
-      const key = keyPart.split(';')[0]; // strip params (e.g. DTSTART;TZID=...)
+      const params = keyPart.split(';');
+      const key = params[0];
+      // Extract TZID parameter so DTSTART/DTEND can resolve floating
+      // wall-clock times (e.g. "20260505T180000" with TZID=America/Chicago)
+      // to the correct UTC moment instead of being misinterpreted as
+      // server-local (UTC) time. The bug this fixes: 6pm Central gets
+      // displayed as 1pm Central because Date.parse on a tz-naive ISO
+      // treats it as UTC, then we render in CDT and lose 5 hours.
+      let tzid = null;
+      for (let i = 1; i < params.length; i++) {
+        const p = params[i];
+        if (p.startsWith('TZID=')) {
+          tzid = p.slice(5);
+          break;
+        }
+      }
       // Don't overwrite repeated keys (e.g. multiple ATTENDEE) — first wins for our needs.
       if (!(key in cur)) cur[key] = value;
+      // Stash tzid alongside the value, namespaced so it doesn't collide
+      // with another ics property.
+      if (tzid && !(`${key}_TZID` in cur)) cur[`${key}_TZID`] = tzid;
     }
   }
   return events;
 }
 
 function normalizeEvent(raw) {
-  const start = parseIcsDate(raw.DTSTART);
-  const end = parseIcsDate(raw.DTEND);
+  const start = parseIcsDate(raw.DTSTART, raw.DTSTART_TZID);
+  const end = parseIcsDate(raw.DTEND, raw.DTEND_TZID);
   return {
     summary: unescapeIcs(raw.SUMMARY || ''),
     location: unescapeIcs(raw.LOCATION || ''),
@@ -2621,14 +2639,62 @@ function normalizeEvent(raw) {
   };
 }
 
-function parseIcsDate(s) {
+/**
+ * For a given UTC moment, return the offset (in ms) that tzid is from
+ * UTC at that moment (DST-aware). Used by parseIcsDate to convert
+ * wall-clock times in tzid to true UTC.
+ */
+function tzidOffsetMs(tzid, utcMs) {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: tzid,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(new Date(utcMs));
+    const o = {};
+    for (const p of parts) if (p.type !== 'literal') o[p.type] = parseInt(p.value, 10);
+    if (o.hour === 24) o.hour = 0; // some locales render midnight as 24
+    const localAsIfUtcMs = Date.UTC(o.year, o.month - 1, o.day, o.hour, o.minute, o.second);
+    return localAsIfUtcMs - utcMs;
+  } catch {
+    return 0; // unknown tzid → treat as UTC (best effort)
+  }
+}
+
+function parseIcsDate(s, tzid) {
   if (!s) return null;
   // YYYYMMDDTHHMMSS(Z) — datetime, optionally UTC.
   let m = s.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z)?$/);
   if (m) {
-    const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7] ? 'Z' : ''}`;
-    const ms = Date.parse(iso);
-    return Number.isFinite(ms) ? { iso, ms, allDay: false } : null;
+    const isUtc = m[7] === 'Z';
+    if (isUtc) {
+      const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`;
+      const ms = Date.parse(iso);
+      return Number.isFinite(ms) ? { iso, ms, allDay: false } : null;
+    }
+    // No Z: this is a wall-clock time. If the property had a TZID
+    // parameter, convert that wall time in that zone to true UTC.
+    // First-pass guess: pretend the wall time IS UTC.
+    const guessUtcMs = Date.UTC(
+      parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10),
+      parseInt(m[4], 10), parseInt(m[5], 10), parseInt(m[6], 10)
+    );
+    if (!Number.isFinite(guessUtcMs)) return null;
+    if (tzid) {
+      // Adjust by the tzid offset at that moment so the wall-clock
+      // time we parsed lands on the right UTC instant.
+      const offset = tzidOffsetMs(tzid, guessUtcMs);
+      const trueUtcMs = guessUtcMs - offset;
+      return { iso: new Date(trueUtcMs).toISOString(), ms: trueUtcMs, allDay: false };
+    }
+    // No tzid + no Z = "floating" wall time per RFC. We don't know
+    // which zone — fall back to treating as UTC. The existing behavior
+    // before this fix did the same thing implicitly; flagging here so
+    // future-us can revisit if floating times become a real problem.
+    const iso = `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`;
+    return { iso, ms: guessUtcMs, allDay: false };
   }
   // YYYYMMDD — all-day.
   m = s.match(/^(\d{4})(\d{2})(\d{2})$/);
