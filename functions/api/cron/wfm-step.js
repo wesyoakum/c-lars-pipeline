@@ -193,10 +193,38 @@ export async function onRequestPost(context) {
       try {
         chunkResult = await processSamples(env, samples, options);
       } catch (engineErr) {
-        // The engine itself blew up — mark the chunk as error and
-        // continue to the next one so a single bad record doesn't
-        // halt the whole run.
         const msg = String(engineErr.message || engineErr);
+
+        // Special case: OAuth chain is dead. Don't mark plans as
+        // 'error' (they're not record-level failures — just unable
+        // to reach WFM). Roll the chunk back to 'pending' so they
+        // resume cleanly once the user reconnects, and log a
+        // single error line on the run so the UI surfaces what
+        // happened. The cron keeps firing every minute but each
+        // tick is cheap (one D1 read + one OAuth refresh attempt)
+        // until OAuth is repaired.
+        const isOauthFailure = /OAuth token refresh failed|invalid_grant|Refresh token (?:is invalid|reuse detected)|RECONNECT REQUIRED|WFM is not connected/i
+          .test(msg);
+        if (isOauthFailure) {
+          await markPlans(env, planChunk.map((p) => p.id), 'pending');
+          // Append the error only once per tick to avoid a log
+          // explosion across many tries.
+          const recentError = 'WFM OAuth chain is dead — paused until reconnected. Visit /settings/wfm-import → Reconnect.';
+          if (errors[errors.length - 1] !== recentError) errors.push(recentError);
+          await updateRunProgress(env, runId, totals, errors, links);
+          // Bail out of the tick — no point trying further chunks
+          // until OAuth is repaired.
+          return json({
+            ok: false,
+            run_id: runId,
+            paused_for_oauth: true,
+            chunks_processed: chunksProcessed,
+            duration_ms: Date.now() - tickStart,
+          }, 200);  // 200 because the cron is fine — it's WFM that's down
+        }
+
+        // Any other engine error: real per-chunk failure. Mark
+        // the plans as 'error' so the user can see them in the UI.
         await markPlans(env, planChunk.map((p) => p.id), 'error', msg);
         errors.push('chunk ' + kind + ' (' + planChunk.length + ' records) failed: ' + msg);
         await updateRunProgress(env, runId, totals, errors, links);
