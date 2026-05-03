@@ -247,16 +247,42 @@ export async function onRequestGet(context) {
             </select>
           </label>
           <label style="flex:2">
-            <span style="display:block;font-size:0.85rem;color:var(--fg-muted)">Your timezone (IANA)</span>
-            <input type="text" name="timezone" value="${escape(tz)}"
-                   placeholder="America/New_York"
-                   style="width:100%;font:inherit;padding:0.4rem;border:1px solid var(--border);border-radius:4px">
+            <span style="display:block;font-size:0.85rem;color:var(--fg-muted)">Your timezone</span>
+            <select name="timezone" style="width:100%;font:inherit;padding:0.4rem;border:1px solid var(--border);border-radius:4px">
+              ${(() => {
+                const COMMON_TZS = [
+                  ['America/New_York',     'Eastern (America/New_York)'],
+                  ['America/Chicago',      'Central (America/Chicago)'],
+                  ['America/Denver',       'Mountain (America/Denver)'],
+                  ['America/Phoenix',      'Mountain — AZ no DST (America/Phoenix)'],
+                  ['America/Los_Angeles',  'Pacific (America/Los_Angeles)'],
+                  ['America/Anchorage',    'Alaska (America/Anchorage)'],
+                  ['Pacific/Honolulu',     'Hawaii (Pacific/Honolulu)'],
+                  ['UTC',                  'UTC'],
+                  ['Europe/London',        'UK (Europe/London)'],
+                  ['Europe/Paris',         'Central Europe (Europe/Paris)'],
+                  ['Asia/Singapore',       'Singapore (Asia/Singapore)'],
+                  ['Asia/Tokyo',           'Japan (Asia/Tokyo)'],
+                  ['Australia/Sydney',     'Sydney (Australia/Sydney)'],
+                ];
+                const known = COMMON_TZS.some(([v]) => v === tz);
+                return html`
+                  ${COMMON_TZS.map(([value, label]) => html`
+                    <option value="${escape(value)}" ${value === tz ? 'selected' : ''}>${escape(label)}</option>
+                  `)}
+                  ${!known
+                    ? html`<option value="${escape(tz)}" selected>${escape(tz)} (current)</option>`
+                    : ''}
+                `;
+              })()}
+            </select>
           </label>
         </div>
         <p class="muted" style="margin-top:0.4rem;font-size:0.82rem">
           Daily digest is opt-in via the matrix above. The cron tick runs
           hourly UTC and fires at <code>digest_hour_local</code> in your
-          timezone (default 04:00 America/New_York).
+          timezone. Pick from the list above; for an obscure region not
+          listed, the server accepts any IANA name (e.g. Pacific/Auckland).
         </p>
 
         <div style="margin-top:1rem">
