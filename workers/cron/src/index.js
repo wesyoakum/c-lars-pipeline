@@ -41,8 +41,15 @@ export default {
         console.error('cron claudia-tick run failed:', err?.message || err);
       }));
     } else {
+      // 1-minute tick: notifications + WFM full-import step. Fire
+      // both in parallel via waitUntil — neither blocks the other,
+      // and Pages takes ~5s for each so we stay way under the
+      // Worker's 30s budget.
       ctx.waitUntil(callPipeline(env, '/api/cron/notifications', 'notifications').catch((err) => {
         console.error('cron notifications run failed:', err?.message || err);
+      }));
+      ctx.waitUntil(callPipeline(env, '/api/cron/wfm-step', 'wfm-step').catch((err) => {
+        console.error('cron wfm-step run failed:', err?.message || err);
       }));
     }
   },
@@ -82,6 +89,15 @@ export default {
         return new Response('Unauthorized', { status: 401 });
       }
       const result = await callPipeline(env, '/api/cron/claudia-tick', 'claudia-tick');
+      return jsonResponse(result, result.ok ? 200 : 502);
+    }
+
+    if (request.method === 'POST' && url.pathname === '/__run-wfm-step') {
+      const provided = request.headers.get('x-cron-secret') || '';
+      if (!secretsMatch(provided, env.CRON_SECRET || '')) {
+        return new Response('Unauthorized', { status: 401 });
+      }
+      const result = await callPipeline(env, '/api/cron/wfm-step', 'wfm-step');
       return jsonResponse(result, result.ok ? 200 : 502);
     }
 

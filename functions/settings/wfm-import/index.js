@@ -160,79 +160,107 @@ export async function onRequestGet(context) {
             shuffle.
           </p>
 
-          <!-- Full-import row (top — most prominent action) -->
-          <div style="margin:.4rem 0 .8rem 0;padding:.6rem .8rem;border:1px solid #d4a72c;border-radius:6px;background:#fff8e1">
+          <!-- Full-import row (top — most prominent action).
+               Background mode (Option 3): browser kicks off, cron
+               worker drains the queue every minute, page polls
+               /full/status for live progress. Tab can close at any
+               time without pausing the import. -->
+          <div style="margin:.4rem 0 .8rem 0;padding:.6rem .8rem;border:1px solid #d4a72c;border-radius:6px;background:#fff8e1"
+               x-init="fullStatusBoot()">
             <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center">
               <strong style="font-size:.92rem">Full import</strong>
-              <span class="muted" style="font-size:.82rem;flex:1;min-width:14rem">
-                Pull every record from WFM and import in chunks.
-                Browser must stay open. ~30–60 min depending on volume.
+              <span class="muted" style="font-size:.82rem;flex:1;min-width:14rem"
+                    x-show="!fullRun">
+                Pull every record from WFM and queue them for the cron
+                worker. Runs in the background — close the tab and
+                come back later.
               </span>
-              <label style="display:flex;align-items:center;gap:.3rem;font-size:.82rem;cursor:pointer">
+              <span class="muted" style="font-size:.82rem;flex:1;min-width:14rem"
+                    x-show="fullRun"
+                    x-text="fullRunHeadline"></span>
+              <label style="display:flex;align-items:center;gap:.3rem;font-size:.82rem;cursor:pointer"
+                     x-show="!fullRun || fullRun.status !== 'in_progress'">
                 <input type="checkbox" x-model="fullImportSynth" :disabled="busy">
                 <span class="muted">Synth orphan quotes</span>
               </label>
               <button type="button" class="btn primary"
                       @click="fullImportStart()"
-                      :disabled="busy"
-                      x-show="!fullImportRunning">
-                Full import — fetch everything
+                      :disabled="busy || (fullRun && fullRun.status === 'in_progress')">
+                <span x-show="!fullRun || fullRun.status !== 'in_progress'">Start full import</span>
+                <span x-show="fullRun && fullRun.status === 'in_progress'">Running…</span>
               </button>
               <button type="button" class="btn"
                       @click="fullImportCancel()"
-                      x-show="fullImportRunning"
+                      x-show="fullRun && fullRun.status === 'in_progress'"
                       style="background:#cf222e;color:white">Cancel</button>
             </div>
 
-            <!-- Progress block — shown only during a run.
-                 Hardcoded 5 rows (one per kind) instead of x-for —
-                 simpler markup, less surface area for Alpine quirks. -->
-            <div x-show="fullImportRunning || fullImportSummary" x-cloak
+            <!-- Progress block — shown whenever there's a run row,
+                 in_progress or completed/cancelled/failed. -->
+            <div x-show="fullRun" x-cloak
                  style="margin-top:.6rem;padding:.5rem .7rem;background:white;border-radius:4px;border:1px solid #e0c97a">
               <div style="display:flex;justify-content:space-between;gap:.5rem;flex-wrap:wrap;align-items:baseline">
-                <strong x-text="fullImportPhaseLabel" style="font-size:.85rem"></strong>
+                <strong style="font-size:.85rem" x-text="fullRunPhaseLabel"></strong>
                 <span class="muted" style="font-size:.78rem"
-                      x-text="fullImportElapsedLabel"></span>
+                      x-text="fullRunMetaLabel"></span>
               </div>
+
+              <!-- Overall progress bar -->
+              <div style="margin-top:.4rem;height:6px;background:#eee;border-radius:3px;overflow:hidden">
+                <div :style="fullRunBarStyle"></div>
+              </div>
+              <div class="muted" style="font-size:.75rem;margin-top:.2rem"
+                   x-text="fullRunProgressLabel"></div>
+
+              <!-- Per-kind grid -->
               <div style="margin-top:.4rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.4rem;font-size:.78rem">
                 <div style="padding:.3rem .4rem;border:1px solid #eee;border-radius:4px;background:#fafafa">
                   <div style="display:flex;justify-content:space-between">
                     <span style="font-variant:small-caps">staff</span>
-                    <span x-text="fullImportTotals.staff.done + ' / ' + fullImportTotals.staff.total"></span>
+                    <span x-text="fullKindLabel('staff')"></span>
                   </div>
                 </div>
                 <div style="padding:.3rem .4rem;border:1px solid #eee;border-radius:4px;background:#fafafa">
                   <div style="display:flex;justify-content:space-between">
                     <span style="font-variant:small-caps">clients</span>
-                    <span x-text="fullImportTotals.clients.done + ' / ' + fullImportTotals.clients.total"></span>
+                    <span x-text="fullKindLabel('client')"></span>
                   </div>
                 </div>
                 <div style="padding:.3rem .4rem;border:1px solid #eee;border-radius:4px;background:#fafafa">
                   <div style="display:flex;justify-content:space-between">
                     <span style="font-variant:small-caps">leads</span>
-                    <span x-text="fullImportTotals.leads.done + ' / ' + fullImportTotals.leads.total"></span>
+                    <span x-text="fullKindLabel('lead')"></span>
                   </div>
                 </div>
                 <div style="padding:.3rem .4rem;border:1px solid #eee;border-radius:4px;background:#fafafa">
                   <div style="display:flex;justify-content:space-between">
                     <span style="font-variant:small-caps">quotes</span>
-                    <span x-text="fullImportTotals.quotes.done + ' / ' + fullImportTotals.quotes.total"></span>
+                    <span x-text="fullKindLabel('quote')"></span>
                   </div>
                 </div>
                 <div style="padding:.3rem .4rem;border:1px solid #eee;border-radius:4px;background:#fafafa">
                   <div style="display:flex;justify-content:space-between">
                     <span style="font-variant:small-caps">jobs</span>
-                    <span x-text="fullImportTotals.jobs.done + ' / ' + fullImportTotals.jobs.total"></span>
+                    <span x-text="fullKindLabel('job')"></span>
                   </div>
                 </div>
               </div>
-              <p x-show="fullImportSummary" x-text="fullImportSummary"
+
+              <p x-show="fullRun && fullRun.summary"
+                 x-text="fullRun && fullRun.summary"
                  class="muted" style="margin:.5rem 0 0 0;font-size:.82rem;font-family:ui-monospace,monospace;white-space:pre-wrap"></p>
-              <p x-show="fullImportErrors.length > 0" class="muted" style="margin:.4rem 0 0 0;font-size:.78rem">
-                <span x-text="fullImportErrors.length"></span> error(s) recorded — see
+              <p x-show="fullRun && fullRun.errors && fullRun.errors.length > 0"
+                 class="muted" style="margin:.4rem 0 0 0;font-size:.78rem">
+                <span x-text="fullRun && fullRun.errors ? fullRun.errors.length : 0"></span> error(s) recorded — see
                 <a href="/settings/wfm-import/history">/settings/wfm-import/history</a>
-                for the per-chunk run rows.
+                for the run row, or scroll the latest below:
               </p>
+              <div x-show="fullRun && fullRun.errors && fullRun.errors.length > 0"
+                   style="max-height:6rem;overflow-y:auto;font-size:.72rem;font-family:ui-monospace,monospace;background:#fff8c5;border:1px solid #d4a72c;border-radius:4px;padding:.3rem .4rem;margin-top:.2rem">
+                <template x-for="(e, i) in (fullRun ? fullRun.errors.slice(-20) : [])" :key="i">
+                  <div x-text="e"></div>
+                </template>
+              </div>
             </div>
           </div>
 
@@ -583,33 +611,14 @@ export async function onRequestGet(context) {
                 // Import-time options. Off by default; user opts in.
                 synthOrphanQuotes: false,
 
-                // Full-import state — separate from the sample-based
-                // selective import flow above. The full-import loop
-                // POSTs /commit with chunk-of-30 records sequentially
-                // until every fetched record is processed.
-                fullImportRunning: false,
-                fullImportCancelRequested: false,
-                fullImportSynth: true,           // default ON for full imports
-                fullImportPhaseLabel: '',
-                fullImportStartedAt: 0,
-                fullImportTotals: {              // { kind: { total, done } }
-                  staff:   { total: 0, done: 0 },
-                  clients: { total: 0, done: 0 },
-                  leads:   { total: 0, done: 0 },
-                  quotes:  { total: 0, done: 0 },
-                  jobs:    { total: 0, done: 0 },
-                },
-                fullImportRunCounts: {           // accumulator across all chunks
-                  accounts: 0, contacts: 0, opportunities: 0, quotes: 0,
-                  users: 0, jobs: 0, skipped: 0, quote_lines: 0,
-                  accounts_cascaded: 0, contacts_cascaded: 0,
-                  opportunities_cascaded: 0, opportunities_synthesized: 0,
-                  accounts_claimed: 0, contacts_claimed: 0,
-                },
-                fullImportErrors: [],
-                fullImportSummary: '',
-                fullImportElapsedLabel: '',
-                _fullImportElapsedTimer: null,
+                // ---------- Full-import state (background mode) ----------
+                // Server-side: /full/start enqueues plans, /api/cron/wfm-step
+                // drains them every minute, /full/status reports progress.
+                // Browser only kicks off + polls.
+                fullImportSynth: true,             // checkbox state
+                fullRun: null,                     // last polled status object
+                fullProgress: null,                // { total, done, pending, errored, percent, by_kind }
+                _fullPollTimer: null,
                 searchFilters: {
                   date_field: '', date_preset: '', date_from: '', date_to: '',
                   state: [], category: [], type: [],
@@ -949,203 +958,152 @@ export async function onRequestGet(context) {
                 },
 
                 // ============================================================
-                // Full-import flow — Option 2 (browser-driven chunked import).
+                // Full-import flow (Option 3 — background queue).
                 //
-                // Click sequence:
-                //   1. fullImportStart() POSTs /full-fetch, gets all records.
-                //   2. confirm() with the total-record preview.
-                //   3. _fullImportRun() loops by kind, chunking 30 records per
-                //      /commit POST, accumulating counts, watching for cancel.
-                //   4. On done (or cancel): show summary, leave history as
-                //      the audit trail.
-                //
-                // Idempotent at every step — restarts are safe.
+                // Browser only kicks off and polls /full/status. The actual
+                // record processing happens in /api/cron/wfm-step ticks
+                // fired by the sidecar cron Worker every minute. So:
+                //   - Tab can close at any time.
+                //   - Page reload picks up live progress on init.
+                //   - "Running…" label persists across browser restarts.
                 // ============================================================
 
-                _fullImportTickElapsed() {
-                  if (!this.fullImportStartedAt) { this.fullImportElapsedLabel = ''; return; }
-                  const ms = Date.now() - this.fullImportStartedAt;
-                  const s = Math.floor(ms / 1000);
-                  const m = Math.floor(s / 60);
-                  const ss = s % 60;
-                  this.fullImportElapsedLabel = (m > 0 ? m + 'm ' : '') + ss + 's elapsed';
+                async fullStatusBoot() {
+                  // First load on page open — get the latest status and
+                  // start polling if a run is in progress.
+                  await this._fullStatusFetch();
+                  this._fullStatusEnsurePolling();
+                },
+
+                async _fullStatusFetch() {
+                  try {
+                    const res = await fetch('/settings/wfm-import/full/status', {
+                      credentials: 'same-origin',
+                    });
+                    const j = await res.json();
+                    if (j.ok) {
+                      this.fullRun = j.run;
+                      this.fullProgress = j.progress;
+                    }
+                  } catch (_) { /* swallow — next poll will retry */ }
+                },
+
+                _fullStatusEnsurePolling() {
+                  if (this._fullPollTimer) return;
+                  // Poll every 5s. Cheap (one tiny GET) and gives a
+                  // responsive feel during the run.
+                  this._fullPollTimer = setInterval(async () => {
+                    await this._fullStatusFetch();
+                    if (!this.fullRun || this.fullRun.status !== 'in_progress') {
+                      // Run finished (or there's no run) — stop polling.
+                      // We still keep the last-status visible.
+                      clearInterval(this._fullPollTimer);
+                      this._fullPollTimer = null;
+                    }
+                  }, 5000);
+                },
+
+                get fullRunHeadline() {
+                  if (!this.fullRun) return '';
+                  if (this.fullRun.status === 'in_progress') return 'Running in background — close this tab and come back.';
+                  if (this.fullRun.status === 'completed')   return 'Last full import: complete.';
+                  if (this.fullRun.status === 'cancelled')   return 'Last full import: cancelled.';
+                  if (this.fullRun.status === 'failed')      return 'Last full import: failed.';
+                  return '';
+                },
+
+                get fullRunPhaseLabel() {
+                  if (!this.fullRun) return '';
+                  if (this.fullRun.status === 'in_progress') {
+                    if (this.fullProgress && this.fullProgress.percent === 0) return 'Queued — cron worker will pick up within ~1 min.';
+                    return 'Importing… (cron drains the queue every minute)';
+                  }
+                  if (this.fullRun.status === 'completed') return '✓ Full import complete.';
+                  if (this.fullRun.status === 'cancelled') return 'Cancelled.';
+                  if (this.fullRun.status === 'failed')    return '✗ Failed.';
+                  return this.fullRun.status;
+                },
+
+                get fullRunMetaLabel() {
+                  if (!this.fullRun) return '';
+                  const parts = [];
+                  if (this.fullRun.started_at) parts.push('started ' + this.fullRun.started_at.replace(/\..*/, '').replace('T', ' ') + 'Z');
+                  if (this.fullRun.finished_at) parts.push('finished ' + this.fullRun.finished_at.replace(/\..*/, '').replace('T', ' ') + 'Z');
+                  return parts.join(' · ');
+                },
+
+                get fullRunProgressLabel() {
+                  if (!this.fullProgress) return '';
+                  return this.fullProgress.done + ' / ' + this.fullProgress.total + ' processed' +
+                    (this.fullProgress.errored > 0 ? ' · ' + this.fullProgress.errored + ' errored' : '') +
+                    ' · ' + this.fullProgress.percent + '%';
+                },
+
+                get fullRunBarStyle() {
+                  const pct = this.fullProgress ? this.fullProgress.percent : 0;
+                  return {
+                    width: pct + '%',
+                    height: '100%',
+                    background: pct >= 100 ? '#1a7f37' : '#1f6feb',
+                    transition: 'width .3s ease',
+                  };
+                },
+
+                fullKindLabel(kind) {
+                  if (!this.fullProgress || !this.fullProgress.by_kind || !this.fullProgress.by_kind[kind]) {
+                    return '0';
+                  }
+                  const k = this.fullProgress.by_kind[kind];
+                  return k.done + ' / ' + k.total +
+                    (k.error > 0 ? ' (' + k.error + ' err)' : '');
                 },
 
                 async fullImportStart() {
-                  if (this.fullImportRunning) return;
-                  if (!confirm('Pull every record from WFM and import them all? Browser must stay open for the duration (~30–60 min).')) return;
-
-                  this.fullImportRunning = true;
-                  this.fullImportCancelRequested = false;
-                  this.fullImportSummary = '';
-                  this.fullImportErrors = [];
-                  this.fullImportStartedAt = Date.now();
-                  this.fullImportPhaseLabel = 'Fetching all records from WFM…';
-                  this.fullImportTotals = {
-                    staff:   { total: 0, done: 0 },
-                    clients: { total: 0, done: 0 },
-                    leads:   { total: 0, done: 0 },
-                    quotes:  { total: 0, done: 0 },
-                    jobs:    { total: 0, done: 0 },
-                  };
-                  this.fullImportRunCounts = {
-                    accounts: 0, contacts: 0, opportunities: 0, quotes: 0,
-                    users: 0, jobs: 0, skipped: 0, quote_lines: 0,
-                    accounts_cascaded: 0, contacts_cascaded: 0,
-                    opportunities_cascaded: 0, opportunities_synthesized: 0,
-                    accounts_claimed: 0, contacts_claimed: 0,
-                  };
-                  this._fullImportElapsedTimer = setInterval(
-                    () => this._fullImportTickElapsed(), 1000);
-
+                  if (!confirm('Queue a full WFM import? Records are pulled now and processed by the cron worker over the next ~30–60 min. You can close this tab — the import will keep running.')) return;
+                  this.busy = true;
                   try {
-                    // -------- Phase 1: fetch all records --------
-                    const fetchRes = await fetch('/settings/wfm-import/full-fetch', {
+                    const res = await fetch('/settings/wfm-import/full/start', {
                       method: 'POST', credentials: 'same-origin',
                       headers: { 'content-type': 'application/json' },
-                      body: '{}',
+                      body: JSON.stringify({
+                        options: { synth_orphan_quotes: !!this.fullImportSynth },
+                      }),
                     });
-                    const fetchJson = await fetchRes.json();
-                    if (!fetchJson.ok) throw new Error(fetchJson.error || 'full-fetch failed');
-
-                    const samples = fetchJson.samples || {};
-                    for (const kind of Object.keys(this.fullImportTotals)) {
-                      this.fullImportTotals[kind].total = (samples[kind] || []).length;
-                    }
-                    const total = fetchJson.counts.total;
-
-                    // Newline escapes here are doubled on purpose —
-                    // see the comment near the top of the script tag.
-                    // (Single backslash gets eaten by the outer
-                    // tagged-template processing the file as a whole.)
-                    if (!confirm(
-                      'Fetched ' + total + ' records from WFM:\\n' +
-                      '  Staff:    ' + samples.staff.length + '\\n' +
-                      '  Clients:  ' + samples.clients.length + '\\n' +
-                      '  Leads:    ' + samples.leads.length + '\\n' +
-                      '  Quotes:   ' + samples.quotes.length + '\\n' +
-                      '  Jobs:     ' + samples.jobs.length + '\\n\\n' +
-                      'Begin chunked import? Estimated ' + Math.ceil(total / 30) +
-                      ' chunks at ~10–20s each.'
-                    )) {
-                      this.fullImportPhaseLabel = 'Cancelled before import.';
+                    const j = await res.json();
+                    if (!j.ok) {
+                      alert('Failed: ' + (j.message || j.error || 'unknown'));
                       return;
                     }
-
-                    // -------- Phase 2: chunked import --------
-                    // Order matters: staff (no FKs) → clients (no FKs) →
-                    // leads (FK to client) → quotes (FK to lead/job) →
-                    // jobs (FK to client + may upgrade an opp from a lead).
-                    // Cascades fix any out-of-order FK on demand.
-                    const KIND_ORDER = ['staff', 'clients', 'leads', 'quotes', 'jobs'];
-                    // Smaller chunks for kinds that do per-record detail
-                    // calls (quotes do /quote.api/get/{UUID}, clients do
-                    // /client.api/get/{UUID} when Contacts is missing).
-                    const CHUNK_SIZE_BY_KIND = {
-                      staff:   30,
-                      clients: 15,    // per-client detail call for contacts
-                      leads:   30,
-                      quotes:  15,    // per-quote detail call for line items
-                      jobs:    25,
-                    };
-
-                    for (const kind of KIND_ORDER) {
-                      const records = samples[kind] || [];
-                      if (records.length === 0) continue;
-                      const chunkSize = CHUNK_SIZE_BY_KIND[kind] || 25;
-
-                      this.fullImportPhaseLabel =
-                        'Importing ' + kind + ' (' + records.length + ' total)…';
-
-                      for (let i = 0; i < records.length; i += chunkSize) {
-                        if (this.fullImportCancelRequested) {
-                          this.fullImportPhaseLabel = 'Cancelled at user request.';
-                          return;
-                        }
-                        const chunk = records.slice(i, i + chunkSize);
-                        const chunkSamples = { [kind]: chunk };
-
-                        try {
-                          const res = await fetch('/settings/wfm-import/commit', {
-                            method: 'POST', credentials: 'same-origin',
-                            headers: { 'content-type': 'application/json' },
-                            body: JSON.stringify({
-                              samples: chunkSamples,
-                              options: {
-                                synth_orphan_quotes: !!this.fullImportSynth,
-                              },
-                            }),
-                          });
-                          const j = await res.json();
-                          if (!j.ok) {
-                            this.fullImportErrors.push('chunk ' + kind + ' ' +
-                              (i + 1) + '-' + (i + chunk.length) + ': ' +
-                              (j.error || 'unknown'));
-                          } else {
-                            // Accumulate counts.
-                            for (const k of Object.keys(this.fullImportRunCounts)) {
-                              this.fullImportRunCounts[k] += (j.counts && j.counts[k]) || 0;
-                            }
-                            if (j.errors && j.errors.length > 0) {
-                              for (const e of j.errors) this.fullImportErrors.push(e);
-                            }
-                          }
-                        } catch (e) {
-                          this.fullImportErrors.push('chunk ' + kind + ' ' +
-                            (i + 1) + '-' + (i + chunk.length) + ' (network): ' +
-                            String(e.message || e));
-                        }
-
-                        this.fullImportTotals[kind].done = Math.min(
-                          i + chunk.length, records.length);
-
-                        // Pacing: brief breath between chunks so we don't
-                        // hammer the server / WFM rate limit.
-                        await new Promise((r) => setTimeout(r, 500));
-                      }
-                    }
-
-                    this.fullImportPhaseLabel = '✓ Full import complete.';
-
-                    // Build the summary line — same shape as commit.js.
-                    const c = this.fullImportRunCounts;
-                    this.fullImportSummary =
-                      c.accounts + ' accounts · ' +
-                      c.contacts + ' contacts · ' +
-                      c.opportunities + ' opps from leads · ' +
-                      c.quotes + ' quotes (' + c.quote_lines + ' line items) · ' +
-                      c.jobs + ' opps from jobs · ' +
-                      c.users + ' users enriched · ' +
-                      c.skipped + ' skipped' +
-                      (c.opportunities_synthesized > 0
-                        ? ' · synthesized: ' + c.opportunities_synthesized + ' orphan-quote opps'
-                        : '') +
-                      ((c.accounts_cascaded + c.contacts_cascaded + c.opportunities_cascaded) > 0
-                        ? ' · auto-cascaded: ' + c.accounts_cascaded + ' / ' +
-                          c.contacts_cascaded + ' / ' + c.opportunities_cascaded
-                        : '') +
-                      ((c.accounts_claimed + c.contacts_claimed) > 0
-                        ? ' · claimed: ' + c.accounts_claimed + ' / ' + c.contacts_claimed
-                        : '');
+                    // Refresh status immediately so the progress block appears.
+                    await this._fullStatusFetch();
+                    this._fullStatusEnsurePolling();
                   } catch (e) {
-                    this.fullImportPhaseLabel = '✗ Failed: ' + String(e.message || e);
+                    alert('Failed to start: ' + (e.message || e));
                   } finally {
-                    this.fullImportRunning = false;
-                    this.fullImportCancelRequested = false;
-                    if (this._fullImportElapsedTimer) {
-                      clearInterval(this._fullImportElapsedTimer);
-                      this._fullImportElapsedTimer = null;
-                    }
-                    this._fullImportTickElapsed();
+                    this.busy = false;
                   }
                 },
 
-                fullImportCancel() {
-                  if (!this.fullImportRunning) return;
-                  if (confirm('Cancel the full import? Already-imported records stay in Pipeline; the rest will be skipped.')) {
-                    this.fullImportCancelRequested = true;
+                async fullImportCancel() {
+                  if (!confirm('Cancel the in-progress full import? Already-imported records stay in Pipeline; remaining records will be skipped.')) return;
+                  this.busy = true;
+                  try {
+                    const res = await fetch('/settings/wfm-import/full/cancel', {
+                      method: 'POST', credentials: 'same-origin',
+                    });
+                    const j = await res.json();
+                    if (!j.ok) {
+                      alert('Cancel failed: ' + (j.error || 'unknown'));
+                      return;
+                    }
+                    await this._fullStatusFetch();
+                  } catch (e) {
+                    alert('Cancel failed: ' + (e.message || e));
+                  } finally {
+                    this.busy = false;
                   }
                 },
+
               };
             };
           </script>

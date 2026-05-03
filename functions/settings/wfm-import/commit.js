@@ -1005,23 +1005,48 @@ function genRunId() {
   return 'run-' + Math.random().toString(16).slice(2) + Math.random().toString(16).slice(2);
 }
 
-export async function onRequestPost(context) {
-  const { env, request, data } = context;
-  const user = data?.user;
-  if (!user) return json({ ok: false, error: 'sign_in_required' }, 401);
-  if (!hasRole(user, 'admin')) return json({ ok: false, error: 'admin_only' }, 403);
+// Build the human-readable summary line from a counts object. Used
+// by both the selective-import response (one chunk) and the full-
+// import progress endpoint (rolling totals across many cron ticks).
+export function buildSummaryLine(counts) {
+  const c = counts || {};
+  const safe = (n) => (typeof n === 'number' ? n : 0);
+  return safe(c.accounts) + ' accounts'
+    + ' · ' + safe(c.contacts) + ' contacts'
+    + ' · ' + safe(c.opportunities) + ' opps from leads'
+    + ' · ' + safe(c.quotes) + ' quotes (' + safe(c.quote_lines) + ' line items)'
+    + ' · ' + safe(c.jobs) + ' opps from jobs'
+    + ' · ' + safe(c.users) + ' users enriched'
+    + ' · ' + safe(c.skipped) + ' skipped (FK unresolved)'
+    + ((safe(c.accounts_cascaded) + safe(c.contacts_cascaded) + safe(c.opportunities_cascaded)) > 0
+        ? ' · auto-cascaded: ' + safe(c.accounts_cascaded) + ' accounts, '
+          + safe(c.contacts_cascaded) + ' contacts, '
+          + safe(c.opportunities_cascaded) + ' opps'
+        : '')
+    + (safe(c.opportunities_synthesized) > 0
+        ? ' · synthesized: ' + safe(c.opportunities_synthesized) + ' orphan-quote opps'
+        : '')
+    + ((safe(c.accounts_claimed) + safe(c.contacts_claimed)) > 0
+        ? ' · claimed (matched existing Pipeline rows by name): '
+          + safe(c.accounts_claimed) + ' accounts, '
+          + safe(c.contacts_claimed) + ' contacts'
+        : '');
+}
 
-  let body;
-  try { body = await request.json(); }
-  catch { return json({ ok: false, error: 'invalid_json' }, 400); }
-
-  const samples = body?.samples || {};
-
-  // Bookkeeping for the persisted run log.
-  const runId        = genRunId();
-  const runStartedAt = nowIso();
-  const triggeredBy  = user?.email || '';
-  const selectionSummary = summarizeSelection(samples);
+// The reusable engine. Takes a samples object (same shape as the
+// /commit body) and an options bag, runs every kind loop in
+// dependency order with auto-cascade + claim-by-name support, and
+// returns { counts, errors, links }. Does NOT persist a run row —
+// that's the caller's job (selective imports add one row per call;
+// the full-import cron step UPDATEs a single row across many calls).
+//
+// FK auto-cascade: if a quote references a lead that's not in the
+// same chunk, the engine fetches the lead from WFM via apiGet and
+// imports it on the fly (commit.js's existing ensureOpportunityFromLead
+// path). Same for accounts / contacts. So a chunk can be a single
+// kind in isolation — the cascade lifts the dependency graph.
+export async function processSamples(env, samples, options = {}) {
+  const synthOrphanQuotes = !!options.synth_orphan_quotes;
 
   // Build lookup maps as we go.
   const accountByWfmUuid = new Map();
@@ -1030,7 +1055,7 @@ export async function onRequestPost(context) {
   const oppByWfmUuid     = new Map();
 
   // Pre-load all WFM-mapped accounts/contacts/opps so leads/quotes
-  // referencing earlier imports (not in this batch) still resolve.
+  // referencing earlier imports (not in this chunk) still resolve.
   const priorAccounts = await all(env.DB,
     'SELECT id, external_id FROM accounts WHERE external_source = ?', ['wfm']);
   for (const r of priorAccounts) accountByWfmUuid.set(r.external_id, r.id);
@@ -1045,216 +1070,195 @@ export async function onRequestPost(context) {
     ['wfm-lead', 'wfm-job', 'wfm-quote-orphan']);
   for (const r of priorOpps) oppByWfmUuid.set(r.external_id, r.id);
 
-  // Import options. Currently:
-  //   synth_orphan_quotes: when a quote has no resolvable parent
-  //     (no LeadUUID/JobUUID, OR cascade fails because parent is
-  //     archived/deleted in WFM), synthesize a stub opportunity from
-  //     the quote's own fields. external_source='wfm-quote-orphan'.
-  const options = (body && body.options) || {};
-  const synthOrphanQuotes = !!options.synth_orphan_quotes;
-
   const counts = {
     accounts: 0, contacts: 0, opportunities: 0, quotes: 0,
     users: 0, jobs: 0, skipped: 0,
     quote_lines: 0,
-    // Records imported via auto-cascade (parent FK was missing).
     accounts_cascaded: 0, contacts_cascaded: 0, opportunities_cascaded: 0,
-    // Records claimed: a Pipeline-native row was found by name/email
-    // and stamped with the WFM external_id (rather than creating a
-    // new row alongside the existing one).
     accounts_claimed: 0, contacts_claimed: 0,
-    // Stub opps synthesized from orphan/stranded quotes (when
-    // options.synth_orphan_quotes is on).
     opportunities_synthesized: 0,
   };
   const links = [];
   const errors = [];
 
-  // Per-request fetch cache so we don't re-pull /client.api/get/{X}
-  // 5 times if 5 selected leads all reference the same client.
   const fetchCache = new Map();
   const ctx = {
     accountByWfmUuid, contactByWfmUuid, userByWfmUuid, oppByWfmUuid,
     fetchCache, counts,
   };
 
-  try {
-    // -------- Staff ---------
-    for (const st of (samples.staff || [])) {
-      try {
-        const userId = await enrichUserFromStaff(env, st);
-        if (userId) { userByWfmUuid.set(st.UUID, userId); counts.users++; }
-        else counts.skipped++;
-      } catch (e) { errors.push(`staff ${st?.Name}: ${e.message}`); }
-    }
+  // -------- Staff ---------
+  for (const st of (samples.staff || [])) {
+    try {
+      const userId = await enrichUserFromStaff(env, st);
+      if (userId) { userByWfmUuid.set(st.UUID, userId); counts.users++; }
+      else counts.skipped++;
+    } catch (e) { errors.push('staff ' + (st?.Name || '?') + ': ' + e.message); }
+  }
 
-    // -------- Clients (+ nested contacts) ---------
-    for (const cInput of (samples.clients || [])) {
-      try {
-        // The /client.api/list endpoint returns clients WITHOUT their
-        // Contacts array (those live on the per-client detail). When
-        // the caller passed a list-shaped record (no Contacts key),
-        // fetch the detail now so we don't drop the contacts on the
-        // floor. Sample-based imports already pre-fetch detail in
-        // sample.js, so this hits only on the full-import path.
-        let c = cInput;
-        if (!c.Contacts && c.UUID) {
-          try {
-            const detailResp = await apiGet(env, '/client.api/get/' + encodeURIComponent(c.UUID));
-            if (detailResp.ok) {
-              const detailC = recordList(detailResp.body, 'Client')[0];
-              if (detailC) c = detailC;
-            }
-          } catch (_) { /* fall through with list-shaped record */ }
-        }
-
-        const a = await upsertAccount(env, c);
-        accountByWfmUuid.set(c.UUID, a.id);
-        counts.accounts++;
-        if (a.action === 'claimed') counts.accounts_claimed++;
-        links.push({ url: '/accounts/' + a.id, label: 'Account: ' + (c.Name || c.UUID) });
-
-        const cts = (c.Contacts && c.Contacts.Contact)
-          ? (Array.isArray(c.Contacts.Contact) ? c.Contacts.Contact : [c.Contacts.Contact])
-          : [];
-        for (const ct of cts) {
-          const r = await upsertContact(env, ct, a.id);
-          contactByWfmUuid.set(ct.UUID, r.id);
-          counts.contacts++;
-          if (r.action === 'claimed') counts.contacts_claimed++;
-        }
-      } catch (e) { errors.push('client ' + (c?.Name || '?') + ': ' + e.message); }
-    }
-
-    // -------- Leads ---------
-    for (const lead of (samples.leads || [])) {
-      try {
-        // Auto-cascade: if the lead's parent Client isn't in the
-        // current batch and isn't already in Pipeline, fetch it from
-        // WFM and import it on the fly.
-        const accountId = lead.Client?.UUID
-          ? await ensureAccount(env, lead.Client.UUID, ctx)
-          : null;
-        if (!accountId) {
-          counts.skipped++;
-          errors.push('lead "' + (lead?.Name || lead?.UUID || '?') +
-            '" skipped: ' +
-            (lead.Client?.UUID
-              ? 'client UUID ' + lead.Client.UUID + ' could not be resolved (cascade fetch failed?)'
-              : 'no Client.UUID on lead'));
-          continue;
-        }
-        const contactId = lead.Contact?.UUID ? contactByWfmUuid.get(lead.Contact.UUID) : null;
-        const ownerId   = lead.Owner?.UUID   ? userByWfmUuid.get(lead.Owner.UUID)      : null;
-        const o = await upsertOpportunityFromLead(env, lead, accountId, contactId, ownerId);
-        oppByWfmUuid.set(lead.UUID, o.id);
-        counts.opportunities++;
-        links.push({ url: '/opportunities/' + o.id, label: 'Opp: ' + (lead.Name || o.number) });
-      } catch (e) { errors.push('lead ' + (lead?.Name || '?') + ': ' + e.message); }
-    }
-
-    // -------- Quotes ---------
-    for (const q of (samples.quotes || [])) {
-      try {
-        // Auto-cascade: if the quote's parent Lead/Job isn't in the
-        // current batch and isn't in Pipeline, fetch it from WFM
-        // (which recursively cascades the Client) and import on the fly.
-        let oppId = null;
-        let synthesized = false;
-        if (q.LeadUUID) oppId = await ensureOpportunityFromLead(env, q.LeadUUID, ctx);
-        if (!oppId && q.JobUUID) oppId = await ensureOpportunityFromJob(env, q.JobUUID, ctx);
-        // Last-resort synthesizer: if cascades failed AND the user opted
-        // in, synthesize a stub opportunity from the quote's own fields.
-        if (!oppId && synthOrphanQuotes) {
-          oppId = await synthesizeOpportunityFromQuote(env, q, ctx);
-          if (oppId) {
-            synthesized = true;
-            links.push({
-              url: '/opportunities/' + oppId,
-              label: 'Synthesized opp: ' + (q.Name || q.ID || q.UUID || '?'),
-            });
-          }
-        }
-        if (!oppId) {
-          counts.skipped++;
-          let reason;
-          if (!q.LeadUUID && !q.JobUUID) {
-            reason = 'orphan quote: no LeadUUID and no JobUUID set on the WFM record';
-          } else if (q.LeadUUID && !q.JobUUID) {
-            reason = 'LeadUUID ' + q.LeadUUID + ' present but cascade failed (lead missing/archived/inaccessible in WFM?)';
-          } else if (!q.LeadUUID && q.JobUUID) {
-            reason = 'JobUUID ' + q.JobUUID + ' present but cascade failed (job missing/inaccessible in WFM?)';
-          } else {
-            reason = 'both LeadUUID (' + q.LeadUUID + ') and JobUUID (' + q.JobUUID + ') present, neither cascade succeeded';
-          }
-          if (!synthOrphanQuotes) {
-            reason += ' (enable "Synthesize standalone opportunities for orphan quotes" to import anyway)';
-          } else {
-            // Synth was on but still failed — that means the Client
-            // couldn't be resolved either.
-            reason += ' (synthesis attempted but quote.Client.UUID could not be resolved either)';
-          }
-          errors.push('quote "' + (q?.Name || q?.ID || q?.UUID || '?') + '" skipped: ' + reason);
-          continue;
-        }
-        const r = await upsertQuote(env, q, oppId);
-        counts.quotes++;
-        // Pull the DetailedQuote and write its Costs/Tasks into
-        // quote_lines. Cached so we don't re-fetch when re-importing.
+  // -------- Clients (+ nested contacts) ---------
+  for (const cInput of (samples.clients || [])) {
+    let c = cInput;
+    try {
+      // The /client.api/list endpoint returns clients WITHOUT their
+      // Contacts array (those live on the per-client detail). When
+      // the caller passed a list-shaped record (no Contacts key),
+      // fetch the detail now so we don't drop the contacts.
+      if (!c.Contacts && c.UUID) {
         try {
-          const lineCount = await syncQuoteLines(env, r.id, q.UUID, ctx);
-          counts.quote_lines += lineCount;
-        } catch (lineErr) {
-          errors.push('quote-lines ' + (q?.Name || '?') + ': ' + lineErr.message);
-        }
-        links.push({ url: '/opportunities/' + oppId + '/quotes/' + r.id, label: 'Quote: ' + (q.Name || r.number) });
-      } catch (e) { errors.push('quote ' + (q?.Name || '?') + ': ' + e.message); }
-    }
+          const detailResp = await apiGet(env, '/client.api/get/' + encodeURIComponent(c.UUID));
+          if (detailResp.ok) {
+            const detailC = recordList(detailResp.body, 'Client')[0];
+            if (detailC) c = detailC;
+          }
+        } catch (_) { /* fall through with list-shaped record */ }
+      }
 
-    // -------- Jobs ---------
-    for (const job of (samples.jobs || [])) {
+      const a = await upsertAccount(env, c);
+      accountByWfmUuid.set(c.UUID, a.id);
+      counts.accounts++;
+      if (a.action === 'claimed') counts.accounts_claimed++;
+      links.push({ url: '/accounts/' + a.id, label: 'Account: ' + (c.Name || c.UUID) });
+
+      const cts = (c.Contacts && c.Contacts.Contact)
+        ? (Array.isArray(c.Contacts.Contact) ? c.Contacts.Contact : [c.Contacts.Contact])
+        : [];
+      for (const ct of cts) {
+        const r = await upsertContact(env, ct, a.id);
+        contactByWfmUuid.set(ct.UUID, r.id);
+        counts.contacts++;
+        if (r.action === 'claimed') counts.contacts_claimed++;
+      }
+    } catch (e) { errors.push('client ' + (c?.Name || '?') + ': ' + e.message); }
+  }
+
+  // -------- Leads ---------
+  for (const lead of (samples.leads || [])) {
+    try {
+      const accountId = lead.Client?.UUID
+        ? await ensureAccount(env, lead.Client.UUID, ctx)
+        : null;
+      if (!accountId) {
+        counts.skipped++;
+        errors.push('lead "' + (lead?.Name || lead?.UUID || '?') +
+          '" skipped: ' +
+          (lead.Client?.UUID
+            ? 'client UUID ' + lead.Client.UUID + ' could not be resolved (cascade fetch failed?)'
+            : 'no Client.UUID on lead'));
+        continue;
+      }
+      const contactId = lead.Contact?.UUID ? contactByWfmUuid.get(lead.Contact.UUID) : null;
+      const ownerId   = lead.Owner?.UUID   ? userByWfmUuid.get(lead.Owner.UUID)      : null;
+      const o = await upsertOpportunityFromLead(env, lead, accountId, contactId, ownerId);
+      oppByWfmUuid.set(lead.UUID, o.id);
+      counts.opportunities++;
+      links.push({ url: '/opportunities/' + o.id, label: 'Opp: ' + (lead.Name || o.number) });
+    } catch (e) { errors.push('lead ' + (lead?.Name || '?') + ': ' + e.message); }
+  }
+
+  // -------- Quotes ---------
+  for (const q of (samples.quotes || [])) {
+    try {
+      let oppId = null;
+      if (q.LeadUUID) oppId = await ensureOpportunityFromLead(env, q.LeadUUID, ctx);
+      if (!oppId && q.JobUUID) oppId = await ensureOpportunityFromJob(env, q.JobUUID, ctx);
+      if (!oppId && synthOrphanQuotes) {
+        oppId = await synthesizeOpportunityFromQuote(env, q, ctx);
+        if (oppId) {
+          links.push({
+            url: '/opportunities/' + oppId,
+            label: 'Synthesized opp: ' + (q.Name || q.ID || q.UUID || '?'),
+          });
+        }
+      }
+      if (!oppId) {
+        counts.skipped++;
+        let reason;
+        if (!q.LeadUUID && !q.JobUUID) {
+          reason = 'orphan quote: no LeadUUID and no JobUUID set on the WFM record';
+        } else if (q.LeadUUID && !q.JobUUID) {
+          reason = 'LeadUUID ' + q.LeadUUID + ' present but cascade failed (lead missing/archived/inaccessible in WFM?)';
+        } else if (!q.LeadUUID && q.JobUUID) {
+          reason = 'JobUUID ' + q.JobUUID + ' present but cascade failed (job missing/inaccessible in WFM?)';
+        } else {
+          reason = 'both LeadUUID (' + q.LeadUUID + ') and JobUUID (' + q.JobUUID + ') present, neither cascade succeeded';
+        }
+        if (!synthOrphanQuotes) {
+          reason += ' (enable synthesize-orphan-quotes option to import anyway)';
+        } else {
+          reason += ' (synthesis attempted but quote.Client.UUID could not be resolved either)';
+        }
+        errors.push('quote "' + (q?.Name || q?.ID || q?.UUID || '?') + '" skipped: ' + reason);
+        continue;
+      }
+      const r = await upsertQuote(env, q, oppId);
+      counts.quotes++;
       try {
-        const accountId = job.Client?.UUID
-          ? await ensureAccount(env, job.Client.UUID, ctx)
-          : null;
-        if (!accountId) {
-          counts.skipped++;
-          errors.push('job "' + (job?.Name || job?.ID || '?') +
-            '" skipped: ' +
-            (job.Client?.UUID
-              ? 'client UUID ' + job.Client.UUID + ' could not be resolved (cascade fetch failed?)'
-              : 'no Client.UUID on job'));
-          continue;
-        }
-        const ownerId = job.Manager?.UUID ? userByWfmUuid.get(job.Manager.UUID) : null;
-        const o = await upsertOpportunityFromJob(env, job, accountId, ownerId);
-        oppByWfmUuid.set(job.UUID, o.id);
-        counts.jobs++;
-        links.push({ url: '/opportunities/' + o.id, label: 'Job-opp: ' + (job.Name || o.number) });
-      } catch (e) { errors.push('job ' + (job?.Name || '?') + ': ' + e.message); }
-    }
+        const lineCount = await syncQuoteLines(env, r.id, q.UUID, ctx);
+        counts.quote_lines += lineCount;
+      } catch (lineErr) {
+        errors.push('quote-lines ' + (q?.Name || '?') + ': ' + lineErr.message);
+      }
+      links.push({ url: '/opportunities/' + oppId + '/quotes/' + r.id, label: 'Quote: ' + (q.Name || r.number) });
+    } catch (e) { errors.push('quote ' + (q?.Name || '?') + ': ' + e.message); }
+  }
 
-    const summary =
-      counts.accounts + ' accounts'
-      + ' · ' + counts.contacts + ' contacts'
-      + ' · ' + counts.opportunities + ' opps from leads'
-      + ' · ' + counts.quotes + ' quotes (' + counts.quote_lines + ' line items)'
-      + ' · ' + counts.jobs + ' opps from jobs'
-      + ' · ' + counts.users + ' users enriched'
-      + ' · ' + counts.skipped + ' skipped (FK unresolved)'
-      + ((counts.accounts_cascaded + counts.contacts_cascaded + counts.opportunities_cascaded) > 0
-          ? ' · auto-cascaded: ' + counts.accounts_cascaded + ' accounts, '
-            + counts.contacts_cascaded + ' contacts, '
-            + counts.opportunities_cascaded + ' opps'
-          : '')
-      + (counts.opportunities_synthesized > 0
-          ? ' · synthesized: ' + counts.opportunities_synthesized + ' orphan-quote opps'
-          : '')
-      + ((counts.accounts_claimed + counts.contacts_claimed) > 0
-          ? ' · claimed (matched existing Pipeline rows by name): '
-            + counts.accounts_claimed + ' accounts, '
-            + counts.contacts_claimed + ' contacts'
-          : '');
+  // -------- Jobs ---------
+  for (const job of (samples.jobs || [])) {
+    try {
+      const accountId = job.Client?.UUID
+        ? await ensureAccount(env, job.Client.UUID, ctx)
+        : null;
+      if (!accountId) {
+        counts.skipped++;
+        errors.push('job "' + (job?.Name || job?.ID || '?') +
+          '" skipped: ' +
+          (job.Client?.UUID
+            ? 'client UUID ' + job.Client.UUID + ' could not be resolved (cascade fetch failed?)'
+            : 'no Client.UUID on job'));
+        continue;
+      }
+      const ownerId = job.Manager?.UUID ? userByWfmUuid.get(job.Manager.UUID) : null;
+      const o = await upsertOpportunityFromJob(env, job, accountId, ownerId);
+      oppByWfmUuid.set(job.UUID, o.id);
+      counts.jobs++;
+      links.push({ url: '/opportunities/' + o.id, label: 'Job-opp: ' + (job.Name || o.number) });
+    } catch (e) { errors.push('job ' + (job?.Name || '?') + ': ' + e.message); }
+  }
+
+  return { counts, errors, links };
+}
+
+export async function onRequestPost(context) {
+  const { env, request, data } = context;
+  const user = data?.user;
+  if (!user) return json({ ok: false, error: 'sign_in_required' }, 401);
+  if (!hasRole(user, 'admin')) return json({ ok: false, error: 'admin_only' }, 403);
+
+  let body;
+  try { body = await request.json(); }
+  catch { return json({ ok: false, error: 'invalid_json' }, 400); }
+
+  const samples = body?.samples || {};
+  const options = body?.options || {};
+
+  // Bookkeeping for the persisted run log.
+  const runId        = genRunId();
+  const runStartedAt = nowIso();
+  const triggeredBy  = user?.email || '';
+  const selectionSummary = summarizeSelection(samples);
+
+  let counts = {};
+  let errors = [];
+  let links  = [];
+
+  try {
+    const result = await processSamples(env, samples, options);
+    counts = result.counts;
+    errors = result.errors;
+    links  = result.links;
+
+    const summary = buildSummaryLine(counts);
 
     // Cap errors at 50 so the row-size stays bounded in D1; the UI
     // also caps display at 50.
