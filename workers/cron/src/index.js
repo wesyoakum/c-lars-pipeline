@@ -126,14 +126,31 @@ async function callPipeline(env, endpointPath, label) {
   const target = `${pipelineUrl}${endpointPath}`;
   const startedAt = new Date().toISOString();
 
+  // Cloudflare Access sits in front of the Pages app. The cron
+  // Worker can't authenticate via SSO (no interactive login), so
+  // either:
+  //   (a) Access has a Bypass policy for /api/cron/* paths, OR
+  //   (b) We pass a Service Token (CF_ACCESS_CLIENT_ID +
+  //       CF_ACCESS_CLIENT_SECRET) and Access has a policy that
+  //       allows that token through.
+  // We always set the Service Token headers when the secrets are
+  // configured — Access ignores them when (a) is in use, accepts
+  // them when (b) is in use. So setting both up is harmless and
+  // either path works.
+  const headers = {
+    'x-cron-secret': env.CRON_SECRET,
+    'user-agent': 'c-lars-pms-cron/1.0',
+  };
+  if (env.CF_ACCESS_CLIENT_ID && env.CF_ACCESS_CLIENT_SECRET) {
+    headers['CF-Access-Client-Id']     = env.CF_ACCESS_CLIENT_ID;
+    headers['CF-Access-Client-Secret'] = env.CF_ACCESS_CLIENT_SECRET;
+  }
+
   let res;
   try {
     res = await fetch(target, {
       method: 'POST',
-      headers: {
-        'x-cron-secret': env.CRON_SECRET,
-        'user-agent': 'c-lars-pms-cron/1.0',
-      },
+      headers,
     });
   } catch (err) {
     console.error(label + ' cron fetch failed:', err?.message || err);
