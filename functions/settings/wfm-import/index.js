@@ -195,6 +195,35 @@ export async function onRequestGet(context) {
                       style="background:#cf222e;color:white">Cancel</button>
             </div>
 
+            <!-- Manual-step row. Visible only while a run is in
+                 progress. Used as the workaround when the sidecar
+                 cron Worker can't reach /api/cron/wfm-step (Access
+                 policy blocking it). One click = one chunk of work
+                 (~25s wall clock, ~25–100 records). The auto-loop
+                 toggle keeps clicking automatically until done —
+                 browser must stay open. -->
+            <div x-show="fullRun && fullRun.status === 'in_progress'" x-cloak
+                 style="margin-top:.5rem;padding:.4rem .6rem;background:#fffbe6;border:1px dashed #d4a72c;border-radius:4px;display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;font-size:.82rem">
+              <span class="muted">
+                Manual drain (cron is blocked by Access right now):
+              </span>
+              <button type="button" class="btn"
+                      @click="manualStep()"
+                      :disabled="manualStepBusy"
+                      style="font-size:.82rem">
+                <span x-show="!manualStepBusy">Run one step now</span>
+                <span x-show="manualStepBusy">Running…</span>
+              </button>
+              <label style="display:flex;align-items:center;gap:.3rem;cursor:pointer">
+                <input type="checkbox" x-model="manualAutoLoop"
+                       @change="manualAutoLoopChanged()">
+                <span class="muted">Run continuously (browser must stay open)</span>
+              </label>
+              <span class="muted" style="font-size:.78rem"
+                    x-show="manualLastResult"
+                    x-text="manualLastResult"></span>
+            </div>
+
             <!-- Progress block — shown whenever there's a run row,
                  in_progress or completed/cancelled/failed. -->
             <div x-show="fullRun" x-cloak
@@ -619,6 +648,13 @@ export async function onRequestGet(context) {
                 fullRun: null,                     // last polled status object
                 fullProgress: null,                // { total, done, pending, errored, percent, by_kind }
                 _fullPollTimer: null,
+
+                // Manual-drain state — used while CF Access blocks the
+                // cron Worker from reaching /api/cron/wfm-step. Each
+                // manual /run-step call processes one chunk (~25s).
+                manualStepBusy: false,
+                manualAutoLoop: false,
+                manualLastResult: '',
                 searchFilters: {
                   date_field: '', date_preset: '', date_from: '', date_to: '',
                   state: [], category: [], type: [],
@@ -1101,6 +1137,62 @@ export async function onRequestGet(context) {
                     alert('Cancel failed: ' + (e.message || e));
                   } finally {
                     this.busy = false;
+                  }
+                },
+
+                // ---------- Manual-drain (CF Access workaround) ----------
+                // Each call to /run-step processes one chunk (~25s wall
+                // clock, ~25–100 records). The endpoint is the same
+                // logic as /api/cron/wfm-step but SSO+admin-protected
+                // instead of CRON_SECRET-protected.
+                async manualStep() {
+                  if (this.manualStepBusy) return;
+                  this.manualStepBusy = true;
+                  this.manualLastResult = '';
+                  try {
+                    const res = await fetch('/settings/wfm-import/full/run-step', {
+                      method: 'POST', credentials: 'same-origin',
+                    });
+                    const j = await res.json();
+                    if (j.ok) {
+                      this.manualLastResult = 'processed ' + (j.chunks_processed || 0)
+                        + ' chunk(s), ' + (j.pending_remaining || 0) + ' record(s) pending — '
+                        + ((j.duration_ms / 1000) | 0) + 's';
+                    } else if (j.paused_for_oauth) {
+                      this.manualLastResult = 'paused: WFM OAuth chain dead, reconnect required';
+                      this.manualAutoLoop = false;
+                    } else {
+                      this.manualLastResult = 'error: ' + (j.error || 'unknown');
+                    }
+                    // Refresh the status block so the progress bar +
+                    // per-kind counts update right after the chunk lands.
+                    await this._fullStatusFetch();
+                  } catch (e) {
+                    this.manualLastResult = 'fetch error: ' + (e.message || e);
+                  } finally {
+                    this.manualStepBusy = false;
+                  }
+
+                  // If auto-loop is on AND the run is still in progress,
+                  // queue another step. Small delay so the user can
+                  // visually track progress and click Cancel if needed.
+                  if (this.manualAutoLoop && this.fullRun && this.fullRun.status === 'in_progress') {
+                    setTimeout(() => {
+                      if (this.manualAutoLoop) this.manualStep();
+                    }, 2000);
+                  } else if (this.manualAutoLoop) {
+                    // Run completed (or cancelled) — turn off the loop.
+                    this.manualAutoLoop = false;
+                  }
+                },
+
+                manualAutoLoopChanged() {
+                  // Toggling on while not already busy → kick off the
+                  // first step immediately. The recursion in manualStep
+                  // handles the rest.
+                  if (this.manualAutoLoop && !this.manualStepBusy
+                      && this.fullRun && this.fullRun.status === 'in_progress') {
+                    this.manualStep();
                   }
                 },
 

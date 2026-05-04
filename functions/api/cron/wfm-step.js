@@ -127,11 +127,18 @@ function chunked(arr, n) {
   return out;
 }
 
-export async function onRequestPost(context) {
-  const { env, request } = context;
-
-  if (!checkSecret(request, env)) return unauthorized();
-
+/**
+ * Shared chunk-processing engine. Both the cron-secret-protected
+ * /api/cron/wfm-step endpoint AND the SSO-admin-protected
+ * /settings/wfm-import/full/run-step endpoint call this. Returns a
+ * Response object directly so caller can pass it through.
+ *
+ * Exists because Cloudflare Access blocks the cron Worker from
+ * reaching this endpoint by default; the manual SSO-admin route
+ * gives the user a way to drain the queue while Access permissions
+ * are being sorted out.
+ */
+export async function runOneStep(env) {
   const tickStart = Date.now();
 
   try {
@@ -347,4 +354,12 @@ export async function onRequestPost(context) {
   } catch (err) {
     return json({ ok: false, error: String(err.message || err), duration_ms: Date.now() - tickStart }, 500);
   }
+}
+
+// Cron-secret-protected wrapper. Sidecar cron Worker calls this every
+// minute (when Access bypass / service-token policy lets it through).
+export async function onRequestPost(context) {
+  const { env, request } = context;
+  if (!checkSecret(request, env)) return unauthorized();
+  return runOneStep(env);
 }
