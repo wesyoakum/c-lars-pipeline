@@ -702,11 +702,19 @@ async function syncQuoteLines(env, pipelineQuoteId, wfmQuoteUuid, ctx) {
     [pipelineQuoteId]);
   const oldQuoteLineIds = oldLines.map((r) => r.id);
 
-  if (oldQuoteLineIds.length > 0) {
-    const placeholders = oldQuoteLineIds.map(() => '?').join(',');
+  // D1 caps prepared-statement parameters per query (historically
+  // ~100; safe assumption ≤100 variables per IN-list). Quote
+  // C185 SPK #1 in the production import had >100 cost-build
+  // back-refs and tripped "too many SQL variables" — the entire
+  // line-item sync bailed with no data lost but the quote ended up
+  // with 0 lines. Chunk the IN list to stay under the cap.
+  const PARAM_CAP = 80;
+  for (let i = 0; i < oldQuoteLineIds.length; i += PARAM_CAP) {
+    const idSlice = oldQuoteLineIds.slice(i, i + PARAM_CAP);
+    const placeholders = idSlice.map(() => '?').join(',');
     await run(env.DB,
       'DELETE FROM cost_builds WHERE quote_line_id IN (' + placeholders + ')',
-      oldQuoteLineIds);
+      idSlice);
   }
 
   await run(env.DB,
