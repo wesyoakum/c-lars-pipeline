@@ -28,7 +28,7 @@
 //   npx wrangler pages secret put OUTLOOK_ADDIN_SECRET --project-name=c-lars-pms
 // The same string must appear here AND in the Cloudflare Pages
 // secret. If they don't match, every send fails 401.
-const SHARED_SECRET = 'REPLACE_ME_WITH_OUTLOOK_ADDIN_SECRET';
+const SHARED_SECRET = 'kBxSrFOLg62uhlU5py3EfRcoY4izJwT809Ite7NWajsvKnHXPmZGAVdbC1DqMQ';
 
 const INGEST_ENDPOINT = 'https://c-lars-pms.pages.dev/api/email-ingest';
 
