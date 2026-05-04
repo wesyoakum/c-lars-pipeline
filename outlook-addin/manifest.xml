@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Outlook Add-in manifest — "Send to Claudia"
+
+  Sideload this XML in Outlook (Web / Desktop / Mac) to add a single
+  ribbon button on the read-message ribbon. Clicking the button reads
+  the current email's MIME content and POSTs it to
+  https://c-lars-pms.pages.dev/api/email-ingest with the shared
+  secret. The email lands in claudia_documents and Claudia can read
+  it via her existing tools.
+
+  See docs/outlook-addin-setup.md for the full setup runbook.
+
+  IMPORTANT: regenerate the <Id> GUID if you fork this for someone
+  else's mailbox — Office uses it as the add-in's unique identity.
+-->
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0"
+  xsi:type="MailApp">
+
+  <Id>4a3f8c9e-7b21-4d6f-b8e3-2a1c6d9f7e84</Id>
+  <Version>1.0.0.0</Version>
+  <ProviderName>C-LARS</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="Send to Claudia" />
+  <Description DefaultValue="Send the current email to Claudia (Pipeline assistant) for context and follow-up." />
+  <IconUrl DefaultValue="https://c-lars-pms.pages.dev/img/logo-120.png" />
+  <HighResolutionIconUrl DefaultValue="https://c-lars-pms.pages.dev/img/logo-120.png" />
+  <SupportUrl DefaultValue="https://c-lars-pms.pages.dev/sandbox/assistant" />
+
+  <AppDomains>
+    <AppDomain>https://c-lars-pms.pages.dev</AppDomain>
+  </AppDomains>
+
+  <Hosts>
+    <Host Name="Mailbox" />
+  </Hosts>
+
+  <Requirements>
+    <Sets>
+      <Set Name="Mailbox" MinVersion="1.9" />
+    </Sets>
+  </Requirements>
+
+  <FormSettings>
+    <Form xsi:type="ItemRead">
+      <DesktopSettings>
+        <SourceLocation DefaultValue="https://c-lars-pms.pages.dev/outlook-addin/taskpane.html" />
+        <RequestedHeight>250</RequestedHeight>
+      </DesktopSettings>
+    </Form>
+  </FormSettings>
+
+  <Permissions>ReadItem</Permissions>
+  <Rule xsi:type="RuleCollection" Mode="Or">
+    <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read" />
+  </Rule>
+  <DisableEntityHighlighting>false</DisableEntityHighlighting>
+
+  <VersionOverrides
+    xmlns="http://schemas.microsoft.com/office/mailappversionoverrides"
+    xsi:type="VersionOverridesV1_0">
+    <Requirements>
+      <bt:Sets DefaultMinVersion="1.9">
+        <bt:Set Name="Mailbox" />
+      </bt:Sets>
+    </Requirements>
+    <Hosts>
+      <Host xsi:type="MailHost">
+        <DesktopFormFactor>
+          <FunctionFile resid="Commands.Url" />
+
+          <!-- Read-message ribbon: one button, "Send to Claudia". -->
+          <ExtensionPoint xsi:type="MessageReadCommandSurface">
+            <OfficeTab id="TabDefault">
+              <Group id="claudiaGroup">
+                <Label resid="ClaudiaGroup.Label" />
+                <Control xsi:type="Button" id="sendToClaudiaButton">
+                  <Label resid="SendToClaudia.Label" />
+                  <Supertip>
+                    <Title resid="SendToClaudia.Title" />
+                    <Description resid="SendToClaudia.Tooltip" />
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon.16" />
+                    <bt:Image size="32" resid="Icon.32" />
+                    <bt:Image size="80" resid="Icon.80" />
+                  </Icon>
+                  <Action xsi:type="ExecuteFunction">
+                    <FunctionName>sendToClaudia</FunctionName>
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+
+    <Resources>
+      <bt:Images>
+        <!-- Outlook scales these per the slot. Using one source PNG is
+             fine for an MVP; replace with sharper 16/32/80 dedicated
+             files if the small-button rendering looks rough. -->
+        <bt:Image id="Icon.16" DefaultValue="https://c-lars-pms.pages.dev/img/logo-120.png" />
+        <bt:Image id="Icon.32" DefaultValue="https://c-lars-pms.pages.dev/img/logo-120.png" />
+        <bt:Image id="Icon.80" DefaultValue="https://c-lars-pms.pages.dev/img/logo-120.png" />
+      </bt:Images>
+      <bt:Urls>
+        <bt:Url id="Commands.Url" DefaultValue="https://c-lars-pms.pages.dev/outlook-addin/commands.html" />
+      </bt:Urls>
+      <bt:ShortStrings>
+        <bt:String id="ClaudiaGroup.Label" DefaultValue="Claudia" />
+        <bt:String id="SendToClaudia.Label" DefaultValue="Send to Claudia" />
+        <bt:String id="SendToClaudia.Title" DefaultValue="Send to Claudia" />
+      </bt:ShortStrings>
+      <bt:LongStrings>
+        <bt:String id="SendToClaudia.Tooltip"
+          DefaultValue="Send this email's contents to Claudia (your Pipeline assistant) for context and follow-up. Read-only — Claudia gets a copy, your inbox isn't changed." />
+      </bt:LongStrings>
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>

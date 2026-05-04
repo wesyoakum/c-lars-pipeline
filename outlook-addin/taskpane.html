@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <!--
+    Tiny taskpane — only shown if Outlook can't render the ribbon
+    button (e.g. older clients). Modern Outlook fires the function
+    command directly without ever opening this. Kept for manifest
+    completeness.
+  -->
+  <head>
+    <meta charset="utf-8" />
+    <title>Send to Claudia</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        margin: 0;
+        padding: 1rem;
+        font-size: 14px;
+        line-height: 1.45;
+        color: #1a1a22;
+      }
+      h1 { font-size: 16px; margin: 0 0 0.5rem; }
+      .muted { color: #64748b; }
+      button {
+        background: #2566ff; color: #fff; border: 0; border-radius: 4px;
+        padding: 8px 14px; font-size: 14px; cursor: pointer; margin-top: 0.5rem;
+      }
+      button:hover { background: #1245cc; }
+      #status { margin-top: 0.75rem; min-height: 1.5em; font-size: 13px; }
+      #status.ok { color: #166534; }
+      #status.err { color: #991b1b; }
+    </style>
+    <script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
+    <script src="commands.js" defer></script>
+  </head>
+  <body>
+    <h1>Send to Claudia</h1>
+    <p class="muted">
+      Send the current email to Claudia (your Pipeline assistant) for context
+      and follow-up.
+    </p>
+    <button id="send-btn">Send</button>
+    <div id="status"></div>
+    <script>
+      Office.onReady(() => {
+        const btn = document.getElementById('send-btn');
+        const status = document.getElementById('status');
+        btn.addEventListener('click', () => {
+          status.textContent = 'Sending…';
+          status.className = '';
+          // Reuse the same sendToClaudia function the ribbon button
+          // calls; pass a fake `event` whose completed() is a noop.
+          window.sendToClaudia({ completed: () => {
+            status.textContent = 'Done — check Claudia.';
+            status.className = 'ok';
+          } }).catch?.((err) => {
+            status.textContent = 'Failed: ' + (err?.message || err);
+            status.className = 'err';
+          });
+        });
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <!--
+    Hidden HTML wrapper that hosts the Office.js function commands.
+    Outlook loads this page invisibly when the add-in is activated;
+    it never renders to the user. The actual button handler lives in
+    commands.js.
+  -->
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <title>Send to Claudia — function commands</title>
+    <script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
+    <script src="commands.js" defer></script>
+  </head>
+  <body>
+    <!-- Intentionally empty. Function commands have no UI. -->
+  </body>
+</html>
