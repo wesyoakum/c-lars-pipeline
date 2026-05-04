@@ -19,6 +19,13 @@ import { checkInactivateBlockers } from '../../lib/inactivate-blocker.js';
 import { readBrief, regenerateBrief } from '../../lib/claudia-brief.js';
 import teamsProvider from '../../lib/notify-providers/teams.js';
 import {
+  searchMessages as gmailSearchMessages,
+  getMessage as gmailGetMessage,
+  listThreads as gmailListThreads,
+  getThread as gmailGetThread,
+} from '../../lib/gmail-api.js';
+import { getGmailConnectionStatus } from '../../lib/gmail-oauth.js';
+import {
   claudiaInsert,
   claudiaUpdate,
   claudiaUndo,
@@ -511,6 +518,97 @@ export async function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'search_gmail',
+      description:
+        'Search ${display}\'s connected Gmail using Google\'s standard q syntax. Read-only — no send, ' +
+        'no modify. Returns up to 25 messages by default (cap 100), each with id + threadId; call ' +
+        'read_gmail_message for the full body. ' +
+        'q syntax examples: ' +
+        '"from:tom@example.com" / "subject:RFQ" / "newer_than:7d" / "has:attachment" / ' +
+        '"is:unread label:inbox" / "to:me from:noreply" / "in:sent newer_than:30d". ' +
+        'Combine with spaces for AND ("from:tom newer_than:7d"), use OR explicitly ("from:tom OR from:bob"). ' +
+        'Use this when ${display} asks anything email-flavored: "what did Tom send?", "find that email about the RFQ", ' +
+        '"any unread from customers?", "search my Gmail for X". ' +
+        'If Gmail isn\'t connected, returns { error: "gmail_not_connected" } — surface that plainly and ' +
+        'point ${display} to /settings/claudia to connect.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          q: {
+            type: 'string',
+            description: 'Required. Gmail search query in Google\'s q syntax. Empty string returns recent messages from the inbox by default.',
+          },
+          max_results: {
+            type: 'integer',
+            description: 'Default 25, hard cap 100. Tighter is better for chat — call again with pageToken if you need more.',
+          },
+          page_token: {
+            type: 'string',
+            description: 'Pass nextPageToken from a previous call to fetch the next page.',
+          },
+        },
+        required: ['q'],
+      },
+    },
+    {
+      name: 'read_gmail_message',
+      description:
+        'Fetch one Gmail message by id, parsed into { from, to, cc, subject, date, body, attachments[] }. ' +
+        'Body is plaintext (text/plain part if available; otherwise text/html stripped). Truncated to ~50k chars ' +
+        'with body_truncated=true if longer. Attachments include filename + mime + size + attachment_id, but the ' +
+        'bytes themselves are NOT downloaded — Claudia\'s Gmail tools are metadata-only on attachments today.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Gmail message id (from search_gmail or list_gmail_threads).' },
+        },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'list_gmail_threads',
+      description:
+        'List Gmail THREADS (conversations, not individual messages) matching a q query. Useful when ' +
+        '${display} wants "all threads with Tom" or "every conversation about the RFQ" — threads group ' +
+        'replies so the summary is one row per back-and-forth. Returns up to 25 (cap 100). Call ' +
+        'read_gmail_thread for the full message list within a thread.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          q: { type: 'string', description: 'Gmail q syntax. Same as search_gmail.' },
+          max_results: { type: 'integer' },
+          page_token: { type: 'string' },
+        },
+        required: ['q'],
+      },
+    },
+    {
+      name: 'read_gmail_thread',
+      description:
+        'Fetch one Gmail thread (all messages in the conversation) by threadId. Returns ' +
+        '{ id, messages: [...same shape as read_gmail_message...] } in chronological order. Use this ' +
+        'instead of multiple read_gmail_message calls when ${display} wants the full back-and-forth.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Gmail thread id (from list_gmail_threads or a message\'s thread_id).' },
+        },
+        required: ['id'],
+      },
+    },
+    {
+      name: 'gmail_status',
+      description:
+        'Check whether Gmail is currently connected for ${display}. Returns { connected: bool, ' +
+        'connected_email?, connected_at?, last_refreshed_at?, last_error? }. Use this when a Gmail tool ' +
+        'returns gmail_not_connected, when ${display} asks "is Gmail connected?", or when you want to ' +
+        'mention the connected account ("looking at your Gmail tom@gmail.com — found 3 unread").',
+      input_schema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+    {
       name: 'read_account_intel',
       description:
         'Read the AI-driven intel notes you maintain on one account — a markdown blob distinct from ' +
@@ -952,6 +1050,16 @@ export async function makeAssistantTools({ env, user }) {
         return createOpportunity(env, user, input);
       case 'update_opportunity':
         return updateOpportunity(env, user, input);
+      case 'search_gmail':
+        return searchGmail(env, user, input);
+      case 'read_gmail_message':
+        return readGmailMessage(env, user, input);
+      case 'list_gmail_threads':
+        return listGmailThreads(env, user, input);
+      case 'read_gmail_thread':
+        return readGmailThread(env, user, input);
+      case 'gmail_status':
+        return gmailStatus(env, user, input);
       case 'read_account_intel':
         return readAccountIntel(env, user, input);
       case 'set_account_intel':
@@ -1004,6 +1112,81 @@ export async function listTableNames(env) {
 }
 
 // ---------- Implementations ----------
+
+// ---------- Gmail (read-only) ----------
+
+/**
+ * Wrap a Gmail tool call so the various error codes from
+ * lib/gmail-oauth.js (gmail_not_connected, refresh_failed) come back
+ * as structured tool results Claudia can surface, instead of throwing.
+ */
+async function gmailGuard(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (err?.code === 'gmail_not_connected') {
+      return {
+        error: 'gmail_not_connected',
+        message: 'Gmail is not connected. Send Wes to /settings/claudia to connect.',
+      };
+    }
+    if (err?.code === 'refresh_failed') {
+      return {
+        error: 'gmail_refresh_failed',
+        message: 'Gmail refresh token failed (commonly: expired in Testing mode after 7 days, or revoked). Send Wes to /settings/claudia to reconnect.',
+        detail: err.message,
+      };
+    }
+    return { error: 'gmail_call_failed', message: err?.message || String(err) };
+  }
+}
+
+async function searchGmail(env, user, { q, max_results, page_token } = {}) {
+  return gmailGuard(async () => {
+    const result = await gmailSearchMessages(env, user.id, {
+      q: String(q || ''),
+      maxResults: max_results,
+      pageToken: page_token,
+    });
+    return {
+      messages: result.messages || [],
+      next_page_token: result.nextPageToken || null,
+      result_size_estimate: result.resultSizeEstimate ?? null,
+      count: (result.messages || []).length,
+    };
+  });
+}
+
+async function readGmailMessage(env, user, { id } = {}) {
+  if (!id) throw new Error('read_gmail_message requires id.');
+  return gmailGuard(() => gmailGetMessage(env, user.id, String(id)));
+}
+
+async function listGmailThreads(env, user, { q, max_results, page_token } = {}) {
+  return gmailGuard(async () => {
+    const result = await gmailListThreads(env, user.id, {
+      q: String(q || ''),
+      maxResults: max_results,
+      pageToken: page_token,
+    });
+    return {
+      threads: result.threads || [],
+      next_page_token: result.nextPageToken || null,
+      result_size_estimate: result.resultSizeEstimate ?? null,
+      count: (result.threads || []).length,
+    };
+  });
+}
+
+async function readGmailThread(env, user, { id } = {}) {
+  if (!id) throw new Error('read_gmail_thread requires id.');
+  return gmailGuard(() => gmailGetThread(env, user.id, String(id)));
+}
+
+async function gmailStatus(env, user) {
+  const status = await getGmailConnectionStatus(env, user.id);
+  return status;
+}
 
 async function readAccountIntel(env, user, { account_id } = {}) {
   const id = String(account_id || '').trim();
