@@ -24,7 +24,14 @@ import { unauthorizedResponse } from './lib/layout.js';
 //     via Access (no interactive login), so those endpoints enforce
 //     their own constant-time CRON_SECRET header check. See
 //     functions/api/cron/sweep.js.
-const PUBLIC_PREFIXES = ['/css/', '/js/', '/img/', '/favicon.ico', '/api/cron/'];
+//   - /api/email-ingest — the Outlook add-in's iframe has no Access
+//     cookie. Endpoint enforces its own OUTLOOK_ADDIN_SECRET bearer
+//     check + WES_KNOWN_EMAILS recipient allowlist. See
+//     functions/api/email-ingest.js.
+//   - /outlook-addin/ — manifest, commands.html/js, taskpane.html for
+//     the Outlook add-in. Public by design (the shared secret in
+//     commands.js is documented in docs/outlook-addin-setup.md).
+const PUBLIC_PREFIXES = ['/css/', '/js/', '/img/', '/favicon.ico', '/api/cron/', '/api/email-ingest', '/outlook-addin/'];
 
 export async function onRequest(context) {
   const { request, env, next } = context;
