@@ -2,27 +2,34 @@
 //
 // GET /wfm/oauth-callback
 //
-// One-shot landing page for the BlueRock WorkflowMax OAuth bootstrap.
-// The developer-portal app is registered with this URL as its
-// redirect URI; after the user grants consent, BlueRock sends the
-// browser here with a `?code=…&state=…` query string.
+// Landing page for the BlueRock WorkflowMax OAuth flow. The
+// developer-portal app is registered with this URL as its redirect
+// URI; after the user grants consent, BlueRock sends the browser
+// here with a `?code=…&state=…` query string.
 //
-// Nothing on the server side has to do anything with the code — the
-// refresh token is captured offline via curl from the dev workstation
-// (see docs/wfm-api-oauth-setup.md §3). This page just makes the code
-// easy to copy: it shows it in a big monospace box with a copy
-// button, plus the matching curl command pre-filled with the
-// redirect URI.
+// Two flows, switched by `state`:
 //
-// Once Phase 1 of the migration is done and we have a stable refresh
-// token in `.env.local`, this route can stay (harmless idle) or be
-// removed; the bootstrap is one-time per developer machine.
+//   1. state=phase0-bootstrap (legacy / migration-script flow)
+//      Shows the auth code in a monospace box plus a pre-baked
+//      `node scripts/wfm/api-client.mjs --bootstrap-token <CODE>`
+//      command. The user runs that locally; the script writes the
+//      refresh token to .env.local. Used by docs/wfm-api-oauth-setup.md
+//      and the local migration scripts.
+//
+//   2. anything else (default — used by /settings/wfm-import Reconnect)
+//      Auto-exchanges the auth code for tokens server-side, writes
+//      them directly to the wfm_credentials D1 row, and redirects to
+//      /settings/wfm-import?reconnected=1. Single-click reconnect, no
+//      terminal step.
 //
 // Cloudflare Access is in front of the Pages deployment, so the user
-// will already be signed in when BlueRock redirects here — no extra
-// auth step.
+// is already signed in when BlueRock redirects here.
 
 import { layout, htmlResponse, html, escape } from '../lib/layout.js';
+import { run } from '../lib/db.js';
+import { decodeJwtPayload, extractOrgIdFromJwt } from '../lib/wfm-client.js';
+
+const TOKEN_URL = 'https://oauth.workflowmax.com/oauth/token';
 
 export async function onRequestGet(context) {
   const { data, request } = context;
@@ -69,6 +76,78 @@ export async function onRequestGet(context) {
       `,
       { user }
     ));
+  }
+
+  // ============================================================
+  // Auto-exchange path — used when the user clicks "Reconnect" on
+  // /settings/wfm-import (or any other entry that doesn't request
+  // the legacy migration-script flow). We POST the auth code to
+  // BlueRock server-side, get back access + refresh tokens, write
+  // them straight to wfm_credentials, and redirect back to settings.
+  //
+  // The legacy state=phase0-bootstrap value falls through to the
+  // "show the code, run a node command locally" UI further below
+  // (preserved for the migration-script docs).
+  // ============================================================
+  if (state !== 'phase0-bootstrap') {
+    const clientId = context.env?.WFM_CLIENT_ID;
+    const clientSecret = context.env?.WFM_CLIENT_SECRET;
+    if (!clientId || !clientSecret) {
+      return reconnectErrorPage(user,
+        'WFM_CLIENT_ID / WFM_CLIENT_SECRET are not set in Pages env. ' +
+        'Set them via `npx wrangler pages secret put` and retry.');
+    }
+
+    let payload;
+    try {
+      const reqBody = new URLSearchParams({
+        grant_type:    'authorization_code',
+        code,
+        client_id:     clientId,
+        client_secret: clientSecret,
+        redirect_uri:  redirectUri,
+      });
+      // BlueRock rejects Basic auth on the token endpoint — body params only.
+      const tokenRes = await fetch(TOKEN_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: reqBody,
+      });
+      const text = await tokenRes.text();
+      if (!tokenRes.ok) {
+        return reconnectErrorPage(user,
+          `BlueRock token exchange failed (${tokenRes.status}): ${text.slice(0, 400)}. ` +
+          'Common causes: the auth code was already used (single-use), or you took >10 min to land here.');
+      }
+      payload = JSON.parse(text);
+    } catch (err) {
+      return reconnectErrorPage(user, `Token exchange threw: ${err?.message || String(err)}`);
+    }
+
+    const accessToken  = payload.access_token;
+    const refreshToken = payload.refresh_token;
+    const expiresIn    = Number(payload.expires_in) || 1800;
+    if (!accessToken || !refreshToken) {
+      return reconnectErrorPage(user,
+        `Token response missing required fields. Payload: ${JSON.stringify(payload).slice(0, 300)}`);
+    }
+    const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+    const orgId = extractOrgIdFromJwt(decodeJwtPayload(accessToken)) || '';
+
+    try {
+      await run(context.env.DB,
+        `UPDATE wfm_credentials
+            SET refresh_token = ?, access_token = ?, access_expires_at = ?,
+                org_id = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+          WHERE id = 1`,
+        [refreshToken, accessToken, expiresAt, orgId]);
+    } catch (err) {
+      return reconnectErrorPage(user,
+        `Got the tokens from BlueRock but the D1 write failed: ${err?.message || String(err)}. ` +
+        `Try Reconnect again in a moment.`);
+    }
+
+    return Response.redirect(`${url.origin}/settings/wfm-import?reconnected=1`, 302);
   }
 
   // Pre-baked Node command — reads WFM_CLIENT_ID / WFM_CLIENT_SECRET
@@ -155,4 +234,19 @@ node scripts/wfm/probe.mjs</code></pre>
   `;
 
   return htmlResponse(layout('WFM OAuth — got the code', body, { user }));
+}
+
+function reconnectErrorPage(user, message) {
+  return htmlResponse(layout('WFM reconnect — failed',
+    html`
+      <section class="card" style="margin-top:1rem;max-width:720px">
+        <h1>Reconnect failed</h1>
+        <p>${escape(message)}</p>
+        <p style="margin-top:1rem">
+          <a href="/settings/wfm-import" class="btn">← Back to WFM settings</a>
+        </p>
+      </section>
+    `,
+    { user }
+  ));
 }

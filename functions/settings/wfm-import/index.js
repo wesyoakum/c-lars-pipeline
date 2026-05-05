@@ -47,8 +47,36 @@ export async function onRequestGet(context) {
   const hasRefresh  = !!(creds && creds.has_refresh);
   const ready       = hasOauthApp && hasRefresh;
 
+  // Build the BlueRock authorize URL for the one-click reconnect.
+  // Lands at /wfm/oauth-callback, which auto-exchanges the code and
+  // writes refresh_token back to wfm_credentials. state isn't checked
+  // for security (Cloudflare Access already authenticated the user)
+  // but we set it for BlueRock's audit log clarity. Anything other
+  // than `phase0-bootstrap` triggers the auto-exchange path.
+  const authorizeUrl = hasOauthApp
+    ? 'https://oauth.workflowmax.com/oauth/authorize'
+      + '?response_type=code'
+      + '&client_id=' + encodeURIComponent(env.WFM_CLIENT_ID)
+      + '&redirect_uri=' + encodeURIComponent(`${url.origin}/wfm/oauth-callback`)
+      + '&scope=' + encodeURIComponent('openid profile email workflowmax offline_access')
+      + '&state=reconnect'
+      + '&prompt=consent'
+    : '#';
+
+  const justReconnected = url.searchParams.get('reconnected') === '1';
+
   const body = html`
     ${settingsSubNav('wfm-import', true, user?.email === 'wes.yoakum@c-lars.com')}
+
+    ${justReconnected ? html`
+      <section class="card" style="margin-top:1rem;background:#e6f4ea;border-color:#9bcfa6">
+        <p style="margin:0">
+          <strong style="color:#1a7f37">✓ Reconnected.</strong>
+          A fresh refresh token has been written to D1.
+          ${creds?.org_id ? html` Org ID: <code>${escape(creds.org_id)}</code>.` : ''}
+        </p>
+      </section>
+    ` : ''}
 
     <section class="card" style="margin-top:1rem">
       <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap">
@@ -95,29 +123,39 @@ export async function onRequestGet(context) {
       </div>
 
       ${hasOauthApp ? html`
-        <!-- =============== Refresh-token paste form (for first-time + recovery) =============== -->
+        <!-- =============== Reconnect panel — one-click OAuth =============== -->
         <section id="reconnect-panel" class="card"
                  style="margin-top:1rem;border-color:#d4a72c;display:${ready ? 'none' : 'block'}">
           <h2 style="margin-top:0">${ready ? 'Reconnect WFM' : 'Connect WFM'}</h2>
           <p class="muted" style="margin-top:0">
             ${ready
-              ? html`<strong>Paste a fresh refresh token here when re-authentication is needed</strong> (e.g. after a "Refresh token reuse detected" error from BlueRock).`
-              : html`Paste the <code>WFM_REFRESH_TOKEN</code> here to connect.`}
-            BlueRock rotates the token on every refresh; we persist the
-            new value back to D1 immediately. If a transient D1 timeout
-            ever loses the rotated token, re-bootstrap via:
+              ? html`Reconnect when you see <code>RECONNECT_REQUIRED</code> errors, "Refresh token reuse detected" from BlueRock, or every ~60 days (refresh token expiry).`
+              : html`Sign in to WorkflowMax and click Allow — the refresh token will be saved to D1 automatically.`}
           </p>
-          <ol class="muted" style="margin:.4rem 0 .6rem 1.2rem;font-size:.85em;line-height:1.5">
-            <li>Open the BlueRock OAuth authorize URL in a browser, sign in, copy the <code>code=</code> param from the redirect.</li>
-            <li>Locally: <code style="background:rgba(0,0,0,0.05);padding:.1rem .3rem;border-radius:3px">node scripts/wfm/api-client.mjs --bootstrap-token &lt;CODE&gt;</code></li>
-            <li>Copy the new <code>WFM_REFRESH_TOKEN</code> from <code>.env.local</code> and paste it below.</li>
-          </ol>
-          <form id="creds-form" style="display:flex;gap:.5rem;align-items:flex-start;flex-wrap:wrap">
-            <input type="password" name="refresh_token" placeholder="WFM refresh token" required
-                   style="flex:1;min-width:280px;font-family:ui-monospace,monospace;font-size:.85rem;padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px">
-            <button type="submit" class="btn primary">Save & test</button>
-          </form>
-          <p id="creds-status" class="muted" style="margin-top:.6rem;font-size:.85em"></p>
+
+          <p style="margin-top:1rem">
+            <a href="${authorizeUrl}" class="btn primary" style="font-size:.95rem">
+              ${ready ? 'Reconnect via BlueRock →' : 'Connect via BlueRock →'}
+            </a>
+          </p>
+          <p class="muted" style="margin-top:.4rem;font-size:.8rem">
+            Opens WorkflowMax. After you click Allow there, you'll be redirected back here automatically.
+          </p>
+
+          <details style="margin-top:1.2rem">
+            <summary style="cursor:pointer;font-weight:600;font-size:.9rem">Manual fallback (paste refresh token)</summary>
+            <p class="muted" style="margin-top:.6rem;font-size:.85em">
+              Use only if the one-click reconnect above fails. Get the token by running
+              <code style="background:rgba(0,0,0,0.05);padding:.1rem .3rem;border-radius:3px">node scripts/wfm/api-client.mjs --bootstrap-token &lt;CODE&gt;</code>
+              locally and pasting the value from <code>.env.local</code> here.
+            </p>
+            <form id="creds-form" style="display:flex;gap:.5rem;align-items:flex-start;flex-wrap:wrap;margin-top:.6rem">
+              <input type="password" name="refresh_token" placeholder="WFM refresh token" required
+                     style="flex:1;min-width:280px;font-family:ui-monospace,monospace;font-size:.85rem;padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px">
+              <button type="submit" class="btn">Save & test</button>
+            </form>
+            <p id="creds-status" class="muted" style="margin-top:.6rem;font-size:.85em"></p>
+          </details>
         </section>
         <script>
           document.getElementById('creds-form').addEventListener('submit', async function (e) {
