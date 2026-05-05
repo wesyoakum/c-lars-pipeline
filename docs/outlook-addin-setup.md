@@ -156,10 +156,14 @@ involve any of your known addresses. Either it's the wrong email or
 you need to add the address to `WES_KNOWN_EMAILS` in
 `functions/api/email-ingest.js`.
 
+If you get **"Failed: Mailbox API < 1.14"** — your Outlook build
+predates `getAsFileAsync`. Run **File** → **Office Account** →
+**Update Options** → **Update Now** and restart Outlook. Build
+≥ 16.0.16xxx is required (most builds from 2023+).
+
 If the Send button doesn't appear — sideload didn't take. Restart
 Outlook (sometimes a re-launch is needed). On Outlook desktop, also
-try **File** → **Office Account** → **Update Options** → **Update Now**
-to make sure your Mailbox API version is ≥ 1.9.
+try **File** → **Office Account** → **Update Options** → **Update Now**.
 
 ## 6. Rotating the secret
 

@@ -2,9 +2,9 @@
 //
 // "Send to Claudia" function command for the Outlook ribbon button.
 // When the user clicks the button:
-//   1. Read the current message's MIME content via getMimeContentAsync.
-//   2. Base64-encode it and POST to /api/email-ingest with the shared
-//      bearer token below.
+//   1. Read the current message as a Base64-encoded EML via
+//      getAsFileAsync (Mailbox 1.14+, ReadItem).
+//   2. POST it to /api/email-ingest with the shared bearer token below.
 //   3. Show a transient notification on the message ("Sent to Claudia
 //      ✓" / "Failed: <reason>"). Dismisses itself after a few seconds.
 //
@@ -54,9 +54,8 @@ async function sendToClaudia(event) {
 
     await showNotification('Sending to Claudia…', 'progressIndicator');
 
-    // 1. Get the raw MIME bytes of this message.
-    const mimeContent = await getMimeContentAsync(item);
-    // mimeContent is a base64 string already.
+    // 1. Get the raw MIME bytes of this message as a base64 EML.
+    const mimeContent = await getAsFileAsync(item);
 
     // 2. POST to the ingest endpoint.
     const safeFilename = (subject.replace(/[^\w\s.-]+/g, '_').slice(0, 80) || 'email') + '.eml';
@@ -108,18 +107,18 @@ window.sendToClaudia = sendToClaudia;
 // Helpers
 // ---------------------------------------------------------------
 
-function getMimeContentAsync(item) {
+function getAsFileAsync(item) {
   return new Promise((resolve, reject) => {
-    if (typeof item.getMimeContentAsync !== 'function') {
-      reject(new Error('Mailbox API < 1.9 — getMimeContentAsync unavailable. Update Outlook.'));
+    if (typeof item.getAsFileAsync !== 'function') {
+      reject(new Error('Mailbox API < 1.14 — getAsFileAsync unavailable. Update Outlook.'));
       return;
     }
-    item.getMimeContentAsync({ asyncContext: null }, (result) => {
+    item.getAsFileAsync((result) => {
       if (result.status !== Office.AsyncResultStatus.Succeeded) {
-        reject(new Error('getMimeContentAsync failed: ' + (result.error?.message || result.status)));
+        reject(new Error('getAsFileAsync failed: ' + (result.error?.message || result.status)));
         return;
       }
-      resolve(result.value); // base64-encoded MIME
+      resolve(result.value); // base64-encoded EML
     });
   });
 }
