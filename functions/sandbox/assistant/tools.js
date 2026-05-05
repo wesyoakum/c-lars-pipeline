@@ -36,6 +36,7 @@ import {
   PERMISSION_GATED_ACTIONS,
   loadPermissionMap,
 } from '../../lib/claudia-permissions.js';
+import { wfmSearch, wfmGet } from './wfm-tools.js';
 
 /**
  * Build the toolset bound to a particular request (env + acting user).
@@ -972,6 +973,60 @@ export async function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'wfm_search',
+      description:
+        'Fuzzy-search WFM (BlueRock WorkflowMax) records by name or short ID. Read-only, hits WFM live. ' +
+        'Use when WFM is the source of truth (jobs in flight, current quote status, freshly-promoted ' +
+        'leads) and Pipeline\'s synced copy might be stale or missing — for example, when ${display} ' +
+        'asks "where does this stand in WFM?" and you need to look up the current record. ' +
+        '`type` is one of: client | lead | quote | job | invoice. ' +
+        'Returns up to 20 matches as { uuid, id, name, state, client? }. Pass the uuid (preferred) or ' +
+        'short id back into wfm_get for the full record + first-level relations. ' +
+        'If WFM is not connected, returns { error: "wfm_not_connected" } — surface that and point ' +
+        '${display} to /settings/wfm-import.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['client', 'lead', 'quote', 'job', 'invoice'],
+            description: 'Which WFM entity to search.',
+          },
+          query: {
+            type: 'string',
+            description: 'Substring to match against the record\'s Name, ID, or parent client name.',
+          },
+          limit: { type: 'integer', description: 'Default 20, hard cap 50.' },
+        },
+        required: ['type', 'query'],
+      },
+    },
+    {
+      name: 'wfm_get',
+      description:
+        'Fetch one WFM record by UUID or short ID, plus first-level relations. Read-only. ' +
+        'Use after wfm_search picks the right candidate, OR when you already have the WFM ID/UUID ' +
+        '(e.g. from a Pipeline `external_id` column on accounts/opportunities). ' +
+        'First-level relations chased automatically: quote → job (via JobUUID), job → approved quote ' +
+        '(via ApprovedQuoteUUID), invoice → job (via JobUUID), lead → quote (scans current quotes for ' +
+        'matching LeadUUID). Client and lead responses already include nested contacts/owner. ' +
+        'If the record is not found, returns { error: "wfm_not_found" }.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['client', 'lead', 'quote', 'job', 'invoice'],
+          },
+          id: {
+            type: 'string',
+            description: 'UUID (a012...) or short ID (J25024, Q25008, INV-0003).',
+          },
+        },
+        required: ['type', 'id'],
+      },
+    },
+    {
       name: 'query_db',
       description:
         'Run a single read-only SELECT (or WITH ... SELECT) against the Pipeline D1 database. Returns ' +
@@ -1020,6 +1075,10 @@ export async function makeAssistantTools({ env, user }) {
         return describeSchema(env, input);
       case 'query_db':
         return queryDb(env, input);
+      case 'wfm_search':
+        return wfmSearch(env, input);
+      case 'wfm_get':
+        return wfmGet(env, input);
       case 'get_calendar_events':
         return getCalendarEvents(env, user, input);
       case 'list_documents':
