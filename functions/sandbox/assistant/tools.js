@@ -212,6 +212,8 @@ export async function makeAssistantTools({ env, user }) {
           include_trashed: { type: 'boolean', description: 'Include documents whose retention is "trashed". Default false.' },
           retention: { type: 'string', enum: ['auto', 'keep_forever', 'trashed'], description: 'Optional exact-match retention filter.' },
           since: { type: 'integer', description: 'Only return docs with seq > this number. Use to fetch new arrivals since a previous list.' },
+          seq: { type: 'integer', description: 'Exact-seq lookup — returns at most one row, the doc whose seq equals this. Use when ${display} asks "what is #N?" to fetch that specific doc directly.' },
+          before_seq: { type: 'integer', description: 'Only return docs with seq < this number. Use to walk BACKWARD from a known seq (e.g., paginate older docs).' },
           limit: { type: 'integer', description: 'Max rows to return. Default 30, hard cap 100.' },
         },
       },
@@ -1436,7 +1438,7 @@ async function queryDb(env, { sql }) {
 
 const READ_DOCUMENT_MAX_CHARS = 50_000;
 
-async function listDocuments(env, user, { include_trashed, retention, since, limit } = {}) {
+async function listDocuments(env, user, { include_trashed, retention, since, seq, before_seq, limit } = {}) {
   const cap = Math.min(Math.max(Number(limit) || 30, 1), 100);
   const params = [user.id];
   let where = 'user_id = ?';
@@ -1446,10 +1448,23 @@ async function listDocuments(env, user, { include_trashed, retention, since, lim
   } else if (!include_trashed) {
     where += " AND retention != 'trashed'";
   }
-  const sinceN = Number(since);
-  if (Number.isFinite(sinceN) && sinceN >= 0) {
-    where += ' AND seq > ?';
-    params.push(sinceN);
+  // Exact-seq lookup short-circuits other filters: it's a "give me #N"
+  // query, no range or recency logic needed.
+  const seqN = Number(seq);
+  if (Number.isFinite(seqN)) {
+    where += ' AND seq = ?';
+    params.push(seqN);
+  } else {
+    const sinceN = Number(since);
+    if (Number.isFinite(sinceN) && sinceN >= 0) {
+      where += ' AND seq > ?';
+      params.push(sinceN);
+    }
+    const beforeN = Number(before_seq);
+    if (Number.isFinite(beforeN) && beforeN >= 0) {
+      where += ' AND seq < ?';
+      params.push(beforeN);
+    }
   }
   params.push(cap);
   const rows = await all(
