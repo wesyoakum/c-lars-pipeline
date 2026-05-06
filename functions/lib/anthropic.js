@@ -35,6 +35,16 @@ function requireKey(env) {
   return key;
 }
 
+// Opus 4.7 (and likely later models) deprecated the `temperature`
+// parameter — passing it returns 400. We omit it for these models and
+// keep the existing default for everything else. Centralizing here so
+// both messages() and messagesWithTools() pick up the same rule.
+function supportsTemperature(model) {
+  const m = String(model || '').toLowerCase();
+  if (m.startsWith('claude-opus-4-7')) return false;
+  return true;
+}
+
 /**
  * Send a Messages request and return Claude's parsed response.
  *
@@ -59,7 +69,7 @@ export async function messages(env, opts) {
   const body = {
     model,
     max_tokens: opts.maxTokens ?? 2048,
-    temperature: opts.temperature ?? 0.2,
+    ...(supportsTemperature(model) ? { temperature: opts.temperature ?? 0.2 } : {}),
     system: systemBlock,
     messages: [{ role: 'user', content: opts.user }],
   };
@@ -194,7 +204,7 @@ export async function messagesWithTools(env, opts) {
     const body = {
       model,
       max_tokens: opts.maxTokens ?? 4096,
-      temperature: opts.temperature ?? 0.2,
+      ...(supportsTemperature(model) ? { temperature: opts.temperature ?? 0.2 } : {}),
       system: systemBlock,
       tools: opts.tools,
       messages,
