@@ -52,38 +52,50 @@ export async function onRequestPost(context) {
     return jsonResponse({ ok: false, error: `too many ids (${ids.length} > ${MAX_IDS_PER_REQUEST})` }, 400);
   }
 
+  // D1 caps bound parameters at ~100 per statement (much tighter than
+  // SQLite's 999). With 3 fixed params (ts, ts, user.id) we have ~97
+  // slots for IDs. Chunk well under that to leave headroom and to
+  // avoid long-running statements on large batches. Each chunk's
+  // UPDATE is independent — already-trashed rows from a prior chunk
+  // are no-ops (the WHERE retention != 'trashed' clause), so a retry
+  // mid-batch is safe.
+  const CHUNK_SIZE = 50;
   const ts = now();
-  const placeholders = ids.map(() => '?').join(',');
-  let meta;
-  try {
-    // db.js's run() already unwraps to result.meta for us, so the
-    // returned object IS the meta — `meta.changes` directly, NOT
-    // `meta.meta.changes`. Earlier draft of this file had the wrong
-    // path; the trashed count came back as 0 even on success.
-    meta = await run(
-      env.DB,
-      `UPDATE claudia_documents
-          SET retention = 'trashed',
-              updated_at = ?,
-              trashed_at = ?
-        WHERE user_id = ?
-          AND retention != 'trashed'
-          AND id IN (${placeholders})`,
-      [ts, ts, user.id, ...ids]
-    );
-  } catch (err) {
-    // Surface the actual SQL error so the client alert shows something
-    // useful instead of a generic "unknown error".
-    console.error('[bulk-trash] sql error:', err?.message || err, '\nids count:', ids.length);
-    return jsonResponse({
-      ok: false,
-      error: 'sql: ' + (err?.message || String(err)),
-    }, 500);
+  let trashed = 0;
+
+  for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + CHUNK_SIZE);
+    const placeholders = chunk.map(() => '?').join(',');
+    let meta;
+    try {
+      // db.js's run() already unwraps to result.meta for us, so the
+      // returned object IS the meta — `meta.changes` directly, NOT
+      // `meta.meta.changes`.
+      meta = await run(
+        env.DB,
+        `UPDATE claudia_documents
+            SET retention = 'trashed',
+                updated_at = ?,
+                trashed_at = ?
+          WHERE user_id = ?
+            AND retention != 'trashed'
+            AND id IN (${placeholders})`,
+        [ts, ts, user.id, ...chunk]
+      );
+    } catch (err) {
+      console.error('[bulk-trash] sql error on chunk', i, '–', i + chunk.length, ':',
+        err?.message || err, 'ids count:', ids.length);
+      return jsonResponse({
+        ok: false,
+        // Even on partial failure, report what we did manage to trash
+        // so the client can refresh accurately.
+        error: 'sql: ' + (err?.message || String(err)),
+        trashed,
+      }, 500);
+    }
+    trashed += meta?.changes ?? 0;
   }
 
-  // meta.changes reflects rows actually updated (skipping already-
-  // trashed and any IDs that didn't belong to the user).
-  const trashed = meta?.changes ?? 0;
   return jsonResponse({ ok: true, trashed });
 }
 
