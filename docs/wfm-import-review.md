@@ -26,29 +26,53 @@ that lets him click through proposed changes per record before
 anything writes. Same architecture handles the bulk pull AND the
 delta sync.
 
-## 2. Behavior
+## 2. Behavior — three-way merge per field
 
-For each WFM record encountered during an import:
+The importer keeps a snapshot of the last WFM value it saw for every
+field of every record (see §3). This turns each re-import into a
+proper three-way merge: `base = snapshot`, `wfm = current WFM`,
+`pipe = current Pipeline`. Per-field classification:
+
+| Case | base | wfm | pipe | Action |
+|---|---|---|---|---|
+| 1 | a | a | a | SKIP — nothing moved |
+| 2 | a | a | b | SKIP — Pipeline moved, WFM stable; preserve user edit |
+| 3 | a | b | a | AUTO-APPLY — WFM moved, Pipeline still matches old; fast-forward |
+| 4 | a | b | b | SKIP — both moved to the same value, already in sync |
+| 5 | a | b | c | **CONFLICT** — both moved to different values, queue for user |
+| 6 | (none) | b | (none) | INSERT — new record, no Pipeline row |
+| 7 | (none) | b | b | SKIP — record exists in Pipeline but no snapshot yet (first delta after bulk pull); equality means we're already in sync |
+| 8 | (none) | b | c | **CONFLICT** — exists in Pipeline but no snapshot AND values disagree; can't tell who's right, queue for user |
+
+After every import (whether the field was applied, skipped, or
+deferred to user) the snapshot is refreshed to the latest WFM
+payload. That means cases 5/8 only surface as conflicts ONCE per
+WFM-side change, even if Pipeline stays disagreeing.
+
+For each WFM record:
 
 1. Fetch the matching Pipeline row by `(external_source='wfm',
-   external_id=<wfm_uuid>)`.
-2. Classify:
-   - **new** — no Pipeline row → INSERT (no conflict, queue for
-     approval as a single bulk item)
-   - **unchanged** — all fields equal → SKIP silently (doesn't
-     appear in review)
-   - **conflict** — at least one field differs → queue with the
-     specific field-level diff
-3. Nothing writes to the live tables. All proposals land in a
-   pending queue.
-4. User reviews via UI, decides per record (or bulk-accepts in
-   common-case categories), commits.
-5. Commit applies only the approved fields, writes audit rows,
-   clears the pending queue.
+   external_id=<wfm_uuid>)` AND the corresponding snapshot from
+   `wfm_import_snapshots`.
+2. Classify each field per the table above.
+3. Aggregate at the record level:
+   - All fields SKIP → record marked **unchanged** (silent)
+   - Mix of AUTO-APPLY + SKIP → **autoApply** (no user input needed,
+     applied straight through but logged in the run report)
+   - Any CONFLICT field → **conflict** queued for review (other
+     fields shown as context but pre-decided)
+   - INSERT → queued for review as a single approve-or-reject card
+4. Live tables aren't written until the user clicks Commit (except
+   AUTO-APPLY in case 3 — those write immediately, log to
+   `claudia_writes`, and don't appear in the review queue).
+5. Snapshot table is updated as part of every successful write.
 
 ## 3. Schema
 
-New table:
+Two new tables.
+
+**`wfm_import_pending`** — the review queue. Populated on dry-run,
+drained on commit:
 
 ```sql
 CREATE TABLE wfm_import_pending (
@@ -61,7 +85,7 @@ CREATE TABLE wfm_import_pending (
   pipeline_row_id TEXT,                        -- NULL for inserts
   wfm_payload_json    TEXT NOT NULL,           -- the WFM source as JSON
   pipeline_snapshot_json TEXT,                 -- Pipeline row as JSON (NULL for inserts)
-  fields_diff_json    TEXT NOT NULL,           -- {field: {pipeline, wfm}} for the diff
+  fields_diff_json    TEXT NOT NULL,           -- {field: {base, pipeline, wfm}} for the 3-way diff
   status          TEXT NOT NULL DEFAULT 'pending'
                     CHECK (status IN ('pending','approved','rejected','applied','superseded')),
   decided_at      TEXT,                        -- ISO 8601 when user clicked
@@ -82,6 +106,30 @@ came from the May 6 delta sync."
 generates a fresh pending row for the same `(entity_type,
 external_id)` while a prior one is still un-decided — the older
 becomes superseded and is hidden from the UI.
+
+**`wfm_import_snapshots`** — the per-field "base" for three-way
+merge. Stores the last WFM payload we saw for each record so future
+re-imports can detect WFM-side vs Pipeline-side changes
+independently:
+
+```sql
+CREATE TABLE wfm_import_snapshots (
+  entity_type     TEXT NOT NULL,               -- 'account' | 'contact' | …
+  external_id     TEXT NOT NULL,               -- WFM UUID
+  payload_json    TEXT NOT NULL,               -- last WFM payload, normalized
+  last_seen_at    TEXT NOT NULL,               -- when this snapshot was last refreshed
+  PRIMARY KEY (entity_type, external_id)
+);
+```
+
+The snapshot is the canonical "what did WFM look like the last time
+we saw it" — refreshed on every successful apply (and on AUTO-APPLY
+case 3) but NOT on case-2 skips (since we didn't pull WFM there;
+WFM didn't change, so the snapshot is already correct).
+
+Snapshot entries are seeded by the initial bulk pull. Records
+imported before this plan ships have no snapshot — case 7/8 of the
+behavior table handles that gracefully.
 
 ## 4. Endpoints
 
@@ -141,14 +189,22 @@ each can evolve independently as edge cases come up.
 
 ## 7. Rollout phases
 
-1. **Schema migration** — add `wfm_import_pending` table.
-2. **Dry-run handler** — wire `POST /settings/wfm-import/dry-run`
-   for one entity (start with `accounts`); use the existing
-   `wfm-client.js` to fetch + the new normalizer + insert to
-   pending.
-3. **Pending list UI** — render the cards for one entity.
-4. **Decide + apply** — write the two endpoints; commit applies the
-   live writes.
+1. **Schema migration** — add `wfm_import_pending` and
+   `wfm_import_snapshots` tables. Backfill `wfm_import_snapshots`
+   from any existing imported records (run a one-shot pull from
+   WFM and seed the snapshot table with current values; future
+   re-imports will work normally from there).
+2. **Dry-run handler with three-way merge** — wire
+   `POST /settings/wfm-import/dry-run` for one entity (start with
+   `accounts`); use the existing `wfm-client.js` to fetch + the new
+   normalizer + the case 1–8 classifier + insert to pending (or
+   AUTO-APPLY case 3 directly).
+3. **Pending list UI** — render the cards for one entity, with the
+   3-way display (base / pipe / wfm side-by-side per conflicting
+   field).
+4. **Decide + apply** — write the decide and apply endpoints;
+   commit applies the live writes AND refreshes
+   `wfm_import_snapshots` per touched record.
 5. **Roll out to remaining entities** — contacts, opportunities,
    quotes, jobs, invoices.
 6. **Bulk actions** — "accept WFM where Pipeline empty",
@@ -158,15 +214,17 @@ each can evolve independently as edge cases come up.
 
 ## 8. Verification
 
-- After initial bulk pull and review/apply: re-run dry-run
-  immediately → expect `0 new · 0 conflicts`, all unchanged.
-- Edit one record in WFM → re-run → expect 1 conflict for that
-  record only.
-- Edit a Pipeline row (no WFM change) → re-run → expect 0
-  conflicts, 1 unchanged (the diff is suppressed because we last
-  saw WFM with the same value Pipeline now disagrees with — i.e.,
-  Pipeline-side edits don't get flagged as conflicts unless WFM
-  also moves).
+Each scenario maps to one row of the §2 case table:
+
+| Scenario | Setup | Expected |
+|---|---|---|
+| Idempotent re-run | Run dry-run twice in a row | First produces `N new · K conflicts`; second produces `0 · 0` (case 1 for everything) |
+| WFM-side change | Edit a field in WFM → re-run | 1 AUTO-APPLY (case 3 — Pipeline still matched the snapshot, so no user input needed) |
+| Pipeline-side edit | Edit a Pipeline row, no WFM change → re-run | 0 conflicts, the row is silent (case 2 — WFM matches snapshot, so we never even consider Pipeline) |
+| Both sides change to same | Edit same field in both to same value → re-run | 0 conflicts (case 4) |
+| Both sides change to different | Edit same field in both to DIFFERENT values → re-run | 1 conflict (case 5), card shows base/pipe/wfm |
+| Pre-snapshot Pipeline match | Pre-existing Pipeline row matches WFM, no snapshot → re-run | Silent (case 7); snapshot gets seeded |
+| Pre-snapshot Pipeline mismatch | Pre-existing Pipeline row disagrees with WFM, no snapshot → re-run | 1 conflict (case 8), card shows wfm and pipe (no base) |
 
 ## 9. Open questions
 
@@ -175,9 +233,3 @@ each can evolve independently as edge cases come up.
   status, prune anything older than 90 days via cron.
 - Should bulk approval require a confirmation dialog ("about to
   apply 47 changes — continue?")? Yes for >10 changes.
-- Does delta sync auto-apply unchanged-Pipeline-side conflicts
-  (i.e., WFM moved, Pipeline didn't, no actual conflict from the
-  user's POV)? With snapshots, yes; without snapshots, those still
-  surface as conflicts the user has to dismiss. Worth deciding
-  before §6 implementation — leaning toward adding snapshots so
-  the common case is auto-resolved and only true conflicts surface.
