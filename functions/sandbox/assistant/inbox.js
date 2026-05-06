@@ -241,7 +241,13 @@ export async function onRequestGet(context) {
             }
             tr.row-selected { background: #fefce8; }
           </style>
-          <script>${raw(listScript('pipeline.claudia.inbox.v1', 'date', 'desc'))}</script>
+          <!-- Storage key bumped to v2 because v1 was set before the
+               "select" column existed; returning users with v1 state
+               had the select column appended at the END of the table
+               (listScript appends unknown new columns) and missed the
+               bulk-delete checkboxes entirely. Bumping the key invalidates
+               that stale order/visibility map. -->
+          <script>${raw(listScript('pipeline.claudia.inbox.v2', 'date', 'desc'))}</script>
           <script>${raw(bulkSelectScript())}</script>`}
     </section>`;
 
