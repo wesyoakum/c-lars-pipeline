@@ -334,9 +334,14 @@ export async function onRequestGet(context) {
         min-width: 0; padding: 1rem 0; max-width: none;
       }
       .claudia-side {
-        position: sticky; top: 16px;
+        /* Sticky-top offset clears the site-header (height tracked by
+           the --site-header-h CSS variable, kept in sync by the
+           layout.js boot script). Without it, the pinned h3 + "View
+           all" link sit behind the header and the link is unclickable. */
+        position: sticky;
+        top: calc(var(--site-header-h, 53px) + 8px);
         align-self: start;
-        max-height: calc(100vh - 100px);
+        max-height: calc(100vh - var(--site-header-h, 53px) - 24px);
         background: #f8fafc;
         border: 1px solid #e2e8f0;
         border-radius: 8px;
