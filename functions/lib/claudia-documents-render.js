@@ -3,7 +3,7 @@
 // Renders the two sidebars on /sandbox/assistant:
 //   * left  — claudia-audio-panel  (audio recordings + transcripts)
 //   * right — claudia-docs-panel   (everything else: PDF / DOCX / XLSX /
-//                                    images / text)
+//                                    images / text / .eml + attachments)
 //
 // On any upload or retention change, BOTH panels need to refresh so a
 // file can move between them (e.g. nothing's audio today, then you
@@ -25,7 +25,11 @@ export function partitionDocs(docs) {
   const audio = [];
   const other = [];
   for (const d of docs) {
-    if (isAudio(d)) audio.push(d);
+    // Children of an email always render under the parent in the docs
+    // panel — even audio attachments stay with their email rather than
+    // jumping to the audio sidebar (the audio panel is for direct mic
+    // recordings, not for files arriving via email).
+    if (!d.parent_id && isAudio(d)) audio.push(d);
     else other.push(d);
   }
   return { audio, other };
@@ -36,6 +40,13 @@ function isAudio(d) {
   if (ct.startsWith('audio/')) return true;
   const ext = String(d.filename || '').toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
   return ext ? AUDIO_EXTS.has(ext) : false;
+}
+
+function isEmail(d) {
+  if (d.subject) return true;
+  const ct = String(d.content_type || '').toLowerCase();
+  if (ct === 'message/rfc822' || ct === 'application/mbox') return true;
+  return /\.(eml|mbox)$/i.test(String(d.filename || ''));
 }
 
 export function renderBothPanels(allDocs, opts = {}) {
@@ -72,12 +83,28 @@ export function renderDocsPanel(docs, opts = {}) {
 
 function renderDocRow(d) {
   const id = escapeAttr(d.id);
-  const filename = escapeHtml(d.filename || 'untitled');
-  const meta = [
-    formatBytes(d.size_bytes),
-    contentTypeShort(d.content_type, d.filename),
-    formatRelative(d.created_at),
-  ].filter(Boolean).join(' · ');
+  const isChild = !!d.parent_id;
+  const emailLike = isEmail(d);
+
+  let primary;
+  let secondary;
+  if (emailLike) {
+    // Subject as the primary line (falls back to filename if Subject is
+    // missing — happens with malformed .eml files). Sender + age below.
+    primary = escapeHtml(d.subject || d.filename || 'untitled');
+    const fromText = d.sender_name || d.sender_email || '';
+    const when = formatRelative(d.email_date || d.created_at);
+    secondary = [fromText, when].filter(Boolean).map(escapeHtml).join(' · ');
+  } else {
+    primary = escapeHtml(d.filename || 'untitled');
+    const meta = [
+      formatBytes(d.size_bytes),
+      contentTypeShort(d.content_type, d.filename),
+      formatRelative(d.created_at),
+    ].filter(Boolean).join(' · ');
+    secondary = escapeHtml(meta);
+  }
+
   const retention = d.retention || 'auto';
   const retentionBadge = retention === 'keep_forever'
     ? '<span class="claudia-doc-badge keep">★ kept</span>' : '';
@@ -86,19 +113,24 @@ function renderDocRow(d) {
     : d.extraction_status === 'partial'
     ? '<span class="claudia-doc-badge warn">partial extract</span>' : '';
   const categoryBadge = d.category
-    ? `<span class="claudia-doc-badge cat" title="Auto-categorized on upload">${escapeHtml(d.category)}</span>` : '';
+    ? `<span class="claudia-doc-badge cat cat-${escapeAttr(d.category)}" title="Auto-categorized on upload">${escapeHtml(d.category)}</span>` : '';
   const isKept = retention === 'keep_forever';
   const keepHref = isKept ? 'auto' : 'keep_forever';
   const keepLabel = isKept ? 'Unkeep' : 'Keep forever';
   const keepClass = isKept ? 'active' : '';
 
-  return `<div class="claudia-doc" id="claudia-doc-${id}">
-    <div class="claudia-doc-main">
+  const childClass = isChild ? ' claudia-doc-child' : '';
+  const childIcon = isChild
+    ? '<span class="claudia-doc-clip" aria-hidden="true">↳</span>'
+    : '';
+
+  return `<div class="claudia-doc${childClass}" id="claudia-doc-${id}">
+    ${childIcon}<div class="claudia-doc-main">
       <div class="claudia-doc-title">
-        <span class="claudia-doc-filename">${filename}</span>
+        <span class="claudia-doc-filename">${primary}</span>
         ${categoryBadge}${retentionBadge}${statusBadge}
       </div>
-      <div class="claudia-doc-meta">${escapeHtml(meta)}</div>
+      <div class="claudia-doc-meta">${secondary}</div>
     </div>
     <div class="claudia-doc-actions">
       <button type="button"

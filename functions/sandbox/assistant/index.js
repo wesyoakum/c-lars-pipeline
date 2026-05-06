@@ -84,18 +84,29 @@ export async function onRequestGet(context) {
     [user.id]
   );
 
-  // Drop-zone documents (newest 30, non-trashed) for the initial render.
+  // Drop-zone documents (newest, non-trashed) for the initial render.
   // Preview is bumped to 600 chars so the audio sidebar can show a real
   // transcript snippet; the right docs sidebar doesn't render preview.
+  // Sort puts each parent-email's attachments immediately after the
+  // parent (sort_anchor = parent's created_at when child).
   const documents = await all(
     env.DB,
-    `SELECT id, filename, content_type, size_bytes, retention,
-            extraction_status, extraction_error, created_at,
-            substr(coalesce(full_text, ''), 1, 600) AS preview
-       FROM claudia_documents
-      WHERE user_id = ? AND retention != 'trashed'
-      ORDER BY created_at DESC
-      LIMIT 30`,
+    `SELECT d.id, d.filename, d.content_type, d.size_bytes, d.retention,
+            d.extraction_status, d.extraction_error, d.created_at,
+            d.category,
+            d.sender_email, d.sender_name, d.subject, d.email_date,
+            d.parent_id,
+            substr(coalesce(d.full_text, ''), 1, 600) AS preview,
+            COALESCE(
+              (SELECT p.created_at FROM claudia_documents p WHERE p.id = d.parent_id),
+              d.created_at
+            ) AS sort_anchor
+       FROM claudia_documents d
+      WHERE d.user_id = ? AND d.retention != 'trashed'
+      ORDER BY sort_anchor DESC,
+               (d.parent_id IS NULL) DESC,
+               d.created_at ASC
+      LIMIT 60`,
     [user.id]
   );
   const { audio: audioDocs, other: otherDocs } = partitionDocs(documents);
@@ -326,19 +337,43 @@ export async function onRequestGet(context) {
         position: sticky; top: 16px;
         align-self: start;
         max-height: calc(100vh - 100px);
-        overflow-y: auto;
         background: #f8fafc;
         border: 1px solid #e2e8f0;
         border-radius: 8px;
         padding: 0.6rem 0.7rem;
         margin-top: 1rem;
+        /* Flex column with the inner panel as the scroll target. The
+           h3 header and "View all" link stay pinned while the list
+           scrolls below. The previous layout put overflow-y:auto on
+           this wrapper directly; with 30+ docs the scrollbar failed
+           to engage because of a sticky-in-grid quirk. */
+        display: flex; flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
       }
       .claudia-side h3 {
-        margin: 0 0 0.5rem 0; font-size: 11px; font-weight: 600;
+        margin: 0 0 0.4rem 0; font-size: 11px; font-weight: 600;
         text-transform: uppercase; letter-spacing: 0.05em; color: #64748b;
+        flex-shrink: 0;
+      }
+      .claudia-side-actions {
+        display: flex; justify-content: flex-end; margin-bottom: 0.4rem;
+        flex-shrink: 0;
+      }
+      .claudia-side-link {
+        font-size: 11px; color: #475569; text-decoration: none;
+        padding: 2px 6px; border-radius: 4px;
+      }
+      .claudia-side-link:hover { background: #e2e8f0; color: #1a1a22; }
+      .claudia-docs-panel,
+      .claudia-audio-panel {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        min-height: 0;
       }
       .claudia-side-empty {
         font-size: 12px; color: #94a3b8; font-style: italic; line-height: 1.5;
+        flex-shrink: 0;
       }
       @media (max-width: 1100px) {
         /* Tablet: stack docs on top, hide audio sidebar (rare on the
@@ -416,6 +451,37 @@ export async function onRequestGet(context) {
         background: #ecfeff; color: #0369a1; border: 1px solid #bae6fd;
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         text-transform: lowercase; font-weight: 500;
+      }
+      /* Per-category color tags so an inbox of mixed-type docs is
+         scannable at a glance. Falls back to the generic .cat blue when
+         the category isn't in this map (e.g. a future category we add
+         server-side before adding the CSS). */
+      .claudia-doc-badge.cat-rfq          { background: #fee2e2; color: #b91c1c; border-color: #fecaca; }
+      .claudia-doc-badge.cat-quote        { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+      .claudia-doc-badge.cat-spec         { background: #dbeafe; color: #1e40af; border-color: #bfdbfe; }
+      .claudia-doc-badge.cat-po           { background: #ede9fe; color: #5b21b6; border-color: #ddd6fe; }
+      .claudia-doc-badge.cat-contract     { background: #ede9fe; color: #5b21b6; border-color: #ddd6fe; }
+      .claudia-doc-badge.cat-invoice      { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+      .claudia-doc-badge.cat-email        { background: #f1f5f9; color: #475569; border-color: #e2e8f0; }
+      .claudia-doc-badge.cat-meeting_note { background: #fdf4ff; color: #86198f; border-color: #f5d0fe; }
+      .claudia-doc-badge.cat-contact_list { background: #f0fdfa; color: #0f766e; border-color: #ccfbf1; }
+      .claudia-doc-badge.cat-business_card{ background: #f0fdfa; color: #0f766e; border-color: #ccfbf1; }
+      .claudia-doc-badge.cat-marketing    { background: #fff7ed; color: #9a3412; border-color: #fed7aa; }
+      .claudia-doc-badge.cat-badge        { background: #fff7ed; color: #9a3412; border-color: #fed7aa; }
+      .claudia-doc-badge.cat-spreadsheet  { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
+      .claudia-doc-badge.cat-other        { background: #f1f5f9; color: #475569; border-color: #e2e8f0; }
+      /* Children of an email (extracted attachments) — indented and
+         clipped onto the parent row visually. */
+      .claudia-doc.claudia-doc-child {
+        margin-left: 1.1rem;
+        border-left: 2px solid #cbd5e1;
+        border-radius: 0 6px 6px 0;
+        padding-left: 0.6rem;
+      }
+      .claudia-doc-clip {
+        font-size: 12px; color: #94a3b8;
+        margin-right: 4px; flex-shrink: 0;
+        display: inline-flex; align-items: center;
       }
       .claudia-doc-actions { display: flex; gap: 4px; flex-shrink: 0; }
       .claudia-doc-btn {
@@ -665,8 +731,11 @@ export async function onRequestGet(context) {
     </div>
     <aside class="claudia-side docs-side" id="claudia-side-docs">
       <h3>Documents</h3>
+      <div class="claudia-side-actions">
+        <a href="/sandbox/assistant/inbox" class="claudia-side-link" title="Open the full inbox">View all &rarr;</a>
+      </div>
       ${raw(renderDocsPanel(otherDocs))}
-      ${otherDocs.length === 0 ? html`<div class="claudia-side-empty">No documents yet. Use the attach button or drag-drop anywhere on the chat to upload (PDF, DOCX, XLSX, image, TXT, MD).</div>` : ''}
+      ${otherDocs.length === 0 ? html`<div class="claudia-side-empty">No documents yet. Use the attach button or drag-drop anywhere on the chat to upload (PDF, DOCX, XLSX, image, email .eml, TXT, MD).</div>` : ''}
     </aside>
     </div>
     <script>

@@ -39,13 +39,22 @@ export async function onRequestPost(context) {
 
   const docs = await all(
     env.DB,
-    `SELECT id, filename, content_type, size_bytes, retention,
-            extraction_status, extraction_error, created_at,
-            substr(coalesce(full_text, ''), 1, 200) AS preview
-       FROM claudia_documents
-      WHERE user_id = ? AND retention != 'trashed'
-      ORDER BY created_at DESC
-      LIMIT 30`,
+    `SELECT d.id, d.filename, d.content_type, d.size_bytes, d.retention,
+            d.extraction_status, d.extraction_error, d.created_at,
+            d.category,
+            d.sender_email, d.sender_name, d.subject, d.email_date,
+            d.parent_id,
+            substr(coalesce(d.full_text, ''), 1, 200) AS preview,
+            COALESCE(
+              (SELECT p.created_at FROM claudia_documents p WHERE p.id = d.parent_id),
+              d.created_at
+            ) AS sort_anchor
+       FROM claudia_documents d
+      WHERE d.user_id = ? AND d.retention != 'trashed'
+      ORDER BY sort_anchor DESC,
+               (d.parent_id IS NULL) DESC,
+               d.created_at ASC
+      LIMIT 60`,
     [user.id]
   );
 

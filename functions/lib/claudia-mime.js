@@ -91,6 +91,88 @@ export function extractAttachments(rawMime) {
   return flattenAttachmentParts(parsed);
 }
 
+/**
+ * Pull structured email metadata (sender, subject, date, message-id) out
+ * of a raw .eml so the upload endpoint can store it in dedicated columns
+ * — letting the renderer show "Subject — From · Date" without re-parsing
+ * full_text on every render.
+ *
+ * Returns:
+ *   { sender_email, sender_name, subject, email_date, message_id, in_reply_to }
+ *   — any individual field may be null if the header is absent or unparseable.
+ *
+ * Returns null only if the input itself can't be parsed as MIME.
+ */
+export function emailMetadata(rawMime) {
+  if (!rawMime || typeof rawMime !== 'string') return null;
+  let parsed;
+  try {
+    parsed = parseMime(rawMime);
+  } catch {
+    return null;
+  }
+  if (!parsed) return null;
+  const h = parsed.headers || {};
+
+  const fromRaw = h['from'] || '';
+  const { email: sender_email, name: sender_name } = splitAddress(decodeRfc2047(fromRaw));
+
+  const subjectRaw = h['subject'] || '';
+  const subject = subjectRaw ? decodeRfc2047(subjectRaw).trim() : null;
+
+  const dateRaw = h['date'] || '';
+  const email_date = normalizeDate(dateRaw);
+
+  // Message-Id and In-Reply-To are wrapped in angle brackets per RFC 5322;
+  // strip them for cleaner display + comparison.
+  const message_id = stripAngles(h['message-id']) || null;
+  const in_reply_to = stripAngles(h['in-reply-to']) || null;
+
+  return {
+    sender_email: sender_email || null,
+    sender_name: sender_name || null,
+    subject,
+    email_date,
+    message_id,
+    in_reply_to,
+  };
+}
+
+// "Wes Yoakum <wes@c-lars.com>" -> { name: "Wes Yoakum", email: "wes@c-lars.com" }
+// "wes@c-lars.com"              -> { name: "",           email: "wes@c-lars.com" }
+// "<wes@c-lars.com>"            -> { name: "",           email: "wes@c-lars.com" }
+function splitAddress(s) {
+  const str = String(s || '').trim();
+  if (!str) return { name: '', email: '' };
+  const m = str.match(/^(.*?)<\s*([^>]+?)\s*>\s*$/);
+  if (m) {
+    let name = m[1].trim();
+    if (name.startsWith('"') && name.endsWith('"')) name = name.slice(1, -1);
+    return { name, email: m[2].trim() };
+  }
+  // Bare address with no display name.
+  if (/^[^\s@]+@[^\s@]+$/.test(str)) return { name: '', email: str };
+  // Fallback: treat the whole thing as a name. Better than losing it.
+  return { name: str, email: '' };
+}
+
+function stripAngles(s) {
+  const str = String(s || '').trim();
+  if (!str) return '';
+  const m = str.match(/^<\s*(.+?)\s*>$/);
+  return m ? m[1] : str;
+}
+
+// RFC 5322 dates parse cleanly with Date.parse() in modern V8.
+// Fall back to the raw header on parse failure so the value isn't lost.
+function normalizeDate(raw) {
+  const str = String(raw || '').trim();
+  if (!str) return null;
+  const ms = Date.parse(str);
+  if (Number.isFinite(ms)) return new Date(ms).toISOString();
+  return str;
+}
+
 function flattenAttachmentParts(node) {
   if (!node) return [];
   if (Array.isArray(node.parts)) return node.parts.flatMap(flattenAttachmentParts);
