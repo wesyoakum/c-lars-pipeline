@@ -261,6 +261,19 @@ export async function onRequestGet(context) {
       .assistant-msg-meta {
         font-size: 11px; color: #888; margin-top: 4px;
       }
+      /* Per-message timestamp under each bubble. Subtle by default;
+         hover reveals full datetime via the title tooltip. Aligns
+         with the bubble side: user (right) and assistant (left). */
+      .assistant-msg-stamp {
+        font-size: 10px; color: #94a3b8; margin-top: 2px;
+        line-height: 1.2; user-select: none;
+      }
+      .assistant-msg.user .assistant-msg-stamp {
+        text-align: right; color: rgba(255,255,255,0.7);
+      }
+      .assistant-msg.assistant .assistant-msg-stamp {
+        text-align: left;
+      }
       .assistant-form {
         display: flex; gap: 0.5rem; align-items: flex-end;
         padding: 0.75rem 0.75rem;
@@ -1131,12 +1144,43 @@ function renderMessage(m) {
   const body = m.role === 'assistant'
     ? raw(renderMarkdown(m.text))
     : html`<span>${m.text}</span>`;
+  // Compact local-time stamp under each bubble. Full datetime in the
+  // tooltip for hover-to-see-the-day. Same purpose as the inline
+  // [CT ...] prefix on Claudia's view of each message: makes "what
+  // came in between my last reply and now" answerable at a glance.
+  const stamp = m.created_at ? formatChatTime(m.created_at) : '';
+  const stampFull = m.created_at ? formatChatTimeFull(m.created_at) : '';
   return html`<div class="assistant-msg ${m.role}" data-copy-text="${m.text}">
     <div class="assistant-msg-body">${body}</div>
     <button type="button" class="assistant-msg-copy" aria-label="Copy message" title="Copy">
       ${raw('<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>')}
     </button>
+    ${stamp ? html`<div class="assistant-msg-stamp" title="${escape(stampFull)}">${escape(stamp)}</div>` : ''}
   </div>`;
+}
+
+// "9:14 AM" — local CT time of day. Used inline under each chat
+// bubble. Day-level context goes in the tooltip via formatChatTimeFull.
+const CHAT_TIME_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Chicago',
+  hour: 'numeric', minute: '2-digit',
+  hour12: true,
+});
+const CHAT_TIME_FULL_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Chicago',
+  weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+  hour: 'numeric', minute: '2-digit',
+  hour12: true,
+});
+function formatChatTime(iso) {
+  const ms = Date.parse(String(iso || ''));
+  if (!Number.isFinite(ms)) return '';
+  return CHAT_TIME_FMT.format(new Date(ms));
+}
+function formatChatTimeFull(iso) {
+  const ms = Date.parse(String(iso || ''));
+  if (!Number.isFinite(ms)) return '';
+  return CHAT_TIME_FULL_FMT.format(new Date(ms)) + ' CT';
 }
 
 function renderObservation(o) {

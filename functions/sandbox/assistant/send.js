@@ -80,7 +80,7 @@ export async function onRequestPost(context) {
   // ends-on-user-turn invariant the prior LIMIT-based query had.
   const recentDesc = await all(
     env.DB,
-    `SELECT role, text FROM assistant_messages
+    `SELECT role, text, created_at FROM assistant_messages
       WHERE thread_id = ?
         AND (
           created_at >= datetime('now', '-${HISTORY_WINDOW_DAYS} days')
@@ -104,9 +104,14 @@ export async function onRequestPost(context) {
     history.shift();
   }
 
+  // Prepend each message with a [CT YYYY-MM-DD HH:MM] timestamp so
+  // Claudia can reason about when each turn happened. The DB stores
+  // raw text; the prefix is added only here for the model context.
+  // The UI's renderMessage uses created_at separately, so the user
+  // sees clean text in the chat.
   const apiMessages = history.map((m) => ({
     role: m.role,
-    content: m.text,
+    content: `[${formatCt(m.created_at)}] ${m.text}`,
   }));
 
   const tools = await makeAssistantTools({ env, user });
@@ -220,8 +225,25 @@ function autoTitleFromMessage(text) {
   return (cut > 30 ? cleaned.slice(0, cut) : cleaned.slice(0, 57)) + '…';
 }
 
+// Format a UTC ISO 8601 timestamp into "YYYY-MM-DD HH:MM" in
+// America/Chicago. Used for the [CT ...] prefix on every message
+// passed to Claudia and for the "right now" line in her system
+// prompt. en-CA gives the YYYY-MM-DD ordering with a comma we strip.
+const CT_FMT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Chicago',
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit',
+  hour12: false,
+});
+function formatCt(iso) {
+  const ms = Date.parse(String(iso || ''));
+  if (!Number.isFinite(ms)) return '';
+  return CT_FMT.format(new Date(ms)).replace(',', '');
+}
+
 function buildSystemPrompt(user, tableNames, recentUploads = []) {
   const today = new Date().toISOString().slice(0, 10);
+  const nowCt = formatCt(new Date().toISOString());  // "2026-05-06 14:14"
   const display = user.display_name || user.email;
   const recentUploadsBlock = recentUploads.length > 0
     ? `\n\nRECENT UPLOADS (since your last turn) — apply the "Handling new uploads" rules to each:\n${recentUploads
@@ -236,7 +258,7 @@ function buildSystemPrompt(user, tableNames, recentUploads = []) {
 
 You are Claudia, an AI assistant dedicated to ${display}. You operate as a proactive executive assistant, operational backstop, and second set of eyes across everything Wes is involved in. Your primary objective: ensure nothing important is missed, dropped, unclear, or allowed to become a problem.
 
-Talking with: ${display} (${user.email}, role: ${user.role}). Today is ${today}.
+Talking with: ${display} (${user.email}, role: ${user.role}). Right now is ${nowCt} America/Chicago. Today is ${today}. Each message in the history below is prefixed with [CT YYYY-MM-DD HH:MM] — that is when the message was sent. When ${display} says "next batch" or "anything new", look at the timestamp on his current message and the timestamp on your most recent prior reply, then list_documents and check the created_at on each row to find what arrived in that window.
 
 Priorities, in order: follow-through, completeness, clarity, executability, risk reduction.
 
