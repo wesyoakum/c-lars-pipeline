@@ -44,6 +44,10 @@ export async function onRequestGet(context) {
   );
 
   const columns = [
+    // First column is a row checkbox for bulk selection. Sort/filter
+    // are off (it's a control, not data); default true so the
+    // hamburger column-menu doesn't accidentally hide it.
+    { key: 'select',   label: '',               sort: null,     filter: null,     default: true },
     { key: 'subject',  label: 'Subject / File', sort: 'text',   filter: 'text',   default: true },
     { key: 'sender',   label: 'From',           sort: 'text',   filter: 'text',   default: true },
     { key: 'category', label: 'Category',       sort: 'text',   filter: 'select', default: true },
@@ -102,16 +106,38 @@ export async function onRequestGet(context) {
         <a href="/sandbox/assistant">← Back to Claudia</a>
       </p>
 
+      <div class="bulk-action-bar" data-role="bulk-action-bar">
+        <span class="bulk-count"><strong data-role="bulk-action-count">0</strong> selected</span>
+        <button type="button" class="btn btn-sm danger" data-role="bulk-trash">Trash selected</button>
+        <button type="button" class="btn btn-sm" data-role="bulk-clear">Clear</button>
+      </div>
+
       ${rows.length === 0
         ? html`<p class="muted">No documents yet. Drop files on <a href="/sandbox/assistant">Claudia's chat</a> to start.</p>`
         : html`
           <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
             <table class="data opp-list-table">
-              ${listTableHead(columns, rowData)}
+              <thead>
+                <tr data-role="header-row">
+                  <th class="col-select" data-col="select">
+                    <input type="checkbox" data-role="row-select-all" title="Select all visible" aria-label="Select all visible">
+                  </th>
+                  ${columns.slice(1).map(c => html`
+                    <th class="col-${c.key}" data-col="${c.key}">
+                      <button type="button" class="col-sort" data-sort="${c.key}" data-sort-type="${c.sort}">
+                        <span>${c.label}</span>
+                        <span class="sort-indicator" data-role="sort-indicator"></span>
+                      </button>
+                    </th>`)}
+                </tr>
+              </thead>
               <tbody data-role="rows">
                 ${rowData.map(r => html`
                   <tr data-row-id="${escape(r.id)}"
                       ${raw(rowDataAttrs(columns, r))}>
+                    <td class="col-select" data-col="select">
+                      <input type="checkbox" class="row-select" data-id="${escape(r.id)}" aria-label="Select row">
+                    </td>
                     <td class="col-subject" data-col="subject">
                       ${r.kind === 'attachment' ? raw('<span class="muted" title="Attachment">↳</span> ') : ''}
                       <strong>${escape(r.subject)}</strong>
@@ -193,8 +219,30 @@ export async function onRequestGet(context) {
             .claudia-doc-btn:hover { background: #f1f3f7; color: #1a1a22; border-color: #e2e8f0; }
             .claudia-doc-btn.active { color: #b45309; }
             .claudia-doc-btn.danger:hover { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
+            /* Bulk action bar — hidden until at least one row is
+               selected. Sticks just under the toolbar so it doesn't
+               jump the layout when it appears. */
+            .bulk-action-bar {
+              display: none; align-items: center; gap: 0.6rem;
+              background: #fef9c3; border: 1px solid #fde68a;
+              padding: 0.4rem 0.7rem; border-radius: 6px;
+              margin: 0 0 0.6rem 0; font-size: 13px;
+              position: sticky;
+              top: calc(var(--site-header-h, 53px) + 8px);
+              z-index: 5;
+            }
+            .bulk-action-bar.show { display: flex; }
+            .bulk-action-bar .bulk-count { color: #713f12; }
+            .bulk-action-bar .btn { font-size: 12px; padding: 4px 10px; }
+            .col-select { width: 32px; text-align: center; }
+            .col-select .row-select,
+            .col-select [data-role="row-select-all"] {
+              cursor: pointer; vertical-align: middle;
+            }
+            tr.row-selected { background: #fefce8; }
           </style>
-          <script>${raw(listScript('pipeline.claudia.inbox.v1', 'date', 'desc'))}</script>`}
+          <script>${raw(listScript('pipeline.claudia.inbox.v1', 'date', 'desc'))}</script>
+          <script>${raw(bulkSelectScript())}</script>`}
     </section>`;
 
   return htmlResponse(
@@ -230,6 +278,132 @@ function formatBytes(n) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// Inline client-side script: wires up the row checkboxes, header
+// "select all", and the bulk-trash action bar. Returned as a plain
+// string (injected via raw()).
+function bulkSelectScript() {
+  return `
+(function() {
+  var tbody = document.querySelector('tbody[data-role="rows"]');
+  if (!tbody) return;
+  var bar       = document.querySelector('[data-role="bulk-action-bar"]');
+  var countEl   = document.querySelector('[data-role="bulk-action-count"]');
+  var selectAll = document.querySelector('[data-role="row-select-all"]');
+  var trashBtn  = document.querySelector('[data-role="bulk-trash"]');
+  var clearBtn  = document.querySelector('[data-role="bulk-clear"]');
+
+  function visibleCheckboxes() {
+    return Array.prototype.filter.call(
+      tbody.querySelectorAll('input.row-select'),
+      function(cb) {
+        var tr = cb.closest('tr');
+        // Honor the list-table client filter / quicksearch — they
+        // toggle row display via inline style "display: none".
+        return tr && tr.style.display !== 'none';
+      }
+    );
+  }
+  function selectedCheckboxes() {
+    return visibleCheckboxes().filter(function(cb) { return cb.checked; });
+  }
+
+  function updateUI() {
+    var sel = selectedCheckboxes();
+    var n = sel.length;
+    if (countEl) countEl.textContent = String(n);
+    if (bar) bar.classList.toggle('show', n > 0);
+    // Mark selected rows for visual feedback
+    Array.prototype.forEach.call(tbody.querySelectorAll('tr'), function(tr) {
+      var cb = tr.querySelector('input.row-select');
+      tr.classList.toggle('row-selected', !!(cb && cb.checked));
+    });
+    // Sync select-all (indeterminate when partial)
+    if (selectAll) {
+      var visible = visibleCheckboxes();
+      selectAll.checked = visible.length > 0 && sel.length === visible.length;
+      selectAll.indeterminate = sel.length > 0 && sel.length < visible.length;
+    }
+  }
+
+  tbody.addEventListener('change', function(e) {
+    if (e.target && e.target.classList && e.target.classList.contains('row-select')) {
+      updateUI();
+    }
+  });
+
+  if (selectAll) {
+    selectAll.addEventListener('change', function() {
+      var checked = selectAll.checked;
+      visibleCheckboxes().forEach(function(cb) { cb.checked = checked; });
+      updateUI();
+    });
+  }
+
+  if (clearBtn) {
+    clearBtn.addEventListener('click', function() {
+      Array.prototype.forEach.call(
+        tbody.querySelectorAll('input.row-select:checked'),
+        function(cb) { cb.checked = false; }
+      );
+      updateUI();
+    });
+  }
+
+  if (trashBtn) {
+    trashBtn.addEventListener('click', async function() {
+      var sel = selectedCheckboxes();
+      var ids = sel.map(function(cb) { return cb.dataset.id; });
+      if (!ids.length) return;
+      var msg = 'Move ' + ids.length + ' document' + (ids.length === 1 ? '' : 's')
+              + ' to trash? You can restore them from the database.';
+      if (!confirm(msg)) return;
+      trashBtn.disabled = true;
+      try {
+        var fd = new FormData();
+        ids.forEach(function(id) { fd.append('ids', id); });
+        var r = await fetch('/sandbox/assistant/documents/bulk-trash', { method: 'POST', body: fd });
+        var json = await r.json().catch(function() { return null; });
+        if (json && json.ok) {
+          // Drop the rows in place — no full reload. Update the list-
+          // table count too so the toolbar's "Showing N of M" stays right.
+          ids.forEach(function(id) {
+            var row = tbody.querySelector('tr[data-row-id="' + id + '"]');
+            if (row) row.remove();
+          });
+          var countDisplay = document.querySelector('[data-role="count"]');
+          if (countDisplay) {
+            var remaining = tbody.querySelectorAll('tr[data-row-id]').length;
+            countDisplay.textContent = remaining;
+          }
+          updateUI();
+        } else {
+          alert('Could not trash: ' + ((json && json.error) || 'unknown error'));
+        }
+      } catch (err) {
+        alert('Error: ' + (err && err.message ? err.message : err));
+      } finally {
+        trashBtn.disabled = false;
+      }
+    });
+  }
+
+  // Quicksearch / column-filter changes hide rows; recompute the
+  // select-all state when that happens. The list-table script doesn't
+  // emit a custom event, so we observe display changes via a periodic
+  // tick triggered by user interaction (input/keyup on the search box,
+  // change on filter popovers).
+  var quick = document.querySelector('[data-role="quicksearch"]');
+  if (quick) quick.addEventListener('input', function() { setTimeout(updateUI, 50); });
+  document.addEventListener('change', function(e) {
+    if (e.target && e.target.matches && e.target.matches('[data-filter-popover] *')) {
+      setTimeout(updateUI, 50);
+    }
+  });
+
+  updateUI();
+})();`;
 }
 
 // Render an ISO timestamp as "YYYY-MM-DD HH:MM" in America/Chicago.
