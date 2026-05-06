@@ -79,7 +79,7 @@ export async function onRequestGet(context) {
       sender,
       category: r.category || '',
       date: dateIso,            // ISO 8601 — sorts correctly as string
-      date_display: dateIso ? dateIso.slice(0, 10) : '',
+      date_display: formatLocalDateTime(dateIso),
       size: sizeRaw,            // raw bytes — numeric sort works
       size_display: sizeLabel,
       type: typeShort,
@@ -230,4 +230,22 @@ function formatBytes(n) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+// Render an ISO timestamp as "YYYY-MM-DD HH:MM" in America/Chicago.
+// Same TZ that auto-tasks.js (and the rest of the project) treats as
+// authoritative — Wes is the only user.
+const DATE_TIME_FMT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'America/Chicago',
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit',
+  hour12: false,
+});
+function formatLocalDateTime(iso) {
+  if (!iso) return '';
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return '';
+  // en-CA gives "YYYY-MM-DD, HH:MM" — strip the comma for a tighter
+  // look, since the column is already narrow.
+  return DATE_TIME_FMT.format(new Date(ms)).replace(',', '');
 }
