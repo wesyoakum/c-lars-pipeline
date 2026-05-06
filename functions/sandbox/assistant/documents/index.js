@@ -140,13 +140,17 @@ export async function onRequestPost(context) {
         console.error('[upload] categorize failed:', err?.message || err);
       }
 
+      // seq via correlated subquery — atomic per-user "next number".
+      // The UNIQUE INDEX on (user_id, seq) catches the rare race where
+      // two concurrent inserts compute the same MAX.
       await run(
         env.DB,
         `INSERT INTO claudia_documents
            (id, user_id, filename, content_type, size_bytes, r2_key,
             full_text, retention, extraction_status, extraction_error,
-            category, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'auto', ?, ?, ?, ?, ?)`,
+            category, created_at, updated_at, seq)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'auto', ?, ?, ?, ?, ?,
+           COALESCE((SELECT MAX(seq) FROM claudia_documents WHERE user_id = ?), 0) + 1)`,
         [
           docId,
           user.id,
@@ -160,6 +164,7 @@ export async function onRequestPost(context) {
           category,
           ts,
           ts,
+          user.id,
         ]
       );
     } catch (err) {

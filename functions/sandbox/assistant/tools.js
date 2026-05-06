@@ -197,16 +197,21 @@ export async function makeAssistantTools({ env, user }) {
         "List documents the user has dropped into Claudia's drop-zone. Files can be PDF, DOCX, " +
         'XLSX, images (PNG / JPG / GIF / WEBP — extracted as a vision-generated description), ' +
         'audio (MP3 / WAV / M4A / etc — transcribed via Whisper), or plain text variants ' +
-        '(TXT / MD / CSV / JSON / XML / YAML). Returns id, filename, content_type, size_bytes, ' +
-        'retention, extraction_status, created_at, and a short preview. Use this when the user ' +
-        'asks about what is in their dropped files, or before suggesting cleanups (filter to ' +
-        'retention=auto for trashable candidates). Trashed documents are excluded by default; ' +
-        'pass include_trashed: true to see them.',
+        '(TXT / MD / CSV / JSON / XML / YAML). Returns id, seq, filename, content_type, ' +
+        'size_bytes, retention, extraction_status, created_at, and a short preview. ' +
+        'Each doc has a per-user monotonic `seq` (#1, #2, #3, ...) — refer to docs by short ' +
+        '#N in conversation, and use `since: N` to list ONLY uploads with seq > N. That is the ' +
+        'reliable way to check for new arrivals mid-conversation: note the highest seq you saw ' +
+        'on a previous list call, then re-list with since=<that number>. Filenames repeat across ' +
+        'batches (Pocket emails, Anthropic newsletters, the same RFQ thread) so do not infer ' +
+        '"already-seen" from filename matches; trust seq instead. Trashed docs are excluded by ' +
+        'default; pass include_trashed: true to see them.',
       input_schema: {
         type: 'object',
         properties: {
           include_trashed: { type: 'boolean', description: 'Include documents whose retention is "trashed". Default false.' },
           retention: { type: 'string', enum: ['auto', 'keep_forever', 'trashed'], description: 'Optional exact-match retention filter.' },
+          since: { type: 'integer', description: 'Only return docs with seq > this number. Use to fetch new arrivals since a previous list.' },
           limit: { type: 'integer', description: 'Max rows to return. Default 30, hard cap 100.' },
         },
       },
@@ -1431,7 +1436,7 @@ async function queryDb(env, { sql }) {
 
 const READ_DOCUMENT_MAX_CHARS = 50_000;
 
-async function listDocuments(env, user, { include_trashed, retention, limit } = {}) {
+async function listDocuments(env, user, { include_trashed, retention, since, limit } = {}) {
   const cap = Math.min(Math.max(Number(limit) || 30, 1), 100);
   const params = [user.id];
   let where = 'user_id = ?';
@@ -1441,15 +1446,20 @@ async function listDocuments(env, user, { include_trashed, retention, limit } = 
   } else if (!include_trashed) {
     where += " AND retention != 'trashed'";
   }
+  const sinceN = Number(since);
+  if (Number.isFinite(sinceN) && sinceN >= 0) {
+    where += ' AND seq > ?';
+    params.push(sinceN);
+  }
   params.push(cap);
   const rows = await all(
     env.DB,
-    `SELECT id, filename, content_type, size_bytes, retention, category,
+    `SELECT id, seq, filename, content_type, size_bytes, retention, category,
             extraction_status, extraction_error, created_at, last_accessed_at,
             substr(coalesce(full_text, ''), 1, 200) AS preview
        FROM claudia_documents
       WHERE ${where}
-      ORDER BY created_at DESC
+      ORDER BY seq DESC
       LIMIT ?`,
     params
   );
@@ -1463,13 +1473,13 @@ async function searchDocuments(env, user, { query, limit } = {}) {
   const like = `%${q}%`;
   const rows = await all(
     env.DB,
-    `SELECT id, filename, content_type, size_bytes, retention, category, created_at,
+    `SELECT id, seq, filename, content_type, size_bytes, retention, category, created_at,
             substr(coalesce(full_text, ''), 1, 200) AS preview
        FROM claudia_documents
       WHERE user_id = ?
         AND retention != 'trashed'
         AND (filename LIKE ? OR full_text LIKE ?)
-      ORDER BY created_at DESC
+      ORDER BY seq DESC
       LIMIT ?`,
     [user.id, like, like, cap]
   );

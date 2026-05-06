@@ -115,14 +115,14 @@ export async function onRequestPost(context) {
     : new Date(Date.now() - 10 * 60 * 1000).toISOString();
   const recentUploads = await all(
     env.DB,
-    `SELECT id, filename, content_type, size_bytes, retention, category,
+    `SELECT id, seq, filename, content_type, size_bytes, retention, category,
             extraction_status, created_at,
             substr(coalesce(full_text, ''), 1, 300) AS preview
        FROM claudia_documents
       WHERE user_id = ?
         AND retention != 'trashed'
         AND created_at > ?
-      ORDER BY created_at ASC`,
+      ORDER BY seq ASC`,
     [user.id, sinceIso]
   );
 
@@ -218,9 +218,9 @@ function buildSystemPrompt(user, tableNames, recentUploads = []) {
         .map((d) => {
           const previewSnippet = String(d.preview || '').replace(/\s+/g, ' ').trim().slice(0, 200);
           const cat = d.category ? ` | auto-category=${d.category}` : '';
-          return `- id=${d.id} | filename="${d.filename}" | type=${d.content_type || 'unknown'} | status=${d.extraction_status}${cat} | preview="${previewSnippet}${previewSnippet.length >= 200 ? '…' : ''}"`;
+          return `- #${d.seq} | id=${d.id} | filename="${d.filename}" | type=${d.content_type || 'unknown'} | status=${d.extraction_status}${cat} | preview="${previewSnippet}${previewSnippet.length >= 200 ? '…' : ''}"`;
         })
-        .join('\n')}\n\nThe auto-category is a best-guess label set on upload (RFQ, spec, quote, contract, contact_list, etc.) — useful as a hint but not authoritative; if your analysis disagrees, just say so and use what you found. If any of the above is unread/unanalyzed, your response MUST start by addressing it (acknowledge → read_document → cross-reference → 2-3 concrete actions). The user's typed message takes priority over the uploads only if they explicitly redirect you ("ignore the file", "different topic").\n`
+        .join('\n')}\n\nThe auto-category is a best-guess label set on upload (RFQ, spec, quote, contract, contact_list, etc.) — useful as a hint but not authoritative; if your analysis disagrees, just say so and use what you found. If any of the above is unread/unanalyzed, your response MUST start by addressing it (acknowledge → read_document → cross-reference → 2-3 concrete actions). The user's typed message takes priority over the uploads only if they explicitly redirect you ("ignore the file", "different topic"). Highest seq above is #${recentUploads[recentUploads.length - 1].seq} — if mid-conversation the user says "anything new?" or "I sent more", call list_documents({since: <highest-seq-you-have-seen>}) to get only the new ones, NEVER assume new uploads are duplicates of similar-named older ones.\n`
     : '';
   return `CLAUDIA
 
@@ -500,7 +500,7 @@ Tools:
 - describe_schema(tables) — get CREATE TABLE statements when you need exact column names or relationships.
 - query_db(sql) — run any read-only SELECT (joins, aggregations, filters). Hard cap 200 rows. Use when curated tools cannot answer.
 - get_calendar_events(start, end, sources?) — fetch events from published-calendar (.ics) feeds. Multi-source: any number of calendars can be configured, each stored in memory under a key of the form "calendar.url.<label>". Examples: "calendar.url.work", "calendar.url.family", "calendar.url.wife", "calendar.url.son_baseball". Pick a short lowercase descriptive label when the user gives you a new URL conversationally, and save via set_memory. Ask the user for a label if it is ambiguous. Pass sources: ["work", "family"] to scope the fetch; omit sources to merge all configured calendars. Each returned event has a "source" field. If no URLs are set, the tool returns setup instructions — pass those to the user.
-- list_documents / search_documents / read_document — the user has a global drop-zone for files (PDF / DOCX / TXT / MD). They persist across conversations. Use list_documents for an inventory; search_documents to find a file by filename or content match; read_document to load the full extracted text of one file. Bump retention to "keep_forever" via set_document_retention when the user explicitly says a file is important; only flip to "trashed" when the user explicitly asks. Never trash on your own initiative. When the user asks "what can I clean up?", call list_documents (filter retention=auto), check last_accessed_at, and offer specific candidates with reasons — never blanket-recommend trashing files you haven't looked at.
+- list_documents / search_documents / read_document — the user has a global drop-zone for files (PDF / DOCX / TXT / MD). They persist across conversations. Use list_documents for an inventory; search_documents to find a file by filename or content match; read_document to load the full extracted text of one file. Each doc has a per-user monotonic `seq` (#1, #2, #3, ...) — refer to docs as #N in conversation, and use list_documents({since: N}) to fetch ONLY arrivals with seq > N. When ${display} mid-conversation says "I sent more" or "anything new?", note the highest seq you have already seen and call list_documents({since: <that-seq>}) — that is the reliable check. NEVER infer "already seen" from filename matches alone; filenames repeat across batches (Pocket newsletters, the same RFQ thread) and you will misclassify new actionable items as duplicates. list_documents is capped at 100 most recent (by seq); for older docs, use search_documents (full-corpus search). Bump retention to "keep_forever" via set_document_retention when the user explicitly says a file is important; only flip to "trashed" when the user explicitly asks. Never trash on your own initiative. When the user asks "what can I clean up?", call list_documents (filter retention=auto), check last_accessed_at, and offer specific candidates with reasons — never blanket-recommend trashing files you haven't looked at.
 - get_memory / set_memory — small key/value store that persists across conversations.
 
 When the user asks about people (owners, assignees, creators), resolve user IDs to display_name via the users table.
