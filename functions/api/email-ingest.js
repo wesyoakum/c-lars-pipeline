@@ -33,6 +33,7 @@ import { run } from '../lib/db.js';
 import { now, uuid } from '../lib/ids.js';
 import { extractText } from '../lib/claudia-extract.js';
 import { categorizeDocument } from '../lib/claudia-categorize.js';
+import { extractAttachments } from '../lib/claudia-mime.js';
 import { one } from '../lib/db.js';
 
 // Wes's known email addresses for the recipient/sender check. Add to
@@ -204,6 +205,92 @@ export async function onRequestPost(context) {
     ]
   );
 
+  // 7. Extract and ingest each attachment as its own claudia_documents
+  // row. Same pipeline as a drop-zone upload (R2 put → text extract →
+  // categorize → INSERT with own seq). Best-effort per attachment: if
+  // one fails we log it in the response and keep going on the rest.
+  const fullEmlText = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  const attachments = extractAttachments(fullEmlText);
+  const attachmentResults = [];
+  for (const att of attachments) {
+    try {
+      const attDocId = uuid();
+      const attTs = now();
+      const attSafeName = (att.filename || 'attachment')
+        .replace(/[^A-Za-z0-9._-]+/g, '_')
+        .slice(0, 120) || 'attachment';
+      const attR2Key = `claudia-docs/${user.id}/${attDocId}/${attSafeName}`;
+
+      await env.DOCS.put(attR2Key, att.bytes, {
+        httpMetadata: { contentType: att.contentType },
+        customMetadata: {
+          uploaded_by: user.id,
+          original_filename: att.filename,
+          ingest_source: 'outlook_addin_attachment',
+          parent_email_doc_id: docId,
+        },
+      });
+
+      let attExtracted = { text: '', status: 'error', error: 'not run' };
+      try {
+        attExtracted = await extractText(env, att.bytes, att.contentType, att.filename);
+      } catch (err) {
+        attExtracted = { text: '', status: 'error', error: err?.message || String(err) };
+      }
+
+      let attCategory = null;
+      try {
+        attCategory = await categorizeDocument(env, {
+          filename: att.filename,
+          contentType: att.contentType,
+          text: attExtracted.text,
+        });
+      } catch (err) {
+        console.error('[email-ingest] attachment categorize failed:', err?.message || err);
+      }
+
+      await run(
+        env.DB,
+        `INSERT INTO claudia_documents
+           (id, user_id, filename, content_type, size_bytes, r2_key,
+            full_text, retention, extraction_status, extraction_error,
+            category, created_at, updated_at, seq)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'auto', ?, ?, ?, ?, ?,
+           COALESCE((SELECT MAX(seq) FROM claudia_documents WHERE user_id = ?), 0) + 1)`,
+        [
+          attDocId,
+          user.id,
+          att.filename,
+          att.contentType,
+          att.bytes.length,
+          attR2Key,
+          attExtracted.text || null,
+          attExtracted.status,
+          attExtracted.error || null,
+          attCategory,
+          attTs,
+          attTs,
+          user.id,
+        ]
+      );
+
+      attachmentResults.push({
+        document_id: attDocId,
+        filename: att.filename,
+        content_type: att.contentType,
+        bytes: att.bytes.length,
+        category: attCategory,
+        extraction_status: attExtracted.status,
+      });
+    } catch (err) {
+      console.error('[email-ingest] attachment failed:', err?.message || err);
+      attachmentResults.push({
+        filename: att.filename,
+        error: err?.message || String(err),
+      });
+    }
+  }
+
   return jsonResponse({
     ok: true,
     document_id: docId,
@@ -211,6 +298,7 @@ export async function onRequestPost(context) {
     category,
     extraction_status: extracted.status,
     bytes: bytes.length,
+    attachments: attachmentResults,
   });
 }
 

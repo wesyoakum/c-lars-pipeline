@@ -10,8 +10,9 @@
 //   * Walks multipart/* trees recursively, identifying each part.
 //   * Decodes Content-Transfer-Encoding (base64, quoted-printable,
 //     7bit/8bit/binary).
-//   * Keeps text/* leaves, drops binary leaves (PDFs, images,
-//     application/* attachments, etc.).
+//   * Keeps text/* leaves as decoded strings (`emailToReadableText`).
+//   * Keeps non-text leaves as raw bytes + filename so callers can
+//     extract attachments separately (`extractAttachments`).
 //   * Decodes RFC 2047 encoded-words ("=?UTF-8?B?...?=" /
 //     "=?UTF-8?Q?...?=") in header values so non-ASCII Subject /
 //     From lines come out readable.
@@ -23,8 +24,8 @@
 //     UTF-8; rare Latin-1 / SJIS content may show garbled bytes).
 //   * No signature / quote folding (replies still include "> ..."
 //     quoted text — fine for search).
-//   * No attachment metadata extraction (we drop them entirely; the
-//     R2 original keeps the bytes if we ever need them back).
+//   * No RFC 5987 filename* decoding (rare for English filenames;
+//     plain filename= and name= cover the common cases).
 
 const HEADER_KEYS_DISPLAYED = ['from', 'to', 'cc', 'subject', 'date', 'reply-to'];
 
@@ -65,6 +66,89 @@ export function emailToReadableText(rawMime) {
   return headerBlock + (headerBlock ? '\n\n' : '') + bodyText;
 }
 
+/**
+ * Walk the MIME tree and return every non-text leaf that looks like an
+ * attachment, as `{ filename, contentType, bytes }`. Used by the
+ * Outlook add-in's email-ingest path to surface attached PDFs / images
+ * / spreadsheets as their own claudia_documents rows alongside the
+ * parent .eml.
+ *
+ * Filters out tiny inline images (under 2KB) — these are almost always
+ * signature logos or tracking pixels, not real content. Non-image
+ * inline parts are kept (rare but legitimate, e.g. inline CSV).
+ *
+ * Returns [] on parse failure or when there are no attachments.
+ */
+export function extractAttachments(rawMime) {
+  if (!rawMime || typeof rawMime !== 'string') return [];
+  let parsed;
+  try {
+    parsed = parseMime(rawMime);
+  } catch {
+    return [];
+  }
+  if (!parsed) return [];
+  return flattenAttachmentParts(parsed);
+}
+
+function flattenAttachmentParts(node) {
+  if (!node) return [];
+  if (Array.isArray(node.parts)) return node.parts.flatMap(flattenAttachmentParts);
+  // Leaf. Text leaves don't carry rawBytes, so they fall through here.
+  if (!node.rawBytes || node.rawBytes.length === 0) return [];
+
+  const headers = node.headers || {};
+  const dispRaw = headers['content-disposition'] || '';
+  // parseContentType happens to match "type; key=value; ..." so it
+  // works for Content-Disposition too — we only need the type token
+  // and the filename param.
+  const disp = parseContentType(dispRaw);
+  const isAttachment = disp.type === 'attachment';
+  const isInline = disp.type === 'inline';
+  const isImage = String(node.contentType || '').toLowerCase().startsWith('image/');
+
+  // Skip tiny inline images (signature logos, tracking pixels).
+  if (isInline && isImage && node.rawBytes.length < 2 * 1024) return [];
+
+  // Anything explicitly marked attachment OR a sized inline non-image
+  // (rare but legitimate) gets surfaced. Default-disposition binary
+  // parts (no Content-Disposition header at all) also flow through
+  // here as long as they're large enough to be real content.
+  const filenameRaw = disp.params.filename || node.contentTypeParams?.name || '';
+  const filename = decodeRfc2047(filenameRaw) || `attachment.${guessExt(node.contentType)}`;
+
+  if (!isAttachment && !filenameRaw && node.rawBytes.length < 2 * 1024) {
+    // No disposition, no filename, tiny — almost certainly not real
+    // content. Skip.
+    return [];
+  }
+
+  return [{
+    filename,
+    contentType: node.contentType,
+    bytes: node.rawBytes,
+  }];
+}
+
+function guessExt(ct) {
+  const c = String(ct || '').toLowerCase();
+  const map = {
+    'application/pdf': 'pdf',
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'application/msword': 'doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/vnd.ms-excel': 'xls',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'text/csv': 'csv',
+    'text/plain': 'txt',
+    'application/zip': 'zip',
+  };
+  return map[c] || 'bin';
+}
+
 /* ===================== Parsing core ===================== */
 
 function parseMime(raw) {
@@ -81,12 +165,39 @@ function parseMime(raw) {
       parts: parts.map(parseMime).filter(Boolean),
     };
   }
+
+  // text/* leaves get decoded into a string for the readable-text
+  // pipeline. Non-text leaves keep raw bytes so extractAttachments
+  // can pull them out — running them through bytesToString would
+  // mangle the binary anyway, so we skip the decode entirely.
+  if (contentType.type.startsWith('text/')) {
+    return {
+      headers,
+      contentType: contentType.type,
+      contentTypeParams: contentType.params,
+      body: decodeBody(body, encoding, contentType.params.charset),
+    };
+  }
   return {
     headers,
     contentType: contentType.type,
     contentTypeParams: contentType.params,
-    body: decodeBody(body, encoding, contentType.params.charset),
+    rawBytes: decodeBodyToBytes(body, encoding),
   };
+}
+
+// Decode a part body all the way to raw bytes (Uint8Array). Mirror of
+// decodeBody() but skips the bytesToString step so binary content
+// survives intact.
+function decodeBodyToBytes(body, encoding) {
+  if (encoding === 'base64') return base64ToBytes(body);
+  if (encoding === 'quoted-printable') return quotedPrintableToBytes(body);
+  // 7bit / 8bit / binary: char-code each character into a byte. Modern
+  // email puts binary attachments in base64, so this branch is mostly
+  // a fallback for malformed messages.
+  const out = new Uint8Array(body.length);
+  for (let i = 0; i < body.length; i++) out[i] = body.charCodeAt(i) & 0xff;
+  return out;
 }
 
 function splitHeadersBody(text) {

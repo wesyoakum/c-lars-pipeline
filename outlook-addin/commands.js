@@ -86,8 +86,12 @@ async function sendToClaudia(event) {
 
     let body;
     try { body = await res.json(); } catch { body = {}; }
-    const cat = body?.category ? ' (' + body.category + ')' : '';
-    await showNotification('Sent to Claudia ' + cat + ' ✓', 'informationalMessage');
+    const parts = [];
+    if (body?.category) parts.push(body.category);
+    const attCount = Array.isArray(body?.attachments) ? body.attachments.length : 0;
+    if (attCount > 0) parts.push('+' + attCount + ' attachment' + (attCount > 1 ? 's' : ''));
+    const suffix = parts.length > 0 ? ' (' + parts.join(', ') + ')' : '';
+    await showNotification('Sent to Claudia' + suffix + ' ✓', 'informationalMessage');
   } catch (err) {
     console.error('[send-to-claudia] failed:', err);
     await showNotification('Failed: ' + (err?.message || String(err)), 'errorMessage');
