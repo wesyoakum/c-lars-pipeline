@@ -17,6 +17,14 @@ import { formBody } from '../../lib/http.js';
 import { makeAssistantTools, listTableNames } from './tools.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
+
+// Live chat runs on Opus 4.7 (matches the hourly tick). Sonnet was
+// dropping nuanced instructions ("review each one — ask about
+// questionables") and adding banned scaffolding (emoji-prefixed list
+// headers) at the bottom of the ~600-line system prompt; Opus holds
+// the contract. Override via env.CLAUDIA_CHAT_MODEL to flip back to
+// Sonnet without a redeploy if cost surprises us.
+const CLAUDIA_CHAT_MODEL_DEFAULT = 'claude-opus-4-7';
 // History window for the Claudia API context. Single-conversation mode
 // means the thread grows forever, so we cap to the LAST 14 DAYS or
 // the LAST 100 MESSAGES, whichever is MORE — so an active week still
@@ -158,6 +166,7 @@ export async function onRequestPost(context) {
       executeTool: tools.execute,
       cacheSystem: true,
       maxToolHops: 6,
+      model: env.CLAUDIA_CHAT_MODEL || CLAUDIA_CHAT_MODEL_DEFAULT,
     });
     assistantText = result.text || '(no response)';
   } catch (err) {
