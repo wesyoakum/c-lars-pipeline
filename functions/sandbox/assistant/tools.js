@@ -196,16 +196,22 @@ export async function makeAssistantTools({ env, user }) {
       description:
         "List documents the user has dropped into Claudia's drop-zone. Files can be PDF, DOCX, " +
         'XLSX, images (PNG / JPG / GIF / WEBP — extracted as a vision-generated description), ' +
-        'audio (MP3 / WAV / M4A / etc — transcribed via Whisper), or plain text variants ' +
-        '(TXT / MD / CSV / JSON / XML / YAML). Returns id, seq, filename, content_type, ' +
-        'size_bytes, retention, extraction_status, created_at, and a short preview. ' +
+        'audio (MP3 / WAV / M4A / etc — transcribed via Whisper), email .eml/.mbox (parsed for ' +
+        'sender / subject / date), or plain text variants (TXT / MD / CSV / JSON / XML / YAML). ' +
+        'Returns id, seq, filename, content_type, size_bytes, retention, category, ' +
+        'extraction_status, created_at, sender_email/sender_name/subject/email_date/message_id ' +
+        '(populated for .eml uploads), parent_id (set on rows that came from inside an .eml as ' +
+        'an attachment — the parent_id is the .eml row), and a short preview. ' +
         'Each doc has a per-user monotonic `seq` (#1, #2, #3, ...) — refer to docs by short ' +
         '#N in conversation, and use `since: N` to list ONLY uploads with seq > N. That is the ' +
         'reliable way to check for new arrivals mid-conversation: note the highest seq you saw ' +
-        'on a previous list call, then re-list with since=<that number>. Filenames repeat across ' +
-        'batches (Pocket emails, Anthropic newsletters, the same RFQ thread) so do not infer ' +
-        '"already-seen" from filename matches; trust seq instead. Trashed docs are excluded by ' +
-        'default; pass include_trashed: true to see them.',
+        'on a previous list call, then re-list with since=<that number>. When the user says they ' +
+        'just uploaded ("first batch is there", "I dropped them", "they\'re in"), call ' +
+        'list_documents WITHOUT a since filter to grab the latest 30 — do NOT report "nothing ' +
+        'new" without first running the tool, and trust the rows the tool returns over any prior ' +
+        'belief. Filenames repeat across batches (Pocket emails, Anthropic newsletters, the same ' +
+        'RFQ thread) so do not infer "already-seen" from filename matches; trust seq instead. ' +
+        'Trashed docs are excluded by default; pass include_trashed: true to see them.',
       input_schema: {
         type: 'object',
         properties: {
@@ -1471,6 +1477,8 @@ async function listDocuments(env, user, { include_trashed, retention, since, seq
     env.DB,
     `SELECT id, seq, filename, content_type, size_bytes, retention, category,
             extraction_status, extraction_error, created_at, last_accessed_at,
+            sender_email, sender_name, subject, email_date, message_id,
+            parent_id,
             substr(coalesce(full_text, ''), 1, 200) AS preview
        FROM claudia_documents
       WHERE ${where}
