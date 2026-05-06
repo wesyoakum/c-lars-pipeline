@@ -370,7 +370,13 @@ function bulkSelectScript() {
         var fd = new FormData();
         ids.forEach(function(id) { fd.append('ids', id); });
         var r = await fetch('/sandbox/assistant/documents/bulk-trash', { method: 'POST', body: fd });
-        var json = await r.json().catch(function() { return null; });
+        // Read the body once as text so we can show diagnostics on
+        // non-JSON responses (e.g. HTML error pages from Cloudflare
+        // when the function fails or isn't deployed yet).
+        var bodyText = await r.text();
+        var json = null;
+        try { json = JSON.parse(bodyText); } catch (e) { /* leave as null */ }
+
         if (json && json.ok) {
           // Drop the rows in place — no full reload. Update the list-
           // table count too so the toolbar's "Showing N of M" stays right.
@@ -385,9 +391,14 @@ function bulkSelectScript() {
           }
           updateUI();
         } else {
-          alert('Could not trash: ' + ((json && json.error) || 'unknown error'));
+          var detail = (json && json.error)
+            ? json.error
+            : ('HTTP ' + r.status + ' — ' + (bodyText || '').slice(0, 200));
+          console.error('[bulk-trash] failed:', r.status, bodyText);
+          alert('Could not trash: ' + detail);
         }
       } catch (err) {
+        console.error('[bulk-trash] exception:', err);
         alert('Error: ' + (err && err.message ? err.message : err));
       } finally {
         trashBtn.disabled = false;

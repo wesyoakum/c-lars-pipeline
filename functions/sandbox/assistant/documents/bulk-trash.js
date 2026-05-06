@@ -54,21 +54,36 @@ export async function onRequestPost(context) {
 
   const ts = now();
   const placeholders = ids.map(() => '?').join(',');
-  const result = await run(
-    env.DB,
-    `UPDATE claudia_documents
-        SET retention = 'trashed',
-            updated_at = ?,
-            trashed_at = ?
-      WHERE user_id = ?
-        AND retention != 'trashed'
-        AND id IN (${placeholders})`,
-    [ts, ts, user.id, ...ids]
-  );
+  let meta;
+  try {
+    // db.js's run() already unwraps to result.meta for us, so the
+    // returned object IS the meta — `meta.changes` directly, NOT
+    // `meta.meta.changes`. Earlier draft of this file had the wrong
+    // path; the trashed count came back as 0 even on success.
+    meta = await run(
+      env.DB,
+      `UPDATE claudia_documents
+          SET retention = 'trashed',
+              updated_at = ?,
+              trashed_at = ?
+        WHERE user_id = ?
+          AND retention != 'trashed'
+          AND id IN (${placeholders})`,
+      [ts, ts, user.id, ...ids]
+    );
+  } catch (err) {
+    // Surface the actual SQL error so the client alert shows something
+    // useful instead of a generic "unknown error".
+    console.error('[bulk-trash] sql error:', err?.message || err, '\nids count:', ids.length);
+    return jsonResponse({
+      ok: false,
+      error: 'sql: ' + (err?.message || String(err)),
+    }, 500);
+  }
 
-  // D1's `result.meta.changes` reflects rows actually updated (skipping
-  // already-trashed and any IDs that didn't belong to the user).
-  const trashed = result?.meta?.changes ?? 0;
+  // meta.changes reflects rows actually updated (skipping already-
+  // trashed and any IDs that didn't belong to the user).
+  const trashed = meta?.changes ?? 0;
   return jsonResponse({ ok: true, trashed });
 }
 
