@@ -22,7 +22,7 @@
   xsi:type="MailApp">
 
   <Id>4a3f8c9e-7b21-4d6f-b8e3-2a1c6d9f7e84</Id>
-  <Version>1.0.0.1</Version>
+  <Version>1.0.0.2</Version>
   <ProviderName>C-LARS</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Send to Claudia" />
@@ -48,7 +48,15 @@
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://c-lars-pms.pages.dev/outlook-addin/taskpane.html" />
+        <!-- Extensionless URL — Cloudflare Pages auto-redirects
+             /outlook-addin/taskpane.html → /outlook-addin/taskpane
+             (308 Permanent Redirect, "clean URLs" default behavior).
+             Outlook's add-in runtime doesn't follow that redirect
+             when fetching the SourceLocation, so the original .html
+             reference here failed to load with "We're sorry, we
+             couldn't access Send to Claudia." Pointing directly at
+             the canonical extensionless URL avoids the 308. -->
+        <SourceLocation DefaultValue="https://c-lars-pms.pages.dev/outlook-addin/taskpane" />
         <RequestedHeight>250</RequestedHeight>
       </DesktopSettings>
     </Form>
@@ -110,7 +118,8 @@
         <bt:Image id="Icon.80" DefaultValue="https://c-lars-pms.pages.dev/img/logo-120.png" />
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Commands.Url" DefaultValue="https://c-lars-pms.pages.dev/outlook-addin/commands.html" />
+        <!-- Same extensionless-URL fix as SourceLocation above. -->
+        <bt:Url id="Commands.Url" DefaultValue="https://c-lars-pms.pages.dev/outlook-addin/commands" />
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="ClaudiaGroup.Label" DefaultValue="Claudia" />
