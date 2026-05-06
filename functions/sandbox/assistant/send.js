@@ -17,7 +17,14 @@ import { formBody } from '../../lib/http.js';
 import { makeAssistantTools, listTableNames } from './tools.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
-const MAX_HISTORY_TURNS = 40;
+// History window for the Claudia API context. Single-conversation mode
+// means the thread grows forever, so we cap to the LAST 14 DAYS or
+// the LAST 100 MESSAGES, whichever is MORE — so an active week still
+// fits in context, and a quiet stretch doesn't lose the last
+// hand-off. Memory keys (claudia.hold_list.current etc.) carry
+// across the cap, so nothing important relies on the rolling window.
+const HISTORY_WINDOW_DAYS = 14;
+const HISTORY_MIN_MESSAGES = 100;
 
 export async function onRequestPost(context) {
   const { env, data, request } = context;
@@ -37,9 +44,7 @@ export async function onRequestPost(context) {
   // → most recently updated thread (or create one if the user has none
   // yet — preserves the prior single-thread behavior on a brand-new
   // account).
-  const url = new URL(request.url);
-  const requestedThreadId = url.searchParams.get('thread') || form.thread_id || null;
-  const thread = await ensureThread(env.DB, user, requestedThreadId);
+  const thread = await ensureThread(env.DB, user);
   const ts = now();
   await run(
     env.DB,
@@ -67,16 +72,27 @@ export async function onRequestPost(context) {
     }
   }
 
-  // Pull the LATEST N turns (DESC then reverse) so the just-inserted
-  // user message is always included and the array ends on the user
-  // turn — Claude rejects conversations that don't end on a user role.
+  // Pull the history window: last HISTORY_WINDOW_DAYS days OR last
+  // HISTORY_MIN_MESSAGES rows, whichever is MORE. The OR-with-id-IN
+  // subquery handles both: rows in the date window match the first
+  // arm, anything older than the window but inside the recency floor
+  // matches the second. Then DESC + reverse for the same
+  // ends-on-user-turn invariant the prior LIMIT-based query had.
   const recentDesc = await all(
     env.DB,
     `SELECT role, text FROM assistant_messages
       WHERE thread_id = ?
-      ORDER BY created_at DESC, id DESC
-      LIMIT ?`,
-    [thread.id, MAX_HISTORY_TURNS]
+        AND (
+          created_at >= datetime('now', '-${HISTORY_WINDOW_DAYS} days')
+          OR id IN (
+            SELECT id FROM assistant_messages
+             WHERE thread_id = ?
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?
+          )
+        )
+      ORDER BY created_at DESC, id DESC`,
+    [thread.id, thread.id, HISTORY_MIN_MESSAGES]
   );
   const history = recentDesc.slice().reverse();
 
@@ -166,19 +182,13 @@ export async function onRequestPost(context) {
   return htmlFragment(all_messages.map(renderRow).join(''));
 }
 
-async function ensureThread(db, user, requestedId) {
-  // Specific thread requested? Validate it belongs to the user, then
-  // return it. Mismatched/missing → fall through to "most recent" so a
-  // stale URL with a deleted thread still works.
-  if (requestedId) {
-    const owned = await one(
-      db,
-      'SELECT id, title FROM assistant_threads WHERE id = ? AND user_id = ?',
-      [requestedId, user.id]
-    );
-    if (owned) return owned;
-  }
-
+async function ensureThread(db, user) {
+  // Single-conversation mode: always return the user's most-recently
+  // updated thread (creating one if none exists). Older threads are
+  // left in D1 for audit / future recovery but are no longer routable
+  // from the UI — the requestedId param the caller used to pass is
+  // ignored on purpose so a stale `?thread=<id>` URL collapses to the
+  // canonical conversation instead of resurrecting an old one.
   const existing = await one(
     db,
     'SELECT id, title FROM assistant_threads WHERE user_id = ? ORDER BY updated_at DESC LIMIT 1',
@@ -190,9 +200,9 @@ async function ensureThread(db, user, requestedId) {
   await run(
     db,
     'INSERT INTO assistant_threads (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-    [id, user.id, 'New chat', ts, ts]
+    [id, user.id, 'Claudia', ts, ts]
   );
-  return { id, title: 'New chat' };
+  return { id, title: 'Claudia' };
 }
 
 /**
