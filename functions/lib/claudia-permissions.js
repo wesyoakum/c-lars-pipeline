@@ -145,6 +145,13 @@ export const PERMISSION_GATED_ACTIONS_CATALOG = [
     description: 'Re-fire an auto-task rule chain against an entity (opp, quote, task, job) by event_type. Use only when the natural trigger missed for a specific entity — firing a chain that already ran will create duplicate tasks. Powerful and easy to misuse, hence default-off.',
     defaultEnabled: false,
   },
+  // triage — chat-raised actions land in the four-quadrant queue.
+  {
+    action: 'set_action',
+    category: 'triage',
+    label: 'Add an action to the triage queue',
+    description: 'Insert a new claudia_actions row when Wes dictates a todo in chat ("remind me to make Stacy\'s birthday reservations", "add a follow-up with Bob to the Hot list", "I need to circle back on the Acme RFQ"). Does NOT execute anything — the action lands in the queue with proposed_action=null and Wes marks it Done when he completes it. Source attribution: source_kind=\'self\' (or \'chat\') and raised_by=\'wes\'. Quadrant defaults to plan unless Claudia infers otherwise.',
+  },
   // account / contact merging (consolidate duplicate rows)
   {
     action: 'merge_accounts',
@@ -215,6 +222,11 @@ export const PERMISSION_CATEGORIES = [
     key: 'messaging',
     label: 'Outbound messaging',
     blurb: 'Push a notification to Wes\'s configured external channel (Teams today; email pending). Always to him, never to anyone else.',
+  },
+  {
+    key: 'triage',
+    label: 'Triage queue',
+    blurb: 'Chat-raised actions ("add this to my list") that land in the Hot/Plan/Quick/Skip queue. Pure organizational — no Pipeline mutations. Wes marks each item Done / Dismissed / Move-quadrant from the panel.',
   },
   {
     key: 'auto_tasks',

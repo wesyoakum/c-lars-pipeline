@@ -917,6 +917,60 @@ export async function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'set_action',
+      description:
+        "Add a row to ${display}'s Triage queue (Hot / Plan / Quick / Skip). Use when ${display} " +
+        'dictates a todo in chat — examples: "remind me to make Stacy\'s birthday reservations", ' +
+        '"add a follow-up with Bob to the Hot list", "I need to circle back on the Acme RFQ", ' +
+        '"put filing the OpenAI invoice on the list," "queue up a quarterly review with Acme." ' +
+        "Does NOT execute anything — the row lands in the queue with proposed_action=null. " +
+        "${display} marks it Done from the panel when he completes it. " +
+        '\n\n' +
+        'QUADRANT GUIDANCE (importance × urgency):\n' +
+        '- hot   = important AND urgent. Today / this week / customer-facing deadline.\n' +
+        '- plan  = important, NOT urgent. Schedule deliberate time. Quarterly reviews, ' +
+        'strategic follow-ups, prospects to nurture.\n' +
+        '- quick = urgent, NOT important. Knock-out items. Small admin, file this doc, ' +
+        'reply to that one email.\n' +
+        '- skip  = neither (or low-priority background). Default to plan if unsure.\n' +
+        '\n' +
+        'When ${display} provides an explicit deadline ("by Friday", "tomorrow", "next week"), ' +
+        'resolve to ISO date and set due_at. ' +
+        'When ${display} explicitly asks for a quadrant ("add this to Hot"), honor that. ' +
+        'Otherwise infer from importance/urgency. Returns { ok, action_id, quadrant }.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          title: {
+            type: 'string',
+            description: 'Short scannable title (under 80 chars), action-imperative. e.g. "Make Stacy\'s birthday reservations".',
+          },
+          detail: {
+            type: 'string',
+            description: 'Optional 1–3 sentence context — the why. Don\'t restate the title.',
+          },
+          quadrant: {
+            type: 'string',
+            enum: ['hot', 'plan', 'quick', 'skip'],
+            description: 'Eisenhower quadrant. Default plan if unsure.',
+          },
+          importance: {
+            type: 'number',
+            description: '0..1. "If this never happens, what breaks?" Optional.',
+          },
+          urgency: {
+            type: 'number',
+            description: '0..1. "How fast does this rot?" Optional.',
+          },
+          due_at: {
+            type: 'string',
+            description: 'ISO 8601 date (YYYY-MM-DD) when there is an explicit deadline. Omit otherwise.',
+          },
+        },
+        required: ['title'],
+      },
+    },
+    {
       name: 'undo_claudia_write',
       description:
         'Reverse a previous Claudia write within the 24-hour undo window. For a CREATE: deletes ' +
@@ -1158,6 +1212,8 @@ export async function makeAssistantTools({ env, user }) {
         return mergeContacts(env, user, input);
       case 'notify_wes':
         return notifyWes(env, user, input);
+      case 'set_action':
+        return setAction(env, user, input);
       case 'undo_claudia_write':
         return undoClaudiaWrite(env, user, input);
       case 'list_recent_writes':
@@ -2550,6 +2606,82 @@ async function mergeRows(env, user, opts) {
 }
 
 // ---------- Outbound notifications (Teams today; email pending) ----------
+
+async function setAction(env, user, input = {}) {
+  const title = String(input.title || '').trim();
+  if (!title) {
+    return { error: 'title_required', message: 'set_action requires a non-empty title.' };
+  }
+
+  const validQuadrants = new Set(['hot', 'plan', 'quick', 'skip']);
+  const quadrant = validQuadrants.has(String(input.quadrant || '').toLowerCase())
+    ? String(input.quadrant).toLowerCase()
+    : 'plan';
+
+  const clamp01 = (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(0, Math.min(1, n));
+  };
+
+  // Light validation on due_at — accept anything ISO-parseable, store the
+  // original string. The classifier and the worker do the same.
+  let dueAt = null;
+  if (input.due_at) {
+    const s = String(input.due_at).trim();
+    if (s && Number.isFinite(Date.parse(s))) dueAt = s;
+  }
+
+  const id = uuid();
+  const ts = now();
+  await run(
+    env.DB,
+    `INSERT INTO claudia_actions (
+        id, user_id,
+        source_kind, source_ref_table, source_ref_id, source_event_id,
+        raised_by,
+        title, detail, rationale,
+        quadrant, importance, urgency, due_at,
+        proposed_action_json, edited_action_json,
+        context_json,
+        status, evaluation_count,
+        created_at, updated_at
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      id, user.id,
+      'chat', null, null, null,
+      'wes',
+      title, trimOrNull(input.detail), null,
+      quadrant, clamp01(input.importance), clamp01(input.urgency), dueAt,
+      null, null,
+      null,
+      'open', 1,
+      ts, ts,
+    ]
+  );
+
+  // Audit row so the per-entity history view shows it.
+  try {
+    await audit(env.DB, {
+      entityType: 'claudia_action',
+      entityId: id,
+      eventType: 'created',
+      user,
+      summary: `Wes raised an action via chat: ${title.slice(0, 200)}`,
+    });
+  } catch {
+    // Non-fatal — the action row already exists.
+  }
+
+  return {
+    ok: true,
+    action_id: id,
+    title,
+    quadrant,
+    due_at: dueAt,
+    summary: `Added to ${quadrant.toUpperCase()}: "${title.length > 60 ? title.slice(0, 57) + '...' : title}"`,
+  };
+}
 
 async function notifyWes(env, user, { message, urgency, link_label, link_url } = {}) {
   const body = String(message || '').trim();
