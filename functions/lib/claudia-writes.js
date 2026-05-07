@@ -76,7 +76,14 @@ const AUDIT_FIELDS_BY_TABLE = {
     'customer_po_number', 'ntp_required'],
 };
 
-const UNDO_WINDOW_HOURS = 24;
+// Window in which claudiaUndo() will reverse a write. Bumped from 24h
+// to 72h so a Friday-afternoon Claudia write can still be undone Monday
+// morning. The longer window raises the chance that the affected row
+// has been edited between Claudia's write and the undo — see the
+// stale-conflict check below in claudiaUndo, which sets
+// `stale_warning: true` on the response when that happens so callers
+// can decide whether to proceed.
+const UNDO_WINDOW_HOURS = 72;
 
 // Tables Claudia is allowed to write to. Anything else is rejected.
 // Add intentionally; the per-tool definitions in tools.js still gate
@@ -243,15 +250,22 @@ export async function claudiaUpdate(env, user, action, table, id, columnValues, 
 
 /**
  * Reverse an audited write. For a CREATE: delete the row. For an
- * UPDATE: restore the before snapshot. The 24-hour window is enforced
+ * UPDATE: restore the before snapshot. The 72-hour window is enforced
  * here. Marks the audit row undone (does not delete it).
+ *
+ * Includes a stale-conflict check: if the affected row's updated_at
+ * is newer than the original write's created_at, the response carries
+ * `stale_warning: true` plus `current_updated_at` so the caller can
+ * surface "this row has been edited since Claudia wrote it; undo will
+ * blow away those edits" before proceeding. The undo still executes —
+ * the warning is informational, not blocking.
  *
  * @param {object} env
  * @param {object} user
  * @param {string} auditId
  * @param {object} [opts]
  * @param {string} [opts.reason]
- * @returns {Promise<{ ok, action, ref_table, ref_id, undone_at }>}
+ * @returns {Promise<{ ok, action, ref_table, ref_id, undone_at, stale_warning?, current_updated_at? }>}
  */
 export async function claudiaUndo(env, user, auditId, opts = {}) {
   const audit = await one(
@@ -273,6 +287,28 @@ export async function claudiaUndo(env, user, auditId, opts = {}) {
   }
   if (!WRITABLE_TABLES.has(audit.ref_table)) {
     return { error: 'table_not_writable', ref_table: audit.ref_table };
+  }
+
+  // Stale-conflict probe. Best-effort: if the table has no updated_at
+  // column or the row is gone, we just skip the warning. No throw.
+  // Compare on string timestamps — they're ISO 8601 in this schema, so
+  // lexical compare matches chronological order.
+  let staleWarning = false;
+  let currentUpdatedAt = null;
+  try {
+    const currentRow = await one(
+      env.DB,
+      `SELECT updated_at FROM ${audit.ref_table} WHERE id = ?`,
+      [audit.ref_id]
+    );
+    if (currentRow && currentRow.updated_at && audit.created_at) {
+      currentUpdatedAt = currentRow.updated_at;
+      if (currentRow.updated_at > audit.created_at) {
+        staleWarning = true;
+      }
+    }
+  } catch {
+    // Column or row missing — leave staleWarning = false.
   }
 
   const ts = now();
@@ -332,6 +368,7 @@ export async function claudiaUndo(env, user, auditId, opts = {}) {
     ref_table: audit.ref_table,
     ref_id: audit.ref_id,
     undone_at: ts,
+    ...(staleWarning ? { stale_warning: true, current_updated_at: currentUpdatedAt } : {}),
   };
 }
 
