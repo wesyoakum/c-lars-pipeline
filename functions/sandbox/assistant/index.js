@@ -171,6 +171,30 @@ export async function onRequestGet(context) {
       #chat-scroll-top    { bottom: 168px; }
       #chat-scroll-bottom { bottom: 124px; }
       .chat-scroll-jump svg { width: 14px; height: 14px; }
+      /* Order toggle — flips message order between oldest-first and
+         newest-first. Same fixed-position style as the scroll-jump
+         buttons, sits just above them. Always visible (unlike the
+         scroll buttons which only appear when scrollable). */
+      #chat-order-toggle {
+        position: fixed; right: 332px; bottom: 212px; z-index: 7;
+        width: 32px; height: 32px; border-radius: 50%;
+        background: rgba(255, 255, 255, 0.95);
+        border: 1px solid #d0d0d5; color: #4b5563; cursor: pointer;
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        transition: color 0.15s ease, background 0.15s ease;
+      }
+      #chat-order-toggle:hover { color: #1a1a22; background: #fff; }
+      #chat-order-toggle svg { width: 14px; height: 14px; }
+      @media (max-width: 1100px) { #chat-order-toggle { right: 312px; } }
+      @media (max-width: 800px)  { #chat-order-toggle { right: 16px;  } }
+      /* Newest-first mode: column-reverse on both the wrap (so the
+         form moves to the top) and the messages list (so newest
+         message is at the visual top). DOM order is unchanged —
+         we still store + render messages oldest-first, the CSS just
+         flips the visual stack. */
+      .assistant-wrap.order-newest-first { flex-direction: column-reverse; }
+      .assistant-wrap.order-newest-first .assistant-messages { flex-direction: column-reverse; }
       @media (max-width: 1100px) {
         /* Right sidebar at 280px in this breakpoint per .assistant-layout */
         .chat-scroll-jump { right: 312px; }
@@ -698,6 +722,14 @@ export async function onRequestGet(context) {
       ${audioDocs.length === 0 ? html`<div class="claudia-side-empty">No recordings yet. Hit the mic next to the message box to capture a voice note — Claudia transcribes it via Whisper and you can ask her about it from the chat.</div>` : ''}
     </aside>
     <div class="assistant-wrap">
+      <button type="button" id="chat-order-toggle" aria-label="Toggle message order" title="Toggle: newest at top / newest at bottom">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="6" y1="5" x2="6" y2="19"/>
+          <polyline points="3 8 6 5 9 8"/>
+          <polyline points="15 16 18 19 21 16"/>
+          <line x1="18" y1="5" x2="18" y2="19"/>
+        </svg>
+      </button>
       <button type="button" id="chat-scroll-top" class="chat-scroll-jump" aria-label="Scroll to top of conversation" title="Top of conversation">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <polyline points="6 15 12 9 18 15"/>
@@ -769,13 +801,47 @@ export async function onRequestGet(context) {
         const grow = () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 180) + 'px'; };
         ta.addEventListener('input', grow);
 
-        // Helper: scroll the WINDOW to the bottom of the page (chat
-        // is page-scroll now, not internal).
+        // Message-order preference. 'asc' (default) = oldest at top,
+        // newest at bottom (typical chat). 'desc' = newest at top —
+        // CSS uses flex-direction: column-reverse on the wrap and
+        // messages list. The DOM order doesn't change; this is a
+        // pure visual flip plus a scroll-direction flip.
+        const ORDER_KEY = 'pipeline.claudia.message_order';
+        let messageOrder = 'asc';
+        try { messageOrder = localStorage.getItem(ORDER_KEY) === 'desc' ? 'desc' : 'asc'; } catch (_) {}
+        function applyOrder() {
+          // Queries each call so it works regardless of where the
+          // wrap is declared in the surrounding IIFE.
+          const w = document.querySelector('.assistant-wrap');
+          if (!w) return;
+          w.classList.toggle('order-newest-first', messageOrder === 'desc');
+        }
+        applyOrder();
+
+        // Helper: scroll to wherever the LATEST message lives — the
+        // bottom of the page in oldest-first mode, the top in
+        // newest-first mode (because column-reverse puts newest at
+        // the visual top).
         function scrollPageToBottom(behavior) {
-          window.scrollTo({ top: document.documentElement.scrollHeight, behavior: behavior || 'auto' });
+          if (messageOrder === 'desc') {
+            window.scrollTo({ top: 0, behavior: behavior || 'auto' });
+          } else {
+            window.scrollTo({ top: document.documentElement.scrollHeight, behavior: behavior || 'auto' });
+          }
         }
 
-        // Initial scroll-to-bottom on load.
+        // Toggle button handler.
+        const orderToggle = document.getElementById('chat-order-toggle');
+        if (orderToggle) {
+          orderToggle.addEventListener('click', () => {
+            messageOrder = messageOrder === 'asc' ? 'desc' : 'asc';
+            try { localStorage.setItem(ORDER_KEY, messageOrder); } catch (_) {}
+            applyOrder();
+            scrollPageToBottom('smooth');
+          });
+        }
+
+        // Initial scroll-to-latest on load.
         scrollPageToBottom();
 
         // BEFORE the HTMX request fires: optimistically append the user's
