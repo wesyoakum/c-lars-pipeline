@@ -1,9 +1,13 @@
-// functions/api/claudia/event-tick.js
+// functions/api/cron/claudia-event-tick.js
 //
-// POST /api/claudia/event-tick — fired by the workers/claudia-consumer
-// Worker for each cf-claudia-events queue message, OR by the hourly
-// sweeper for any claudia_events_pending row whose dispatched_at is
-// still NULL.
+// POST /api/cron/claudia-event-tick — fired by the workers/claudia-consumer
+// Worker for each cf-claudia-events queue message, OR by a manual
+// /__run on the consumer worker for testing.
+//
+// Lives under /api/cron/ so it's covered by the same Cloudflare Access
+// "Bypass" policy as the existing cron endpoints (sweep, notifications,
+// claudia-tick, wfm-step). Despite the name, it's not on a cron
+// schedule — the shared path just keeps the Access policy simple.
 //
 // Responsibility: turn ONE pending event into the right downstream
 // artifacts.

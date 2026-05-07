@@ -3,7 +3,7 @@
   //
   // Cloudflare Pages Functions can't be queue-consumers directly. This
   // tiny Worker subscribes to the cf-claudia-events queue and forwards
-  // each message to the Pages site at /api/claudia/event-tick, where
+  // each message to the Pages site at /api/cron/claudia-event-tick, where
   // the real work runs (D1 access + Anthropic calls). Same belt-and-
   // suspenders pattern as workers/cron/ — keep the Worker thin, do
   // logic in Pages where the bindings live.
@@ -52,7 +52,7 @@
 
   "vars": {
     // Public URL of the Pages deployment. Worker POSTs to
-    // `${PIPELINE_URL}/api/claudia/event-tick`. Same value the cron
+    // `${PIPELINE_URL}/api/cron/claudia-event-tick`. Same value the cron
     // worker uses.
     "PIPELINE_URL": "https://c-lars-pms.pages.dev"
   }

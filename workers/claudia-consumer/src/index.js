@@ -9,7 +9,7 @@
 //     Fired by the queue subscription defined in wrangler.jsonc. Each
 //     message body comes from queueClaudiaEvent() in the Pages project
 //     ({ event_id, type, ref_id, summary, user_id, sent_at }). For each
-//     message, POST to the Pages site at /api/claudia/event-tick. The
+//     message, POST to the Pages site at /api/cron/claudia-event-tick. The
 //     Pages endpoint loads the event by id, runs enrichment + the
 //     action extractor, and writes claudia_actions / claudia_questions
 //     / claudia_observations rows. Then we ack on success or retry on
@@ -100,7 +100,7 @@ async function processOneMessage(env, message) {
 }
 
 /**
- * POST one event payload to /api/claudia/event-tick on the Pages site.
+ * POST one event payload to /api/cron/claudia-event-tick on the Pages site.
  * Returns { ok, status, target, body } so the caller can settle the
  * queue message accordingly.
  */
@@ -117,7 +117,7 @@ async function callEventTick(env, body, label) {
     return { ok: false, status: 0, error: msg };
   }
 
-  const target = `${pipelineUrl}/api/claudia/event-tick`;
+  const target = `${pipelineUrl}/api/cron/claudia-event-tick`;
   const startedAt = new Date().toISOString();
 
   const headers = {
