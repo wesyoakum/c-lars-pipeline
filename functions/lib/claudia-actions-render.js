@@ -218,11 +218,25 @@ export function renderActionsPanel(actions) {
 
 function renderQuestionRow(q) {
   const linkedActionId = q.source_action_id;
+  const id = encodeURIComponent(q.id);
   return html`
     <li class="claudia-question-row" data-id="${escape(q.id)}">
       <div class="claudia-question-q">${escape(q.question)}</div>
       ${q.context ? html`<div class="claudia-question-ctx">${escape(q.context)}</div>` : ''}
       ${linkedActionId ? html`<div class="claudia-question-link"><a href="#claudia-action-${escape(linkedActionId)}">re: action</a></div>` : ''}
+      <form class="claudia-question-answer-form"
+            hx-post="/sandbox/assistant/questions/${id}/answer"
+            hx-target="#claudia-questions-panel"
+            hx-swap="outerHTML">
+        <input type="text" name="answer" class="claudia-question-input"
+               placeholder="Answer (Enter to save)…"
+               autocomplete="off" />
+        <button type="button" class="claudia-question-btn drop"
+                hx-post="/sandbox/assistant/questions/${id}/drop"
+                hx-target="#claudia-questions-panel"
+                hx-swap="outerHTML"
+                title="Drop — no longer relevant">Drop</button>
+      </form>
     </li>
   `;
 }
@@ -353,6 +367,26 @@ export const ACTIONS_PANEL_CSS = `
   .claudia-question-ctx { color: #6b5520; font-size: 12px; margin-top: 0.15rem; }
   .claudia-question-link { font-size: 11px; margin-top: 0.2rem; }
   .claudia-question-link a { color: #4a3a1a; text-decoration: underline; }
+  .claudia-question-answer-form {
+    display: flex; gap: 0.4rem; margin-top: 0.4rem; align-items: center;
+  }
+  .claudia-question-input {
+    flex: 1; padding: 4px 8px; font-size: 12px;
+    border: 1px solid #facc8a; border-radius: 4px;
+    background: #fffdf6; color: #4a3a1a;
+    font-family: inherit;
+  }
+  .claudia-question-input:focus {
+    outline: none; border-color: #d97706; background: #fff;
+  }
+  .claudia-question-btn {
+    background: rgba(255,255,255,0.85);
+    border: 1px solid #facc8a; border-radius: 4px;
+    padding: 3px 8px; font-size: 11px;
+    color: #6b5520; cursor: pointer;
+    line-height: 1.3;
+  }
+  .claudia-question-btn:hover { background: #fff; border-color: #d97706; }
 
   @media (max-width: 640px) {
     .claudia-actions-panel,
