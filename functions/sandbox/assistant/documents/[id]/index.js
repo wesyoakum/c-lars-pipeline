@@ -193,6 +193,47 @@ function renderEnrichment(enrichment) {
   `;
 }
 
+// Plain-form POST button strip for the drill-down page. Mirrors the
+// HTMX strip on the queue tray, but as classic <form>s — the route
+// handlers detect the missing HX-Request header and respond with a
+// 303 to the Referer, so the browser hard-reloads the drill-down with
+// fresh state.
+function renderDrillActionButtons(a) {
+  const id = encodeURIComponent(a.id);
+  let proposed = null;
+  try {
+    const src = a.edited_action_json || a.proposed_action_json;
+    if (src) {
+      const obj = JSON.parse(src);
+      if (obj && obj.tool) proposed = obj;
+    }
+  } catch { /* leave null */ }
+  const otherQuadrants = ['hot', 'plan', 'quick', 'skip'].filter((q) => q !== a.quadrant);
+  return html`
+    <div class="drill-action-actions">
+      ${proposed ? html`
+        <form method="POST" action="/sandbox/assistant/actions/${id}/approve">
+          <button type="submit" class="drill-action-btn approve" title="Approve — execute ${escape(proposed.tool)}, 72h undo">Approve</button>
+        </form>
+      ` : ''}
+      <form method="POST" action="/sandbox/assistant/actions/${id}/done">
+        <button type="submit" class="drill-action-btn done" title="Mark done — I did this">Done</button>
+      </form>
+      <form method="POST" action="/sandbox/assistant/actions/${id}/dismiss">
+        <button type="submit" class="drill-action-btn dismiss" title="Dismiss — not worth doing">Dismiss</button>
+      </form>
+      <span class="drill-action-move">
+        <span class="drill-action-move-label">Move:</span>
+        ${otherQuadrants.map((q) => html`
+          <form method="POST" action="/sandbox/assistant/actions/${id}/move?to=${escape(q)}">
+            <button type="submit" class="drill-action-btn move" title="Move to ${escape(q)}">${escape(q.charAt(0).toUpperCase() + q.slice(1))}</button>
+          </form>
+        `)}
+      </span>
+    </div>
+  `;
+}
+
 function renderActions(actions) {
   if (!actions || actions.length === 0) {
     return html`
@@ -216,6 +257,7 @@ function renderActions(actions) {
             </div>
             ${a.detail ? html`<div class="drill-action-detail">${escape(a.detail)}</div>` : ''}
             ${a.rationale ? html`<div class="drill-action-rat">${escape(a.rationale)}</div>` : ''}
+            ${a.status === 'open' ? renderDrillActionButtons(a) : ''}
           </li>
         `)}
       </ul>
@@ -235,6 +277,15 @@ function renderQuestions(questions) {
             ${q.context ? html`<div class="drill-question-ctx">${escape(q.context)}</div>` : ''}
             ${q.answer ? html`<div class="drill-question-ans"><strong>Answer:</strong> ${escape(q.answer)}</div>` : ''}
             <div class="drill-question-meta">${escape(q.status)} · ${escape(fmtDate(q.created_at))}</div>
+            ${q.status === 'open' ? html`
+              <form class="drill-question-answer-form" method="POST" action="/sandbox/assistant/questions/${escape(q.id)}/answer">
+                <input type="text" name="answer" placeholder="Answer (Enter to save)…" autocomplete="off" />
+                <button type="submit" class="drill-action-btn">Save</button>
+                <button type="submit" class="drill-action-btn dismiss"
+                        formaction="/sandbox/assistant/questions/${escape(q.id)}/drop"
+                        title="Drop — no longer relevant">Drop</button>
+              </form>
+            ` : ''}
           </li>
         `)}
       </ul>
@@ -312,6 +363,50 @@ function renderDrillDown({ doc, enrichment, actions, questions }) {
       .drill-action-detail { margin-top: 0.3rem; font-weight: 400; line-height: 1.45; }
       .drill-action-rat { margin-top: 0.2rem; font-size: 12px; color: #6b7280; font-style: italic; }
       .drill-empty { font-size: 13px; color: #6b7280; padding: 0.5rem 0; }
+
+      /* Action button strip — plain form POSTs that 303-redirect back. */
+      .drill-action-actions {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem;
+        margin-top: 0.4rem; font-size: 11px;
+      }
+      .drill-action-actions form { display: inline; margin: 0; padding: 0; }
+      .drill-action-btn {
+        background: rgba(255,255,255,0.85);
+        border: 1px solid rgba(0,0,0,0.15);
+        border-radius: 4px;
+        padding: 3px 9px;
+        font: inherit; font-size: 11px;
+        color: #1f2937; cursor: pointer;
+        line-height: 1.3;
+      }
+      .drill-action-btn:hover { background: rgba(255,255,255,1); border-color: rgba(0,0,0,0.30); }
+      .drill-action-btn.approve {
+        background: #15803d; border-color: #15803d; color: #fff; font-weight: 600;
+      }
+      .drill-action-btn.approve:hover { background: #166534; border-color: #166534; }
+      .drill-action-btn.done    { color: #15803d; }
+      .drill-action-btn.dismiss { color: #6b7280; }
+      .drill-action-btn.move    { color: #4b5563; }
+      .drill-action-move {
+        display: inline-flex; align-items: center; gap: 0.25rem;
+        margin-left: 0.4rem; padding-left: 0.4rem;
+        border-left: 1px solid rgba(0,0,0,0.12);
+      }
+      .drill-action-move-label { color: #6b7280; font-size: 11px; }
+
+      /* Question answer strip on the drill-down. */
+      .drill-question-answer-form {
+        display: flex; gap: 0.4rem; margin-top: 0.4rem; align-items: center;
+      }
+      .drill-question-answer-form input[type="text"] {
+        flex: 1; padding: 4px 8px; font-size: 12px;
+        border: 1px solid #facc8a; border-radius: 4px;
+        background: #fffdf6; color: #4a3a1a;
+        font-family: inherit;
+      }
+      .drill-question-answer-form input[type="text"]:focus {
+        outline: none; border-color: #d97706; background: #fff;
+      }
 
       .drill-question {
         background: #fff7e6; border: 1px solid #facc8a; border-radius: 8px;

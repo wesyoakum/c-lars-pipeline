@@ -65,6 +65,14 @@ export async function onRequestPost(context) {
     } catch { /* non-fatal */ }
   }
 
-  const { actions } = await loadActionsAndQuestions(env, user.id);
-  return htmlFragment(renderActionsPanel(actions));
+  return await respond(env, user, context.request);
+}
+
+async function respond(env, user, request) {
+  if (request.headers.get('HX-Request')) {
+    const { actions } = await loadActionsAndQuestions(env, user.id);
+    return htmlFragment(renderActionsPanel(actions));
+  }
+  const referer = request.headers.get('Referer') || '/sandbox/assistant';
+  return new Response(null, { status: 303, headers: { Location: referer } });
 }

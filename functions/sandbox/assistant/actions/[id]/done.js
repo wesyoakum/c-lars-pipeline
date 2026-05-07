@@ -65,6 +65,18 @@ export async function onRequestPost(context) {
     } catch { /* non-fatal */ }
   }
 
-  const { actions } = await loadActionsAndQuestions(env, user.id);
-  return htmlFragment(renderActionsPanel(actions));
+  return await respond(env, user, context.request);
+}
+
+// HTMX requests get a panel-fragment swap; plain form POSTs (e.g.
+// from the per-file drill-down page) get a 303 redirect to the
+// Referer so the browser lands back on a fully-rendered page with
+// fresh state.
+async function respond(env, user, request) {
+  if (request.headers.get('HX-Request')) {
+    const { actions } = await loadActionsAndQuestions(env, user.id);
+    return htmlFragment(renderActionsPanel(actions));
+  }
+  const referer = request.headers.get('Referer') || '/sandbox/assistant';
+  return new Response(null, { status: 303, headers: { Location: referer } });
 }

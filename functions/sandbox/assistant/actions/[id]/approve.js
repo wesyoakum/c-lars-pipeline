@@ -36,6 +36,19 @@ function htmlFragment(s) {
   });
 }
 
+// HTMX requests get a panel-fragment swap; plain form POSTs (e.g.
+// from the per-file drill-down page) get a 303 redirect to the
+// Referer so the browser lands back on a fully-rendered page with
+// fresh state.
+async function respond(env, user, request) {
+  if (request.headers.get('HX-Request')) {
+    const { actions } = await loadActionsAndQuestions(env, user.id);
+    return htmlFragment(renderActionsPanel(actions));
+  }
+  const referer = request.headers.get('Referer') || '/sandbox/assistant';
+  return new Response(null, { status: 303, headers: { Location: referer } });
+}
+
 function parseJsonField(s) {
   if (!s) return null;
   try { return JSON.parse(s); } catch { return null; }
@@ -58,8 +71,7 @@ export async function onRequestPost(context) {
   if (!action) return new Response('Not found', { status: 404 });
   if (action.status !== 'open') {
     // Idempotent: re-render and return without re-execution.
-    const { actions } = await loadActionsAndQuestions(env, user.id);
-    return htmlFragment(renderActionsPanel(actions));
+    return await respond(env, user, context.request);
   }
 
   // Effective payload: edited overrides proposed, neither means we
@@ -68,7 +80,7 @@ export async function onRequestPost(context) {
   if (!effective || !effective.tool || typeof effective.payload !== 'object') {
     // Nothing to execute. Same outcome as Done; flip with a distinct
     // reason so the audit trail explains why.
-    return await markCompletedNoExec(env, user, action, 'no_proposed_action');
+    return await markCompletedNoExec(env, user, action, 'no_proposed_action', context.request);
   }
 
   // Dispatch through the chat tool registry. makeAssistantTools applies
@@ -78,11 +90,11 @@ export async function onRequestPost(context) {
   try {
     toolset = await makeAssistantTools({ env, user });
   } catch (err) {
-    return await markCompletedNoExec(env, user, action, `tools_load_failed:${err?.message || String(err)}`);
+    return await markCompletedNoExec(env, user, action, `tools_load_failed:${err?.message || String(err)}`, context.request);
   }
   const exec = toolset?.execute;
   if (typeof exec !== 'function') {
-    return await markCompletedNoExec(env, user, action, 'tools_dispatch_unavailable');
+    return await markCompletedNoExec(env, user, action, 'tools_dispatch_unavailable', context.request);
   }
 
   let result;
@@ -99,8 +111,7 @@ export async function onRequestPost(context) {
         WHERE id = ?`,
       [String(err?.message || err).slice(0, 500), ts, actionId]
     );
-    const { actions } = await loadActionsAndQuestions(env, user.id);
-    return htmlFragment(renderActionsPanel(actions));
+    return await respond(env, user, context.request);
   }
 
   // Tool returned a structured error result (not a throw). Same shape
@@ -115,8 +126,7 @@ export async function onRequestPost(context) {
         WHERE id = ?`,
       [String(result.error || result.message || 'tool_returned_error').slice(0, 500), ts, actionId]
     );
-    const { actions } = await loadActionsAndQuestions(env, user.id);
-    return htmlFragment(renderActionsPanel(actions));
+    return await respond(env, user, context.request);
   }
 
   // Success path. Most write tools return { audit_id, ... } from
@@ -149,14 +159,13 @@ export async function onRequestPost(context) {
     });
   } catch { /* non-fatal */ }
 
-  const { actions } = await loadActionsAndQuestions(env, user.id);
-  return htmlFragment(renderActionsPanel(actions));
+  return await respond(env, user, context.request);
 }
 
 // Mark the action completed without firing a tool — used when the
 // proposed payload is malformed or the tool registry isn't available.
 // Distinct completed_reason values so the audit trail explains why.
-async function markCompletedNoExec(env, user, action, reason) {
+async function markCompletedNoExec(env, user, action, reason, request) {
   const ts = now();
   await run(
     env.DB,
@@ -179,6 +188,5 @@ async function markCompletedNoExec(env, user, action, reason) {
       summary: `Completed (${reason}): ${(action.title || '').slice(0, 200)}`,
     });
   } catch { /* non-fatal */ }
-  const { actions } = await loadActionsAndQuestions(env, user.id);
-  return htmlFragment(renderActionsPanel(actions));
+  return await respond(env, user, request);
 }
