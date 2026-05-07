@@ -1,0 +1,59 @@
+{
+  // C-LARS Pipeline sidecar consumer Worker for the Claudia event queue.
+  //
+  // Cloudflare Pages Functions can't be queue-consumers directly. This
+  // tiny Worker subscribes to the cf-claudia-events queue and forwards
+  // each message to the Pages site at /api/claudia/event-tick, where
+  // the real work runs (D1 access + Anthropic calls). Same belt-and-
+  // suspenders pattern as workers/cron/ — keep the Worker thin, do
+  // logic in Pages where the bindings live.
+  //
+  // Deploy:
+  //   cd workers/claudia-consumer
+  //   npx wrangler deploy
+  //
+  // Secrets (run once, then again on rotation):
+  //   npx wrangler secret put CRON_SECRET
+  //   npx wrangler secret put CF_ACCESS_CLIENT_ID       (optional, for
+  //   npx wrangler secret put CF_ACCESS_CLIENT_SECRET    Access service-token)
+  //   # The Pages project should have the same CRON_SECRET set:
+  //   npx wrangler pages secret put CRON_SECRET
+  //
+  // Manual smoke test (no queue wait):
+  //   curl -X POST https://c-lars-pms-claudia-consumer.<account>.workers.dev/__run \
+  //     -H "x-cron-secret: $CRON_SECRET" \
+  //     -d '{"event_id":"<uuid>"}'
+  "name": "c-lars-pms-claudia-consumer",
+  "main": "src/index.js",
+  "compatibility_date": "2026-04-17",
+
+  // Subscribe to the Claudia events queue. Producer side lives in the
+  // Pages project (root wrangler.jsonc has a [[queues.producers]]
+  // binding named CLAUDIA_EVENTS that publishes to this same queue).
+  //
+  // max_batch_size 1 keeps things sequential during Phase A so we can
+  // observe the worker's behavior on real events without concurrent-
+  // race surprises. Bump later when we trust the path.
+  //
+  // max_retries 3 means a 5xx / network error will be retried twice
+  // more before going to the (currently unconfigured) DLQ. The hourly
+  // sweeper drains anything that ultimately fails.
+  "queues": {
+    "consumers": [
+      {
+        "queue": "cf-claudia-events",
+        "max_batch_size": 1,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "max_concurrency": 1
+      }
+    ]
+  },
+
+  "vars": {
+    // Public URL of the Pages deployment. Worker POSTs to
+    // `${PIPELINE_URL}/api/claudia/event-tick`. Same value the cron
+    // worker uses.
+    "PIPELINE_URL": "https://c-lars-pms.pages.dev"
+  }
+}
