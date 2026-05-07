@@ -120,7 +120,7 @@ function sourceChip(action) {
   }
   if (source_ref_table === 'claudia_documents' || source_ref_table === 'ai_inbox_items') {
     const href = source_ref_table === 'claudia_documents'
-      ? `/sandbox/assistant/files/${encodeURIComponent(source_ref_id)}`
+      ? `/sandbox/assistant/documents/${encodeURIComponent(source_ref_id)}`
       : `/ai-inbox/${encodeURIComponent(source_ref_id)}`;
     return html`<a class="claudia-action-src file" href="${href}">${source_ref_table === 'ai_inbox_items' ? 'inbox' : 'file'}</a>`;
   }
