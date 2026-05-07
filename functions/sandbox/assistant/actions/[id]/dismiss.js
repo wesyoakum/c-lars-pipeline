@@ -1,0 +1,70 @@
+// functions/sandbox/assistant/actions/[id]/dismiss.js
+//
+// POST /sandbox/assistant/actions/:id/dismiss
+//
+// Marks one open claudia_actions row as dismissed (Wes decided this
+// isn't worth acting on). Distinct from "completed" — dismissed means
+// "ignore, don't surface again," vs. completed means "I did it."
+// Returns the refreshed actions panel for HTMX outerHTML swap.
+// Wes-only.
+
+import { one, run } from '../../../../lib/db.js';
+import { now } from '../../../../lib/ids.js';
+import { audit } from '../../../../lib/audit.js';
+import {
+  loadActionsAndQuestions,
+  renderActionsPanel,
+} from '../../../../lib/claudia-actions-render.js';
+
+const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
+
+function htmlFragment(s) {
+  return new Response(String(s), {
+    status: 200,
+    headers: { 'content-type': 'text/html; charset=utf-8' },
+  });
+}
+
+export async function onRequestPost(context) {
+  const { env, data, params } = context;
+  const user = data?.user;
+  if (!user || user.email !== SANDBOX_OWNER) {
+    return new Response('Not found', { status: 404 });
+  }
+
+  const actionId = params.id;
+  const action = await one(
+    env.DB,
+    `SELECT id, status, title FROM claudia_actions WHERE id = ? AND user_id = ?`,
+    [actionId, user.id]
+  );
+  if (!action) return new Response('Not found', { status: 404 });
+
+  if (action.status === 'open') {
+    const ts = now();
+    await run(
+      env.DB,
+      `UPDATE claudia_actions
+          SET status = 'dismissed',
+              completed_at = ?,
+              completed_reason = 'dismissed_by_user',
+              decided_at = ?,
+              decided_by_user_id = ?,
+              updated_at = ?
+        WHERE id = ?`,
+      [ts, ts, user.id, ts, actionId]
+    );
+    try {
+      await audit(env.DB, {
+        entityType: 'claudia_action',
+        entityId: actionId,
+        eventType: 'dismissed',
+        user,
+        summary: `Dismissed: ${(action.title || '').slice(0, 200)}`,
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  const { actions } = await loadActionsAndQuestions(env, user.id);
+  return htmlFragment(renderActionsPanel(actions));
+}

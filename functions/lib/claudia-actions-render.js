@@ -136,11 +136,44 @@ function sourceChip(action) {
   return html`<span class="claudia-action-src">${escape(source_kind || 'event')}</span>`;
 }
 
+// Buttons that fire HTMX POSTs to the per-action route handlers and
+// swap the entire actions panel back. Each button sets the same
+// hx-target / hx-swap so the panel re-renders coherently after any
+// state change.
+function renderActionButtons(a) {
+  const id = encodeURIComponent(a.id);
+  const otherQuadrants = QUADRANT_ORDER.filter((q) => q !== a.quadrant);
+  return html`
+    <div class="claudia-action-actions">
+      <button type="button" class="claudia-action-btn done"
+              hx-post="/sandbox/assistant/actions/${id}/done"
+              hx-target="#claudia-actions-panel"
+              hx-swap="outerHTML"
+              title="Mark done — I did this">Done</button>
+      <button type="button" class="claudia-action-btn dismiss"
+              hx-post="/sandbox/assistant/actions/${id}/dismiss"
+              hx-target="#claudia-actions-panel"
+              hx-swap="outerHTML"
+              title="Dismiss — not worth doing">Dismiss</button>
+      <span class="claudia-action-move">
+        <span class="claudia-action-move-label">Move:</span>
+        ${otherQuadrants.map((q) => html`
+          <button type="button" class="claudia-action-btn move"
+                  hx-post="/sandbox/assistant/actions/${id}/move?to=${escape(q)}"
+                  hx-target="#claudia-actions-panel"
+                  hx-swap="outerHTML"
+                  title="Move to ${escape(QUADRANT_LABELS[q])}">${escape(QUADRANT_LABELS[q])}</button>
+        `)}
+      </span>
+    </div>
+  `;
+}
+
 function renderActionRow(a) {
   const due = formatDue(a.due_at);
   const overdue = due && /overdue/.test(due);
   return html`
-    <li class="claudia-action-row" data-q="${escape(a.quadrant)}" data-id="${escape(a.id)}">
+    <li class="claudia-action-row" data-q="${escape(a.quadrant)}" data-id="${escape(a.id)}" id="claudia-action-${escape(a.id)}">
       <div class="claudia-action-head">
         <span class="claudia-action-title">${escape(a.title || '')}</span>
         ${sourceChip(a)}
@@ -148,6 +181,7 @@ function renderActionRow(a) {
       </div>
       ${a.detail ? html`<div class="claudia-action-detail">${escape(a.detail)}</div>` : ''}
       ${a.rationale ? html`<div class="claudia-action-rationale">${escape(a.rationale)}</div>` : ''}
+      ${renderActionButtons(a)}
     </li>
   `;
 }
@@ -266,6 +300,32 @@ export const ACTIONS_PANEL_CSS = `
   .claudia-action-due.overdue { background: #fee2e2; color: #991b1b; font-weight: 600; }
   .claudia-action-detail { margin-top: 0.2rem; color: #1f2937; }
   .claudia-action-rationale { margin-top: 0.15rem; color: #6b7280; font-size: 12px; font-style: italic; }
+
+  .claudia-action-actions {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem;
+    margin-top: 0.4rem; font-size: 11px;
+  }
+  .claudia-action-btn {
+    background: rgba(255,255,255,0.85);
+    border: 1px solid rgba(0,0,0,0.12);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font: inherit;
+    color: #1f2937;
+    cursor: pointer;
+    line-height: 1.3;
+  }
+  .claudia-action-btn:hover { background: rgba(255,255,255,1); border-color: rgba(0,0,0,0.25); }
+  .claudia-action-btn.done    { color: #15803d; }
+  .claudia-action-btn.dismiss { color: #6b7280; }
+  .claudia-action-btn.move    { color: #4b5563; }
+  .claudia-action-move {
+    display: inline-flex; align-items: center; gap: 0.25rem;
+    margin-left: 0.4rem;
+    padding-left: 0.4rem;
+    border-left: 1px solid rgba(0,0,0,0.12);
+  }
+  .claudia-action-move-label { color: #6b7280; font-size: 11px; }
 
   .claudia-questions-panel {
     max-width: 880px; margin: 0.5rem auto 0; padding: 0 1rem;
