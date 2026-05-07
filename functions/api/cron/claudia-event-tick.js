@@ -145,6 +145,8 @@ export async function onRequestPost(context) {
   // ── Persist ───────────────────────────────────────────────────────
   const ts = now();
   let actionsInserted = 0;
+  let actionsUpdated = 0;
+  let actionsResolved = 0;
   let questionsInserted = 0;
   let observationInserted = false;
   let actionSummary = 'noop';
@@ -155,8 +157,84 @@ export async function onRequestPost(context) {
   const { sourceKind, sourceRefTable, sourceRefId } = inferSource(event);
 
   if (decision.decision === 'extract' && decision.actions.length > 0) {
-    const insertedIds = [];
+    // Pre-load the user's open actions so we can validate any update
+    // ids the model emitted — defensive against the model citing a
+    // non-existent / wrong-user id.
+    const openActionIds = new Set(
+      (enrichment?.open_actions || [])
+        .map((r) => r?.id)
+        .filter(Boolean)
+    );
+
+    const insertedIds = [];   // index → claudia_actions.id (new + updated)
+    const newlyCreatedIds = [];   // subset that were INSERTs (for the 'created' audit row)
+    const ctxJson = enrichment ? JSON.stringify(trimContext(enrichment)) : null;
+
     for (const a of decision.actions) {
+      // UPDATE path: model said "update this existing open action."
+      // Validate the id is actually in the open_actions cluster the
+      // model saw — otherwise treat it as a new INSERT (defensive).
+      if (a.id && openActionIds.has(a.id)) {
+        if (a.resolved) {
+          // Existing action is now moot because of this event.
+          await run(
+            env.DB,
+            `UPDATE claudia_actions
+                SET status = 'completed',
+                    completed_at = ?, completed_reason = 'related_entity_closed',
+                    decided_at = ?, decided_by_user_id = ?,
+                    detail = COALESCE(?, detail),
+                    rationale = COALESCE(?, rationale),
+                    context_json = ?,
+                    last_evaluated_at = ?, evaluation_count = evaluation_count + 1,
+                    updated_at = ?
+              WHERE id = ? AND user_id = ?`,
+            [ts, ts, user.id, a.detail ?? null, a.rationale ?? null, ctxJson, ts, ts, a.id, user.id]
+          );
+          actionsResolved++;
+        } else {
+          // Re-evaluation: refresh the row's classification + context
+          // without changing its identity. evaluation_count++ so we can
+          // see how many times the worker has revisited.
+          await run(
+            env.DB,
+            `UPDATE claudia_actions
+                SET title = ?, detail = ?, rationale = ?,
+                    quadrant = ?, importance = ?, urgency = ?, due_at = ?,
+                    proposed_action_json = ?,
+                    context_json = ?,
+                    last_evaluated_at = ?, evaluation_count = evaluation_count + 1,
+                    updated_at = ?
+              WHERE id = ? AND user_id = ? AND status = 'open'`,
+            [
+              a.title, a.detail ?? null, a.rationale ?? null,
+              a.quadrant, a.importance ?? null, a.urgency ?? null, a.due_at ?? null,
+              a.proposed_action ? JSON.stringify(a.proposed_action) : null,
+              ctxJson,
+              ts, ts,
+              a.id, user.id,
+            ]
+          );
+          actionsUpdated++;
+        }
+        insertedIds[a.idx ?? insertedIds.length] = a.id;
+        // Audit the re-evaluation as a quadrant_changed (or completed,
+        // when resolved) event so the trail shows the move.
+        try {
+          await audit(env.DB, {
+            entityType: 'claudia_action',
+            entityId: a.id,
+            eventType: a.resolved ? 'completed' : 'quadrant_changed',
+            user,
+            summary: a.resolved
+              ? `Resolved by ${event.type} (${(a.title || '').slice(0, 100)})`
+              : `Re-evaluated from ${event.type} → ${a.quadrant}: ${(a.title || '').slice(0, 120)}`,
+          });
+        } catch { /* non-fatal */ }
+        continue;
+      }
+
+      // INSERT path: new action, fresh row.
       const actionId = uuid();
       await run(
         env.DB,
@@ -179,12 +257,13 @@ export async function onRequestPost(context) {
           a.quadrant, a.importance ?? null, a.urgency ?? null, a.due_at ?? null,
           a.proposed_action ? JSON.stringify(a.proposed_action) : null,
           null,
-          enrichment ? JSON.stringify(trimContext(enrichment)) : null,
+          ctxJson,
           'open', 1,
           ts, ts,
         ]
       );
       insertedIds[a.idx ?? insertedIds.length] = actionId;
+      newlyCreatedIds.push(actionId);
       actionsInserted++;
     }
 
@@ -203,23 +282,28 @@ export async function onRequestPost(context) {
       questionsInserted++;
     }
 
-    // Standard audit_events row for each new action so the per-entity
-    // history view shows them. One per action keeps the trail tidy.
-    for (const id of insertedIds.filter(Boolean)) {
+    // Standard audit_events row for each newly-inserted action so the
+    // per-entity history view shows them. Updates already wrote their
+    // own 'quadrant_changed' / 'completed' audit row above — don't
+    // double-audit them.
+    for (const id of newlyCreatedIds) {
       try {
         await audit(env.DB, {
           entityType: 'claudia_action',
           entityId: id,
           eventType: 'created',
-          user, // attributed to Claudia's actor (the user this fired for)
+          user,
           summary: `Claudia raised an action from event ${event.type}`,
         });
-      } catch {
-        // Audit failure is non-fatal — the action row already exists.
-      }
+      } catch { /* non-fatal */ }
     }
 
-    actionSummary = `extract:${decision.actions.length}_actions${questionsInserted ? `+${questionsInserted}q` : ''}`;
+    const summaryBits = [];
+    if (actionsInserted > 0)  summaryBits.push(`${actionsInserted}_new`);
+    if (actionsUpdated > 0)   summaryBits.push(`${actionsUpdated}_updated`);
+    if (actionsResolved > 0)  summaryBits.push(`${actionsResolved}_resolved`);
+    if (questionsInserted > 0) summaryBits.push(`${questionsInserted}q`);
+    actionSummary = `extract:${summaryBits.join('+') || 'none'}`;
   } else if (decision.decision === 'observe' && decision.observation) {
     await run(
       env.DB,
@@ -268,6 +352,8 @@ export async function onRequestPost(context) {
     type: event.type,
     decision: decision.decision,
     actions_inserted: actionsInserted,
+    actions_updated: actionsUpdated,
+    actions_resolved: actionsResolved,
     questions_inserted: questionsInserted,
     observation_inserted: observationInserted,
     action_summary: actionSummary,

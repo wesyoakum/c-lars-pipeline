@@ -61,6 +61,14 @@ function buildSystemPrompt(displayName, today) {
     '- The enrichment payload includes related Pipeline rows (accounts, opportunities, contacts, activities). Cite the EXACT names/numbers/dates from there. Do not make up an opp number, an account name, or a contact email.',
     '- If the source mentions a name that does NOT match any related entity, that is a signal — raise a QUESTION (e.g. "Is \'Acme\' the same as \'Acme Industries\' (acct id …)?"). Do not silently guess.',
     '',
+    'RE-EVALUATION — UPDATE INSTEAD OF DUPLICATING:',
+    '- enrichment.open_actions lists currently-open actions in the same entity-cluster. EACH has an id, title, quadrant, source_kind, due_at, status.',
+    '- If an action you would emit covers the SAME thing as an existing open one (same call, same follow-up, same task), SET its `id` field to that existing action\'s id. The worker UPDATES that row (quadrant, importance, urgency, detail, rationale, due_at, context_json, bumps evaluation_count) instead of inserting a duplicate.',
+    '- If your action is a NEW thing not yet captured, leave `id` null (or omit it) — the worker INSERTS a new row.',
+    '- "Same thing" is judged by intent, not exact wording. "Follow up with Bob at Acme on the spares quote" and "Reply to Bob re: spares quote pricing" cover the same action — update, do not duplicate.',
+    '- Promote / demote freely on update: a Plan row can become Hot when the deadline shortens; a Hot row can become Skip when context shows the customer dropped the thread. Cite the change in `rationale` ("escalated: customer asked for response by Friday").',
+    '- If an existing open action is now MOOT because of this event (deal closed, task completed externally, question answered), set `id` to that row\'s id AND set `resolved: true`. The worker marks it status=\'completed\' with completed_reason=\'related_entity_closed\'.',
+    '',
     'GOOD ACTION TITLES (calibrated to the data):',
     '- "Reply to Bob at Acme re: Spares quote — they want pricing by Friday"',
     '- "Move opp WFM02-25314 to quote_drafted — RFQ has been sitting in lead for 9 days"',
@@ -94,6 +102,8 @@ function buildSystemPrompt(displayName, today) {
     '  "decision": "extract" | "observe" | "noop",',
     '  "actions": [',
     '    {',
+    '      "id":          null | string,  // null = NEW row; existing claudia_actions.id = UPDATE that row',
+    '      "resolved":    boolean,        // ONLY when id is set. true = mark the existing row completed (related entity closed).',
     '      "title":       string,    // short scannable, under 80 chars, action-imperative',
     '      "detail":      string,    // 1–3 sentences explaining what + why',
     '      "rationale":   string,    // why this quadrant (1 sentence)',
@@ -172,8 +182,16 @@ function normalizeAction(raw, idx) {
     if (!Number.isFinite(n)) return null;
     return Math.max(0, Math.min(1, n));
   };
+  // Update-vs-insert signal. id is the existing claudia_actions.id when
+  // the model wants to update an existing open row instead of creating
+  // a new one. resolved=true only meaningful when id is set — promotes
+  // the update to a "mark this row completed" operation.
+  const existingId = typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : null;
+  const resolved = existingId && raw.resolved === true;
   return {
     idx,
+    id: existingId,                  // null = INSERT; non-null = UPDATE
+    resolved,                        // true = also mark status='completed'
     title: title.slice(0, 240),
     detail: raw.detail ? String(raw.detail).trim() : null,
     rationale: raw.rationale ? String(raw.rationale).trim() : null,
