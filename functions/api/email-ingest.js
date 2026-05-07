@@ -33,7 +33,7 @@ import { run } from '../lib/db.js';
 import { now, uuid } from '../lib/ids.js';
 import { extractText } from '../lib/claudia-extract.js';
 import { categorizeDocument } from '../lib/claudia-categorize.js';
-import { extractAttachments } from '../lib/claudia-mime.js';
+import { extractAttachments, emailMetadata } from '../lib/claudia-mime.js';
 import { one } from '../lib/db.js';
 
 // Wes's known email addresses for the recipient/sender check. Add to
@@ -142,6 +142,43 @@ export async function onRequestPost(context) {
     return jsonResponse({ ok: false, error: 'pipeline_user_not_found' }, 500);
   }
 
+  // 5b. Dedup by RFC 5322 Message-Id. Same email re-sent from the
+  // Outlook add-in (or arrived via another path) returns 200 with
+  // duplicate:true instead of creating a new row + R2 object + Haiku
+  // pass. The current message_id column is set on every email
+  // ingested since migration 0081, so we only catch dupes against
+  // post-0081 history — older ingests have null message_id and are
+  // not protected. Trashed rows are excluded so re-ingesting a
+  // previously-deleted email creates a fresh row (intentional —
+  // user can deliberately re-add).
+  const fullEmlText = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  const incomingMeta = emailMetadata(fullEmlText);
+  const incomingMessageId = incomingMeta?.message_id || null;
+  if (incomingMessageId) {
+    const existing = await one(
+      env.DB,
+      `SELECT id, seq, filename, category, created_at
+         FROM claudia_documents
+        WHERE user_id = ?
+          AND message_id = ?
+          AND retention != 'trashed'
+        LIMIT 1`,
+      [user.id, incomingMessageId]
+    );
+    if (existing) {
+      return jsonResponse({
+        ok: true,
+        duplicate: true,
+        document_id: existing.id,
+        seq: existing.seq,
+        filename: existing.filename,
+        category: existing.category,
+        first_seen_at: existing.created_at,
+        message: 'Already on Claudia (#' + existing.seq + ')',
+      });
+    }
+  }
+
   // 6. Stream to R2 + extract text + categorize, mirroring the
   // upload endpoint's flow so the resulting document looks identical
   // to one dropped via the chat UI.
@@ -175,6 +212,14 @@ export async function onRequestPost(context) {
     console.error('[email-ingest] categorize failed:', err?.message || err);
   }
 
+  // 6b. Extract attachments BEFORE the parent INSERT so we can
+  // populate attachments_count in structured_data accurately.
+  // extractAttachments now filters out unreferenced inline images
+  // (signature logos, tracking pixels) — only image attachments
+  // explicitly disposed as attachment OR inline images that the
+  // text/html body actually references via cid: pass through.
+  const attachments = extractAttachments(fullEmlText);
+
   const ts = now();
   // seq via correlated subquery — atomic per-user "next number".
   // The UNIQUE INDEX on (user_id, seq) catches the rare race where
@@ -185,8 +230,11 @@ export async function onRequestPost(context) {
     `INSERT INTO claudia_documents
        (id, user_id, filename, content_type, size_bytes, r2_key,
         full_text, retention, extraction_status, extraction_error,
-        category, created_at, updated_at, seq)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'auto', ?, ?, ?, ?, ?,
+        category,
+        sender_email, sender_name, subject, email_date, message_id,
+        structured_data, parent_id,
+        created_at, updated_at, seq)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'auto', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?,
        COALESCE((SELECT MAX(seq) FROM claudia_documents WHERE user_id = ?), 0) + 1)`,
     [
       docId,
@@ -199,18 +247,24 @@ export async function onRequestPost(context) {
       extracted.status,
       extracted.error || null,
       category,
+      incomingMeta?.sender_email || null,
+      incomingMeta?.sender_name || null,
+      incomingMeta?.subject || null,
+      incomingMeta?.email_date || null,
+      incomingMessageId,
+      incomingMeta
+        ? JSON.stringify({ kind: 'email', ...incomingMeta, attachments_count: attachments.length })
+        : null,
       ts,
       ts,
       user.id,
     ]
   );
 
-  // 7. Extract and ingest each attachment as its own claudia_documents
-  // row. Same pipeline as a drop-zone upload (R2 put → text extract →
-  // categorize → INSERT with own seq). Best-effort per attachment: if
-  // one fails we log it in the response and keep going on the rest.
-  const fullEmlText = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-  const attachments = extractAttachments(fullEmlText);
+  // 7. Ingest each attachment as its own claudia_documents row. Same
+  // pipeline as a drop-zone upload (R2 put → text extract → categorize
+  // → INSERT with own seq). Best-effort per attachment: if one fails
+  // we log it in the response and keep going on the rest.
   const attachmentResults = [];
   for (const att of attachments) {
     try {
@@ -254,8 +308,11 @@ export async function onRequestPost(context) {
         `INSERT INTO claudia_documents
            (id, user_id, filename, content_type, size_bytes, r2_key,
             full_text, retention, extraction_status, extraction_error,
-            category, created_at, updated_at, seq)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'auto', ?, ?, ?, ?, ?,
+            category,
+            sender_email, sender_name, subject, email_date, message_id,
+            structured_data, parent_id,
+            created_at, updated_at, seq)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'auto', ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, ?, ?,
            COALESCE((SELECT MAX(seq) FROM claudia_documents WHERE user_id = ?), 0) + 1)`,
         [
           attDocId,
@@ -268,6 +325,8 @@ export async function onRequestPost(context) {
           attExtracted.status,
           attExtracted.error || null,
           attCategory,
+          JSON.stringify({ kind: 'attachment', from_email: docId }),
+          docId,
           attTs,
           attTs,
           user.id,

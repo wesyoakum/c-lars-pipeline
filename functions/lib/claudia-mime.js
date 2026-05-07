@@ -88,7 +88,34 @@ export function extractAttachments(rawMime) {
     return [];
   }
   if (!parsed) return [];
-  return flattenAttachmentParts(parsed);
+  // Collect cid: references from text/html parts so we can keep
+  // body-referenced inline images (charts, screenshots, embedded
+  // diagrams) but drop the unreferenced inline cruft (signature
+  // logos, tracking pixels). Image rows that arrive as actual
+  // Content-Disposition: attachment ALWAYS pass through regardless.
+  const referencedCids = collectReferencedCids(parsed);
+  return flattenAttachmentParts(parsed, referencedCids);
+}
+
+// Walk the MIME tree, scan every text/html body for cid: references,
+// return a lowercased Set of the referenced CID values.
+function collectReferencedCids(node) {
+  const cids = new Set();
+  function walk(n) {
+    if (!n) return;
+    if (Array.isArray(n.parts)) { n.parts.forEach(walk); return; }
+    if (typeof n.contentType === 'string'
+        && n.contentType.toLowerCase() === 'text/html'
+        && typeof n.body === 'string') {
+      const re = /cid:([^\s'"<>)]+)/gi;
+      let m;
+      while ((m = re.exec(n.body)) !== null) {
+        cids.add(m[1].toLowerCase());
+      }
+    }
+  }
+  walk(node);
+  return cids;
 }
 
 /**
@@ -173,9 +200,11 @@ function normalizeDate(raw) {
   return str;
 }
 
-function flattenAttachmentParts(node) {
+function flattenAttachmentParts(node, referencedCids) {
   if (!node) return [];
-  if (Array.isArray(node.parts)) return node.parts.flatMap(flattenAttachmentParts);
+  if (Array.isArray(node.parts)) {
+    return node.parts.flatMap((p) => flattenAttachmentParts(p, referencedCids));
+  }
   // Leaf. Text leaves don't carry rawBytes, so they fall through here.
   if (!node.rawBytes || node.rawBytes.length === 0) return [];
 
@@ -189,20 +218,39 @@ function flattenAttachmentParts(node) {
   const isInline = disp.type === 'inline';
   const isImage = String(node.contentType || '').toLowerCase().startsWith('image/');
 
-  // Skip tiny inline images (signature logos, tracking pixels).
-  if (isInline && isImage && node.rawBytes.length < 2 * 1024) return [];
+  // Inline images are the noise we want to filter out (signature
+  // logos, tracking pixels, divider images). The keep rule is "the
+  // image is actually shown in the body" — i.e. its Content-Id is
+  // referenced via cid: in some text/html part. If yes, this is real
+  // content (chart, screenshot, embedded diagram). If no, drop it.
+  if (isInline && isImage) {
+    const cid = stripAngles(headers['content-id'] || '').toLowerCase();
+    if (cid && referencedCids && referencedCids.has(cid)) {
+      // referenced inline image — keep, fall through to the return below
+    } else {
+      return [];
+    }
+  }
 
-  // Anything explicitly marked attachment OR a sized inline non-image
-  // (rare but legitimate) gets surfaced. Default-disposition binary
-  // parts (no Content-Disposition header at all) also flow through
-  // here as long as they're large enough to be real content.
+  // Image attachments (Content-Disposition: attachment) ALWAYS pass
+  // through regardless of size — wes.yoakum 2026-05-07: those are
+  // real content the user explicitly attached. Same for non-image
+  // inline parts (rare but legitimate, e.g. inline CSV).
   const filenameRaw = disp.params.filename || node.contentTypeParams?.name || '';
   const filename = decodeRfc2047(filenameRaw) || `attachment.${guessExt(node.contentType)}`;
 
-  if (!isAttachment && !filenameRaw && node.rawBytes.length < 2 * 1024) {
-    // No disposition, no filename, tiny — almost certainly not real
-    // content. Skip.
-    return [];
+  // Default-disposition (no Content-Disposition at all): legacy
+  // pattern. Keep if there's a filename OR if it's not a tiny image.
+  if (!isAttachment && !isInline) {
+    if (isImage && !filenameRaw && node.rawBytes.length < 2 * 1024) {
+      // Tiny default-disposition image with no name — almost
+      // certainly a logo or tracking pixel. Drop.
+      return [];
+    }
+    if (!filenameRaw && node.rawBytes.length < 2 * 1024) {
+      // No disposition, no filename, tiny — drop.
+      return [];
+    }
   }
 
   return [{
