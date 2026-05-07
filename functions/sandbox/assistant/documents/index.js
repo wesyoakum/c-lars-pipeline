@@ -24,6 +24,7 @@ import {
 import { renderDocumentsPanel } from '../../../lib/claudia-documents-render.js';
 import { categorizeDocument } from '../../../lib/claudia-categorize.js';
 import { emailMetadata, extractAttachments } from '../../../lib/claudia-mime.js';
+import { queueClaudiaEvent } from '../../../lib/claudia-events.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 const MAX_BYTES = 25 * 1024 * 1024; // 25 MB per file
@@ -214,6 +215,15 @@ export async function onRequestPost(context) {
           errors.push(`${att.filename || 'attachment'}: ${err?.message || String(err)}`);
         }
       }
+
+      // Fan out to Claudia: one event per ingested file (parent doc).
+      // Attachments don't need their own events — the worker's
+      // enrichment can reach them via parent_id when relevant.
+      // Best-effort; queueClaudiaEvent swallows its own failures.
+      const summary = emailMeta?.subject
+        ? `Email "${emailMeta.subject}"${emailMeta?.sender_email ? ` from ${emailMeta.sender_email}` : ''}`
+        : `Document ${file.name}`;
+      await queueClaudiaEvent(env, user, 'document.uploaded', docId, summary);
     } catch (err) {
       errors.push(`${file?.name || 'file'}: ${err?.message || String(err)}`);
     }
