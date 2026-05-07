@@ -1,0 +1,15 @@
+# Cloudflare Pages _redirects
+#
+# Pages applies a default "clean URL" rule that 308-redirects every
+# /foo.html to /foo. That broke the Outlook add-in, because Outlook's
+# add-in runtime doesn't follow redirects on SourceLocation /
+# Commands.Url fetches — it just shows "We're sorry, we couldn't
+# access Send to Claudia."
+#
+# The manifest itself was updated to point at the extensionless URLs,
+# but classic Outlook caches the manifest aggressively. These rules
+# REWRITE (status 200, not redirect) any straggler request for the
+# old .html paths so even a cached/stale manifest still works.
+
+/outlook-addin/commands.html  /outlook-addin/commands  200
+/outlook-addin/taskpane.html  /outlook-addin/taskpane  200
