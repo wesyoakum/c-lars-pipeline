@@ -75,11 +75,20 @@ export async function onRequestPost(context) {
     [user.id]
   );
 
+  // Sweeper role since Phase A: the event-driven worker
+  // (workers/claudia-consumer + /api/claudia/event-tick) handles
+  // events in near-real-time and sets dispatched_at. The hourly cron
+  // only drains anything the consumer missed (queue outage, redrive
+  // backlog, hot accounts) so events never get permanently stuck.
+  // Filter on dispatched_at, not processed_at — the latter is the
+  // cron's own bookkeeping column for "we wrote an observation".
   const events = await all(
     env.DB,
     `SELECT id, type, ref_id, summary, created_at
        FROM claudia_events_pending
-      WHERE user_id = ? AND processed_at IS NULL
+      WHERE user_id = ?
+        AND dispatched_at IS NULL
+        AND processed_at IS NULL
       ORDER BY created_at ASC
       LIMIT ?`,
     [user.id, MAX_EVENTS_PER_TICK]
@@ -241,15 +250,21 @@ export async function onRequestPost(context) {
   }
 
   // Mark pending events processed regardless of whether any observation
-  // was written — they're consumed either way.
+  // was written — they're consumed either way. Also set dispatched_at
+  // so the event-driven worker's idempotency check sees them as done
+  // (the hourly tick's "fallback observation" output is the dispatched
+  // outcome for these particular events).
   if (events.length > 0) {
     const eventIds = events.map((e) => e.id);
     const placeholders = eventIds.map(() => '?').join(',');
     await run(
       env.DB,
-      `UPDATE claudia_events_pending SET processed_at = ?
+      `UPDATE claudia_events_pending
+          SET processed_at = ?,
+              dispatched_at = COALESCE(dispatched_at, ?),
+              action_summary = COALESCE(action_summary, 'observe:legacy_cron_sweeper')
         WHERE id IN (${placeholders})`,
-      [ts, ...eventIds]
+      [ts, ts, ...eventIds]
     );
   }
 

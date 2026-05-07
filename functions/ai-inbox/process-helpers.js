@@ -22,6 +22,7 @@ import { uuid, now } from '../lib/ids.js';
 import { extract } from './prompts.js';
 import { resolveEntities } from '../lib/entity-resolver.js';
 import { processAttachment, compileContext } from './attachment-processors.js';
+import { queueClaudiaEvent } from '../lib/claudia-events.js';
 
 /**
  * Process an AI Inbox entry end-to-end.
@@ -153,6 +154,16 @@ export async function processItem(env, entryId, fromStep = 'attachments') {
     } catch (e) {
       console.warn(`[ai-inbox] entity resolver failed for ${entryId}:`, e?.message || e);
     }
+  }
+
+  // Fan out to Claudia: one event per inbox item that just transitioned
+  // to status='ready'. Best-effort — queueClaudiaEvent swallows its own
+  // failures so a queue hiccup never breaks the rest of the pipeline.
+  if (extracted) {
+    const summary = extracted.title
+      ? `Inbox item: ${extracted.title}`
+      : `Inbox item ${entryId} ready`;
+    await queueClaudiaEvent(env, { id: entry.user_id }, 'ai_inbox_items.ready', entryId, summary);
   }
 
   // Return the extraction so callers (e.g. the wizard's Smart-start

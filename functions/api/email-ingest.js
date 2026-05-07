@@ -35,6 +35,7 @@ import { extractText } from '../lib/claudia-extract.js';
 import { categorizeDocument } from '../lib/claudia-categorize.js';
 import { extractAttachments, emailMetadata } from '../lib/claudia-mime.js';
 import { one } from '../lib/db.js';
+import { queueClaudiaEvent } from '../lib/claudia-events.js';
 
 // Wes's known email addresses for the recipient/sender check. Add to
 // this list if he wants to ingest from another mailbox he owns.
@@ -349,6 +350,14 @@ export async function onRequestPost(context) {
       });
     }
   }
+
+  // Fan out to Claudia: one event per ingested email (parent doc).
+  // Attachments don't need their own events — the action extractor's
+  // enrichment can reach them via parent_id when relevant.
+  const queueSummary = incomingMeta?.subject
+    ? `Email "${incomingMeta.subject}"${incomingMeta?.sender_email ? ` from ${incomingMeta.sender_email}` : ''}`
+    : `Email ${filename}`;
+  await queueClaudiaEvent(env, user, 'document.email_ingested', docId, queueSummary);
 
   return jsonResponse({
     ok: true,
