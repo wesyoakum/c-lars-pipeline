@@ -17,6 +17,12 @@ import {
 } from '../../lib/claudia-documents-render.js';
 import { ICON_PAPERCLIP, ICON_MIC } from '../../lib/icons.js';
 import { renderMarkdown } from '../../lib/claudia-markdown.js';
+import {
+  loadActionsAndQuestions,
+  renderActionsPanel,
+  renderQuestionsPanel,
+  ACTIONS_PANEL_CSS,
+} from '../../lib/claudia-actions-render.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 
@@ -83,6 +89,12 @@ export async function onRequestGet(context) {
       LIMIT 5`,
     [user.id]
   );
+
+  // Load open actions (Hot/Plan/Quick/Skip) + open questions for the
+  // top-of-page triage panels. Phase A is read-only — Phase B activates
+  // approve/reject/answer affordances.
+  const { actions: triageActions, questions: triageQuestions } =
+    await loadActionsAndQuestions(env, user.id);
 
   // Drop-zone documents (newest, non-trashed) for the initial render.
   // Preview is bumped to 600 chars so the audio sidebar can show a real
@@ -597,6 +609,8 @@ export async function onRequestGet(context) {
       }
       .claudia-obs-dismiss:hover { background: rgba(0,0,0,0.06); color: #4a3a1a; }
 
+      ${raw(ACTIONS_PANEL_CSS)}
+
       /* ============================================================
          Mobile (≤ 640px). Goal: usable chat from a phone.
          The desktop layout already collapses to 1 column at 800px;
@@ -711,6 +725,8 @@ export async function onRequestGet(context) {
       }
     </style>
     ${tabs}
+    ${renderActionsPanel(triageActions)}
+    ${renderQuestionsPanel(triageQuestions)}
     ${observations.length > 0 ? html`
       <div id="claudia-obs-panel" class="claudia-obs-panel">
         ${observations.map(renderObservation)}
