@@ -26,6 +26,21 @@
     }
   ],
 
+  // Cloudflare Queues — producer side only on the Pages project. The
+  // consumer is a separate Worker at workers/claudia-consumer that
+  // fetches back into the Pages site at /api/claudia/event-tick. We
+  // keep a producer-only binding here so all Pipeline write handlers
+  // (and the email-ingest endpoint) can publish to the queue without
+  // a circular dependency.
+  "queues": {
+    "producers": [
+      {
+        "queue": "cf-claudia-events",
+        "binding": "CLAUDIA_EVENTS"
+      }
+    ]
+  },
+
   "vars": {
     // PIPELINE_ENV=production: requests without a Cf-Access-Authenticated-User-Email
     // header return 401. Cloudflare Access is in front of the Pages deployment,
