@@ -24,7 +24,7 @@ const TRIAGE_MODEL_DEFAULT = 'claude-sonnet-4-6';
 // Phase: 'A' (no proposed_action), 'B' (await approval), 'C' (auto-act
 // when in AUTO_ALLOWED). Override via env.CLAUDIA_TRIAGE_PHASE so we
 // can flip without code changes.
-const TRIAGE_PHASE_DEFAULT = 'A';
+const TRIAGE_PHASE_DEFAULT = 'B';
 
 function buildSystemPrompt(displayName, today) {
   return [
@@ -73,6 +73,22 @@ function buildSystemPrompt(displayName, today) {
     '- "Take action on the opportunity" (no actual verb)',
     '- "Hi Wes, here\'s what I think..." (filler)',
     '',
+    'PROPOSED ACTIONS — when confident, suggest a concrete tool call:',
+    '- The action row may carry a `proposed_action` payload — a tool name + arguments — that fires when ' + displayName + ' clicks Approve.',
+    '- Only populate when confidence ≥ 0.7 AND every required argument is present in the enrichment payload (no inventing IDs).',
+    '- Tools you may suggest (subset for Phase B):',
+    '  * create_activity     {account_id?, opportunity_id?, contact_id?, subject, body?, due_at?, type?}',
+    '                        Use for "follow up with X", "schedule a call", "reply to Y" — convert a finding into a tracked task.',
+    '                        Prefer linking to an opportunity_id when the source touches a specific deal; account_id when no specific deal.',
+    '  * set_document_category {id, category}  // category is free-form (RFQ / spec sheet / contact list / meeting note / invoice / receipt)',
+    '                        Use when a freshly-dropped doc has an obvious category and the source was a file event.',
+    '  * set_document_retention {id, retention}  // retention is keep_forever | auto | trashed',
+    '                        Use when a doc is clearly junk (trashed) or clearly important to pin (keep_forever).',
+    '  * notify_wes          {message, urgency: "normal"|"urgent", link_label?, link_url?}',
+    '                        Use ONLY when something is time-sensitive enough to warrant a phone push (overdue task today, deadline that just shifted).',
+    '- If the right move is one of the above but you lack data (no account_id resolved, missing opp number), DO NOT invent — leave proposed_action null and either raise a question or just classify the action.',
+    '- For Wes-life things ("Make Stacy\'s birthday reservations"), proposed_action stays null — there\'s no Pipeline tool that does that. ' + displayName + ' marks Done manually from the panel.',
+    '',
     'OUTPUT — strict JSON, no prose around it, no markdown fences. Shape:',
     '{',
     '  "decision": "extract" | "observe" | "noop",',
@@ -85,7 +101,11 @@ function buildSystemPrompt(displayName, today) {
     '      "importance":  number,    // 0..1',
     '      "urgency":     number,    // 0..1',
     '      "due_at":      string|null,  // ISO 8601 date or null',
-    '      "proposed_action": null     // always null in this phase',
+    '      "proposed_action": null | {',
+    '         "tool":       string,    // one of the tools listed above',
+    '         "payload":    object,    // arguments that match the tool\'s schema',
+    '         "confidence": number     // 0..1; how sure you are this is the right move',
+    '      }',
     '    }',
     '  ],',
     '  "questions": [',
@@ -99,7 +119,7 @@ function buildSystemPrompt(displayName, today) {
     '- decision="observe" → actions=[]; questions optional; observation = a markdown string (1–3 sentences).',
     '- decision="noop" → actions=[]; questions=[]; observation=null. Use when the event is genuinely uninteresting.',
     '- A question may reference an action by index (0-based) via source_action_idx, OR float free (null) if not tied to a single action.',
-    '- proposed_action MUST be null in every action this phase. (The infrastructure exists for Phase B; do not populate it yet.)',
+    '- proposed_action: null OR a fully-populated object. Never half-filled.',
   ].join('\n');
 }
 
@@ -112,6 +132,32 @@ function buildUserPayload(event, enrichment) {
     null,
     2
   );
+}
+
+// Allow-list of tools the extractor may suggest. The approve.js
+// endpoint dispatches via the chat tool registry, so anything not on
+// this list is stripped here so we don't ship malformed payloads
+// downstream. Phase B keeps this list conservative — high-confidence,
+// low-blast-radius tools only. Phase C will broaden it.
+const ALLOWED_PROPOSED_TOOLS = new Set([
+  'create_activity',
+  'set_document_category',
+  'set_document_retention',
+  'notify_wes',
+]);
+
+function normalizeProposedAction(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const tool = String(raw.tool || '').trim();
+  if (!ALLOWED_PROPOSED_TOOLS.has(tool)) return null;
+  if (!raw.payload || typeof raw.payload !== 'object') return null;
+  const conf = Number(raw.confidence);
+  const confidence = Number.isFinite(conf) ? Math.max(0, Math.min(1, conf)) : null;
+  return {
+    tool,
+    payload: raw.payload,
+    confidence,
+  };
 }
 
 // Sanitize one action coming back from the model.
@@ -135,7 +181,9 @@ function normalizeAction(raw, idx) {
     importance: num(raw.importance),
     urgency: num(raw.urgency),
     due_at: raw.due_at ? String(raw.due_at).trim() : null,
-    proposed_action: null, // always null in Phase A; gate enforces below
+    // Phase A always-null is enforced by the gate below; Phase B+
+    // passes the model's proposed_action through after normalization.
+    proposed_action: normalizeProposedAction(raw.proposed_action),
   };
 }
 

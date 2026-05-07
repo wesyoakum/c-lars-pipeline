@@ -136,6 +136,20 @@ function sourceChip(action) {
   return html`<span class="claudia-action-src">${escape(source_kind || 'event')}</span>`;
 }
 
+// Parse the proposed_action JSON for display + button visibility.
+// Returns null when the field is empty / unparseable / lacks a tool.
+function parseProposed(a) {
+  const src = a.edited_action_json || a.proposed_action_json;
+  if (!src) return null;
+  try {
+    const obj = JSON.parse(src);
+    if (obj && typeof obj === 'object' && obj.tool) return obj;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // Buttons that fire HTMX POSTs to the per-action route handlers and
 // swap the entire actions panel back. Each button sets the same
 // hx-target / hx-swap so the panel re-renders coherently after any
@@ -143,8 +157,16 @@ function sourceChip(action) {
 function renderActionButtons(a) {
   const id = encodeURIComponent(a.id);
   const otherQuadrants = QUADRANT_ORDER.filter((q) => q !== a.quadrant);
+  const proposed = parseProposed(a);
   return html`
     <div class="claudia-action-actions">
+      ${proposed ? html`
+        <button type="button" class="claudia-action-btn approve"
+                hx-post="/sandbox/assistant/actions/${id}/approve"
+                hx-target="#claudia-actions-panel"
+                hx-swap="outerHTML"
+                title="Approve — execute ${escape(proposed.tool)} via Claudia, 72h undo">Approve</button>
+      ` : ''}
       <button type="button" class="claudia-action-btn done"
               hx-post="/sandbox/assistant/actions/${id}/done"
               hx-target="#claudia-actions-panel"
@@ -330,6 +352,11 @@ export const ACTIONS_PANEL_CSS = `
     line-height: 1.3;
   }
   .claudia-action-btn:hover { background: rgba(255,255,255,1); border-color: rgba(0,0,0,0.25); }
+  .claudia-action-btn.approve {
+    background: #15803d; border-color: #15803d; color: #fff;
+    font-weight: 600;
+  }
+  .claudia-action-btn.approve:hover { background: #166534; border-color: #166534; }
   .claudia-action-btn.done    { color: #15803d; }
   .claudia-action-btn.dismiss { color: #6b7280; }
   .claudia-action-btn.move    { color: #4b5563; }
