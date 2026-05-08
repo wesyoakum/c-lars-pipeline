@@ -18,6 +18,7 @@
 // only.
 
 import { all, one } from './db.js';
+import { getEventsInWindow, todayCtWindow } from './claudia-calendar.js';
 
 // Compact row shapes — drop columns the model doesn't need, but send
 // the FULL email body (capped only as a safety net against pathological
@@ -176,6 +177,7 @@ function emptyEnrichment(event) {
       audit_recent: [],
     },
     open_actions: [],
+    calendar_today: [],   // populated by enrichEvent post-handler
     notes: [],
   };
 }
@@ -592,11 +594,28 @@ export async function enrichEvent(env, event) {
     return out;
   }
 
+  let out;
   try {
-    return await handler(env, normalized, userId);
+    out = await handler(env, normalized, userId);
   } catch (err) {
-    const out = emptyEnrichment(normalized);
+    out = emptyEnrichment(normalized);
     out.notes.push(`enricher threw: ${err?.message || err}`);
-    return out;
   }
+
+  // Today's calendar — adds personal-side context to every worker
+  // invocation so the model can reason about meeting overlap when an
+  // email lands ("Wes has a 2pm with Sherman; this can wait" / "this
+  // collides with the kid's recital — should it bump?"). Cheap (5-min
+  // cached .ics fetch) and best-effort; getEventsInWindow swallows
+  // any error and returns []. Window is today's wall day in CT.
+  try {
+    const { startMs, endMs } = todayCtWindow();
+    out.calendar_today = await getEventsInWindow(env, { id: userId }, startMs, endMs);
+  } catch (err) {
+    // Don't let a calendar fetch failure block the worker decision.
+    out.calendar_today = [];
+    out.notes.push(`calendar enrich threw: ${err?.message || err}`);
+  }
+
+  return out;
 }
