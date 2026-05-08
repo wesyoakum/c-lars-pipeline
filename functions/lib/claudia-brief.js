@@ -149,6 +149,15 @@ export async function regenerateBrief(env, user, opts = {}) {
     body = 'Quiet right now — nothing on fire.';
   }
 
+  return writeBriefRow(env, user.id, body, sourceEvent);
+}
+
+/**
+ * Persist a brief body that some other caller already produced. Used by
+ * the hourly tick, which generates the brief and observations in a single
+ * Opus call to avoid two model round-trips on overlapping state.
+ */
+export async function writeBriefRow(env, userId, body, sourceEvent) {
   const ts = now();
   await run(
     env.DB,
@@ -158,10 +167,9 @@ export async function regenerateBrief(env, user, opts = {}) {
        body = excluded.body,
        generated_at = excluded.generated_at,
        source_event = excluded.source_event`,
-    [user.id, body, ts, sourceEvent]
+    [userId, body, ts, sourceEvent]
   );
-
-  return { user_id: user.id, body, generated_at: ts, source_event: sourceEvent };
+  return { user_id: userId, body, generated_at: ts, source_event: sourceEvent };
 }
 
 /**

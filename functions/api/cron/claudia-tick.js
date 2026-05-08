@@ -28,7 +28,7 @@ import { all, one, run } from '../../lib/db.js';
 import { now, uuid } from '../../lib/ids.js';
 import { messagesJson } from '../../lib/anthropic.js';
 import { CLAUDIA_USER_ID } from '../../lib/auth.js';
-import { regenerateBrief } from '../../lib/claudia-brief.js';
+import { writeBriefRow } from '../../lib/claudia-brief.js';
 import { COMPANY_CONTEXT, INDUSTRY_TERMS, userContext, loadUserMemoryRows } from '../../lib/claudia-knowledge.js';
 
 const SANDBOX_OWNER_EMAIL = 'wes.yoakum@c-lars.com';
@@ -134,6 +134,21 @@ export async function onRequestPost(context) {
     [user.id]
   );
 
+  // Used by the brief's "Recently completed" section. Tick used to skip
+  // this slice and re-query it inside regenerateBrief; merging the two
+  // calls means we pull it once.
+  const recentCompletions = await all(
+    env.DB,
+    `SELECT id, subject, completed_at, opportunity_id
+       FROM activities
+      WHERE assigned_user_id = ?
+        AND completed_at IS NOT NULL
+        AND completed_at > datetime('now', '-24 hours')
+      ORDER BY completed_at DESC
+      LIMIT 10`,
+    [user.id]
+  );
+
   const recentObservations = await all(
     env.DB,
     `SELECT body, created_at
@@ -212,9 +227,27 @@ export async function onRequestPost(context) {
     '  - Says what you would do — and that you need ' + display + ' to confirm before you do it (you don\'t have a write surface for activities yet, so even when permitted you can\'t mark the task complete on your own).',
     'Skip a task only if you already wrote an observation about it (check recent_observations). One observation per task; do not batch them.',
     '',
+    'BRIEF — the second output you produce:',
+    `In the same response, write a "catch me up" brief for ${display}. This is what he sees when he asks "catch me up" — FAST to read, tells him exactly what matters right now. Aim for 5-10 short bullets across 2-4 sections.`,
+    '',
+    'STRUCTURE (skip a section entirely if it has no signal):',
+    '- ## Today\'s tasks — anything due today or overdue',
+    '- ## Opportunities at risk — opps that haven\'t moved in 14+ days, or are closing within 7 days but stuck',
+    '- ## Closing this week — opps with expected_close_date in the next 7 days',
+    '- ## Recently completed — only if there\'s something noteworthy in the last 24h',
+    '- ## Assigned to you (Claudia) — tasks others have assigned to claudia-ai that need action',
+    '',
+    'BRIEF RULES:',
+    '- Specific. Cite opp numbers, task subjects, dates, dollar amounts.',
+    '- Brief. Each bullet one line. No multi-paragraph entries.',
+    '- Actionable. If a bullet doesn\'t imply a next move, drop it.',
+    '- If genuinely nothing to flag, output a one-line "Quiet right now — nothing on fire." and stop. Do not invent items.',
+    '- Pure markdown body, no surrounding prose, no code fences.',
+    '',
     'OUTPUT: strict JSON, no prose around it, no markdown fences. Shape:',
-    '{ "observations": ["...one observation per string, markdown ok inside, 1-3 sentences..."] }',
-    'If nothing is genuinely worth flagging, output { "observations": [] } and we will skip writing anything. Do not invent something to fill the slot.',
+    '{ "observations": ["...one observation per string, markdown ok inside, 1-3 sentences..."],',
+    '  "brief": "## Markdown sections...\\n- bullets..." }',
+    'If nothing is genuinely worth flagging in observations, output { "observations": [], "brief": "..." } — the brief still needs to be written. Do not invent observations to fill the slot.',
   ].join('\n');
 
   const stateBlob = JSON.stringify(
@@ -222,6 +255,7 @@ export async function onRequestPost(context) {
       pending_events_since_last_tick: events,
       open_opportunities: openOpps,
       open_tasks: openTasks,
+      recently_completed: recentCompletions,
       tasks_assigned_to_claudia: myAssignedTasks,
       recent_observations: recentObservations,
       minutes_since_last_observation: Number.isFinite(minutesSinceLastObs)
@@ -233,6 +267,7 @@ export async function onRequestPost(context) {
   );
 
   let observations = [];
+  let briefBody = '';
   let modelError = null;
   try {
     const result = await messagesJson(env, {
@@ -240,13 +275,16 @@ export async function onRequestPost(context) {
       user: stateBlob,
       model: env.CLAUDIA_TICK_MODEL || CLAUDIA_TICK_MODEL_DEFAULT,
       cacheSystem: true,
-      maxTokens: 1500,
+      maxTokens: 2200,
       temperature: 0.3,
     });
     if (Array.isArray(result.json?.observations)) {
       observations = result.json.observations
         .map((s) => String(s || '').trim())
         .filter((s) => s.length > 0);
+    }
+    if (typeof result.json?.brief === 'string') {
+      briefBody = result.json.brief.trim();
     }
   } catch (err) {
     modelError = err?.message || String(err);
@@ -283,16 +321,21 @@ export async function onRequestPost(context) {
     );
   }
 
-  // Regenerate the "catch me up" brief alongside observations. Cheap
-  // (Haiku, ~700 tokens out, ~7c/day at hourly cadence). Failures here
-  // are swallowed so a brief outage doesn't break the rest of the
-  // tick — read_brief will just surface a slightly stale snapshot.
+  // Persist the brief body the same Opus call returned. Used to be a
+  // separate Haiku round-trip on overlapping state; merging into one
+  // call halves the model spend per tick. If the model didn't return a
+  // brief (parse error, truncated output), we leave the prior cached
+  // row alone — readBrief() falls back to regenerating it on demand.
   let briefError = null;
-  try {
-    await regenerateBrief(env, user, { sourceEvent: 'cron_tick' });
-  } catch (err) {
-    briefError = err?.message || String(err);
-    console.error('[claudia-tick] brief regen failed:', briefError);
+  if (briefBody) {
+    try {
+      await writeBriefRow(env, user.id, briefBody, 'cron_tick');
+    } catch (err) {
+      briefError = err?.message || String(err);
+      console.error('[claudia-tick] brief write failed:', briefError);
+    }
+  } else if (!modelError) {
+    briefError = 'no_brief_in_response';
   }
 
   return jsonResponse({
@@ -300,6 +343,7 @@ export async function onRequestPost(context) {
     user_id: user.id,
     pending_events_processed: events.length,
     observations_written: observations.length,
+    brief_written: briefBody ? true : false,
     model_error: modelError,
     brief_error: briefError,
   });
