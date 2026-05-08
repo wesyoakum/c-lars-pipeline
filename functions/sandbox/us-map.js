@@ -15,21 +15,12 @@
 // Wes-only — same email gate as the rest of /sandbox/*.
 
 import { layout, html, htmlResponse, raw, subnavTabs } from '../lib/layout.js';
-import { STATEHOOD_BY_NAME } from './data/statehood_dates.js';
-import { COUNTY_FOUNDING_BY_FIPS } from './data/county_founding_dates.js';
-import { COUNTY_MONTHLY_TEMPS_F }   from './data/county_monthly_temps.js';
-import { COUNTY_MONTHLY_HIGHS_F }   from './data/county_monthly_highs.js';
-import { COUNTY_MONTHLY_LOWS_F }    from './data/county_monthly_lows.js';
-import { COUNTY_MONTHLY_PRECIP_IN } from './data/county_monthly_precip.js';
-import { COUNTY_ELEVATIONS_FT }     from './data/county_elevations.js';
-import { COUNTY_MEDIAN_INCOME }     from './data/county_median_income.js';
-import { COUNTY_ANNUAL_PDSI, COUNTY_ANNUAL_PDSI_YEARS } from './data/county_annual_pdsi.js';
-import { COUNTY_POPULATION, COUNTY_POPULATION_YEARS }   from './data/county_population.js';
-import { COUNTY_ELECTIONS, COUNTY_ELECTION_YEARS }      from './data/county_elections.js';
-import { CITIES }                   from './data/cities.js';
-import { CBSA_GEOJSON }             from './data/cbsa_geometry.js';
-import { CBSA_INCOME }              from './data/cbsa_income.js';
-import { CBSA_HOME_VALUE }          from './data/cbsa_home_value.js';
+
+// All layer data is served lazily by /sandbox/us-map/data/[layer]
+// instead of being inlined into the page response. Initial HTML
+// stays around 50 KB; the browser fetches each layer's payload only
+// when the user activates that layer (with a small in-memory cache
+// to avoid repeated round-trips on layer-switch).
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 
@@ -465,24 +456,6 @@ export async function onRequestGet(context) {
     <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
     <script>${raw(mapScript({
-      statehood: STATEHOOD_BY_NAME,
-      counties: COUNTY_FOUNDING_BY_FIPS,
-      temperature: COUNTY_MONTHLY_TEMPS_F,
-      highs: COUNTY_MONTHLY_HIGHS_F,
-      lows: COUNTY_MONTHLY_LOWS_F,
-      precip: COUNTY_MONTHLY_PRECIP_IN,
-      elevation: COUNTY_ELEVATIONS_FT,
-      income: COUNTY_MEDIAN_INCOME,
-      pdsi: COUNTY_ANNUAL_PDSI,
-      pdsiYears: COUNTY_ANNUAL_PDSI_YEARS,
-      population: COUNTY_POPULATION,
-      populationYears: COUNTY_POPULATION_YEARS,
-      elections: COUNTY_ELECTIONS,
-      electionYears: COUNTY_ELECTION_YEARS,
-      cities: CITIES,
-      cbsaGeojson: CBSA_GEOJSON,
-      cbsaIncome: CBSA_INCOME,
-      cbsaHomeValue: CBSA_HOME_VALUE,
       stateNames: STATE_NAME_BY_FIPS,
       initialLayer,
     }))}</script>
@@ -495,35 +468,50 @@ export async function onRequestGet(context) {
 // above. Returned as a plain string (injected via raw()) so the JS
 // can use ${...} in template literals without colliding with the
 // outer html`...` template literal.
-function mapScript({
-  statehood, counties, temperature, highs, lows, precip,
-  elevation, income, pdsi, pdsiYears, population, populationYears,
-  elections, electionYears, cities,
-  cbsaGeojson, cbsaIncome, cbsaHomeValue,
-  stateNames, initialLayer,
-}) {
+function mapScript({ stateNames, initialLayer }) {
   return `
 (function() {
-  var STATEHOOD = ${JSON.stringify(statehood)};
-  var COUNTIES  = ${JSON.stringify(counties)};
-  var TEMPS     = ${JSON.stringify(temperature)};
-  var HIGHS     = ${JSON.stringify(highs)};
-  var LOWS      = ${JSON.stringify(lows)};
-  var PRECIP    = ${JSON.stringify(precip)};
-  var ELEVATION = ${JSON.stringify(elevation)};
-  var INCOME    = ${JSON.stringify(income)};
-  var PDSI = ${JSON.stringify(pdsi)};
-  var PDSI_YEARS = ${JSON.stringify(pdsiYears)};
-  var POPULATION = ${JSON.stringify(population)};
-  var POPULATION_YEARS = ${JSON.stringify(populationYears)};
-  var ELECTIONS = ${JSON.stringify(elections)};
-  var ELECTION_YEARS = ${JSON.stringify(electionYears)};
-  var CITIES = ${JSON.stringify(cities)};
-  var CBSA_GEOJSON = ${JSON.stringify(cbsaGeojson)};
-  var CBSA_INCOME = ${JSON.stringify(cbsaIncome)};
-  var CBSA_HOME_VALUE = ${JSON.stringify(cbsaHomeValue)};
   var STATE_NAMES = ${JSON.stringify(stateNames)};
   var INITIAL_LAYER = ${JSON.stringify(initialLayer)};
+
+  // ----- Lazy data fetcher -----------------------------------------
+  // Each layer declares a 'fetch' object describing which endpoint
+  // slugs it needs and where they should land on the layer config
+  // (e.g. { data: 'pdsi', geojson: 'cbsa-geometry' }). loadLayerData()
+  // resolves all of those in parallel, caches the JSON in fetchCache,
+  // and unwraps composite payloads (the slugs that return both data
+  // and years).
+  var DATA_BASE = '/sandbox/us-map/data/';
+  var fetchCache = new Map();
+  function fetchSlug(slug) {
+    if (fetchCache.has(slug)) return fetchCache.get(slug);
+    var p = fetch(DATA_BASE + slug, { credentials: 'same-origin' })
+      .then(function(r) {
+        if (!r.ok) throw new Error('Layer fetch failed: ' + slug + ' ' + r.status);
+        return r.json();
+      });
+    fetchCache.set(slug, p);
+    return p;
+  }
+  function loadLayerData(cfg) {
+    var fetches = cfg.fetch || {};
+    var fields = Object.keys(fetches);
+    return Promise.all(fields.map(function(f) { return fetchSlug(fetches[f]); }))
+      .then(function(payloads) {
+        for (var i = 0; i < fields.length; i++) {
+          var field = fields[i];
+          var payload = payloads[i];
+          // Composite payloads like { data, years } get unwrapped onto
+          // cfg directly so render code can read cfg.data / cfg.years.
+          if (field === 'data' && payload && typeof payload === 'object' && 'data' in payload && 'years' in payload) {
+            cfg.data = payload.data;
+            cfg.years = payload.years;
+          } else {
+            cfg[field] = payload;
+          }
+        }
+      });
+  }
 
   // Helper: county name + state for tooltip on county-keyed layers.
   function countyTitle(d) {
@@ -565,7 +553,7 @@ function mapScript({
       objectName: 'states',
       featureClass: 'statehood',
       keyOf: function(d) { return d.properties.name; },
-      data: STATEHOOD,
+      fetch: { data: 'statehood' },
       tooltipTitle: function(d) { return d.properties.name; },
       tooltipVerb: 'Joined',
       countLabel: 'states have joined the union',
@@ -591,7 +579,7 @@ function mapScript({
       objectName: 'counties',
       featureClass: 'counties',
       keyOf: function(d) { return String(d.id).padStart(5, '0'); },
-      data: COUNTIES,
+      fetch: { data: 'counties' },
       tooltipTitle: countyTitle,
       tooltipVerb: 'Founded',
       countLabel: 'counties have been founded',
@@ -617,7 +605,7 @@ function mapScript({
       objectName: 'counties',
       featureClass: 'counties',
       keyOf: function(d) { return String(d.id).padStart(5, '0'); },
-      data: TEMPS,
+      fetch: { data: 'temperature' },
       tooltipTitle: countyTitle,
       tooltipFormat: function(v, dateLabel) { return v.toFixed(1) + '°F on ' + dateLabel; },
       countFormat: function(avg, n) {
@@ -645,7 +633,7 @@ function mapScript({
       objectName: 'counties',
       featureClass: 'counties',
       keyOf: function(d) { return String(d.id).padStart(5, '0'); },
-      data: HIGHS,
+      fetch: { data: 'highs' },
       tooltipTitle: countyTitle,
       tooltipFormat: function(v, dateLabel) { return 'high ' + v.toFixed(1) + '°F on ' + dateLabel; },
       countFormat: function(avg, n) {
@@ -673,7 +661,7 @@ function mapScript({
       objectName: 'counties',
       featureClass: 'counties',
       keyOf: function(d) { return String(d.id).padStart(5, '0'); },
-      data: LOWS,
+      fetch: { data: 'lows' },
       tooltipTitle: countyTitle,
       tooltipFormat: function(v, dateLabel) { return 'low ' + v.toFixed(1) + '°F on ' + dateLabel; },
       countFormat: function(avg, n) {
@@ -701,7 +689,7 @@ function mapScript({
       objectName: 'counties',
       featureClass: 'counties',
       keyOf: function(d) { return String(d.id).padStart(5, '0'); },
-      data: PRECIP,
+      fetch: { data: 'precip' },
       tooltipTitle: countyTitle,
       tooltipFormat: function(v, dateLabel) { return v.toFixed(2) + '" near ' + dateLabel; },
       countFormat: function(avg, n) {
@@ -733,7 +721,7 @@ function mapScript({
       objectName: 'counties',
       featureClass: 'counties',
       keyOf: function(d) { return String(d.id).padStart(5, '0'); },
-      data: ELEVATION,
+      fetch: { data: 'elevation' },
       tooltipTitle: countyTitle,
       tooltipFormat: function(v) { return v.toLocaleString() + ' ft'; },
       countFormat: function(v) { return { value: v, label: '' }; },
@@ -758,7 +746,7 @@ function mapScript({
       objectName: 'counties',
       featureClass: 'counties',
       keyOf: function(d) { return String(d.id).padStart(5, '0'); },
-      data: INCOME,
+      fetch: { data: 'income' },
       tooltipTitle: countyTitle,
       tooltipFormat: function(v) { return '$' + v.toLocaleString(); },
       summaryFormat: function(stats) {
@@ -777,20 +765,19 @@ function mapScript({
     drought: {
       type: 'time-series',
       title: 'U.S. Annual Mean Drought Index (PDSI)',
-      subtitle: 'Annual-mean Palmer Drought Severity Index per county, 1900-' + (PDSI_YEARS[PDSI_YEARS.length-1]) + '. Source: NOAA climdiv-pdsicy.',
+      subtitle: 'Annual-mean Palmer Drought Severity Index per county, 1900-present. Source: NOAA climdiv-pdsicy.',
       topojsonUrl: 'https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json',
       objectName: 'counties',
       featureClass: 'counties',
       keyOf: function(d) { return String(d.id).padStart(5, '0'); },
-      data: PDSI,
-      years: PDSI_YEARS,
+      fetch: { data: 'pdsi' },
       tooltipTitle: countyTitle,
       tooltipFormat: function(v, label) { return (v >= 0 ? '+' : '') + v.toFixed(1) + ' PDSI in ' + label; },
       countFormat: function(avg, n) {
         return { value: (avg >= 0 ? '+' : '') + avg.toFixed(2), label: 'national mean PDSI across ' + n.toLocaleString() + ' counties' };
       },
       drawStateOverlay: true,
-      sliderMin: PDSI_YEARS[0], sliderMax: PDSI_YEARS[PDSI_YEARS.length-1], sliderStep: 1,
+      sliderMin: 1900, sliderMax: 2026, sliderStep: 1,
       sliderInitial: 1934,  // Dust Bowl peak
       quickJumps: [1934, 1956, 1988, 2002, 2012, 2022].map(function(y) {
         return { value: y, label: String(y) };
@@ -814,17 +801,16 @@ function mapScript({
       objectName: 'counties',
       featureClass: 'counties',
       keyOf: function(d) { return String(d.id).padStart(5, '0'); },
-      data: POPULATION,
-      years: POPULATION_YEARS,
+      fetch: { data: 'population' },
       tooltipTitle: countyTitle,
       tooltipFormat: function(v, label) { return v.toLocaleString() + ' in ' + label; },
       countFormat: function(avg, n, sum) {
         return { value: (sum/1e6).toFixed(1) + ' M', label: 'total population across ' + n.toLocaleString() + ' counties (≥ 1 person)' };
       },
       drawStateOverlay: true,
-      sliderMin: POPULATION_YEARS[0], sliderMax: POPULATION_YEARS[POPULATION_YEARS.length-1], sliderStep: 10,
+      sliderMin: 1900, sliderMax: 2020, sliderStep: 10,
       sliderInitial: 2020,
-      quickJumps: POPULATION_YEARS.map(function(y) { return { value: y, label: String(y) }; }),
+      quickJumps: [1900,1910,1920,1930,1940,1950,1960,1970,1980,1990,2000,2010,2020].map(function(y) { return { value: y, label: String(y) }; }),
       legendMinLabel: '< 1k',
       legendMaxLabel: '5M+',
       legendNotYet: 'No data',
@@ -847,8 +833,7 @@ function mapScript({
       objectName: 'counties',
       featureClass: 'counties',
       keyOf: function(d) { return String(d.id).padStart(5, '0'); },
-      data: ELECTIONS,
-      years: ELECTION_YEARS,
+      fetch: { data: 'elections' },
       tooltipTitle: countyTitle,
       tooltipFormat: function(v, label) {
         var lean = v > 0 ? 'R+' : 'D+';
@@ -859,9 +844,9 @@ function mapScript({
         return { value: lean + Math.abs(avg).toFixed(1), label: 'avg margin across ' + n.toLocaleString() + ' counties (unweighted)' };
       },
       drawStateOverlay: true,
-      sliderMin: ELECTION_YEARS[0], sliderMax: ELECTION_YEARS[ELECTION_YEARS.length-1], sliderStep: 4,
+      sliderMin: 2008, sliderMax: 2024, sliderStep: 4,
       sliderInitial: 2024,
-      quickJumps: ELECTION_YEARS.map(function(y) { return { value: y, label: String(y) }; }),
+      quickJumps: [2008,2012,2016,2020,2024].map(function(y) { return { value: y, label: String(y) }; }),
       legendMinLabel: 'D+30',
       legendMaxLabel: 'R+30',
       legendNotYet: 'No data',
@@ -876,10 +861,9 @@ function mapScript({
       type: 'static',
       title: 'Median Household Income by Metro Area',
       subtitle: 'CBSA-level (Metropolitan + Micropolitan Statistical Areas). ACS 2018-2022 5-year (B19013). Inflation-adjusted dollars.',
-      geojson: CBSA_GEOJSON,  // inline GeoJSON instead of TopoJSON
+      fetch: { geojson: 'cbsa-geometry', data: 'cbsa-income' },
       featureClass: 'msa',
       keyOf: function(d) { return d.properties.geoid; },
-      data: CBSA_INCOME,
       tooltipTitle: function(d) { return d.properties.name; },
       tooltipFormat: function(v) { return '$' + v.toLocaleString(); },
       summaryFormat: function(stats) {
@@ -899,10 +883,9 @@ function mapScript({
       type: 'static',
       title: 'Median Home Value by Metro Area',
       subtitle: 'CBSA-level. ACS 2018-2022 5-year (B25077). Median value of owner-occupied homes.',
-      geojson: CBSA_GEOJSON,
+      fetch: { geojson: 'cbsa-geometry', data: 'cbsa-home-value' },
       featureClass: 'msa',
       keyOf: function(d) { return d.properties.geoid; },
-      data: CBSA_HOME_VALUE,
       tooltipTitle: function(d) { return d.properties.name; },
       tooltipFormat: function(v) { return '$' + v.toLocaleString(); },
       summaryFormat: function(stats) {
@@ -926,7 +909,7 @@ function mapScript({
       // country backdrop drawn from the states TopoJSON.
       topojsonUrl: 'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json',
       objectName: 'states',
-      data: CITIES,
+      fetch: { data: 'cities' },
       // Slider runs in log10(population) space so each unit is a
       // "factor of 10" jump. UI shows the linear threshold value.
       sliderMin: 2.0, sliderMax: 7.0, sliderStep: 0.05,
@@ -1019,12 +1002,17 @@ function mapScript({
 
   function renderUnderlay() {
     if (!underlayOn) return;
-    loadTopo('https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json').then(function(us) {
+    // Lazy-fetch the elevation lookup only when the underlay first
+    // renders. fetchSlug() caches so repeated toggles are free.
+    Promise.all([
+      loadTopo('https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json'),
+      fetchSlug('elevation'),
+    ]).then(function(arr) {
+      var us = arr[0], elevation = arr[1];
       var counties = topojson.feature(us, us.objects.counties).features.filter(function(d) {
         var p = path(d);
         return p != null && p !== '';
       });
-      // Insert underlay paths at the start so they paint behind everything else.
       var g = svg.insert('g', ':first-child').attr('class', 'usmap-underlay');
       g.selectAll('path.usmap-underlay-county')
         .data(counties)
@@ -1034,7 +1022,7 @@ function mapScript({
         .attr('d', path)
         .attr('fill', function(d) {
           var fips = String(d.id).padStart(5, '0');
-          var elev = ELEVATION[fips];
+          var elev = elevation[fips];
           return elev != null ? terrainScale(elev) : '#e8e8e0';
         });
     });
@@ -1136,41 +1124,49 @@ function mapScript({
     // on top. Cheap to skip when the toggle is off.
     renderUnderlay();
 
-    if (cfg.type === 'point-symbols') {
-      renderPointSymbols(cfg, +slider.value);
-      return;
-    }
+    // Fetch this layer's data (cached on subsequent activations), then
+    // render. Layer data lives behind /sandbox/us-map/data/<slug> so
+    // the initial HTML stays small.
+    loadLayerData(cfg).then(function() {
+      // Re-snap the currentLayer reference so render code reads the
+      // freshly-populated cfg.data / cfg.geojson / cfg.years.
+      currentLayer = Object.assign({ key: layerKey }, cfg);
 
-    // Two geometry sources are supported:
-    //   - cfg.topojsonUrl + cfg.objectName  → fetch from CDN
-    //   - cfg.geojson                       → inline GeoJSON FeatureCollection
-    // For inline-GeoJSON layers we load states-10m separately when the
-    // state-overlay context line is requested.
-    if (cfg.geojson) {
-      renderFeatures(cfg, cfg.geojson.features);
-      if (cfg.drawStateOverlay) {
-        loadTopo('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json').then(function(us) {
+      if (cfg.type === 'point-symbols') {
+        renderPointSymbols(cfg, +slider.value);
+        return;
+      }
+
+      // Two geometry sources are supported:
+      //   - cfg.topojsonUrl + cfg.objectName  → fetch from CDN
+      //   - cfg.geojson                       → fetched via fetch slug
+      // For inline-GeoJSON layers we load states-10m separately when
+      // the state-overlay context line is requested.
+      if (cfg.geojson) {
+        renderFeatures(cfg, cfg.geojson.features);
+        if (cfg.drawStateOverlay) {
+          loadTopo('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json').then(function(us) {
+            var stateMesh = topojson.mesh(us, us.objects.states, function(a, b) { return a !== b; });
+            svg.append('path')
+              .attr('class', 'usmap-state-overlay')
+              .attr('d', path(stateMesh));
+          });
+        }
+        update(hasSlider ? +slider.value : 0);
+        return;
+      }
+
+      loadTopo(cfg.topojsonUrl).then(function(us) {
+        var features = topojson.feature(us, us.objects[cfg.objectName]).features;
+        renderFeatures(cfg, features);
+        if (cfg.drawStateOverlay) {
           var stateMesh = topojson.mesh(us, us.objects.states, function(a, b) { return a !== b; });
           svg.append('path')
             .attr('class', 'usmap-state-overlay')
             .attr('d', path(stateMesh));
-        });
-      }
-      update(hasSlider ? +slider.value : 0);
-      return;
-    }
-
-    loadTopo(cfg.topojsonUrl).then(function(us) {
-      var features = topojson.feature(us, us.objects[cfg.objectName]).features;
-      renderFeatures(cfg, features);
-      // Optional state outlines drawn last so they paint on top.
-      if (cfg.drawStateOverlay) {
-        var stateMesh = topojson.mesh(us, us.objects.states, function(a, b) { return a !== b; });
-        svg.append('path')
-          .attr('class', 'usmap-state-overlay')
-          .attr('d', path(stateMesh));
-      }
-      update(hasSlider ? +slider.value : 0);
+        }
+        update(hasSlider ? +slider.value : 0);
+      });
     });
   }
 
