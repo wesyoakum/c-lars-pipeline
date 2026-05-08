@@ -120,6 +120,136 @@ export async function categorizeDocument(env, { filename, contentType, text, par
 }
 
 /**
+ * Categorize a batch of related documents in a single LLM call. Used by
+ * the email-ingest path: a parent email plus N attachments all share
+ * context, and seeing them together lets the model reason about the
+ * family ("the parent says 'NDA attached' — so the PDF is a contract,
+ * the JPG is the signed-page scan").
+ *
+ * Each item must have a stable `key` (caller-chosen identifier) that
+ * the result Map is keyed by. Other fields match categorizeDocument().
+ *
+ * Heuristic short-circuits run per-item before the LLM call. If every
+ * item is heuristic-determined, no model call fires. If only one item
+ * is left after filtering, falls through to the single-item path.
+ */
+export async function categorizeDocumentsBatch(env, items) {
+  const results = new Map();
+  const needsLlm = [];
+
+  for (const item of (items || [])) {
+    const key = item?.key;
+    if (key == null) continue;
+
+    const heuristic = heuristicCategory(item.filename, item.contentType, item.parentSubject);
+    if (heuristic) {
+      results.set(key, heuristic);
+      continue;
+    }
+
+    const trimmed = String(item.text || '').slice(0, CATEGORIZE_MAX_TEXT_CHARS).trim();
+    if (!trimmed && !item.filename && !item.parentSubject) {
+      results.set(key, null);
+      continue;
+    }
+    needsLlm.push({ ...item, _trimmed: trimmed });
+  }
+
+  if (needsLlm.length === 0) return results;
+
+  if (needsLlm.length === 1) {
+    const only = needsLlm[0];
+    try {
+      const cat = await categorizeDocument(env, {
+        filename: only.filename,
+        contentType: only.contentType,
+        text: only.text,
+        parentSubject: only.parentSubject,
+      });
+      results.set(only.key, cat);
+    } catch (err) {
+      console.error('[claudia-categorize] batch single-fallback failed:', err?.message || err);
+      results.set(only.key, null);
+    }
+    return results;
+  }
+
+  // Multi-item batch — one Haiku call instead of N.
+  const system = [
+    'You categorize a related batch of documents for an offshore-engineering company\'s sales assistant.',
+    'The batch is typically a parent email plus its attachments. Treat them as a family — the parent\'s subject and body inform what the children are.',
+    `Pick the single best category per item from this list: ${DOCUMENT_CATEGORIES.join(', ')}.`,
+    '',
+    'Definitions:',
+    '- rfq: Request for Quote / RFP / RFI — inbound spec or pricing request from a customer.',
+    '- spec: Technical spec sheet, datasheet, drawing, capability sheet for a product.',
+    '- quote: A QUOTE document — could be one we sent or one received from a competitor / supplier.',
+    '- po: Purchase Order document.',
+    '- contract: Contract, agreement, NDA, terms-and-conditions.',
+    '- email: An email file (.eml / .mbox).',
+    '- meeting_note: Meeting notes, voice memo transcript, call summary, minutes.',
+    '- contact_list: A spreadsheet/CSV/vCard of contacts (people + emails / phones).',
+    '- marketing: Brochure, one-pager, marketing collateral, capability statement.',
+    '- badge: Conference / trade-show badge photo. ONLY when the image clearly shows a badge / lanyard / name-tag with a visible event name, conference branding, or booth number. A plain photo of a person without a visible badge is NOT a badge — it\'s a headshot.',
+    '- headshot: Professional portrait photo of one person, suitable for a bio / website / org chart. Generic plain-background photo of a face. When the parent email subject says "head shot", "headshot", "portrait", "bio photo", or similar — this is the right category.',
+    '- business_card: Business card photo — clearly shows a card layout with name + title + company.',
+    '- invoice: Invoice document (inbound bill or outbound charge).',
+    '- spreadsheet: Generic data spreadsheet with no obvious sales / contact / pricing context.',
+    '- other: Anything that doesn\'t cleanly fit above.',
+    '',
+    'OUTPUT — strict JSON, no prose around it:',
+    '{ "items": [ { "idx": 0, "category": "<one of the list>" | null, "confidence": "high"|"medium"|"low" }, ... ] }',
+    'Return one entry per input item, in the same order. If you are not confident enough to commit on an item, set its category to null with confidence "low" — better than guessing wrong.',
+  ].join('\n');
+
+  const userBlob = JSON.stringify({
+    items: needsLlm.map((it, idx) => ({
+      idx,
+      filename: it.filename || null,
+      content_type: it.contentType || null,
+      parent_email_subject: it.parentSubject || null,
+      text_excerpt: it._trimmed,
+    })),
+  });
+
+  let json;
+  try {
+    const result = await messagesJson(env, {
+      system,
+      user: userBlob,
+      model: env.CLAUDIA_CATEGORIZE_MODEL || CATEGORIZE_MODEL_DEFAULT,
+      cacheSystem: true,
+      maxTokens: 60 + needsLlm.length * 30,
+      temperature: 0,
+    });
+    json = result.json;
+  } catch (err) {
+    console.error('[claudia-categorize] batch model call failed:', err?.message || err);
+    for (const it of needsLlm) results.set(it.key, null);
+    return results;
+  }
+
+  const out = Array.isArray(json?.items) ? json.items : [];
+  for (let i = 0; i < needsLlm.length; i++) {
+    const item = needsLlm[i];
+    // Match by idx if the model set it, else fall back to position.
+    const row = out.find((r) => r?.idx === i) || out[i];
+    if (!row) {
+      results.set(item.key, null);
+      continue;
+    }
+    const cat = String(row.category || '').trim().toLowerCase();
+    const conf = String(row.confidence || '').toLowerCase();
+    if (!cat || cat === 'null' || !ALLOWED.has(cat) || conf === 'low') {
+      results.set(item.key, null);
+    } else {
+      results.set(item.key, cat);
+    }
+  }
+  return results;
+}
+
+/**
  * Cheap pre-LLM heuristic. Catches the obvious cases (extension or
  * filename keyword) so we don't pay for a Claude call when a
  * regex would work. Returns null when there's no strong signal.

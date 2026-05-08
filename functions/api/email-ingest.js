@@ -32,7 +32,7 @@
 import { run } from '../lib/db.js';
 import { now, uuid } from '../lib/ids.js';
 import { extractText } from '../lib/claudia-extract.js';
-import { categorizeDocument } from '../lib/claudia-categorize.js';
+import { categorizeDocumentsBatch } from '../lib/claudia-categorize.js';
 import { extractAttachments, emailMetadata } from '../lib/claudia-mime.js';
 import { one } from '../lib/db.js';
 import { queueClaudiaEvent } from '../lib/claudia-events.js';
@@ -202,17 +202,6 @@ export async function onRequestPost(context) {
     extracted = { text: '', status: 'error', error: err?.message || String(err) };
   }
 
-  let category = null;
-  try {
-    category = await categorizeDocument(env, {
-      filename,
-      contentType: 'message/rfc822',
-      text: extracted.text,
-    });
-  } catch (err) {
-    console.error('[email-ingest] categorize failed:', err?.message || err);
-  }
-
   // 6b. Extract attachments BEFORE the parent INSERT so we can
   // populate attachments_count in structured_data accurately.
   // extractAttachments now filters out unreferenced inline images
@@ -220,6 +209,88 @@ export async function onRequestPost(context) {
   // explicitly disposed as attachment OR inline images that the
   // text/html body actually references via cid: pass through.
   const attachments = extractAttachments(fullEmlText);
+
+  // 6c. Stage attachments — R2 put + text extract — without writing
+  // the D1 row yet. We need every attachment's extracted text in
+  // hand before the batch categorize call so the model sees the
+  // whole family in one shot. The INSERTs happen after categorize
+  // so each row lands with its category resolved.
+  const stagedAttachments = [];
+  for (const att of attachments) {
+    try {
+      const attDocId = uuid();
+      const attTs = now();
+      const attSafeName = (att.filename || 'attachment')
+        .replace(/[^A-Za-z0-9._-]+/g, '_')
+        .slice(0, 120) || 'attachment';
+      const attR2Key = `claudia-docs/${user.id}/${attDocId}/${attSafeName}`;
+
+      await env.DOCS.put(attR2Key, att.bytes, {
+        httpMetadata: { contentType: att.contentType },
+        customMetadata: {
+          uploaded_by: user.id,
+          original_filename: att.filename,
+          ingest_source: 'outlook_addin_attachment',
+          parent_email_doc_id: docId,
+        },
+      });
+
+      let attExtracted = { text: '', status: 'error', error: 'not run' };
+      try {
+        attExtracted = await extractText(env, att.bytes, att.contentType, att.filename);
+      } catch (err) {
+        attExtracted = { text: '', status: 'error', error: err?.message || String(err) };
+      }
+
+      stagedAttachments.push({
+        att,
+        attDocId,
+        attTs,
+        attR2Key,
+        attExtracted,
+      });
+    } catch (err) {
+      console.error('[email-ingest] attachment stage failed:', err?.message || err);
+      stagedAttachments.push({
+        att,
+        stageError: err?.message || String(err),
+      });
+    }
+  }
+
+  // 6d. ONE batch categorize call covering the parent email + every
+  // staged attachment. Used to be N+1 separate Haiku calls (one per
+  // file); a 5-attachment email is now one model round-trip instead
+  // of six. Heuristic short-circuits (filename regex, image+parent-
+  // subject hints) still run per-item, so most batches are pure
+  // heuristic with no LLM call at all.
+  const categoryMap = await (async () => {
+    const items = [
+      { key: '__parent__', filename, contentType: 'message/rfc822', text: extracted.text, parentSubject: null },
+    ];
+    for (const s of stagedAttachments) {
+      if (s.stageError) continue;
+      items.push({
+        key: s.attDocId,
+        filename: s.att.filename,
+        contentType: s.att.contentType,
+        text: s.attExtracted?.text || '',
+        // Inherit parent context — "Fw: Head shot" → attachment is a
+        // headshot, not generic. Big quality lift on image attachments
+        // where the filename is opaque (UUID-style) and the content
+        // is a binary blob with no extractable text.
+        parentSubject: incomingMeta?.subject || null,
+      });
+    }
+    try {
+      return await categorizeDocumentsBatch(env, items);
+    } catch (err) {
+      console.error('[email-ingest] batch categorize failed:', err?.message || err);
+      return new Map();
+    }
+  })();
+
+  const category = categoryMap.get('__parent__') || null;
 
   const ts = now();
   // seq via correlated subquery — atomic per-user "next number".
@@ -267,48 +338,17 @@ export async function onRequestPost(context) {
   // → INSERT with own seq). Best-effort per attachment: if one fails
   // we log it in the response and keep going on the rest.
   const attachmentResults = [];
-  for (const att of attachments) {
-    try {
-      const attDocId = uuid();
-      const attTs = now();
-      const attSafeName = (att.filename || 'attachment')
-        .replace(/[^A-Za-z0-9._-]+/g, '_')
-        .slice(0, 120) || 'attachment';
-      const attR2Key = `claudia-docs/${user.id}/${attDocId}/${attSafeName}`;
-
-      await env.DOCS.put(attR2Key, att.bytes, {
-        httpMetadata: { contentType: att.contentType },
-        customMetadata: {
-          uploaded_by: user.id,
-          original_filename: att.filename,
-          ingest_source: 'outlook_addin_attachment',
-          parent_email_doc_id: docId,
-        },
+  for (const staged of stagedAttachments) {
+    if (staged.stageError) {
+      attachmentResults.push({
+        filename: staged.att?.filename,
+        error: staged.stageError,
       });
-
-      let attExtracted = { text: '', status: 'error', error: 'not run' };
-      try {
-        attExtracted = await extractText(env, att.bytes, att.contentType, att.filename);
-      } catch (err) {
-        attExtracted = { text: '', status: 'error', error: err?.message || String(err) };
-      }
-
-      let attCategory = null;
-      try {
-        attCategory = await categorizeDocument(env, {
-          filename: att.filename,
-          contentType: att.contentType,
-          text: attExtracted.text,
-          // Inherit parent context — "Fw: Head shot" → attachment is a
-          // headshot, not generic. Big quality lift on image attachments
-          // where the filename is opaque (UUID-style) and the content
-          // is a binary blob with no extractable text.
-          parentSubject: incomingMeta?.subject || null,
-        });
-      } catch (err) {
-        console.error('[email-ingest] attachment categorize failed:', err?.message || err);
-      }
-
+      continue;
+    }
+    const { att, attDocId, attTs, attR2Key, attExtracted } = staged;
+    const attCategory = categoryMap.get(attDocId) || null;
+    try {
       await run(
         env.DB,
         `INSERT INTO claudia_documents
@@ -348,7 +388,7 @@ export async function onRequestPost(context) {
         extraction_status: attExtracted.status,
       });
     } catch (err) {
-      console.error('[email-ingest] attachment failed:', err?.message || err);
+      console.error('[email-ingest] attachment INSERT failed:', err?.message || err);
       attachmentResults.push({
         filename: att.filename,
         error: err?.message || String(err),

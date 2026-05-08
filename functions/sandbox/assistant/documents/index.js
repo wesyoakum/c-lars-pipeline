@@ -22,7 +22,7 @@ import {
   expandMbox,
 } from '../../../lib/claudia-extract.js';
 import { renderDocumentsPanel } from '../../../lib/claudia-documents-render.js';
-import { categorizeDocument } from '../../../lib/claudia-categorize.js';
+import { categorizeDocumentsBatch } from '../../../lib/claudia-categorize.js';
 import { emailMetadata, extractAttachments } from '../../../lib/claudia-mime.js';
 import { queueClaudiaEvent } from '../../../lib/claudia-events.js';
 
@@ -152,16 +152,45 @@ export async function onRequestPost(context) {
       // set_document_category. Auto-categorize is NOT gated by the
       // set_document_category permission — that toggle controls
       // whether Claudia can OVERWRITE categories from chat.
-      let category = null;
-      try {
-        category = await categorizeDocument(env, {
-          filename: file.name,
-          contentType: file.type,
-          text: extracted.text,
-        });
-      } catch (err) {
-        console.error('[upload] categorize failed:', err?.message || err);
+      //
+      // For an email upload with attachments, we stage attachments first
+      // (R2 put + text extract) and then categorize the parent + every
+      // child in ONE batch call instead of N+1. Heuristic short-circuits
+      // still run per-item. Non-email uploads skip straight to the
+      // single-item path.
+      const stagedChildren = [];
+      if (isEmail && attachments.length > 0) {
+        for (const att of attachments) {
+          try {
+            const staged = await stageAttachment(env, user, att, docId);
+            if (staged) stagedChildren.push(staged);
+          } catch (err) {
+            errors.push(`${att.filename || 'attachment'}: ${err?.message || String(err)}`);
+          }
+        }
       }
+
+      const categoryMap = await (async () => {
+        const items = [
+          { key: '__parent__', filename: file.name, contentType: file.type, text: extracted.text, parentSubject: null },
+        ];
+        for (const s of stagedChildren) {
+          items.push({
+            key: s.docId,
+            filename: s.filename,
+            contentType: s.contentType,
+            text: s.extracted?.text || '',
+            parentSubject: emailMeta?.subject || null,
+          });
+        }
+        try {
+          return await categorizeDocumentsBatch(env, items);
+        } catch (err) {
+          console.error('[upload] batch categorize failed:', err?.message || err);
+          return new Map();
+        }
+      })();
+      const category = categoryMap.get('__parent__') || null;
 
       const structuredData = emailMeta
         ? JSON.stringify({ kind: 'email', ...emailMeta, attachments_count: attachments.length })
@@ -204,17 +233,14 @@ export async function onRequestPost(context) {
         ]
       );
 
-      // Ingest each attachment as its own child row. Same R2 + extract +
-      // categorize flow as the parent loop. Failures on a single
-      // attachment fall through to the errors list and don't abort the
-      // parent. Pass the parent email's subject so the categorizer can
-      // chain context — "Fw: Head shot" → child PNG = headshot, not
-      // a generic image.
-      for (const att of attachments) {
+      // Persist each staged attachment as its own child row. R2 put +
+      // extract already happened during the stage pass; category was
+      // resolved by the batch call above. One INSERT per child here.
+      for (const staged of stagedChildren) {
         try {
-          await ingestAttachment(env, user, att, docId, errors, emailMeta?.subject || null);
+          await insertStagedAttachment(env, user, staged, categoryMap.get(staged.docId) || null);
         } catch (err) {
-          errors.push(`${att.filename || 'attachment'}: ${err?.message || String(err)}`);
+          errors.push(`${staged.filename || 'attachment'}: ${err?.message || String(err)}`);
         }
       }
 
@@ -281,14 +307,16 @@ function isEmailFile(contentType, filename) {
   return /\.(eml|mbox)$/i.test(String(filename || ''));
 }
 
-async function ingestAttachment(env, user, att, parentId, errors, parentSubject) {
+// Stage an attachment: R2 put + text extract. Returns a record the
+// caller threads through batch categorize and the final INSERT. Returns
+// null when the attachment can't be staged (size cap, missing bytes).
+async function stageAttachment(env, user, att, parentId) {
   const filename = String(att.filename || 'attachment').slice(0, 255);
   const contentType = att.contentType || 'application/octet-stream';
   const bytes = att.bytes;
-  if (!bytes || !bytes.length) return;
+  if (!bytes || !bytes.length) return null;
   if (bytes.length > MAX_BYTES) {
-    errors.push(`${filename}: attachment too large (${formatBytes(bytes.length)} > 25 MB cap)`);
-    return;
+    throw new Error(`attachment too large (${formatBytes(bytes.length)} > 25 MB cap)`);
   }
 
   // We deliberately accept attachments even when their content_type
@@ -322,18 +350,11 @@ async function ingestAttachment(env, user, att, parentId, errors, parentSubject)
     }
   }
 
-  let category = null;
-  try {
-    category = await categorizeDocument(env, {
-      filename,
-      contentType,
-      text: extracted.text,
-      parentSubject: parentSubject || null,
-    });
-  } catch (err) {
-    console.error('[upload] attachment categorize failed:', err?.message || err);
-  }
+  return { docId, ts, filename, contentType, bytes, r2Key, extracted, parentId };
+}
 
+async function insertStagedAttachment(env, user, staged, category) {
+  const { docId, ts, filename, contentType, bytes, r2Key, extracted, parentId } = staged;
   await run(
     env.DB,
     `INSERT INTO claudia_documents
