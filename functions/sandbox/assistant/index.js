@@ -153,6 +153,10 @@ export async function onRequestGet(context) {
         display: flex; flex-direction: column; gap: 0.85rem;
         overflow-y: auto;
         min-height: 0;
+        /* Allow the messages list to shrink below its intrinsic
+           min-content size — without this, a single long unbreakable
+           string in any message blows the wrap wider than the viewport. */
+        min-width: 0;
       }
       /* Minimalist scrollbar — same shape as the table scrollbars in
          pipeline.css (.opp-list-hscroll). Applies to the chat messages
@@ -224,7 +228,11 @@ export async function onRequestGet(context) {
       }
       .assistant-msg {
         max-width: 80%; padding: 0.65rem 0.95rem; border-radius: 10px;
-        line-height: 1.55; word-wrap: break-word;
+        line-height: 1.55;
+        /* anywhere (vs. break-word) lets break opportunities count
+           toward min-content size, so a long URL or unbreakable word
+           in a message can't force the bubble wider than its column. */
+        overflow-wrap: anywhere;
         font-size: 14px; position: relative;
       }
       .assistant-msg.user {
@@ -324,6 +332,10 @@ export async function onRequestGet(context) {
         border-top: 1px solid #e5e7eb;
         margin: 0 -0.5rem;
         border-radius: 0;
+        /* As a flex-column item inside .assistant-wrap, the form's
+           default min-width is its min-content. On phones that floor
+           was forcing the wrap wider than the viewport. */
+        min-width: 0;
       }
       .assistant-form textarea {
         flex: 1; resize: none; min-height: 44px; max-height: 180px;
