@@ -182,7 +182,17 @@ export const ANTHROPIC_MODELS = {
  * @param {string}   [opts.model]
  * @param {number}   [opts.maxTokens]          per-turn cap (default 4096)
  * @param {number}   [opts.temperature]        default 0.2
- * @param {boolean}  [opts.cacheSystem]
+ * @param {boolean}  [opts.cacheSystem]        Cache the system prompt
+ * @param {boolean}  [opts.cacheTools]         Also cache tool definitions
+ *                                              (cache_control on the last
+ *                                              tool extends the cache to
+ *                                              include all of them).
+ *                                              Recommended for any caller
+ *                                              with a stable toolset and
+ *                                              multi-hop loops — the tool
+ *                                              definitions can be 5-10k
+ *                                              tokens that otherwise
+ *                                              re-pay full cost per hop.
  * @param {number}   [opts.maxToolHops]        runaway guard (default 8)
  * @returns {Promise<{text, model, usage, trace, toolCalls}>}
  */
@@ -195,6 +205,19 @@ export async function messagesWithTools(env, opts) {
     ? [{ type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } }]
     : opts.system;
 
+  // Add cache_control to the LAST tool when cacheTools is set. Anthropic
+  // caches everything UP TO each cache_control breakpoint, so marking the
+  // last tool extends the cached prefix to cover system + all tools. The
+  // worker's tool definitions are stable per invocation (~5-10k tokens of
+  // schemas) so this saves a meaningful chunk per tool-use hop.
+  const tools = (opts.cacheTools && Array.isArray(opts.tools) && opts.tools.length > 0)
+    ? opts.tools.map((t, i) =>
+        i === opts.tools.length - 1
+          ? { ...t, cache_control: { type: 'ephemeral' } }
+          : t
+      )
+    : opts.tools;
+
   const messages = [...opts.messages];
   const trace = [];
   const toolCalls = [];
@@ -206,7 +229,7 @@ export async function messagesWithTools(env, opts) {
       max_tokens: opts.maxTokens ?? 4096,
       ...(supportsTemperature(model) ? { temperature: opts.temperature ?? 0.2 } : {}),
       system: systemBlock,
-      tools: opts.tools,
+      tools,
       messages,
     };
 
