@@ -195,15 +195,21 @@ export function renderActionButtons(a) {
 function renderActionRow(a) {
   const due = formatDue(a.due_at);
   const overdue = due && /overdue/.test(due);
+  const hasContext = Boolean(a.detail || a.rationale);
   return html`
     <li class="claudia-action-row" data-q="${escape(a.quadrant)}" data-id="${escape(a.id)}" id="claudia-action-${escape(a.id)}">
       <div class="claudia-action-head">
         <span class="claudia-action-title">${escape(a.title || '')}</span>
         ${sourceChip(a)}
         ${due ? html`<span class="claudia-action-due ${overdue ? 'overdue' : ''}">${escape(due)}</span>` : ''}
+        ${hasContext ? html`
+          <details class="claudia-action-context">
+            <summary aria-label="Show context">why?</summary>
+            ${a.detail ? html`<div class="claudia-action-detail">${escape(a.detail)}</div>` : ''}
+            ${a.rationale ? html`<div class="claudia-action-rationale">${escape(a.rationale)}</div>` : ''}
+          </details>
+        ` : ''}
       </div>
-      ${a.detail ? html`<div class="claudia-action-detail">${escape(a.detail)}</div>` : ''}
-      ${a.rationale ? html`<div class="claudia-action-rationale">${escape(a.rationale)}</div>` : ''}
       ${renderActionButtons(a)}
     </li>
   `;
@@ -339,7 +345,35 @@ export const ACTIONS_PANEL_CSS = `
     background: rgba(0,0,0,0.06); color: #374151; white-space: nowrap;
   }
   .claudia-action-due.overdue { background: #fee2e2; color: #991b1b; font-weight: 600; }
-  .claudia-action-detail { margin-top: 0.2rem; color: #1f2937; }
+  /* Detail + rationale are folded into a click-to-expand <details> by
+     default — Wes wants rows to be one-line decision prompts, not long
+     reads. Click "why?" to see the model's reasoning when it matters. */
+  .claudia-action-context {
+    flex: 0 0 auto;
+    margin-left: auto;        /* push to the right of the head row */
+  }
+  .claudia-action-context > summary {
+    cursor: pointer;
+    font-size: 11px;
+    color: #6b7280;
+    text-decoration: underline dotted;
+    list-style: none;
+    user-select: none;
+    padding: 0 2px;
+  }
+  .claudia-action-context > summary::-webkit-details-marker { display: none; }
+  .claudia-action-context > summary:hover { color: #1f2937; }
+  .claudia-action-context[open] > summary { color: #1f2937; }
+  /* When expanded, push the detail/rationale to its own line below
+     the head by giving the details a full row in the wrap-flow. */
+  .claudia-action-context[open] {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+  .claudia-action-detail {
+    margin-top: 0.3rem; color: #1f2937;
+    font-weight: 400; font-size: 13px; line-height: 1.45;
+  }
   .claudia-action-rationale { margin-top: 0.15rem; color: #6b7280; font-size: 12px; font-style: italic; }
 
   .claudia-action-actions {

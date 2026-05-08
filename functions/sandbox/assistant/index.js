@@ -144,8 +144,8 @@ export async function onRequestGet(context) {
       .assistant-wrap {
         max-width: 880px; margin: 0 auto; padding: 1rem;
         display: flex; flex-direction: column;
-        height: min(55vh, 600px);
-        min-height: 320px;
+        height: min(82vh, 900px);
+        min-height: 480px;
       }
       .assistant-messages {
         flex: 1 1 auto;
