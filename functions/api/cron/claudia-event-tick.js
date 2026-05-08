@@ -76,6 +76,14 @@ export async function onRequestPost(context) {
     return jsonResponse({ ok: false, error: 'event_id_required' }, 400);
   }
 
+  // Force re-evaluation: when the chat-side replay_pending_events tool
+  // sets force=true (used after a prompt or enrichment change), bypass
+  // the idempotency check and re-process the event under the current
+  // logic. Phase B5's re-evaluation pass means the extractor will
+  // update existing claudia_actions in place via id-matching rather
+  // than duplicating them.
+  const force = body?.force === true;
+
   // Load the canonical row from D1. The queue payload is best-effort
   // and may have stale fields if D1 wrote slowly; trust the row.
   const event = await one(
@@ -89,14 +97,15 @@ export async function onRequestPost(context) {
   }
 
   // Idempotency: queue redrives + the hourly sweeper can both target
-  // the same id. If we already dispatched, return success without
-  // re-processing.
-  if (event.dispatched_at) {
+  // the same id. If we already dispatched and the caller didn't opt
+  // into a forced replay, return success without re-processing.
+  if (event.dispatched_at && !force) {
     return jsonResponse({
       ok: true,
       skipped: 'already_dispatched',
       event_id: eventId,
       dispatched_at: event.dispatched_at,
+      hint: 'Pass force=true in the request body to re-evaluate this event under updated logic.',
     });
   }
 

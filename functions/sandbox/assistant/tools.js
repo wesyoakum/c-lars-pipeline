@@ -973,25 +973,38 @@ export async function makeAssistantTools({ env, user }) {
     {
       name: 'replay_pending_events',
       description:
-        'Operational tool. Re-publishes claudia_events_pending rows whose dispatched_at is NULL ' +
-        'to the cf-claudia-events queue, so the consumer worker re-processes them. Returns counts. ' +
-        'Use when (a) events piled up during a worker / Access outage, or (b) the prompt or ' +
-        'enrichment logic just changed and ${display} wants the recent events re-evaluated under ' +
-        'the new behavior. The chat tool returns immediately; actual processing happens in the ' +
-        'background via the queue, so ${display} should refresh /sandbox/assistant after ~30s ' +
-        'to see results. Does NOT duplicate D1 rows — only re-publishes the queue side. ' +
-        'When ${display} says "rerun those events" / "process the pending queue" / "re-evaluate ' +
-        'the recent emails," call this tool.',
+        'Operational tool. Re-publishes claudia_events_pending rows to the cf-claudia-events queue ' +
+        'so the consumer worker (re-)processes them. Two modes:\n' +
+        '\n' +
+        '1. DEFAULT (no since_minutes): only events with dispatched_at IS NULL. Use when events ' +
+        'piled up during a worker / Access outage and need draining.\n' +
+        '\n' +
+        '2. FORCE RE-EVAL (since_minutes set): also includes already-dispatched events from the ' +
+        'time window. The event-tick endpoint sees the force flag and bypasses its idempotency ' +
+        'check. Use when prompt or enrichment logic just changed and ${display} wants recent ' +
+        'events re-evaluated under the new behavior. Phase B5 re-evaluation kicks in: the ' +
+        'extractor sees existing open actions and updates them in-place rather than duplicating.\n' +
+        '\n' +
+        'When ${display} says "rerun those events" / "process the pending queue" → mode 1. ' +
+        'When ${display} says "re-evaluate the recent emails under the new logic" / "rerun the ' +
+        'last hour" / "I just changed the prompt, refresh the queue" → mode 2 with since_minutes ' +
+        '(60 if not specified). ' +
+        'The chat tool returns immediately; actual processing happens via the queue, so ${display} ' +
+        'should refresh /sandbox/assistant after ~30s to see results. Does NOT duplicate D1 rows.',
       input_schema: {
         type: 'object',
         properties: {
+          since_minutes: {
+            type: 'integer',
+            description: 'Force re-eval mode. Pulls events (including already-dispatched) from the last N minutes. Range 1–1440 (24h). When omitted, only undispatched events are re-queued.',
+          },
           limit: {
             type: 'integer',
             description: 'Max events to re-queue this turn. Default 25, hard cap 50.',
           },
           event_id: {
             type: 'string',
-            description: 'Optional specific event id to re-queue. If set, limit is ignored and only this single event is published.',
+            description: 'Optional specific event id to re-queue, bypassing the dispatched_at filter. If set, limit and since_minutes are ignored.',
           },
         },
       },
@@ -2711,7 +2724,7 @@ async function setAction(env, user, input = {}) {
   };
 }
 
-async function replayPendingEvents(env, user, { limit, event_id } = {}) {
+async function replayPendingEvents(env, user, { limit, event_id, since_minutes } = {}) {
   if (!env?.CLAUDIA_EVENTS?.send) {
     return {
       ok: false,
@@ -2720,27 +2733,47 @@ async function replayPendingEvents(env, user, { limit, event_id } = {}) {
     };
   }
 
+  // Mode: when since_minutes is set, drop the dispatched_at IS NULL
+  // filter so already-processed events from the last N minutes can be
+  // re-evaluated under the current prompt / enrichment logic. The
+  // event-tick endpoint detects the replay flag and bypasses its
+  // idempotency check.
+  const force = Number.isFinite(Number(since_minutes)) && Number(since_minutes) > 0;
+  const minutes = force ? Math.min(Math.max(Number(since_minutes), 1), 1440) : null;
+
   let rows;
   if (event_id) {
     rows = await all(
       env.DB,
-      `SELECT id, type, ref_id, summary
+      `SELECT id, type, ref_id, summary, dispatched_at
          FROM claudia_events_pending
-        WHERE user_id = ? AND id = ? AND dispatched_at IS NULL`,
+        WHERE user_id = ? AND id = ?`,
       [user.id, String(event_id)]
     );
     if (rows.length === 0) {
       return {
         ok: false,
         error: 'event_not_found',
-        message: `No undispatched event with id ${event_id} for this user.`,
+        message: `No event with id ${event_id} for this user.`,
       };
     }
+  } else if (force) {
+    const cap = Math.min(Math.max(Number(limit) || 25, 1), 50);
+    rows = await all(
+      env.DB,
+      `SELECT id, type, ref_id, summary, dispatched_at
+         FROM claudia_events_pending
+        WHERE user_id = ?
+          AND created_at > datetime('now', ?)
+        ORDER BY created_at DESC
+        LIMIT ?`,
+      [user.id, `-${minutes} minutes`, cap]
+    );
   } else {
     const cap = Math.min(Math.max(Number(limit) || 25, 1), 50);
     rows = await all(
       env.DB,
-      `SELECT id, type, ref_id, summary
+      `SELECT id, type, ref_id, summary, dispatched_at
          FROM claudia_events_pending
         WHERE user_id = ? AND dispatched_at IS NULL
         ORDER BY created_at DESC
@@ -2753,13 +2786,23 @@ async function replayPendingEvents(env, user, { limit, event_id } = {}) {
     return {
       ok: true,
       queued: 0,
-      message: 'No undispatched events found — nothing to replay.',
+      mode: force ? `force_since_${minutes}min` : 'undispatched_only',
+      message: force
+        ? `No events found in the last ${minutes} minutes for this user.`
+        : 'No undispatched events found. To re-evaluate already-processed events under updated logic, call again with since_minutes (e.g., since_minutes: 60).',
     };
   }
 
   const ts = now();
   let queued = 0;
   const failures = [];
+  // force=true tells the event-tick endpoint to bypass its idempotency
+  // check (which normally short-circuits when dispatched_at is set).
+  // Always pass force when the caller asked for since_minutes OR when
+  // any of the rows we're re-publishing already has a dispatched_at.
+  const anyAlreadyDispatched = rows.some((r) => !!r.dispatched_at);
+  const sendForce = force || anyAlreadyDispatched;
+
   for (const ev of rows) {
     try {
       await env.CLAUDIA_EVENTS.send({
@@ -2770,6 +2813,7 @@ async function replayPendingEvents(env, user, { limit, event_id } = {}) {
         user_id: user.id,
         sent_at: ts,
         replay: true,
+        force: sendForce,
       });
       queued++;
     } catch (err) {
@@ -2777,13 +2821,18 @@ async function replayPendingEvents(env, user, { limit, event_id } = {}) {
     }
   }
 
+  const mode = force
+    ? `force re-eval, last ${minutes} min`
+    : 'undispatched only';
+
   return {
     ok: queued > 0,
     queued,
-    total_undispatched: rows.length,
+    total_in_window: rows.length,
+    mode,
     failures: failures.length ? failures : undefined,
     summary:
-      `Re-queued ${queued} of ${rows.length} pending event${rows.length === 1 ? '' : 's'}. ` +
+      `Re-queued ${queued} of ${rows.length} event${rows.length === 1 ? '' : 's'} (${mode}). ` +
       `The consumer worker will re-process them in the background. ` +
       `Refresh /sandbox/assistant in ~30 seconds to see the results.`,
   };
