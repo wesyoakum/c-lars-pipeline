@@ -27,6 +27,9 @@ import { COUNTY_ANNUAL_PDSI, COUNTY_ANNUAL_PDSI_YEARS } from './data/county_annu
 import { COUNTY_POPULATION, COUNTY_POPULATION_YEARS }   from './data/county_population.js';
 import { COUNTY_ELECTIONS, COUNTY_ELECTION_YEARS }      from './data/county_elections.js';
 import { CITIES }                   from './data/cities.js';
+import { CBSA_GEOJSON }             from './data/cbsa_geometry.js';
+import { CBSA_INCOME }              from './data/cbsa_income.js';
+import { CBSA_HOME_VALUE }          from './data/cbsa_home_value.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 
@@ -76,6 +79,7 @@ export async function onRequestGet(context) {
   const VALID_LAYERS = [
     'counties', 'temperature', 'high', 'low', 'precipitation',
     'elevation', 'income', 'drought', 'population', 'elections', 'cities',
+    'msaIncome', 'msaHomeValue',
   ];
   const initialLayer = VALID_LAYERS.includes(layerParam) ? layerParam : 'statehood';
 
@@ -145,6 +149,7 @@ export async function onRequestGet(context) {
       }
       .usmap-feature.statehood { stroke-width: 0.75; }
       .usmap-feature.counties  { stroke-width: 0.25; }
+      .usmap-feature.msa       { stroke-width: 0.4; }
       .usmap-feature.not-yet { fill: #e8e8e0; }
       .usmap-feature:hover { stroke: #222; stroke-width: 1.5; }
 
@@ -222,6 +227,15 @@ export async function onRequestGet(context) {
           #74c476  45%,
           #2e7d32  70%,
           #1b3a14 100%);  /* highest */
+      }
+      .usmap-legend-bar.home-value {
+        /* sequential warm: cream → orange → deep red for housing prices */
+        background: linear-gradient(to right,
+          #fff5e1   0%,
+          #ffd28a  20%,
+          #f49a4c  45%,
+          #c2491c  70%,
+          #7a1a0e 100%);
       }
       .usmap-legend-bar.pdsi {
         /* drought (brown) → normal (white) → wet (green/blue) */
@@ -378,6 +392,8 @@ export async function onRequestGet(context) {
         <button class="usmap-layer-btn" data-layer="population"    type="button">Population</button>
         <button class="usmap-layer-btn" data-layer="elections"     type="button">Elections</button>
         <button class="usmap-layer-btn" data-layer="cities"        type="button">Cities</button>
+        <button class="usmap-layer-btn" data-layer="msaIncome"     type="button">MSA Income</button>
+        <button class="usmap-layer-btn" data-layer="msaHomeValue"  type="button">MSA Home Value</button>
       </div>
 
       <div class="usmap-card">
@@ -438,6 +454,9 @@ export async function onRequestGet(context) {
       elections: COUNTY_ELECTIONS,
       electionYears: COUNTY_ELECTION_YEARS,
       cities: CITIES,
+      cbsaGeojson: CBSA_GEOJSON,
+      cbsaIncome: CBSA_INCOME,
+      cbsaHomeValue: CBSA_HOME_VALUE,
       stateNames: STATE_NAME_BY_FIPS,
       initialLayer,
     }))}</script>
@@ -454,6 +473,7 @@ function mapScript({
   statehood, counties, temperature, highs, lows, precip,
   elevation, income, pdsi, pdsiYears, population, populationYears,
   elections, electionYears, cities,
+  cbsaGeojson, cbsaIncome, cbsaHomeValue,
   stateNames, initialLayer,
 }) {
   return `
@@ -473,6 +493,9 @@ function mapScript({
   var ELECTIONS = ${JSON.stringify(elections)};
   var ELECTION_YEARS = ${JSON.stringify(electionYears)};
   var CITIES = ${JSON.stringify(cities)};
+  var CBSA_GEOJSON = ${JSON.stringify(cbsaGeojson)};
+  var CBSA_INCOME = ${JSON.stringify(cbsaIncome)};
+  var CBSA_HOME_VALUE = ${JSON.stringify(cbsaHomeValue)};
   var STATE_NAMES = ${JSON.stringify(stateNames)};
   var INITIAL_LAYER = ${JSON.stringify(initialLayer)};
 
@@ -823,6 +846,52 @@ function mapScript({
         range:  ['#1b3c8a','#5b8ce8','#cbd6f0','#f0c9d0','#e85b6b','#8a1b2e'],
       },
     },
+    msaIncome: {
+      type: 'static',
+      title: 'Median Household Income by Metro Area',
+      subtitle: 'CBSA-level (Metropolitan + Micropolitan Statistical Areas). ACS 2018-2022 5-year (B19013). Inflation-adjusted dollars.',
+      geojson: CBSA_GEOJSON,  // inline GeoJSON instead of TopoJSON
+      featureClass: 'msa',
+      keyOf: function(d) { return d.properties.geoid; },
+      data: CBSA_INCOME,
+      tooltipTitle: function(d) { return d.properties.name; },
+      tooltipFormat: function(v) { return '$' + v.toLocaleString(); },
+      summaryFormat: function(stats) {
+        return { value: '$' + Math.round(stats.mean).toLocaleString(), label: 'mean across ' + stats.n + ' metros — range $' + stats.min.toLocaleString() + ' to $' + stats.max.toLocaleString() };
+      },
+      drawStateOverlay: true,
+      legendMinLabel: '$25k',
+      legendMaxLabel: '$160k+',
+      legendNotYet: 'No data',
+      legendBarClass: 'income',
+      colorScale: {
+        domain: [25000,    50000,    75000,    100000,   160000  ],
+        range:  ['#f7fcf5','#c7e9c0','#74c476','#2e7d32','#1b3a14'],
+      },
+    },
+    msaHomeValue: {
+      type: 'static',
+      title: 'Median Home Value by Metro Area',
+      subtitle: 'CBSA-level. ACS 2018-2022 5-year (B25077). Median value of owner-occupied homes.',
+      geojson: CBSA_GEOJSON,
+      featureClass: 'msa',
+      keyOf: function(d) { return d.properties.geoid; },
+      data: CBSA_HOME_VALUE,
+      tooltipTitle: function(d) { return d.properties.name; },
+      tooltipFormat: function(v) { return '$' + v.toLocaleString(); },
+      summaryFormat: function(stats) {
+        return { value: '$' + Math.round(stats.mean).toLocaleString(), label: 'mean across ' + stats.n + ' metros — range $' + stats.min.toLocaleString() + ' to $' + stats.max.toLocaleString() };
+      },
+      drawStateOverlay: true,
+      legendMinLabel: '$50k',
+      legendMaxLabel: '$1M+',
+      legendNotYet: 'No data',
+      legendBarClass: 'home-value',
+      colorScale: {
+        domain: [50000,    150000,   300000,   500000,   1000000 ],
+        range:  ['#fff5e1','#ffd28a','#f49a4c','#c2491c','#7a1a0e'],
+      },
+    },
     cities: {
       type: 'point-symbols',
       title: 'U.S. Cities by Population',
@@ -1011,34 +1080,28 @@ function mapScript({
       return;
     }
 
+    // Two geometry sources are supported:
+    //   - cfg.topojsonUrl + cfg.objectName  → fetch from CDN
+    //   - cfg.geojson                       → inline GeoJSON FeatureCollection
+    // For inline-GeoJSON layers we load states-10m separately when the
+    // state-overlay context line is requested.
+    if (cfg.geojson) {
+      renderFeatures(cfg, cfg.geojson.features);
+      if (cfg.drawStateOverlay) {
+        loadTopo('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json').then(function(us) {
+          var stateMesh = topojson.mesh(us, us.objects.states, function(a, b) { return a !== b; });
+          svg.append('path')
+            .attr('class', 'usmap-state-overlay')
+            .attr('d', path(stateMesh));
+        });
+      }
+      update(hasSlider ? +slider.value : 0);
+      return;
+    }
+
     loadTopo(cfg.topojsonUrl).then(function(us) {
       var features = topojson.feature(us, us.objects[cfg.objectName]).features;
-
-      // d3.geoAlbersUsa returns null for points outside the 50-state
-      // frame (PR, USVI, NMI). Drop those so totals reflect what's
-      // actually drawn.
-      var rendered = features.filter(function(d) {
-        var p = path(d);
-        return p != null && p !== '';
-      });
-
-      currentFeatures = rendered;
-
-      svg.selectAll('path.usmap-feature')
-        .data(rendered)
-        .enter()
-        .append('path')
-        .attr('class', 'usmap-feature ' + cfg.featureClass + ' not-yet')
-        .attr('d', path)
-        .on('mousemove', function(event, d) {
-          tooltip
-            .style('opacity', 1)
-            .style('left', (event.pageX + 12) + 'px')
-            .style('top', (event.pageY - 28) + 'px')
-            .html(buildTooltipHtml(d));
-        })
-        .on('mouseleave', function() { tooltip.style('opacity', 0); });
-
+      renderFeatures(cfg, features);
       // Optional state outlines drawn last so they paint on top.
       if (cfg.drawStateOverlay) {
         var stateMesh = topojson.mesh(us, us.objects.states, function(a, b) { return a !== b; });
@@ -1046,9 +1109,33 @@ function mapScript({
           .attr('class', 'usmap-state-overlay')
           .attr('d', path(stateMesh));
       }
-
       update(hasSlider ? +slider.value : 0);
     });
+  }
+
+  // Shared feature-rendering helper used by both TopoJSON-loaded and
+  // inline-GeoJSON layers. Keeps the AlbersUSA null-path filter and
+  // the mousemove/leave handlers in one place.
+  function renderFeatures(cfg, features) {
+    var rendered = features.filter(function(d) {
+      var p = path(d);
+      return p != null && p !== '';
+    });
+    currentFeatures = rendered;
+    svg.selectAll('path.usmap-feature')
+      .data(rendered)
+      .enter()
+      .append('path')
+      .attr('class', 'usmap-feature ' + cfg.featureClass + ' not-yet')
+      .attr('d', path)
+      .on('mousemove', function(event, d) {
+        tooltip
+          .style('opacity', 1)
+          .style('left', (event.pageX + 12) + 'px')
+          .style('top', (event.pageY - 28) + 'px')
+          .html(buildTooltipHtml(d));
+      })
+      .on('mouseleave', function() { tooltip.style('opacity', 0); });
   }
 
   // Render the cities point-symbols layer. Country backdrop + faint
