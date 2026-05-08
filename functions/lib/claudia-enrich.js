@@ -302,17 +302,56 @@ async function enrichDocument(env, event, userId) {
     }
   }
 
-  // Sibling docs from same sender (last 6, excluding this one).
+  // Cross-cluster dedup: find OTHER docs on the same email thread by
+  // normalized subject (after stripping RE:/FWD:/Re:/etc.) and include
+  // their ids in refs so openActionsForCluster picks up actions
+  // already raised on sibling emails. This is the fix for the dedup
+  // gap where two emails on the same thread got two independent Hot
+  // actions instead of one updated row.
+  const threadDocIds = [];
+  if (doc.subject) {
+    const normalized = String(doc.subject)
+      .replace(/^(?:re|fwd?|fw|aw):\s*/gi, '')
+      .replace(/^(?:re|fwd?|fw|aw):\s*/gi, '') // double pass for "RE: FWD:"
+      .trim();
+    if (normalized.length >= 3) {
+      const threadDocs = await all(
+        env.DB,
+        `SELECT id, seq, filename, subject, sender_email, sender_name, email_date, category, retention, summary, full_text, created_at
+           FROM claudia_documents
+          WHERE user_id = ? AND id <> ?
+            AND subject IS NOT NULL
+            AND (LOWER(subject) LIKE LOWER(?) OR LOWER(subject) = LOWER(?))
+          ORDER BY created_at DESC LIMIT 8`,
+        [userId, doc.id, `%${normalized}%`, normalized]
+      );
+      for (const d of threadDocs) {
+        threadDocIds.push(d.id);
+        refs.push({ table: 'claudia_documents', id: d.id });
+      }
+      out.related.docs = threadDocs.map(compactDoc);
+    }
+  }
+
+  // Sibling docs from same sender (last 6, excluding this one and any
+  // thread-siblings already found). Different signal: same person
+  // talking on different topics.
   if (doc.sender_email) {
+    const seen = new Set([doc.id, ...threadDocIds]);
     const siblings = await all(
       env.DB,
-      `SELECT id, seq, filename, subject, sender_email, sender_name, category, retention, summary, full_text, created_at
+      `SELECT id, seq, filename, subject, sender_email, sender_name, email_date, category, retention, summary, full_text, created_at
          FROM claudia_documents
         WHERE user_id = ? AND LOWER(sender_email) = LOWER(?) AND id <> ?
         ORDER BY created_at DESC LIMIT 6`,
       [userId, doc.sender_email, doc.id]
     );
-    out.related.docs = siblings.map(compactDoc);
+    for (const s of siblings) {
+      if (seen.has(s.id)) continue;
+      out.related.docs.push(compactDoc(s));
+      // Sender-siblings inform context but don't get added to refs —
+      // their actions are about different topics, dedup wouldn't apply.
+    }
   }
 
   // Recent audit for this doc.
