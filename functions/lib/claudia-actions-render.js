@@ -153,8 +153,9 @@ function parseProposed(a) {
 // Buttons that fire HTMX POSTs to the per-action route handlers and
 // swap the entire actions panel back. Each button sets the same
 // hx-target / hx-swap so the panel re-renders coherently after any
-// state change.
-function renderActionButtons(a) {
+// state change. Exported so the per-file drill-down can reuse the
+// same affordances.
+export function renderActionButtons(a) {
   const id = encodeURIComponent(a.id);
   const otherQuadrants = QUADRANT_ORDER.filter((q) => q !== a.quadrant);
   const proposed = parseProposed(a);
@@ -210,9 +211,13 @@ function renderActionRow(a) {
 
 function renderQuadrantBlock(quadrant, rows) {
   const label = QUADRANT_LABELS[quadrant];
-  const startCollapsed = quadrant === 'skip';
+  // Only Hot defaults expanded — chat now narrates "what's new" via the
+  // proactive welcome-back, so the action queue is the action-tracking
+  // surface, not the discovery surface. Plan/Quick/Skip start collapsed
+  // to keep the page tidy; one click to expand any of them.
+  const startOpen = quadrant === 'hot' && rows.length > 0;
   return html`
-    <details class="claudia-actions-quadrant" data-q="${escape(quadrant)}" ${rows.length === 0 ? '' : (startCollapsed ? '' : 'open')}>
+    <details class="claudia-actions-quadrant" data-q="${escape(quadrant)}" ${startOpen ? 'open' : ''}>
       <summary>
         <span class="claudia-actions-quadrant-label">${escape(label)}</span>
         <span class="claudia-actions-quadrant-count">${rows.length}</span>

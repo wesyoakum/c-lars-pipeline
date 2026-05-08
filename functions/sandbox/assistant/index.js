@@ -137,14 +137,22 @@ export async function onRequestGet(context) {
 
   const body = html`
     <style>
+      /* Chat region is bounded — triage moved below the layout in the
+         body markup, so the chat panel doesn't sprawl. Messages scroll
+         within their own container; page scroll gets you down to
+         triage / questions / observations. */
       .assistant-wrap {
         max-width: 880px; margin: 0 auto; padding: 1rem;
         display: flex; flex-direction: column;
-        min-height: calc(100vh - 200px);
+        height: min(55vh, 600px);
+        min-height: 320px;
       }
       .assistant-messages {
-        flex: 1; padding: 0.5rem 0;
+        flex: 1 1 auto;
+        padding: 0.5rem 0;
         display: flex; flex-direction: column; gap: 0.85rem;
+        overflow-y: auto;
+        min-height: 0;
       }
       /* Minimalist scrollbar — same shape as the table scrollbars in
          pipeline.css (.opp-list-hscroll). Applies to the chat messages
@@ -166,14 +174,13 @@ export async function onRequestGet(context) {
       .claudia-side       { scrollbar-width: thin; scrollbar-color: rgba(0,0,0,0.1) transparent; }
 
       /* Floating scroll-to-top / scroll-to-bottom buttons over the
-         messages pane. Hidden by default; .visible class toggled by JS
-         based on current scroll position. */
-      /* Scroll-to-top / scroll-to-bottom: page-level since the chat is
-         now page-scrollable. Pinned to the right of the chat column,
-         just above the sticky form. Visible only when the page has
-         enough scroll AND the user isn't already at that edge. */
+         messages pane. Position is relative to .assistant-wrap (bounded
+         chat region) so they hover at the chat panel's right edge,
+         not the viewport's. Visible only when the messages list has
+         enough scroll AND the user isn't already pinned to that edge. */
+      .assistant-wrap { position: relative; }
       .chat-scroll-jump {
-        position: fixed; right: 332px; z-index: 7;
+        position: absolute; right: 12px; z-index: 7;
         width: 32px; height: 32px; border-radius: 50%;
         background: rgba(255, 255, 255, 0.95);
         border: 1px solid #d0d0d5; color: #4b5563; cursor: pointer;
@@ -184,15 +191,14 @@ export async function onRequestGet(context) {
       }
       .chat-scroll-jump:hover { color: #1a1a22; background: #fff; }
       .chat-scroll-jump.visible { opacity: 1; pointer-events: auto; }
-      #chat-scroll-top    { bottom: 168px; }
-      #chat-scroll-bottom { bottom: 124px; }
+      #chat-scroll-top    { bottom: 110px; }
+      #chat-scroll-bottom { bottom: 70px; }
       .chat-scroll-jump svg { width: 14px; height: 14px; }
       /* Order toggle — flips message order between oldest-first and
-         newest-first. Same fixed-position style as the scroll-jump
-         buttons, sits just above them. Always visible (unlike the
-         scroll buttons which only appear when scrollable). */
+         newest-first. Same float style as the scroll-jump buttons,
+         sits just above them. Always visible. */
       #chat-order-toggle {
-        position: fixed; right: 332px; bottom: 212px; z-index: 7;
+        position: absolute; right: 12px; bottom: 150px; z-index: 7;
         width: 32px; height: 32px; border-radius: 50%;
         background: rgba(255, 255, 255, 0.95);
         border: 1px solid #d0d0d5; color: #4b5563; cursor: pointer;
@@ -202,8 +208,6 @@ export async function onRequestGet(context) {
       }
       #chat-order-toggle:hover { color: #1a1a22; background: #fff; }
       #chat-order-toggle svg { width: 14px; height: 14px; }
-      @media (max-width: 1100px) { #chat-order-toggle { right: 312px; } }
-      @media (max-width: 800px)  { #chat-order-toggle { right: 16px;  } }
       /* Newest-first mode: column-reverse on both the wrap (so the
          form moves to the top) and the messages list (so newest
          message is at the visual top). DOM order is unchanged —
@@ -211,14 +215,9 @@ export async function onRequestGet(context) {
          flips the visual stack. */
       .assistant-wrap.order-newest-first { flex-direction: column-reverse; }
       .assistant-wrap.order-newest-first .assistant-messages { flex-direction: column-reverse; }
-      @media (max-width: 1100px) {
-        /* Right sidebar at 280px in this breakpoint per .assistant-layout */
-        .chat-scroll-jump { right: 312px; }
-      }
-      @media (max-width: 800px) {
-        /* Sidebars stacked below; pin buttons to the right edge. */
-        .chat-scroll-jump { right: 16px; }
-      }
+      /* Floating buttons are absolute-positioned to the chat region
+         (.assistant-wrap) so the right offset is constant across
+         breakpoints — no per-breakpoint overrides needed. */
       .assistant-empty {
         margin: auto; color: #666; font-style: italic; text-align: center;
         max-width: 420px; line-height: 1.6;
@@ -314,13 +313,14 @@ export async function onRequestGet(context) {
       .assistant-msg.assistant .assistant-msg-stamp {
         text-align: left;
       }
+      /* Form sits at the bottom of the bounded chat region as the last
+         flex child — no need for viewport-sticky positioning anymore.
+         Border-top separates it from the scrolling messages above. */
       .assistant-form {
+        flex: 0 0 auto;
         display: flex; gap: 0.5rem; align-items: flex-end;
         padding: 0.75rem 0.75rem;
-        position: sticky; bottom: 0; z-index: 6;
         background: rgba(248, 250, 252, 0.92);
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
         border-top: 1px solid #e5e7eb;
         margin: 0 -0.5rem;
         border-radius: 0;
@@ -731,13 +731,6 @@ export async function onRequestGet(context) {
       }
     </style>
     ${tabs}
-    ${renderActionsPanel(triageActions)}
-    ${renderQuestionsPanel(triageQuestions)}
-    ${observations.length > 0 ? html`
-      <div id="claudia-obs-panel" class="claudia-obs-panel">
-        ${observations.map(renderObservation)}
-      </div>
-    ` : ''}
     <div class="assistant-layout">
     <aside class="claudia-side audio-side" id="claudia-side-audio">
       <h3>Voice notes</h3>
@@ -811,6 +804,13 @@ export async function onRequestGet(context) {
       ${otherDocs.length === 0 ? html`<div class="claudia-side-empty">No documents yet. Use the attach button or drag-drop anywhere on the chat to upload (PDF, DOCX, XLSX, image, email .eml, TXT, MD).</div>` : ''}
     </aside>
     </div>
+    ${renderActionsPanel(triageActions)}
+    ${renderQuestionsPanel(triageQuestions)}
+    ${observations.length > 0 ? html`
+      <div id="claudia-obs-panel" class="claudia-obs-panel">
+        ${observations.map(renderObservation)}
+      </div>
+    ` : ''}
     <script>
       const CLAUDIA_ICON_HTML = ${raw(JSON.stringify(CLAUDIA_ICON_SVG))};
 
@@ -841,15 +841,19 @@ export async function onRequestGet(context) {
         }
         applyOrder();
 
-        // Helper: scroll to wherever the LATEST message lives — the
-        // bottom of the page in oldest-first mode, the top in
-        // newest-first mode (because column-reverse puts newest at
-        // the visual top).
+        // Helper: scroll the MESSAGES CONTAINER (not the page) to where
+        // the LATEST message lives — the bottom in oldest-first mode,
+        // the top in newest-first mode (because column-reverse puts
+        // newest at the visual top). Chat is bounded to ~55vh so page
+        // scroll is reserved for getting down to triage; only the
+        // messages list scrolls within the chat region.
         function scrollPageToBottom(behavior) {
+          const el = document.getElementById('assistant-messages');
+          if (!el) return;
           if (messageOrder === 'desc') {
-            window.scrollTo({ top: 0, behavior: behavior || 'auto' });
+            el.scrollTo({ top: 0, behavior: behavior || 'auto' });
           } else {
-            window.scrollTo({ top: document.documentElement.scrollHeight, behavior: behavior || 'auto' });
+            el.scrollTo({ top: el.scrollHeight, behavior: behavior || 'auto' });
           }
         }
 
@@ -1052,18 +1056,20 @@ export async function onRequestGet(context) {
           });
         }
 
-        // Floating scroll-to-top / scroll-to-bottom buttons. The chat
-        // is page-scroll now, so these operate on the WINDOW. Visible
-        // only when the page has enough scroll AND the user isn't
-        // already pinned to that edge.
+        // Floating scroll-to-top / scroll-to-bottom buttons. Chat is
+        // bounded now, so these operate on the MESSAGES CONTAINER, not
+        // the window. Visible only when the messages list has enough
+        // scroll AND the user isn't already pinned to that edge.
         const scrollTopBtn = document.getElementById('chat-scroll-top');
         const scrollBottomBtn = document.getElementById('chat-scroll-bottom');
         const SCROLL_EDGE_PX = 64;
         function updateScrollButtons() {
           if (!scrollTopBtn || !scrollBottomBtn) return;
-          const docH = document.documentElement.scrollHeight;
-          const winH = window.innerHeight;
-          const scrollY = window.scrollY || window.pageYOffset || 0;
+          const el = document.getElementById('assistant-messages');
+          if (!el) return;
+          const docH = el.scrollHeight;
+          const winH = el.clientHeight;
+          const scrollY = el.scrollTop || 0;
           const scrollable = docH - winH > SCROLL_EDGE_PX;
           if (!scrollable) {
             scrollTopBtn.classList.remove('visible');
@@ -1075,11 +1081,18 @@ export async function onRequestGet(context) {
           scrollTopBtn.classList.toggle('visible', !atTop);
           scrollBottomBtn.classList.toggle('visible', !atBottom);
         }
-        window.addEventListener('scroll', updateScrollButtons, { passive: true });
+        // Scroll events fire on the messages container (the new scroll
+        // host), not the window. Resize still listens on window since
+        // the bounded height is vh-relative.
+        const messagesEl = document.getElementById('assistant-messages');
+        if (messagesEl) {
+          messagesEl.addEventListener('scroll', updateScrollButtons, { passive: true });
+        }
         window.addEventListener('resize', updateScrollButtons);
         if (scrollTopBtn) {
           scrollTopBtn.addEventListener('click', () => {
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+            const el = document.getElementById('assistant-messages');
+            if (el) el.scrollTo({ top: 0, behavior: 'smooth' });
           });
         }
         if (scrollBottomBtn) {
