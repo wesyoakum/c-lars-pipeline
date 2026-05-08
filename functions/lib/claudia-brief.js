@@ -24,6 +24,7 @@ import { all, one, run } from './db.js';
 import { now } from './ids.js';
 import { messagesJson, messages } from './anthropic.js';
 import { CLAUDIA_USER_ID } from './auth.js';
+import { COMPANY_CONTEXT, INDUSTRY_TERMS, userContext, loadUserMemoryRows } from './claudia-knowledge.js';
 
 const BRIEF_MODEL_DEFAULT = 'claude-haiku-4-5-20251001';
 
@@ -89,7 +90,18 @@ export async function regenerateBrief(env, user, opts = {}) {
       [CLAUDIA_USER_ID]),
   ]);
 
+  const memoryRows = await loadUserMemoryRows(env, user.id);
+  const userCtx = userContext(user, memoryRows);
+
   const system = [
+    COMPANY_CONTEXT,
+    '',
+    userCtx,
+    '',
+    INDUSTRY_TERMS,
+    '',
+    '─────────────────────────────────────────────────────────',
+    '',
     `You are Claudia preparing a "catch me up" brief for ${display}. Today is ${today}.`,
     'This brief is what he sees when he asks "catch me up" — it should be FAST to read and tell him exactly what matters right now. Aim for 5-10 short bullets across 2-4 sections.',
     '',

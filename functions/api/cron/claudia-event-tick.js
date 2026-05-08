@@ -41,6 +41,7 @@ import { now, uuid } from '../../lib/ids.js';
 import { audit } from '../../lib/audit.js';
 import { enrichEvent } from '../../lib/claudia-enrich.js';
 import { extractActions } from '../../lib/claudia-triage.js';
+import { loadUserMemoryRows } from '../../lib/claudia-knowledge.js';
 
 const SANDBOX_OWNER_EMAIL = 'wes.yoakum@c-lars.com';
 
@@ -144,11 +145,20 @@ export async function onRequestPost(context) {
   const today = new Date().toISOString().slice(0, 10);
   const displayName = user.display_name || user.email;
 
+  // Load the user's persisted memory so the triage prompt has the same
+  // standing context the chat surface gets — preferences (confirm
+  // policy, OOO behavior), family, configured calendars, active
+  // reminders. Best-effort; on failure the prompt degrades to a
+  // "no persisted facts yet" note (still has COMPANY_CONTEXT).
+  const memoryRows = await loadUserMemoryRows(env, user.id);
+
   const decision = await extractActions(env, {
     event: { id: event.id, type: event.type, ref_id: event.ref_id, summary: event.summary, created_at: event.created_at },
     enrichment,
     displayName,
     today,
+    user,
+    memoryRows,
   });
 
   // ── Persist ───────────────────────────────────────────────────────

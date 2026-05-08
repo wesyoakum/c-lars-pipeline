@@ -18,6 +18,7 @@
 // env.CLAUDIA_TRIAGE_MODEL.
 
 import { messagesJson } from './anthropic.js';
+import { COMPANY_CONTEXT, INDUSTRY_TERMS, userContext } from './claudia-knowledge.js';
 
 const TRIAGE_MODEL_DEFAULT = 'claude-sonnet-4-6';
 
@@ -26,8 +27,17 @@ const TRIAGE_MODEL_DEFAULT = 'claude-sonnet-4-6';
 // can flip without code changes.
 const TRIAGE_PHASE_DEFAULT = 'B';
 
-function buildSystemPrompt(displayName, today) {
+function buildSystemPrompt(displayName, today, user, memoryRows) {
+  const userCtx = userContext(user, memoryRows);
   return [
+    COMPANY_CONTEXT,
+    '',
+    userCtx,
+    '',
+    INDUSTRY_TERMS,
+    '',
+    '─────────────────────────────────────────────────────────',
+    '',
     `You are Claudia, an AI assistant that triages incoming events for ${displayName}. Today is ${today}. You are NOT in a chat — you are running on a server-side worker that fires within seconds of each event. Your job is to read ONE event + its cross-reference snapshot and produce structured output: actionable items (0..N), questions (0..N), or a single observation, or nothing at all.`,
     '',
     'CORE MENTAL MODEL:',
@@ -52,13 +62,11 @@ function buildSystemPrompt(displayName, today) {
     '- Resolve relative phrases ("next week", "Friday", "tomorrow") against `Today is …` above.',
     '- ISO 8601 (YYYY-MM-DD) only. Leave null if no date is implied.',
     '',
-    'INDUSTRY LINGO — PRESERVE VERBATIM:',
-    '- "VOO" or "vessel of opportunity" — keep as written. Do NOT pick a specific vessel name.',
-    '- Capitalized acronyms (EPS, ROV, OC, RFQ, NTP, BANT, IWOCS, EPS) — preserve exact case.',
-    '- Pipeline opp numbers like WFM02-25314 / PMS25-25314 — keep with the dash and zero-padding the user wrote.',
+    '(Industry lingo + Pipeline opp number formatting are governed by the INDUSTRY_TERMS block at the top of this prompt — preserve verbatim. Do NOT expand acronyms or pick a specific vessel for "VOO".)',
     '',
     'CROSS-REFERENCE — DO NOT INVENT:',
     '- The enrichment payload includes related Pipeline rows (accounts, opportunities, contacts, activities). Cite the EXACT names/numbers/dates from there. Do not make up an opp number, an account name, or a contact email.',
+    '- @c-lars.com email addresses are C-LARS internal staff. Use the "Key people" list in COMPANY CONTEXT to identify them by role (Adam = CEO, Amanda = COO, Sherman = CPDO, Wes = CCO, Kat = Commercial Admin). Do NOT raise a question asking whether someone with @c-lars.com is internal or external — they are internal. CRM contact records linking C-LARS staff to other accounts (e.g. a legacy "Sherman Watters @ Trendsetter" row) are STALE DATA, not signal.',
     '- If the source mentions a name that does NOT match any related entity, that is a signal — raise a QUESTION (e.g. "Is \'Acme\' the same as \'Acme Industries\' (acct id …)?"). Do not silently guess.',
     '',
     'RE-EVALUATION — UPDATE INSTEAD OF DUPLICATING:',
@@ -228,11 +236,17 @@ function normalizeQuestion(raw) {
  * @param {object} args.enrichment  output from claudia-enrich.enrichEvent
  * @param {string} args.displayName user display name for the prompt
  * @param {string} args.today       ISO date for "today"
+ * @param {object} args.user        full user row for userContext()
+ * @param {Array}  args.memoryRows  output of loadUserMemoryRows() — the
+ *                                  human's persisted preferences/family/
+ *                                  calendars/reminders. Optional; empty
+ *                                  array degrades the prompt to a "no
+ *                                  persisted facts yet" note.
  * @returns {Promise<{ decision, actions, questions, observation, raw, modelError? }>}
  */
-export async function extractActions(env, { event, enrichment, displayName, today }) {
+export async function extractActions(env, { event, enrichment, displayName, today, user, memoryRows }) {
   const phase = (env.CLAUDIA_TRIAGE_PHASE || TRIAGE_PHASE_DEFAULT).toUpperCase();
-  const system = buildSystemPrompt(displayName, today);
+  const system = buildSystemPrompt(displayName, today, user, memoryRows);
   const userPayload = buildUserPayload(event, enrichment);
 
   let result;

@@ -29,6 +29,7 @@ import { now, uuid } from '../../lib/ids.js';
 import { messagesJson } from '../../lib/anthropic.js';
 import { CLAUDIA_USER_ID } from '../../lib/auth.js';
 import { regenerateBrief } from '../../lib/claudia-brief.js';
+import { COMPANY_CONTEXT, INDUSTRY_TERMS, userContext, loadUserMemoryRows } from '../../lib/claudia-knowledge.js';
 
 const SANDBOX_OWNER_EMAIL = 'wes.yoakum@c-lars.com';
 const STALE_OBSERVATION_MINUTES = 55;
@@ -170,7 +171,21 @@ export async function onRequestPost(context) {
   const today = new Date().toISOString().slice(0, 10);
   const display = user.display_name || user.email;
 
+  // Shared knowledge layer — same facts the chat surface gets, so the
+  // hourly tick uses the right titles/roles/lingo and knows the user's
+  // standing preferences without a separate get_memory tool call.
+  const memoryRows = await loadUserMemoryRows(env, user.id);
+  const userCtx = userContext(user, memoryRows);
+
   const system = [
+    COMPANY_CONTEXT,
+    '',
+    userCtx,
+    '',
+    INDUSTRY_TERMS,
+    '',
+    '─────────────────────────────────────────────────────────',
+    '',
     `You are Claudia generating a periodic observations feed for ${display}. Today is ${today}. You are NOT in a chat — you are running on a server-side hourly cron tick. Your job is to scan the state below and produce 0–3 short, high-signal observations that ${display} will see at the top of his assistant tab next time he opens it.`,
     '',
     'WHAT MAKES A GOOD OBSERVATION:',

@@ -15,6 +15,7 @@ import { escape } from '../../lib/layout.js';
 import { renderMarkdown } from '../../lib/claudia-markdown.js';
 import { formBody } from '../../lib/http.js';
 import { makeAssistantTools, listTableNames } from './tools.js';
+import { COMPANY_CONTEXT, INDUSTRY_TERMS } from '../../lib/claudia-knowledge.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 
@@ -595,33 +596,9 @@ When the user asks about people (owners, assignees, creators), resolve user IDs 
 Pipeline tables (sqlite_master ordered):
 ${tableNames.map((t) => `  - ${t}`).join('\n')}
 
-Industry terms — preserve verbatim:
-- "VOO" / "vessel of opportunity" — a vessel/ship not yet chosen for a particular job.
-- AHC = Active Heave Compensation. FAT = Factory Acceptance Test. RFQ = Request for Quote. HPU = Hydraulic Power Unit. LARS = Launch and Recovery System.
-- Capitalized acronyms (EPS, ROV, OC, etc.) — preserve case as written.
+${INDUSTRY_TERMS}
 
-COMPANY CONTEXT — C-LARS
-
-C-LARS, LLC is a U.S.-based engineering and manufacturing company specializing in offshore Launch and Recovery Systems (LARS), hydraulic systems, and handling equipment.
-
-Core products: hydraulic and electric winches; A-frames, cranes, davits; HPUs; control systems and operator stations; docking/latching systems.
-
-Capabilities: mechanical / hydraulic / electrical engineering; fabrication, machining, welding, assembly; system integration and FAT testing; refurbishment and upgrades; offshore-deployment-focused design.
-
-Differentiators: fast lead times, strong custom engineering, AHC integration expertise, high responsiveness.
-
-Customer base: work-class ROV operators, offshore contractors, research organizations, defense / autonomy programs. Global — U.S., Brazil, Canada, UK, Norway, Turkey, Japan, Singapore.
-
-Key people:
-- Adam Janac — Owner & CEO; global SME in LARS
-- Amanda Ingram — Chief Operating Officer (COO)
-- Sherman Watters — Chief Product Development Officer; PE
-- Wes Yoakum — Chief Commercial Officer; mechanical engineer; owns sales, marketing, BD
-- Kat Deno — Commercial Administrative Assistant; handles spares orders and commercial admin execution
-
-Typical system structure: winch (hydraulic or electric, Lebus grooved) + A-frame or crane (luffing + overboarding) + HPU (closed/open-loop, redundancy options) + control stand + instrumentation (line speed, tension, payout, etc.). Systems must be offshore-capable, maintainable, logistically realistic, with clearly defined interfaces.
-
-Sales context: long cycles, mixed stakeholders, frequent early ambiguity (budgetary pricing, partial specs). Clean concept → quote → execution transition is critical. Watch for: missing inputs before quoting, scope ambiguity, descriptions that don't match deliverables, downstream issues from unclear scope.
+${COMPANY_CONTEXT}
 
 Intervention triggers — step in when you detect, in the data:
 - Missed or upcoming commitments (with a specific date)
