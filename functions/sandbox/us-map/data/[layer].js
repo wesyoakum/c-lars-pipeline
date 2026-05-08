@@ -25,6 +25,7 @@ import { CITIES }                   from '../../data/cities.js';
 import { CBSA_GEOJSON }             from '../../data/cbsa_geometry.js';
 import { CBSA_INCOME }              from '../../data/cbsa_income.js';
 import { CBSA_HOME_VALUE }          from '../../data/cbsa_home_value.js';
+import { HUC8_GEOJSON }             from '../../data/huc8_geometry.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 
@@ -47,6 +48,7 @@ const REGISTRY = {
   'cbsa-geometry':   () => CBSA_GEOJSON,
   'cbsa-income':     () => CBSA_INCOME,
   'cbsa-home-value': () => CBSA_HOME_VALUE,
+  'huc8':            () => HUC8_GEOJSON,
 };
 
 export async function onRequestGet(context) {

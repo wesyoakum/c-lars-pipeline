@@ -70,7 +70,7 @@ export async function onRequestGet(context) {
   const VALID_LAYERS = [
     'counties', 'temperature', 'high', 'low', 'precipitation',
     'elevation', 'income', 'drought', 'population', 'elections', 'cities',
-    'msaIncome', 'msaHomeValue',
+    'msaIncome', 'msaHomeValue', 'watersheds',
   ];
   const initialLayer = VALID_LAYERS.includes(layerParam) ? layerParam : 'statehood';
 
@@ -165,6 +165,7 @@ export async function onRequestGet(context) {
       .usmap-feature.statehood { stroke-width: 0.75; }
       .usmap-feature.counties  { stroke-width: 0.25; }
       .usmap-feature.msa       { stroke-width: 0.4; }
+      .usmap-feature.huc8      { stroke-width: 0.3; stroke: #f6f6f3; }
       .usmap-feature.not-yet { fill: #e8e8e0; }
       .usmap-feature:hover { stroke: #222; stroke-width: 1.5; }
 
@@ -251,6 +252,21 @@ export async function onRequestGet(context) {
           #f49a4c  45%,
           #c2491c  70%,
           #7a1a0e 100%);
+      }
+      .usmap-legend-bar.watersheds {
+        /* Categorical 18-stripe palette mirroring HUC2_COLORS so the
+           reader sees roughly which color → which region. Hard stops
+           (no interpolation) via 0% width steps. */
+        background: linear-gradient(to right,
+          #1f77b4 0%,        #1f77b4 5.55%,  #aec7e8 5.55%,  #aec7e8 11.11%,
+          #ff7f0e 11.11%,    #ff7f0e 16.66%, #ffbb78 16.66%, #ffbb78 22.22%,
+          #2ca02c 22.22%,    #2ca02c 27.77%, #98df8a 27.77%, #98df8a 33.33%,
+          #d62728 33.33%,    #d62728 38.88%, #ff9896 38.88%, #ff9896 44.44%,
+          #9467bd 44.44%,    #9467bd 50%,    #c5b0d5 50%,    #c5b0d5 55.55%,
+          #8c564b 55.55%,    #8c564b 61.11%, #c49c94 61.11%, #c49c94 66.66%,
+          #e377c2 66.66%,    #e377c2 72.22%, #f7b6d3 72.22%, #f7b6d3 77.77%,
+          #7f7f7f 77.77%,    #7f7f7f 83.33%, #bcbd22 83.33%, #bcbd22 88.88%,
+          #dbdb8d 88.88%,    #dbdb8d 94.44%, #17becf 94.44%, #17becf 100%);
       }
       .usmap-legend-bar.pdsi {
         /* drought (brown) → normal (white) → wet (green/blue) */
@@ -409,6 +425,7 @@ export async function onRequestGet(context) {
         <button class="usmap-layer-btn" data-layer="cities"        type="button">Cities</button>
         <button class="usmap-layer-btn" data-layer="msaIncome"     type="button">MSA Income</button>
         <button class="usmap-layer-btn" data-layer="msaHomeValue"  type="button">MSA Home Value</button>
+        <button class="usmap-layer-btn" data-layer="watersheds"    type="button">Watersheds</button>
         <span class="usmap-layer-row-spacer"></span>
         <button class="usmap-toggle-btn" id="usmap-underlay-btn" type="button" aria-pressed="false" title="Show / hide a faint terrain underlay (county elevations)">Terrain underlay</button>
       </div>
@@ -520,6 +537,29 @@ function mapScript({ stateNames, initialLayer }) {
     var state = STATE_NAMES[fips.slice(0, 2)] || '';
     return state ? (name + ', ' + state) : name;
   }
+
+  // HUC2 (parent watershed region) → color + name. Used by the
+  // Watersheds layer to paint each HUC8 subbasin by its parent
+  // region. Hand-picked from the d3 schemeCategory20 palette so
+  // adjacent regions get visually distinct hues.
+  var HUC2_COLORS = {
+    '01':'#1f77b4', '02':'#aec7e8', '03':'#ff7f0e', '04':'#ffbb78',
+    '05':'#2ca02c', '06':'#98df8a', '07':'#d62728', '08':'#ff9896',
+    '09':'#9467bd', '10':'#c5b0d5', '11':'#8c564b', '12':'#c49c94',
+    '13':'#e377c2', '14':'#f7b6d3', '15':'#7f7f7f', '16':'#bcbd22',
+    '17':'#dbdb8d', '18':'#17becf',
+  };
+  var HUC2_NAMES = {
+    '01':'New England',          '02':'Mid-Atlantic',
+    '03':'South Atlantic-Gulf',  '04':'Great Lakes',
+    '05':'Ohio',                 '06':'Tennessee',
+    '07':'Upper Mississippi',    '08':'Lower Mississippi',
+    '09':'Souris-Red-Rainy',     '10':'Missouri',
+    '11':'Arkansas-White-Red',   '12':'Texas-Gulf',
+    '13':'Rio Grande',           '14':'Upper Colorado',
+    '15':'Lower Colorado',       '16':'Great Basin',
+    '17':'Pacific Northwest',    '18':'California',
+  };
 
   // Day-of-year quick-jump positions for instant-day layers (mid-month
   // anchors so each button lands on the central day of its month).
@@ -901,6 +941,36 @@ function mapScript({ stateNames, initialLayer }) {
         range:  ['#fff5e1','#ffd28a','#f49a4c','#c2491c','#7a1a0e'],
       },
     },
+    watersheds: {
+      type: 'static',
+      title: 'U.S. Watersheds (HUC8 subbasins)',
+      subtitle: '~2,400 hydrologic subbasins (USGS WBD), colored by parent HUC2 region. Mississippi/Missouri basins dominate the Plains; Pacific NW, Rio Grande, Great Basin each carve their own slice of the West.',
+      fetch: { geojson: 'huc8' },
+      featureClass: 'huc8',
+      keyOf: function(d) { return d.properties.huc8; },
+      // Categorical: each HUC8's first 2 digits is its parent HUC2
+      // region. fillFn() short-circuits the linear color scale so we
+      // can paint by region rather than by a numeric value.
+      fillFn: function(d) {
+        var prefix = (d.properties.huc8 || '').slice(0, 2);
+        return HUC2_COLORS[prefix] || '#cccccc';
+      },
+      tooltipTitle: function(d) {
+        var p = d.properties || {};
+        var prefix = (p.huc8 || '').slice(0, 2);
+        var region = HUC2_NAMES[prefix] || '';
+        return (p.name || 'Watershed') + (p.states ? ' — ' + p.states : '') + ' · ' + region;
+      },
+      tooltipFormat: function() { return ''; },
+      summaryFormat: function(stats) {
+        return { value: stats.n + ' watersheds', label: 'shown across the contiguous US' };
+      },
+      drawStateOverlay: true,
+      legendMinLabel: '',
+      legendMaxLabel: '',
+      legendNotYet: '',
+      legendBarClass: 'watersheds',
+    },
     cities: {
       type: 'point-symbols',
       title: 'U.S. Cities by Population',
@@ -1260,7 +1330,13 @@ function mapScript({ stateNames, initialLayer }) {
       return '<strong>' + title + '</strong><span class="y">' + line + '</span>';
     }
     if (cfg.type === 'static') {
-      var v = cfg.data[key];
+      // Categorical static layers (e.g. watersheds) skip the data
+      // lookup and just show the title. The keyOf/tooltipTitle pair
+      // already encodes the category in the title text.
+      if (typeof cfg.fillFn === 'function') {
+        return '<strong>' + title + '</strong>';
+      }
+      var v = cfg.data ? cfg.data[key] : null;
       var line = (v == null) ? '—' : cfg.tooltipFormat(v);
       return '<strong>' + title + '</strong><span class="y">' + line + '</span>';
     }
@@ -1344,13 +1420,22 @@ function mapScript({ stateNames, initialLayer }) {
 
     if (cfg.type === 'static') {
       // No slider — paint each feature once, then summarize.
+      // Two paint modes: numeric (cfg.data + cfg.colorScale) or
+      // categorical (cfg.fillFn directly returns the fill color).
       document.getElementById('usmap-year').textContent = '';
       var sumS = 0, nS = 0, lo = Infinity, hi = -Infinity;
+      var hasFn = typeof cfg.fillFn === 'function';
       svg.selectAll('path.usmap-feature')
         .each(function(d) {
+          var sel = d3.select(this);
+          if (hasFn) {
+            var c = cfg.fillFn(d);
+            sel.classed('not-yet', false).attr('fill', c);
+            nS += 1;
+            return;
+          }
           var key = cfg.keyOf(d);
           var v = cfg.data[key];
-          var sel = d3.select(this);
           if (v == null) {
             sel.classed('not-yet', true).attr('fill', null);
             return;
@@ -1361,7 +1446,7 @@ function mapScript({ stateNames, initialLayer }) {
           if (v > hi) hi = v;
         });
       if (nS > 0 && cfg.summaryFormat) {
-        var fmt = cfg.summaryFormat({ mean: sumS / nS, min: lo, max: hi, n: nS });
+        var fmt = cfg.summaryFormat({ mean: hasFn ? null : sumS / nS, min: lo, max: hi, n: nS });
         document.getElementById('usmap-count').textContent = fmt.value;
         document.getElementById('usmap-count-label').textContent = fmt.label;
       } else {
