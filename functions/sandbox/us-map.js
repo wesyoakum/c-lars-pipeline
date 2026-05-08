@@ -71,6 +71,7 @@ export async function onRequestGet(context) {
     'counties', 'temperature', 'high', 'low', 'precipitation',
     'elevation', 'income', 'drought', 'population', 'elections', 'cities',
     'msaIncome', 'msaHomeValue', 'watersheds', 'migration',
+    'zipIncome', 'zipPopulation',
   ];
   const initialLayer = VALID_LAYERS.includes(layerParam) ? layerParam : 'statehood';
 
@@ -166,6 +167,7 @@ export async function onRequestGet(context) {
       .usmap-feature.counties  { stroke-width: 0.25; }
       .usmap-feature.msa       { stroke-width: 0.4; }
       .usmap-feature.huc8      { stroke-width: 0.3; stroke: #f6f6f3; }
+      .usmap-feature.zcta      { stroke-width: 0.05; stroke: rgba(255,255,255,0.4); }
       .usmap-feature.not-yet { fill: #e8e8e0; }
       .usmap-feature:hover { stroke: #222; stroke-width: 1.5; }
 
@@ -438,6 +440,8 @@ export async function onRequestGet(context) {
         <button class="usmap-layer-btn" data-layer="msaHomeValue"  type="button">MSA Home Value</button>
         <button class="usmap-layer-btn" data-layer="watersheds"    type="button">Watersheds</button>
         <button class="usmap-layer-btn" data-layer="migration"     type="button">Migration</button>
+        <button class="usmap-layer-btn" data-layer="zipIncome"     type="button">ZIP Income</button>
+        <button class="usmap-layer-btn" data-layer="zipPopulation" type="button">ZIP Population</button>
         <span class="usmap-layer-row-spacer"></span>
         <button class="usmap-toggle-btn" id="usmap-underlay-btn" type="button" aria-pressed="false" title="Show / hide a faint terrain underlay (county elevations)">Terrain underlay</button>
       </div>
@@ -952,6 +956,54 @@ function mapScript({ stateNames, initialLayer }) {
         domain: [50000,    150000,   300000,   500000,   1000000 ],
         range:  ['#fff5e1','#ffd28a','#f49a4c','#c2491c','#7a1a0e'],
       },
+    },
+    zipIncome: {
+      type: 'static',
+      title: 'Median Household Income by ZIP Code',
+      subtitle: '~33,000 ZCTAs (Census 2020 boundaries) at simplified geometry. ACS 2018-2022 5-year (B19013). Heavy initial fetch (~6 MB) — first activation takes a few seconds.',
+      fetch: { geojson: 'zcta-geometry', data: 'zcta-income' },
+      featureClass: 'zcta',
+      keyOf: function(d) { return d.properties.z; },
+      data: null,  // populated by fetch
+      tooltipTitle: function(d) { return 'ZIP ' + d.properties.z; },
+      tooltipFormat: function(v) { return '$' + v.toLocaleString(); },
+      summaryFormat: function(stats) {
+        return { value: '$' + Math.round(stats.mean).toLocaleString(), label: 'mean across ' + stats.n.toLocaleString() + ' ZCTAs — range $' + stats.min.toLocaleString() + ' to $' + stats.max.toLocaleString() };
+      },
+      drawStateOverlay: true,
+      legendMinLabel: '$25k',
+      legendMaxLabel: '$200k+',
+      legendNotYet: 'No data',
+      legendBarClass: 'income',
+      colorScale: {
+        domain: [25000,    50000,    75000,    100000,   150000,    200000  ],
+        range:  ['#f7fcf5','#c7e9c0','#74c476','#2e7d32','#1b3a14',  '#0a1f08'],
+      },
+    },
+    zipPopulation: {
+      type: 'static',
+      title: 'Population by ZIP Code',
+      subtitle: '~33,000 ZCTAs colored by raw population on a log scale. ACS 2018-2022 5-year (B01003). Big-city density emerges as bright spots.',
+      fetch: { geojson: 'zcta-geometry', data: 'zcta-population' },
+      featureClass: 'zcta',
+      keyOf: function(d) { return d.properties.z; },
+      tooltipTitle: function(d) { return 'ZIP ' + d.properties.z; },
+      tooltipFormat: function(v) { return v.toLocaleString() + ' people'; },
+      summaryFormat: function(stats) {
+        return { value: stats.n.toLocaleString() + ' ZCTAs', label: 'population range ' + stats.min.toLocaleString() + '–' + stats.max.toLocaleString() };
+      },
+      drawStateOverlay: true,
+      legendMinLabel: '< 100',
+      legendMaxLabel: '100k+',
+      legendNotYet: 'No data',
+      legendBarClass: 'population',
+      // Log10 of population. Most ZCTAs hold 1k–30k people; the tails
+      // (rural < 100, dense urban > 50k) hit the gradient ends.
+      colorScale: {
+        domain: [0,        2,        3,        3.7,      4.3,      5      ],
+        range:  ['#f7fcf5','#d2efd0','#91c98f','#3a8f54','#1c3d6f','#0a0a2a'],
+      },
+      logScale: true,
     },
     watersheds: {
       type: 'static',
@@ -1550,7 +1602,8 @@ function mapScript({ stateNames, initialLayer }) {
             sel.classed('not-yet', true).attr('fill', null);
             return;
           }
-          sel.classed('not-yet', false).attr('fill', currentColorScale(v));
+          var colorIn = cfg.logScale ? Math.log10(Math.max(1, v)) : v;
+          sel.classed('not-yet', false).attr('fill', currentColorScale(colorIn));
           sumS += v; nS += 1;
           if (v < lo) lo = v;
           if (v > hi) hi = v;
