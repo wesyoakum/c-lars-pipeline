@@ -329,6 +329,11 @@ export async function onRequestGet(context) {
         flex: 1; resize: none; min-height: 44px; max-height: 180px;
         padding: 10px 12px; border: 1px solid #d0d0d5; border-radius: 8px;
         font: inherit; font-size: 14px; line-height: 1.4;
+        /* Without min-width: 0 the textarea's intrinsic ~20-col width
+           (~240px) prevents it from shrinking inside the flex row.
+           On phones that forces the form — and the body — wider than
+           the viewport, dragging the sticky header along with it. */
+        min-width: 0;
       }
       .assistant-form textarea:focus { outline: 2px solid #2566ff; outline-offset: -1px; border-color: #2566ff; }
       .assistant-form button {
