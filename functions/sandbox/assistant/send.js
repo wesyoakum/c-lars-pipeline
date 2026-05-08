@@ -156,7 +156,50 @@ export async function onRequestPost(context) {
     [user.id, sinceIso]
   );
 
-  const system = buildSystemPrompt(user, tableNames, recentUploads);
+  // Background activity since the last assistant turn — the things
+  // Claudia did or noticed in the gap between her last reply and this
+  // user message. We surface these so she can lead with a one-line
+  // acknowledgment ("just filed 2 new Hot actions and noticed Sherman's
+  // email") instead of pretending the gap was silent. Wes asked for
+  // this repeatedly; the rule is in the system prompt below.
+  const newActions = await all(
+    env.DB,
+    `SELECT id, title, quadrant, source_kind, source_ref_table, source_ref_id,
+            due_at, status, created_at
+       FROM claudia_actions
+      WHERE user_id = ?
+        AND status = 'open'
+        AND created_at > ?
+      ORDER BY created_at ASC`,
+    [user.id, sinceIso]
+  );
+  const newObservations = await all(
+    env.DB,
+    `SELECT id, body, created_at
+       FROM claudia_observations
+      WHERE user_id = ?
+        AND dismissed_at IS NULL
+        AND created_at > ?
+      ORDER BY created_at ASC`,
+    [user.id, sinceIso]
+  );
+  const recentWrites = await all(
+    env.DB,
+    `SELECT id, action, ref_table, ref_id, summary, created_at
+       FROM claudia_writes
+      WHERE user_id = ?
+        AND created_at > ?
+        AND undone_at IS NULL
+      ORDER BY created_at ASC
+      LIMIT 20`,
+    [user.id, sinceIso]
+  );
+
+  const system = buildSystemPrompt(user, tableNames, recentUploads, {
+    newActions,
+    newObservations,
+    recentWrites,
+  });
 
   let assistantText;
   try {
@@ -251,19 +294,70 @@ function formatCt(iso) {
   return CT_FMT.format(new Date(ms)).replace(',', '');
 }
 
-function buildSystemPrompt(user, tableNames, recentUploads = []) {
+function buildSystemPrompt(user, tableNames, recentUploads = [], background = {}) {
   const today = new Date().toISOString().slice(0, 10);
   const nowCt = formatCt(new Date().toISOString());  // "2026-05-06 14:14"
   const display = user.display_name || user.email;
-  const recentUploadsBlock = recentUploads.length > 0
-    ? `\n\nRECENT UPLOADS (since your last turn) — apply the "Handling new uploads" rules to each:\n${recentUploads
+  const newActions = Array.isArray(background.newActions) ? background.newActions : [];
+  const newObservations = Array.isArray(background.newObservations) ? background.newObservations : [];
+  const recentWrites = Array.isArray(background.recentWrites) ? background.recentWrites : [];
+
+  const uploadLines = recentUploads.length > 0
+    ? recentUploads
         .map((d) => {
           const previewSnippet = String(d.preview || '').replace(/\s+/g, ' ').trim().slice(0, 200);
           const cat = d.category ? ` | auto-category=${d.category}` : '';
-          return `- #${d.seq} | id=${d.id} | filename="${d.filename}" | type=${d.content_type || 'unknown'} | status=${d.extraction_status}${cat} | preview="${previewSnippet}${previewSnippet.length >= 200 ? '…' : ''}"`;
+          return `  - #${d.seq} | id=${d.id} | filename="${d.filename}" | type=${d.content_type || 'unknown'} | status=${d.extraction_status}${cat} | preview="${previewSnippet}${previewSnippet.length >= 200 ? '…' : ''}"`;
         })
-        .join('\n')}\n\nThe auto-category is a best-guess label set on upload (RFQ, spec, quote, contract, contact_list, etc.) — useful as a hint but not authoritative; if your analysis disagrees, just say so and use what you found. If any of the above is unread/unanalyzed, your response MUST start by addressing it (acknowledge → read_document → cross-reference → 2-3 concrete actions). The user's typed message takes priority over the uploads only if they explicitly redirect you ("ignore the file", "different topic"). Highest seq above is #${recentUploads[recentUploads.length - 1].seq} — if mid-conversation the user says "anything new?" or "I sent more", call list_documents({since: <highest-seq-you-have-seen>}) to get only the new ones, NEVER assume new uploads are duplicates of similar-named older ones.\n`
+        .join('\n')
     : '';
+  const actionLines = newActions.length > 0
+    ? newActions
+        .map((a) => {
+          const due = a.due_at ? ` | due=${a.due_at}` : '';
+          const src = a.source_kind ? ` | src=${a.source_kind}` : '';
+          const ref = a.source_ref_table && a.source_ref_id
+            ? ` (${a.source_ref_table}=${a.source_ref_id})`
+            : '';
+          return `  - [${a.quadrant}] id=${a.id} | "${(a.title || '').slice(0, 120)}"${src}${ref}${due}`;
+        })
+        .join('\n')
+    : '';
+  const obsLines = newObservations.length > 0
+    ? newObservations
+        .map((o) => `  - id=${o.id} | ${formatCt(o.created_at)} | ${(o.body || '').replace(/\s+/g, ' ').slice(0, 240)}`)
+        .join('\n')
+    : '';
+  const writeLines = recentWrites.length > 0
+    ? recentWrites
+        .map((w) => `  - ${w.action} on ${w.ref_table}=${w.ref_id} | ${formatCt(w.created_at)}${w.summary ? ` | ${w.summary}` : ''}`)
+        .join('\n')
+    : '';
+
+  // One unified BACKGROUND ACTIVITY block. Wes has asked repeatedly for
+  // Claudia to comment on what arrived/changed/got filed in the gap
+  // between her last reply and his current message. This block is the
+  // raw data; the rule that forces narration is below in the prompt.
+  const hasBackground = Boolean(uploadLines || actionLines || obsLines || writeLines);
+  const backgroundBlock = hasBackground
+    ? `\n\n══════════════════════════════════════════════════════════════════
+BACKGROUND ACTIVITY SINCE YOUR LAST TURN — read this BEFORE responding.
+══════════════════════════════════════════════════════════════════
+${uploadLines ? `\nNew uploads (${recentUploads.length}):\n${uploadLines}\n` : ''}${actionLines ? `\nNew actions you filed (${newActions.length}):\n${actionLines}\n` : ''}${obsLines ? `\nNew observations you wrote (${newObservations.length}):\n${obsLines}\n` : ''}${writeLines ? `\nWrites you executed (${recentWrites.length}):\n${writeLines}\n` : ''}
+NARRATION RULE — NON-NEGOTIABLE:
+When BACKGROUND ACTIVITY above is non-empty, your reply MUST OPEN with a brief one-or-two-line acknowledgment of what's there before you address ${display}'s typed message. This is not optional. Wes has corrected this multiple times; the rule lives at prompt level, not chat level.
+
+Phrasing — bubbly + concrete, not formal. Examples:
+- "ok so — while you were away I filed 2 Hot actions on the Sherman/Oceaneering thread and the categorizer tagged your Canpac PNG as a headshot. now —"
+- "real quick — 3 new uploads landed (Trendsetter RFQ, Workboat exhibitor email, plus an attachment), and I categorized the RFQ. on your message:"
+- "honestly nothing dramatic — one new Plan action on opp 25315. now —"
+
+When ALL of upload/action/observation/write counts are zero (no BACKGROUND ACTIVITY block at all), skip the acknowledgment and answer directly. The rule is "narrate when there's something to narrate", not "always preface with a status line".
+
+Then, if uploads are unread/unanalyzed, follow the "Handling new uploads" rules — acknowledge → read_document → cross-reference → 2-3 concrete actions. ${display}'s typed message takes priority over the background only if he explicitly redirects ("ignore the file", "different topic").
+${recentUploads.length > 0 ? `Highest upload seq above is #${recentUploads[recentUploads.length - 1].seq} — if mid-conversation he says "anything new?" or "I sent more", call list_documents({since: <highest-seq-you-have-seen>}) to get only the new ones, NEVER assume new uploads are duplicates of similar-named older ones.\n` : ''}══════════════════════════════════════════════════════════════════\n`
+    : '';
+  const recentUploadsBlock = backgroundBlock;
   return `CLAUDIA
 
 You are Claudia, an AI assistant dedicated to ${display}. You operate as a proactive executive assistant, operational backstop, and second set of eyes across everything Wes is involved in. Your primary objective: ensure nothing important is missed, dropped, unclear, or allowed to become a problem.

@@ -75,16 +75,19 @@ export async function onRequestGet(context) {
       )
     : [];
 
-  // Surface up to 5 non-dismissed observations from the last 24 hours,
-  // newest first. The hourly cron writes into claudia_observations;
-  // this panel is how Wes sees the output.
+  // Surface non-dismissed observations from the LAST 60 MINUTES only,
+  // newest first. The hourly tick writes a fresh batch each run, so a
+  // 60-minute window shows the most recent tick's output and rolls off
+  // older ones automatically — no more stale "8 hr ago" panels of
+  // content that's already been acted on. The full audit log of older
+  // observations stays in the table for chat tools / debugging.
   const observations = await all(
     env.DB,
     `SELECT id, body, created_at
        FROM claudia_observations
       WHERE user_id = ?
         AND dismissed_at IS NULL
-        AND created_at > datetime('now', '-24 hours')
+        AND created_at > datetime('now', '-60 minutes')
       ORDER BY created_at DESC
       LIMIT 5`,
     [user.id]
