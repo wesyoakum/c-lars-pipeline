@@ -30,6 +30,7 @@ import { messagesJson } from '../../lib/anthropic.js';
 import { CLAUDIA_USER_ID } from '../../lib/auth.js';
 import { writeBriefRow } from '../../lib/claudia-brief.js';
 import { COMPANY_CONTEXT, INDUSTRY_TERMS, userContext, loadUserMemoryRows } from '../../lib/claudia-knowledge.js';
+import { getEventsInWindow, todayCtWindow } from '../../lib/claudia-calendar.js';
 
 const SANDBOX_OWNER_EMAIL = 'wes.yoakum@c-lars.com';
 const STALE_OBSERVATION_MINUTES = 55;
@@ -192,6 +193,13 @@ export async function onRequestPost(context) {
   const memoryRows = await loadUserMemoryRows(env, user.id);
   const userCtx = userContext(user, memoryRows);
 
+  // Today's calendar across all configured .ics feeds (work + family +
+  // wife + kids' sports + …). Drives the new "Today's calendar" brief
+  // section and feeds the observation prompt so the model can correlate
+  // ("you have a 2pm with Sherman; this stage change is timely").
+  const { startMs: dayStartMs, endMs: dayEndMs } = todayCtWindow();
+  const todayCalendar = await getEventsInWindow(env, user, dayStartMs, dayEndMs);
+
   const system = [
     COMPANY_CONTEXT,
     '',
@@ -231,6 +239,7 @@ export async function onRequestPost(context) {
     `In the same response, write a "catch me up" brief for ${display}. This is what he sees when he asks "catch me up" — FAST to read, tells him exactly what matters right now. Aim for 5-10 short bullets across 2-4 sections.`,
     '',
     'STRUCTURE (skip a section entirely if it has no signal):',
+    '- ## Today\'s calendar — meetings/events from today_calendar in CT order. Group by source label (work / family / wife / kid_*) when more than one source has events. Quote start times in CT ("3:00 PM"), not raw ISO. Family-calendar items are AS RELEVANT as work items.',
     '- ## Today\'s tasks — anything due today or overdue',
     '- ## Opportunities at risk — opps that haven\'t moved in 14+ days, or are closing within 7 days but stuck',
     '- ## Closing this week — opps with expected_close_date in the next 7 days',
@@ -253,6 +262,7 @@ export async function onRequestPost(context) {
   const stateBlob = JSON.stringify(
     {
       pending_events_since_last_tick: events,
+      today_calendar: todayCalendar,
       open_opportunities: openOpps,
       open_tasks: openTasks,
       recently_completed: recentCompletions,
