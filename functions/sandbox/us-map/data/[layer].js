@@ -26,6 +26,7 @@ import { CBSA_GEOJSON }             from '../../data/cbsa_geometry.js';
 import { CBSA_INCOME }              from '../../data/cbsa_income.js';
 import { CBSA_HOME_VALUE }          from '../../data/cbsa_home_value.js';
 import { HUC8_GEOJSON }             from '../../data/huc8_geometry.js';
+import { MIGRATION_FLOWS }          from '../../data/migration_flows.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 
@@ -49,6 +50,7 @@ const REGISTRY = {
   'cbsa-income':     () => CBSA_INCOME,
   'cbsa-home-value': () => CBSA_HOME_VALUE,
   'huc8':            () => HUC8_GEOJSON,
+  'migration':       () => MIGRATION_FLOWS,
 };
 
 export async function onRequestGet(context) {

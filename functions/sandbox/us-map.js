@@ -70,7 +70,7 @@ export async function onRequestGet(context) {
   const VALID_LAYERS = [
     'counties', 'temperature', 'high', 'low', 'precipitation',
     'elevation', 'income', 'drought', 'population', 'elections', 'cities',
-    'msaIncome', 'msaHomeValue', 'watersheds',
+    'msaIncome', 'msaHomeValue', 'watersheds', 'migration',
   ];
   const initialLayer = VALID_LAYERS.includes(layerParam) ? layerParam : 'statehood';
 
@@ -403,6 +403,17 @@ export async function onRequestGet(context) {
         transition: fill-opacity 0.15s;
       }
       .usmap-city:hover { fill-opacity: 1; stroke: #222; stroke-width: 1; }
+
+      /* Migration flow lines — quadratic Bezier arcs between county
+         centroids. fill: none + transparent stroke for the layered
+         starburst effect. */
+      .usmap-flow {
+        fill: none;
+        stroke: #1a3a5c;
+        stroke-opacity: 0.18;
+        stroke-linecap: round;
+        pointer-events: none;
+      }
     </style>
     ${tabs}
     <div class="usmap-page">
@@ -426,6 +437,7 @@ export async function onRequestGet(context) {
         <button class="usmap-layer-btn" data-layer="msaIncome"     type="button">MSA Income</button>
         <button class="usmap-layer-btn" data-layer="msaHomeValue"  type="button">MSA Home Value</button>
         <button class="usmap-layer-btn" data-layer="watersheds"    type="button">Watersheds</button>
+        <button class="usmap-layer-btn" data-layer="migration"     type="button">Migration</button>
         <span class="usmap-layer-row-spacer"></span>
         <button class="usmap-toggle-btn" id="usmap-underlay-btn" type="button" aria-pressed="false" title="Show / hide a faint terrain underlay (county elevations)">Terrain underlay</button>
       </div>
@@ -971,6 +983,30 @@ function mapScript({ stateNames, initialLayer }) {
       legendNotYet: '',
       legendBarClass: 'watersheds',
     },
+    migration: {
+      type: 'flows',
+      title: 'U.S. County-to-County Migration (2022→2023)',
+      subtitle: 'IRS tax-return flows. Each curve goes from origin county to destination; thickness ∝ # of people moved. Drag the slider to set a minimum flow size.',
+      // Backdrop is just the country/state context; the flows ride on top.
+      topojsonUrl: 'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json',
+      objectName: 'states',
+      fetch: { data: 'migration' },
+      // Slider runs in log10(min #people) space — same idea as cities.
+      sliderMin: 1.0, sliderMax: 5.0, sliderStep: 0.05,
+      sliderInitial: 3.0,  // ≥ 1,000 people
+      quickJumps: [
+        { value: 1.0, label: '10' },
+        { value: 2.0, label: '100' },
+        { value: 3.0, label: '1k' },
+        { value: 4.0, label: '10k' },
+        { value: 5.0, label: '100k' },
+      ],
+      legendMinLabel: '',
+      legendMaxLabel: '',
+      legendNotYet: '',
+      legendBarClass: '',
+      playMs: 80,
+    },
     cities: {
       type: 'point-symbols',
       title: 'U.S. Cities by Population',
@@ -1138,10 +1174,12 @@ function mapScript({ stateNames, initialLayer }) {
       document.getElementById('usmap-slider-min').textContent =
         cfg.type === 'instant-day' ? doyToDateLabel(cfg.sliderMin)
         : cfg.type === 'point-symbols' ? '100'
+        : cfg.type === 'flows' ? '10'
         : String(cfg.sliderMin);
       document.getElementById('usmap-slider-max').textContent =
         cfg.type === 'instant-day' ? doyToDateLabel(cfg.sliderMax)
         : cfg.type === 'point-symbols' ? '10M'
+        : cfg.type === 'flows' ? '100k'
         : String(cfg.sliderMax);
 
       if (hasMaxSlider) {
@@ -1206,6 +1244,10 @@ function mapScript({ stateNames, initialLayer }) {
         renderPointSymbols(cfg, +slider.value);
         return;
       }
+      if (cfg.type === 'flows') {
+        renderFlows(cfg, +slider.value);
+        return;
+      }
 
       // Two geometry sources are supported:
       //   - cfg.topojsonUrl + cfg.objectName  → fetch from CDN
@@ -1263,6 +1305,74 @@ function mapScript({ stateNames, initialLayer }) {
           .html(buildTooltipHtml(d));
       })
       .on('mouseleave', function() { tooltip.style('opacity', 0); });
+  }
+
+  // Render the migration-flows layer. Country/state backdrop, then
+  // pre-projects every county centroid once and stores the projected
+  // (x, y) on each flow record so update() can filter quickly without
+  // re-projecting on every slider tick.
+  function renderFlows(cfg, sliderVal) {
+    loadTopo(cfg.topojsonUrl).then(function(us) {
+      var states = topojson.feature(us, us.objects.states).features;
+      svg.selectAll('path.usmap-country-fill')
+        .data(states)
+        .enter()
+        .append('path')
+        .attr('class', 'usmap-country-fill')
+        .attr('d', path);
+      var stateMesh = topojson.mesh(us, us.objects.states, function(a, b) { return a !== b; });
+      svg.append('path')
+        .attr('class', 'usmap-state-mesh-faint')
+        .attr('d', path(stateMesh));
+
+      // Project each centroid through AlbersUSA. cfg.data has shape
+      // { centroids: { fips: [lon, lat] }, flows: [[origin, dest, n]] }.
+      var pts = {};
+      var centroids = cfg.data.centroids || {};
+      Object.keys(centroids).forEach(function(fips) {
+        var ll = centroids[fips];
+        var p = projection([ll[0], ll[1]]);
+        if (p) pts[fips] = p;
+      });
+
+      // Pre-build path strings for every flow we'll ever consider.
+      // The slider only filters which ones display, so building paths
+      // up front avoids re-stringifying on every tick. ~50 K paths is
+      // fine for the DOM as long as most are display:none most of the
+      // time.
+      var flows = cfg.data.flows || [];
+      var rendered = [];
+      for (var i = 0; i < flows.length; i++) {
+        var f = flows[i];
+        var a = pts[f[0]], b = pts[f[1]];
+        if (!a || !b) continue;
+        rendered.push({
+          origin: f[0], dest: f[1], n: f[2],
+          d: bezierBetween(a[0], a[1], b[0], b[1]),
+        });
+      }
+      currentFeatures = rendered;
+
+      svg.selectAll('path.usmap-flow')
+        .data(rendered)
+        .enter()
+        .append('path')
+        .attr('class', 'usmap-flow')
+        .attr('d', function(d) { return d.d; });
+
+      update(sliderVal);
+    });
+  }
+
+  // Quadratic Bezier between two projected points with a perpendicular
+  // arch so the flow lines aren't a straight starburst.
+  function bezierBetween(x1, y1, x2, y2) {
+    var dx = x2 - x1, dy = y2 - y1;
+    var midX = (x1 + x2) / 2, midY = (y1 + y2) / 2;
+    // Control point offset perpendicular to the direct line. 18% of
+    // the segment length feels gentle enough for the cluttered map.
+    var nx = -dy * 0.18, ny = dx * 0.18;
+    return 'M' + x1 + ',' + y1 + 'Q' + (midX + nx) + ',' + (midY + ny) + ' ' + x2 + ',' + y2;
   }
 
   // Render the cities point-symbols layer. Country backdrop + faint
@@ -1484,6 +1594,32 @@ function mapScript({ stateNames, initialLayer }) {
         document.getElementById('usmap-count').textContent = '—';
         document.getElementById('usmap-count-label').textContent = '';
       }
+      return;
+    }
+
+    if (cfg.type === 'flows') {
+      // Slider value is log10(min #people). Show flows ≥ that threshold
+      // and scale stroke width by sqrt(n) so a 100-person flow isn't 10×
+      // thicker than a 10-person flow.
+      var minPeople = Math.pow(10, sliderVal);
+      document.getElementById('usmap-year').textContent = '≥ ' + formatPop(minPeople);
+      var visible = 0, totalPeople = 0;
+      svg.selectAll('path.usmap-flow')
+        .each(function(d) {
+          var sel = d3.select(this);
+          if (d.n >= minPeople) {
+            sel.style('display', null)
+              .attr('stroke-width', Math.max(0.4, Math.sqrt(d.n) * 0.06))
+              .attr('stroke-opacity', d.n > 5000 ? 0.5 : (d.n > 500 ? 0.3 : 0.18));
+            visible++;
+            totalPeople += d.n;
+          } else {
+            sel.style('display', 'none');
+          }
+        });
+      document.getElementById('usmap-count').textContent = visible.toLocaleString();
+      document.getElementById('usmap-count-label').textContent =
+        'flows shown — ' + totalPeople.toLocaleString() + ' people moved (IRS exemptions)';
       return;
     }
 
