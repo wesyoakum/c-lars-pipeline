@@ -158,6 +158,12 @@ export const PERMISSION_GATED_ACTIONS_CATALOG = [
     label: 'Re-queue undispatched Claudia events',
     description: 'Operational tool. Walks claudia_events_pending for the user, finds rows with dispatched_at=NULL, re-publishes each to the cf-claudia-events queue so the consumer worker re-processes them. Useful when (a) events piled up during a worker outage / Access misconfig, or (b) the prompt or enrichment changed and old events should be re-evaluated against the new logic. Does NOT duplicate D1 rows — only re-publishes the queue side. Returns counts.',
   },
+  {
+    action: 'complete_action',
+    category: 'triage',
+    label: 'Mark a triage queue action complete',
+    description: 'Flip one or more open claudia_actions to status=\'completed\' from chat. Use when Wes says "resolved" / "handled" / "I\'m done with X" / "we already took care of Y" — find the matching Hot/Plan/Quick rows by title fuzzy match and clear them. Same effect as clicking Done in the queue panel. Pass either an exact id, or a substring match against title (case-insensitive) — when match hits multiple rows, ALL get completed (so "resolved on the MATE thing" clears every MATE-related action at once).',
+  },
   // account / contact merging (consolidate duplicate rows)
   {
     action: 'merge_accounts',

@@ -971,6 +971,35 @@ export async function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'complete_action',
+      description:
+        'Flip one or more open claudia_actions to status=\'completed\' from chat. ' +
+        'Same effect as clicking Done in the queue panel. Use when ${display} says ' +
+        '"resolved" / "handled" / "done with that" / "already took care of X" / "we ' +
+        'don\'t need to do Y" — find the matching Hot/Plan/Quick rows and clear them ' +
+        'so the panel doesn\'t keep nagging him.\n' +
+        '\n' +
+        'Two ways to specify the row(s):\n' +
+        '- id: exact claudia_actions.id (rare — ${display} doesn\'t carry these)\n' +
+        '- match: case-insensitive substring against title. When this hits multiple ' +
+        'rows (e.g. several MATE-related Hot items), ALL of them get completed in ' +
+        'one call. That\'s the desired behavior — "resolved on the MATE thing" ' +
+        'should clear every MATE-related action at once, not just the first.\n' +
+        '\n' +
+        'Returns { ok, completed: [...], match_count, message }. Confirm in the ' +
+        'chat reply with the titles you cleared so ${display} sees what happened. ' +
+        'When the match string is too generic and would clear unrelated rows ' +
+        '(e.g. "resolved" without context), DO NOT call this — ask which rows.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Exact claudia_actions.id, when known.' },
+          match: { type: 'string', description: 'Case-insensitive substring to match against the action title. Matches ALL rows that contain this string.' },
+          reason: { type: 'string', description: 'Optional one-line reason; defaults to "completed_via_chat".' },
+        },
+      },
+    },
+    {
       name: 'replay_pending_events',
       description:
         'Operational tool. Re-publishes claudia_events_pending rows to the cf-claudia-events queue ' +
@@ -1253,6 +1282,8 @@ export async function makeAssistantTools({ env, user }) {
         return notifyWes(env, user, input);
       case 'set_action':
         return setAction(env, user, input);
+      case 'complete_action':
+        return completeAction(env, user, input);
       case 'replay_pending_events':
         return replayPendingEvents(env, user, input);
       case 'undo_claudia_write':
@@ -2811,6 +2842,112 @@ async function setAction(env, user, input = {}) {
     quadrant,
     due_at: dueAt,
     summary: `Added to ${quadrant.toUpperCase()}: "${title.length > 60 ? title.slice(0, 57) + '...' : title}"`,
+  };
+}
+
+async function completeAction(env, user, { id, match, reason } = {}) {
+  const exactId = String(id || '').trim();
+  const fuzzy = String(match || '').trim();
+  if (!exactId && !fuzzy) {
+    return {
+      ok: false,
+      error: 'no_target',
+      message: 'complete_action requires either id (exact) or match (title substring).',
+    };
+  }
+
+  // Find matching open rows. Limit fuzzy matches to a sane cap so a
+  // too-generic substring ("resolved", "the") doesn't accidentally
+  // clear half the queue. The model is supposed to refuse generic
+  // matches per its description, but defense in depth.
+  let rows = [];
+  if (exactId) {
+    rows = await all(
+      env.DB,
+      `SELECT id, title, quadrant FROM claudia_actions
+        WHERE id = ? AND user_id = ? AND status = 'open'`,
+      [exactId, user.id]
+    );
+  } else {
+    if (fuzzy.length < 3) {
+      return {
+        ok: false,
+        error: 'match_too_short',
+        message: `match string "${fuzzy}" is too short — risk of matching too many rows. Use at least 3 characters.`,
+      };
+    }
+    rows = await all(
+      env.DB,
+      `SELECT id, title, quadrant FROM claudia_actions
+        WHERE user_id = ? AND status = 'open'
+          AND LOWER(title) LIKE LOWER(?)
+        ORDER BY created_at DESC
+        LIMIT 25`,
+      [user.id, `%${fuzzy}%`]
+    );
+  }
+
+  if (rows.length === 0) {
+    return {
+      ok: false,
+      error: 'no_match',
+      match_count: 0,
+      message: exactId
+        ? `No open action with id ${exactId} for this user.`
+        : `No open actions match "${fuzzy}". Check the queue panel for the exact title.`,
+    };
+  }
+
+  // Defense against runaway matches. If a fuzzy match landed >10 rows,
+  // refuse — the substring is too generic.
+  if (!exactId && rows.length > 10) {
+    return {
+      ok: false,
+      error: 'match_too_broad',
+      match_count: rows.length,
+      sample: rows.slice(0, 5).map((r) => ({ id: r.id, title: r.title, quadrant: r.quadrant })),
+      message: `"${fuzzy}" matches ${rows.length} open actions — too broad to clear in one call. Narrow the match string or pass a specific id.`,
+    };
+  }
+
+  const ts = now();
+  const completedReason = String(reason || 'completed_via_chat').slice(0, 200);
+  const completed = [];
+  for (const row of rows) {
+    try {
+      await run(
+        env.DB,
+        `UPDATE claudia_actions
+            SET status = 'completed',
+                completed_at = ?,
+                completed_reason = ?,
+                decided_at = ?,
+                decided_by_user_id = ?,
+                updated_at = ?
+          WHERE id = ? AND status = 'open'`,
+        [ts, completedReason, ts, user.id, ts, row.id]
+      );
+      completed.push({ id: row.id, title: row.title, quadrant: row.quadrant });
+      try {
+        await audit(env.DB, {
+          entityType: 'claudia_action',
+          entityId: row.id,
+          eventType: 'completed',
+          user,
+          summary: `Marked complete via chat (${completedReason}): ${(row.title || '').slice(0, 200)}`,
+        });
+      } catch { /* non-fatal */ }
+    } catch (err) {
+      // Skip the failed row but keep going on the rest.
+      console.warn('[complete_action] flip failed for', row.id, err?.message || err);
+    }
+  }
+
+  return {
+    ok: completed.length > 0,
+    match_count: rows.length,
+    completed,
+    summary: `Cleared ${completed.length} of ${rows.length} open action${rows.length === 1 ? '' : 's'}: ${completed.map((c) => `[${c.quadrant.toUpperCase()}] ${c.title}`).join(' · ')}`,
   };
 }
 

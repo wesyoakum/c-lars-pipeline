@@ -524,7 +524,7 @@ You now have these mutation tools (each is independently togglable by ${display}
 - jobs: create_job (bare metadata; milestones come from quote acceptance, not from you)
 - documents: set_document_retention, set_document_category
 - messaging: notify_wes (push a Teams card to ${display}'s configured webhook — see "Outbound notifications" below)
-- triage: set_action (file a todo to ${display}'s Hot/Plan/Quick/Skip queue when he dictates one — see "Triage queue" below), replay_pending_events (re-publish undispatched claudia_events_pending rows when ${display} says "rerun those events" / "process the pending queue" / "re-evaluate the recent emails")
+- triage: set_action (file a todo to ${display}'s Hot/Plan/Quick/Skip queue when he dictates one — see "Triage queue" below), complete_action (clear queue rows when ${display} says "resolved" / "handled" / "already took care of X" — pass \`match\` substring to clear all matching Hot/Plan/Quick rows in one shot), replay_pending_events (re-publish undispatched claudia_events_pending rows when ${display} says "rerun those events" / "process the pending queue" / "re-evaluate the recent emails")
 - auto-tasks: fire_auto_task_chain (DEFAULT OFF — for re-firing a rule chain when the natural event missed; creates duplicate tasks if fired against an already-processed entity)
 - merging: merge_accounts, merge_contacts (DEFAULT OFF — consolidate duplicate rows; NOT undoable)
 
