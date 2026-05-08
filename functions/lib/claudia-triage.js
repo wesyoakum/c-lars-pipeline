@@ -161,15 +161,35 @@ function buildSystemPrompt(displayName, today, user, memoryRows) {
   ].join('\n');
 }
 
-function buildUserPayload(event, enrichment) {
-  return JSON.stringify(
-    {
-      event,
-      enrichment,
-    },
-    null,
-    2
-  );
+// Compact per-event entry for session_history. The model sees these
+// to know what it (or earlier worker invocations) just decided about
+// related events — so two emails on the same opp arriving 30 seconds
+// apart get treated as a coherent batch instead of two independent
+// events.
+function summarizeForSession(row) {
+  if (!row || !row.id) return null;
+  return {
+    event_id: row.id,
+    type: row.type,
+    ref_id: row.ref_id,
+    summary: row.summary,
+    dispatched_at: row.dispatched_at,
+    action_summary: row.action_summary,
+  };
+}
+
+function buildUserPayload(event, enrichment, sessionHistory) {
+  const payload = { event, enrichment };
+  if (Array.isArray(sessionHistory) && sessionHistory.length > 0) {
+    payload.session_history_note =
+      'Events you (or a prior worker run) processed in the last 10 minutes for this user. ' +
+      'Use this as context: if the current event is a follow-up to one of these, treat it ' +
+      'as a sibling — call out the connection in the rationale, and consider updating the ' +
+      'related action via id-matching rather than emitting a new one. The action_summary ' +
+      'tells you what was decided ("extract:1_new+0_updated...", "observe", "noop").';
+    payload.recent_events = sessionHistory;
+  }
+  return JSON.stringify(payload, null, 2);
 }
 
 // Allow-list of tools the extractor may suggest. The approve.js
@@ -287,12 +307,19 @@ function normalizeQuestion(raw) {
  *                                  calendars/reminders. Optional; empty
  *                                  array degrades the prompt to a "no
  *                                  persisted facts yet" note.
+ * @param {Array}  args.sessionHistory  Compact summaries of recent events
+ *                                  (last 10 min) the worker has already
+ *                                  processed for this user — see
+ *                                  summarizeForSession(). Threads context
+ *                                  across events so two emails on the
+ *                                  same opp 30 seconds apart get treated
+ *                                  as siblings, not independent.
  * @returns {Promise<{ decision, actions, questions, observation, raw, modelError? }>}
  */
-export async function extractActions(env, { event, enrichment, displayName, today, user, memoryRows }) {
+export async function extractActions(env, { event, enrichment, displayName, today, user, memoryRows, sessionHistory }) {
   const phase = (env.CLAUDIA_TRIAGE_PHASE || TRIAGE_PHASE_DEFAULT).toUpperCase();
   const system = buildSystemPrompt(displayName, today, user, memoryRows);
-  const userPayload = buildUserPayload(event, enrichment);
+  const userPayload = buildUserPayload(event, enrichment, sessionHistory);
 
   // Build the worker tool surface — read-heavy + a few auto-tier writes.
   // Same shape chat sees, just filtered to safe-for-autonomous tools.

@@ -152,6 +152,39 @@ export async function onRequestPost(context) {
   // "no persisted facts yet" note (still has COMPANY_CONTEXT).
   const memoryRows = await loadUserMemoryRows(env, user.id);
 
+  // Build session history: recently-processed events for this user
+  // (last 10 minutes, dispatched, not the current one) so the model
+  // can connect related events as siblings. Two emails on the same
+  // opp arriving 30 seconds apart should be treated as a coherent
+  // batch — the model sees the prior decision in the user payload.
+  // Best-effort; empty array on failure (worker still works fine).
+  let sessionHistory = [];
+  try {
+    sessionHistory = await all(
+      env.DB,
+      `SELECT id, type, ref_id, summary, dispatched_at, action_summary
+         FROM claudia_events_pending
+        WHERE user_id = ?
+          AND id != ?
+          AND dispatched_at IS NOT NULL
+          AND dispatched_at > datetime('now', '-10 minutes')
+        ORDER BY dispatched_at DESC
+        LIMIT 10`,
+      [user.id, event.id]
+    );
+    // Reshape to the compact session entry the triage helper expects.
+    sessionHistory = sessionHistory.map((r) => ({
+      event_id: r.id,
+      type: r.type,
+      ref_id: r.ref_id,
+      summary: r.summary,
+      dispatched_at: r.dispatched_at,
+      action_summary: r.action_summary,
+    }));
+  } catch (err) {
+    console.warn('[event-tick] session history query failed:', err?.message || err);
+  }
+
   const decision = await extractActions(env, {
     event: { id: event.id, type: event.type, ref_id: event.ref_id, summary: event.summary, created_at: event.created_at },
     enrichment,
@@ -159,6 +192,7 @@ export async function onRequestPost(context) {
     today,
     user,
     memoryRows,
+    sessionHistory,
   });
 
   // ── Persist ───────────────────────────────────────────────────────
