@@ -21,9 +21,47 @@ import { all, one } from './db.js';
 
 // Compact row shapes — drop columns the model doesn't need to keep
 // the prompt small. Each helper returns the keys we want surfaced.
+//
+// Two doc variants:
+//   - principalDoc(d): the doc the event is ABOUT. Send full_text so
+//     the model can reason about its actual contents instead of
+//     hedging from a 240-char snippet. Capped at 60 KB as a safety
+//     net for the long-tail case (huge thread with quoted history) —
+//     rare emails hit this; most are <10 KB.
+//   - compactDoc(d): sibling/related doc surfaced via cross-reference.
+//     Send a 2 KB preview — enough to know what each is about
+//     without blowing up the prompt when there are 6–8 siblings.
+
+const PRINCIPAL_TEXT_CAP = 60 * 1024;   // 60 KB (~15 K tokens)
+const SIBLING_TEXT_CAP   = 2 * 1024;    // 2 KB
+
+function principalDoc(d) {
+  if (!d) return null;
+  const fullText = d.full_text ? String(d.full_text) : null;
+  return {
+    id: d.id,
+    seq: d.seq ?? null,
+    filename: d.filename ?? null,
+    subject: d.subject ?? null,
+    sender_email: d.sender_email ?? null,
+    sender_name: d.sender_name ?? null,
+    email_date: d.email_date ?? null,
+    category: d.category ?? null,
+    retention: d.retention ?? null,
+    summary: d.summary ?? null,
+    full_text: fullText
+      ? (fullText.length > PRINCIPAL_TEXT_CAP
+          ? fullText.slice(0, PRINCIPAL_TEXT_CAP) + `\n[... ${fullText.length - PRINCIPAL_TEXT_CAP} more chars truncated ...]`
+          : fullText)
+      : null,
+    full_text_chars: fullText ? fullText.length : 0,
+    created_at: d.created_at,
+  };
+}
 
 function compactDoc(d) {
   if (!d) return null;
+  const fullText = d.full_text ? String(d.full_text) : null;
   return {
     id: d.id,
     seq: d.seq ?? null,
@@ -33,7 +71,7 @@ function compactDoc(d) {
     sender_name: d.sender_name ?? null,
     category: d.category ?? null,
     retention: d.retention ?? null,
-    snippet: d.summary || (d.full_text ? d.full_text.slice(0, 240) : null),
+    snippet: d.summary || (fullText ? fullText.slice(0, SIBLING_TEXT_CAP) : null),
     created_at: d.created_at,
   };
 }
@@ -205,7 +243,9 @@ async function enrichDocument(env, event, userId) {
   if (!doc) return emptyEnrichment(event);
 
   const out = emptyEnrichment(event);
-  out.principal = compactDoc(doc);
+  // Principal gets the full body — the model needs to actually read
+  // the email, not hedge from a 240-char snippet.
+  out.principal = principalDoc(doc);
 
   const oppNumbers = extractOppNumbersFromText(doc.subject, doc.full_text);
   const refs = [{ table: 'claudia_documents', id: doc.id }];
