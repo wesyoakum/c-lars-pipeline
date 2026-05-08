@@ -60,7 +60,6 @@ function buildSystemPrompt(displayName, today, user, memoryRows) {
     '- enrichment.related.quotes — recent quotes tied to the same opp.',
     '- enrichment.related.audit_recent — last 5 audit_events on the principal entity.',
     '- enrichment.open_actions — currently-open claudia_actions in the same entity-cluster (id, title, quadrant, due_at). Use this for the re-evaluation pass — check before emitting a new action.',
-    `- enrichment.calendar_today — ${displayName}'s calendar for today across all configured .ics feeds (work / family / wife / kids / etc). Each event has source / summary / start / end / all_day / location. Use this when the source is a Pipeline-touching event AND the calendar shows a meeting that may interact with it ("the kid's recital is 5pm — this stage change can wait"; "Sherman's email landed and Wes has a 2pm with him — fold the response into the meeting prep instead of a separate task"). Family-calendar items count — they affect when Wes can act, not just work meetings.`,
     '- session_history (when present) — events you or a sibling worker decided in the last 10 min for this user.',
     '',
     'WHEN A TOOL CALL IS WARRANTED (and not before):',

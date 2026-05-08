@@ -30,7 +30,6 @@ import { all, one, run } from '../../lib/db.js';
 import { now, uuid } from '../../lib/ids.js';
 import { messages } from '../../lib/anthropic.js';
 import { COMPANY_CONTEXT, INDUSTRY_TERMS } from '../../lib/claudia-knowledge.js';
-import { getEventsInWindow } from '../../lib/claudia-calendar.js';
 import { renderMarkdown } from '../../lib/claudia-markdown.js';
 import { escape } from '../../lib/layout.js';
 
@@ -127,13 +126,6 @@ export async function onRequestPost(context) {
     [user.id, sinceIso]
   );
 
-  // Upcoming calendar — anything in the next 4 hours across all
-  // configured .ics feeds (work / family / wife / kids / etc). The
-  // model decides whether to mention it; we just supply the data.
-  // Empty array on any error so the welcome-back still fires.
-  const nowMs = Date.now();
-  const upcomingCalendar = await getEventsInWindow(env, user, nowMs, nowMs + 4 * 60 * 60 * 1000);
-
   const ts = now();
 
   // Always advance last_active_at to "now" — this is the cooldown
@@ -145,20 +137,11 @@ export async function onRequestPost(context) {
     [ts, thread.id]
   );
 
-  // "Anything to say" includes upcoming calendar within the next ~30
-  // minutes. Things further out (next-4-hours) only narrate when
-  // there's ALSO new activity — otherwise mid-day polls would chime
-  // about meetings that aren't urgent.
-  const imminentCalendar = upcomingCalendar.filter((ev) => {
-    const startMs = Date.parse(ev.start || '');
-    return Number.isFinite(startMs) && startMs - nowMs < 30 * 60 * 1000;
-  });
-  const hasNewState =
+  const hasActivity =
     newUploads.length > 0 ||
     newActions.length > 0 ||
     newObservations.length > 0 ||
     recentWrites.length > 0;
-  const hasActivity = hasNewState || imminentCalendar.length > 0;
   if (!hasActivity) {
     return new Response(null, { status: 204 });
   }
@@ -200,12 +183,6 @@ export async function onRequestPost(context) {
     '- This is your only chance to talk in this turn — there are no tools, no follow-up. Get it right with what is given.',
     '- If multiple new uploads share a parent_id, fold them into the parent\'s narration ("Sherman\'s email plus 6 inline images").',
     '- If 30+ tiny image attachments landed (likely email signatures that slipped past the filter), say so plainly ("a pile of 30 inline signature images") rather than enumerating.',
-    '',
-    'UPCOMING CALENDAR (next 4 hours, when present):',
-    '- Mention an upcoming event when it is genuinely time-sensitive — within ~30 minutes, OR when it interacts with new activity in this batch (e.g. "Sherman\'s email landed and you\'ve got the 3pm with him in 20 min — fold it into the meeting?").',
-    '- For items 1-4 hours out, mention only when it changes the framing ("the email can wait — your 4pm is the higher priority").',
-    '- The data lists each event\'s source label (work / family / wife / etc.). Family-calendar events (kids\' games, wife\'s appointments, etc.) are AS RELEVANT as work events. Don\'t skew toward Pipeline.',
-    '- Always cite the start time in CT format ("3:00 PM" not "15:00", and definitely not the raw ISO).',
   ].join('\n');
 
   const stateBlob = JSON.stringify({
@@ -213,7 +190,6 @@ export async function onRequestPost(context) {
     new_actions: newActions,
     new_observations: newObservations,
     recent_writes: recentWrites,
-    upcoming_calendar: upcomingCalendar,
     since_iso: sinceIso,
   }, null, 2);
 
