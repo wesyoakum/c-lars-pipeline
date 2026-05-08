@@ -1,24 +1,32 @@
 // functions/lib/claudia-triage.js
 //
-// Action extractor for the event-driven worker. Given an event +
-// cross-reference enrichment, asks Claude to produce one of:
+// Agentic action extractor for the event-driven worker. Given an
+// event + cross-reference enrichment, opens a chat-style session
+// where Claudia can investigate the event using a constrained
+// "worker" tool surface (read-heavy, plus a few auto-tier writes)
+// before producing structured output:
 //   - 0..N claudia_actions rows (with quadrant assignments + optional
-//     linked questions)
+//     proposed_action_json + linked questions)
 //   - one claudia_observation (ambient narration when nothing
 //     actionable came out)
 //   - noop (event was noise)
 //
+// Phase 2 shift (option C+D + agentic): the worker now reasons
+// multi-hop with the same tool surface chat has, so it can
+// search_accounts, query_db, read_document, etc. before deciding.
+// Investigation BEFORE classification; structured JSON OUTPUT at the
+// end of the loop.
+//
 // Phase A: the gate at the bottom of this module forces every action
-// to ship with proposed_action_json = null. The model can still
-// suggest a tool call, but we strip it before persistence so nothing
-// auto-executes. Phase B flips the gate; Phase C narrows it to the
-// AUTO_ALLOWED set.
+// to ship with proposed_action_json = null. Phase B emits proposed
+// actions awaiting approval; Phase C narrows what's auto-fireable.
 //
 // Model: Sonnet (event volume is too high for Opus). Override via
 // env.CLAUDIA_TRIAGE_MODEL.
 
-import { messagesJson } from './anthropic.js';
+import { messagesWithTools } from './anthropic.js';
 import { COMPANY_CONTEXT, INDUSTRY_TERMS, userContext } from './claudia-knowledge.js';
+import { makeWorkerTools } from '../sandbox/assistant/tools.js';
 
 const TRIAGE_MODEL_DEFAULT = 'claude-sonnet-4-6';
 
@@ -38,7 +46,19 @@ function buildSystemPrompt(displayName, today, user, memoryRows) {
     '',
     '─────────────────────────────────────────────────────────',
     '',
-    `You are Claudia, an AI assistant that triages incoming events for ${displayName}. Today is ${today}. You are NOT in a chat — you are running on a server-side worker that fires within seconds of each event. Your job is to read ONE event + its cross-reference snapshot and produce structured output: actionable items (0..N), questions (0..N), or a single observation, or nothing at all.`,
+    `You are Claudia, an AI assistant that triages incoming events for ${displayName}. Today is ${today}. You are NOT in a live chat — you are running on a server-side worker that fires within seconds of each event. Treat each event like a chat session you'd run with ${displayName} sitting next to you: investigate as much as you need, then decide.`,
+    '',
+    `YOU HAVE TOOLS. Use them. Same investigative surface ${displayName} sees in chat — search_accounts, query_db, read_document, list_open_opportunities, list_open_tasks, get_calendar_events, read_account_intel, read_brief, list_documents, search_documents, get_memory, etc. Plus a few auto-tier writes: set_document_category, set_document_retention, refresh_brief.`,
+    '',
+    'When to investigate vs. decide quickly:',
+    '- The enrichment payload at the bottom of your user message is a STARTER cross-reference, not the whole picture. If something there nags ("is this really opp 25297 or 25298?", "did Kat already follow up on this last week?", "is there a sibling email I should fold this into?"), CALL THE TOOL. You are not paying user-perceived latency.',
+    '- For routine clear-signal events (newsletter, logo image, automated cron-ish notification), don\'t investigate — return decision="noop" or "observe" fast.',
+    '- For meaningful Pipeline-touching emails (RFQ, customer follow-up, internal coordination, named opp), DO investigate. Read the full email via read_document if the principal\'s full_text is truncated, query the related opp\'s recent activities via query_db, check the contact\'s last touch.',
+    '- Use list_recent_writes to see what you\'ve been doing — it prevents you from emitting redundant actions for events that are already covered.',
+    '',
+    'When you fire an auto-tier write tool (set_document_category, set_document_retention, refresh_brief), do it ONLY when the answer is unambiguous from the source — e.g. an .eml from a known supplier with subject line containing "RFQ" → set_document_category(category="RFQ"). Never fire on speculation.',
+    '',
+    `WHEN YOU'RE DONE INVESTIGATING, your final response (no more tool calls) MUST be the strict JSON described under "OUTPUT" below — no prose, no markdown fences. The worker parses that JSON to write claudia_actions / claudia_questions / claudia_observations rows. Every tool call you make is logged for ${displayName} to review later.`,
     '',
     'CORE MENTAL MODEL:',
     '- Things that matter to ' + displayName + ' are ACTIONS / TASKS / TODOS — first-class items he can act on.',
@@ -213,6 +233,31 @@ function normalizeAction(raw, idx) {
   };
 }
 
+// Pull the first JSON object out of a text blob. Tolerant of leading
+// prose, ```json fences, or trailing commentary. Returns null if no
+// parseable object is found.
+function parseJsonFromText(text) {
+  if (!text) return null;
+  const tryParse = (s) => { try { return JSON.parse(s); } catch { return null; } };
+  const direct = tryParse(text);
+  if (direct) return direct;
+  // ```json ... ``` fenced
+  const fenced = String(text).match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) {
+    const fromFence = tryParse(fenced[1]);
+    if (fromFence) return fromFence;
+  }
+  // First {...} substring
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start >= 0 && end > start) {
+    const sliced = text.slice(start, end + 1);
+    const fromSlice = tryParse(sliced);
+    if (fromSlice) return fromSlice;
+  }
+  return null;
+}
+
 function normalizeQuestion(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const question = String(raw.question || '').trim();
@@ -249,15 +294,34 @@ export async function extractActions(env, { event, enrichment, displayName, toda
   const system = buildSystemPrompt(displayName, today, user, memoryRows);
   const userPayload = buildUserPayload(event, enrichment);
 
+  // Build the worker tool surface — read-heavy + a few auto-tier writes.
+  // Same shape chat sees, just filtered to safe-for-autonomous tools.
+  let toolset;
+  try {
+    toolset = await makeWorkerTools({ env, user });
+  } catch (err) {
+    return {
+      decision: 'noop',
+      actions: [],
+      questions: [],
+      observation: null,
+      raw: null,
+      modelError: `worker_tools_failed: ${err?.message || String(err)}`,
+    };
+  }
+
   let result;
   try {
-    result = await messagesJson(env, {
+    result = await messagesWithTools(env, {
       system,
-      user: userPayload,
+      messages: [{ role: 'user', content: userPayload }],
+      tools: toolset.definitions,
+      executeTool: toolset.execute,
       model: env.CLAUDIA_TRIAGE_MODEL || TRIAGE_MODEL_DEFAULT,
       cacheSystem: true,
-      maxTokens: 2048,
+      maxTokens: 4096,
       temperature: 0.2,
+      maxToolHops: 6,
     });
   } catch (err) {
     return {
@@ -270,7 +334,10 @@ export async function extractActions(env, { event, enrichment, displayName, toda
     };
   }
 
-  const raw = result.json || {};
+  // Parse the final text as strict JSON. Tolerant of leading prose
+  // (a stray "ok so —") or fenced ```json blocks even though the prompt
+  // forbids them.
+  const raw = parseJsonFromText(result.text) || {};
   let decision = String(raw.decision || '').toLowerCase();
   if (!['extract', 'observe', 'noop'].includes(decision)) decision = 'noop';
 
@@ -315,5 +382,6 @@ export async function extractActions(env, { event, enrichment, displayName, toda
     observation,
     raw,
     usage: result.usage,
+    tool_calls: Array.isArray(result.toolCalls) ? result.toolCalls.length : 0,
   };
 }

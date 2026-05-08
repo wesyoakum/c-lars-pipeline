@@ -1267,6 +1267,96 @@ export async function makeAssistantTools({ env, user }) {
   return { definitions: filteredDefinitions, execute, permissions };
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Worker tool surface — used by the agentic triage worker (Phase 2).
+// ─────────────────────────────────────────────────────────────────────
+//
+// Same-shape return as makeAssistantTools, but with a heavily filtered
+// tool list. The autonomous worker can:
+//   - Read Pipeline data (search, list, query_db, read_document, etc.)
+//   - Read calendars (get_calendar_events)
+//   - Read state on disk (read_brief, read_account_intel, list_recent_writes)
+//   - Auto-tier writes (set_document_category, set_document_retention,
+//     refresh_brief) — these are already in AUTO_ALLOWED in the
+//     decision gate, low blast radius, undoable via the undo path
+//
+// Explicitly NOT in the worker surface:
+//   - Gmail tools (personal email, NOT Pipeline context — hard line)
+//   - notify_wes (push notifications need to be deliberate)
+//   - set_action (the worker writes claudia_actions directly)
+//   - replay_pending_events (would create infinite loops)
+//   - undo_claudia_write (meta — should only happen at the user's
+//     explicit ask)
+//   - merge_accounts / merge_contacts (not undoable)
+//   - fire_auto_task_chain (creates duplicates if mis-fired)
+//   - create_account / create_contact / create_opportunity / etc.
+//     (large blast radius — Phase 3 may grant some of these once
+//     agentic behavior is well-tuned)
+//   - update_* (same — Phase 3 territory)
+//   - change_opportunity_stage (workflow-altering — never autonomous)
+//   - set_account_intel (free-form text edit — Phase 3)
+//   - propose_contact_imports (needs a user-driven CSV upload context)
+//
+// The worker also has DIRECT D1 access via the event-tick handler for
+// writes to claudia_actions / claudia_questions / claudia_observations.
+// The structured-JSON return from the model populates those rows; this
+// tool surface is for INVESTIGATION before deciding, not for writing
+// the actions themselves.
+
+const WORKER_ALLOWED_TOOLS = new Set([
+  // Read — Pipeline
+  'search_accounts',
+  'list_open_tasks',
+  'list_open_opportunities',
+  'describe_schema',
+  'query_db',
+  'read_account_intel',
+  'inspect_opportunity_stages',
+  // Read — documents
+  'list_documents',
+  'search_documents',
+  'read_document',
+  // Read — calendar
+  'get_calendar_events',
+  // Read — WFM
+  'wfm_search',
+  'wfm_get',
+  // Read — Claudia state
+  'read_brief',
+  'list_recent_writes',
+  'get_memory',
+  // Auto-tier writes (already approved for Phase C autonomy)
+  'set_document_category',
+  'set_document_retention',
+  'refresh_brief',
+]);
+
+/**
+ * Build a constrained toolset for the autonomous triage worker.
+ * Returns the same { definitions, execute, permissions } shape as
+ * makeAssistantTools(), but filtered to a safe investigation +
+ * auto-tier surface.
+ *
+ * Defense in depth: even if the model tries to call a tool that
+ * happens to exist in the chat surface but isn't in
+ * WORKER_ALLOWED_TOOLS, execute() short-circuits with an error.
+ */
+export async function makeWorkerTools({ env, user }) {
+  const full = await makeAssistantTools({ env, user });
+  const definitions = full.definitions.filter((d) => WORKER_ALLOWED_TOOLS.has(d.name));
+  const execute = async (name, input) => {
+    if (!WORKER_ALLOWED_TOOLS.has(name)) {
+      return {
+        error: 'tool_not_available_to_worker',
+        tool: name,
+        message: `The "${name}" tool is not in the autonomous worker's allow-list. Available worker tools: ${Array.from(WORKER_ALLOWED_TOOLS).join(', ')}.`,
+      };
+    }
+    return full.execute(name, input);
+  };
+  return { definitions, execute, permissions: full.permissions };
+}
+
 /**
  * Returns the list of all user-visible table names. Used by the system
  * prompt so Claudia always knows what tables exist without spending a

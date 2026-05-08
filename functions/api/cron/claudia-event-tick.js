@@ -376,6 +376,7 @@ export async function onRequestPost(context) {
     questions_inserted: questionsInserted,
     observation_inserted: observationInserted,
     action_summary: actionSummary,
+    tool_calls: decision.tool_calls ?? 0,
     model_error: decision.modelError ?? null,
     usage: decision.usage ?? null,
   });
