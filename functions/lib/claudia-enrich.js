@@ -315,6 +315,12 @@ async function enrichDocument(env, event, userId) {
       .replace(/^(?:re|fwd?|fw|aw):\s*/gi, '') // double pass for "RE: FWD:"
       .trim();
     if (normalized.length >= 3) {
+      // ORDER BY email_date ASC so the model reads the thread in
+      // chronological send order, not in ingest order. Critical for
+      // backlog forwards where Wes might forward an older email AFTER
+      // a newer one — without this sort, the model sees them in the
+      // wrong order and can mis-reason about who said what when.
+      // NULLS LAST handles cases where email parsing failed.
       const threadDocs = await all(
         env.DB,
         `SELECT id, seq, filename, subject, sender_email, sender_name, email_date, category, retention, summary, full_text, created_at
@@ -322,7 +328,8 @@ async function enrichDocument(env, event, userId) {
           WHERE user_id = ? AND id <> ?
             AND subject IS NOT NULL
             AND (LOWER(subject) LIKE LOWER(?) OR LOWER(subject) = LOWER(?))
-          ORDER BY created_at DESC LIMIT 8`,
+          ORDER BY (email_date IS NULL), email_date ASC, created_at ASC
+          LIMIT 8`,
         [userId, doc.id, `%${normalized}%`, normalized]
       );
       for (const d of threadDocs) {
