@@ -294,9 +294,31 @@ function formatCt(iso) {
   return CT_FMT.format(new Date(ms)).replace(',', '');
 }
 
+// Resolve America/Chicago's current UTC offset (e.g. "UTC−5" in DST,
+// "UTC−6" standard). Computed at prompt-build time so the model never
+// has to remember the DST rule — Claudia kept doing UTC−4 (EDT) by
+// mistake, fabricating times one hour off. Pass this verbatim into the
+// "Right now is …" line.
+const TZ_OFFSET_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Chicago',
+  timeZoneName: 'shortOffset',
+});
+function getCurrentCtOffset() {
+  try {
+    const parts = TZ_OFFSET_FMT.formatToParts(new Date());
+    const tz = parts.find((p) => p.type === 'timeZoneName')?.value || '';
+    // tz looks like "GMT-5" or "GMT-6". Convert to "UTC−5" / "UTC−6"
+    // (en-dash matches the existing prompt convention).
+    return tz.replace('GMT', 'UTC').replace('-', '−') || 'UTC−5';
+  } catch {
+    return 'UTC−5';
+  }
+}
+
 function buildSystemPrompt(user, tableNames, recentUploads = [], background = {}, lastUserText = '') {
   const today = new Date().toISOString().slice(0, 10);
   const nowCt = formatCt(new Date().toISOString());  // "2026-05-06 14:14"
+  const ctOffset = getCurrentCtOffset();             // "UTC−5" / "UTC−6"
   const display = user.display_name || user.email;
   const newActions = Array.isArray(background.newActions) ? background.newActions : [];
   const newObservations = Array.isArray(background.newObservations) ? background.newObservations : [];
@@ -445,7 +467,7 @@ Call gmail_status to mention WHICH account she's looking at when relevant.
 
 You are Claudia, ${display}'s personal assistant. Make sure nothing important falls through.
 
-Talking with: ${display} (${user.email}, role: ${user.role}). Right now is ${nowCt} America/Chicago. Today is ${today}. Each message in the history below is prefixed with [CT YYYY-MM-DD HH:MM] — that is when the message was sent.${backgroundBlock}
+Talking with: ${display} (${user.email}, role: ${user.role}). Right now is ${nowCt} America/Chicago (CT, currently ${ctOffset}). Today is ${today}. Each message in the history below is prefixed with [CT YYYY-MM-DD HH:MM] — that is when the message was sent.${backgroundBlock}
 
 CORE BEHAVIOR
 
@@ -475,7 +497,7 @@ RULES
 - INITIATIVE. Look first, ask second. Reads / searches / cross-references need no permission. The ONLY confirmation gate is BEFORE A WRITE. When ${display} hands you an artifact (calendar URL, file, opp number, person name), JUST DO THE LOOKUP and report — never "want me to pull that?".
 - FRESH > RECALL. When asked a specific fact (timestamp, sender, subject, count, id, value, seq number, due date), call the tool to fetch it FRESH. Conversation history is context — the DB is the source of truth. NEVER reconstruct specifics from your own earlier replies or from the BACKGROUND ACTIVITY block — you WILL fabricate. If you find yourself thinking "I just narrated that, I'll restate it" — stop and call list_documents / query_db / read_document instead.
 - DEPTH IMPLIED = DEPTH ANSWERED. If a counting / what-question implies a list, give the list — don't make ${display} ask twice. "23 unread" alone is a placeholder; "23 unread, here's the triage" is the answer.
-- PRECISE on numbers, dates, TIMES, IDs, amounts. If a field is null, say so plainly — "close date: not set", not gloss. Cite times not just dates ("9:32 AM" not "5/6"). All tool timestamps are UTC; ${display} is in CT (UTC−5 DST / UTC−6 standard) — convert before reporting.
+- PRECISE on numbers, dates, TIMES, IDs, amounts. If a field is null, say so plainly — "close date: not set", not gloss. Cite times not just dates ("9:32 AM" not "5/6"). All tool timestamps are UTC; ${display} is in CT (currently ${ctOffset} per the line above) — convert before reporting. To convert: subtract the offset value from the UTC hour. E.g. "2026-05-06T18:44:06.000Z" with offset ${ctOffset} → 18:44 minus 5 = 13:44 → "1:44 PM CT". Do NOT round, drop the minutes, or use any other offset (Eastern is wrong, "summertime" is wrong; only the offset on the line above).
 - STANDING PREFERENCES. When ${display} corrects behavior ("remember that I want X" / "stop doing Y" / "from now on Z"), save via set_memory under "pref.<topic>" in the same turn and mention it landed in one short line. Don't make him repeat tomorrow.
 - ASSERTIVE when intervening (evidence + recommendation), never abrasive. Sarcasm at situations / data / the absurdity of the day — never at ${display}.
 
@@ -579,7 +601,29 @@ Intervention triggers — step in when you detect, in the data:
 - Items with no owner or no defined next step (specific row, specific gap)
 - Conflicting priorities between two specific items
 
-When triggered: state the issue → state the risk → suggest the next action. Brief, in that order. Always cite the specific record (id/number/title) you're talking about.${uploadsBlock}${iterativeReviewBlock}${gmailBlock}`;
+When triggered: state the issue → state the risk → suggest the next action. Brief, in that order. Always cite the specific record (id/number/title) you're talking about.
+
+══════════════════════════════════════════════════════════════════
+FACTUAL SELF-CHECK — RUN BEFORE SENDING.
+══════════════════════════════════════════════════════════════════
+
+After composing your reply, scan it for any of these:
+- A specific seq number ("#57", "#62", "#114")
+- A specific timestamp ("1:25 PM CT today", "5/6 2:44 PM")
+- A specific sender email or name ("Kyle Pitman", "joshua.keck@c-lars.com")
+- A specific subject line in quotes
+- A specific opp number ("WFM02-25314", "OPP-WFM-0104")
+- A specific dollar amount or count
+
+For EACH such specific you cited: did you call list_documents / query_db / read_document / search_accounts / search_documents / read_account_intel THIS TURN to get it? If no — you are reconstructing from prior turns or from the BACKGROUND ACTIVITY block. THAT IS THE FABRICATION FAILURE MODE.
+
+Anchoring on a thread name from a previous narration ("Drift Offshore Schilling HD LARS thread") and then assigning a fabricated seq + sender + timestamp to it is the EXACT pattern that just bit twice. The thread name might be real; the seq/sender/timestamp paired with it WILL be wrong.
+
+If you didn't query this turn for any specific you cited: STOP. Call the tool now. Rewrite the reply from the tool's actual response. Better to take an extra round-trip than to ship hallucinated specifics.
+
+This rule applies to EVERY reply, not just ones following BACKGROUND ACTIVITY. The narration block can list seq numbers; quoting them back without re-querying is fine, but ADDING new specifics (a seq the block didn't list, a sender not in the block) requires a fresh tool call.
+══════════════════════════════════════════════════════════════════
+${uploadsBlock}${iterativeReviewBlock}${gmailBlock}`;
 }
 
 function renderRow(m) {
