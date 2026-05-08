@@ -162,10 +162,22 @@ export async function onRequestGet(context) {
       }
       /* When the active layer paints features by an absolute value
          (e.g. temperature), the legend bar swaps to the matching
-         diverging gradient. JS toggles the modifier class. */
+         spectrum. Stop positions mirror the JS color-scale domain
+         spread across 0–120°F so the bar reads the same as the map. */
       .usmap-legend-bar.diverging-temp {
         background: linear-gradient(to right,
-          #1a3a5c 0%, #5a8db0 25%, #fafaf6 50%, #d68a55 75%, #a02137 100%);
+          #2e0854   0%,    /* 0°F and below — dark purple */
+          #663399   8.33%, /* 10°F — purple */
+          #c8a2c8  16.67%, /* 20°F — light purple */
+          #ffffff  25%,    /* 30°F — white */
+          #add8e6  33.33%, /* 40°F — light blue */
+          #1e90ff  41.67%, /* 50°F — blue */
+          #228b22  50%,    /* 60°F — green */
+          #ffff00  58.33%, /* 70°F — yellow */
+          #ffa500  66.67%, /* 80°F — orange */
+          #ff0000  75%,    /* 90°F — red */
+          #8b0000  83.33%, /* 100°F — dark red */
+          #000000 100%);   /* 120°F+ — black */
       }
       .usmap-legend-key {
         margin-left: 16px;
@@ -402,15 +414,17 @@ function mapScript({ statehood, counties, temperature, stateNames, initialLayer 
         { value: 319, label: 'Nov' },
         { value: 349, label: 'Dec' },
       ],
-      legendMinLabel: '−10°F',
-      legendMaxLabel: '95°F',
+      legendMinLabel: '0°F',
+      legendMaxLabel: '120°F',
       legendNotYet: 'No data',
       legendBarClass: 'diverging-temp',
       playMs: 30,
-      // Diverging color scale stops (must mirror the legend gradient).
+      // 12-stop temperature spectrum. Values below 0°F clamp to dark
+      // purple; values above 120°F clamp to black. Stops are anchored
+      // at every 10°F so the legend bar gradient matches 1:1.
       colorScale: {
-        domain: [-10, 30, 50, 70, 95],
-        range:  ['#1a3a5c', '#5a8db0', '#fafaf6', '#d68a55', '#a02137'],
+        domain: [0,        10,       20,       30,       40,       50,       60,       70,       80,       90,       100,      120     ],
+        range:  ['#2e0854','#663399','#c8a2c8','#ffffff','#add8e6','#1e90ff','#228b22','#ffff00','#ffa500','#ff0000','#8b0000','#000000'],
       },
     },
   };
