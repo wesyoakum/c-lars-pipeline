@@ -3,10 +3,16 @@
 // All AI calls for the AI Inbox feature live here so route handlers stay
 // focused on HTTP concerns and the prompts can be tuned in one place.
 //
-// Three steps:
+// Two steps:
 //   1. transcribe(env, audioBlob)         — OpenAI audio/transcriptions
-//   2. classify(env, transcript)          — Anthropic, returns one of CONTEXT_TYPES
-//   3. extract(env, transcript, ...)      — Anthropic, type-specific JSON extraction
+//   2. extract(env, transcript, ...)      — Anthropic, structured JSON
+//
+// (A v1 classify() step used to sit between transcribe and extract — it
+// picked one of {quick_note, meeting, trade_show, personal_note, other}
+// to load type-specific extraction guidance. process-helpers.js dropped
+// it: extract() handles everything with the generic prompt now, saving
+// one round-trip per item. The contextType param is still threaded
+// through for future re-introduction but every caller passes 'other'.)
 //
 // Audio transcription stays on OpenAI Whisper / gpt-4o-transcribe (best
 // in class for voice). Everything text-shaped runs on Anthropic for better
@@ -21,68 +27,12 @@ import { transcribeAudio } from '../lib/openai.js';
 import { messagesJson, ANTHROPIC_MODELS } from '../lib/anthropic.js';
 import { redactText, unredactJson } from '../lib/ai-redact.js';
 
-export const CONTEXT_TYPES = [
-  'quick_note',
-  'meeting',
-  'trade_show',
-  'personal_note',
-  'other',
-];
-
-const CONTEXT_TYPE_DESCRIPTIONS = {
-  quick_note:
-    'A brief voice memo to self. Tasks, reminders, ideas, observations. Usually short.',
-  meeting:
-    'A 1-on-1 or group meeting (in person, conference room, or Teams/Zoom). Multiple speakers. Decisions, action items, owners.',
-  trade_show:
-    'A short conversation at a trade show or industry event. Person + company + role + need + follow-up.',
-  personal_note:
-    'Personal reflection, journal, study notes, ideas not tied to business. Not a task list.',
-  other:
-    'Anything that does not clearly fit the above categories.',
-};
-
 /**
  * Transcribe an audio file. Thin wrapper over the shared OpenAI client so
  * the AI Inbox pipeline stays self-contained at the call sites.
  */
 export async function transcribe(env, audioBlob, opts = {}) {
   return transcribeAudio(env, audioBlob, opts);
-}
-
-/**
- * Classify a transcript into one of CONTEXT_TYPES. Falls back to 'other'
- * if the model returns something unexpected.
- */
-export async function classify(env, transcript) {
-  const model = env.AI_INBOX_CLASSIFY_MODEL || ANTHROPIC_MODELS.fast;
-
-  const typeList = CONTEXT_TYPES
-    .map((t) => `- ${t}: ${CONTEXT_TYPE_DESCRIPTIONS[t]}`)
-    .join('\n');
-
-  const system = [
-    'You classify a voice transcript into exactly one of these context types:',
-    typeList,
-    '',
-    'Return strict JSON: {"context_type": "<one of the types above>"}.',
-    'No prose, no markdown fences, no additional fields.',
-  ].join('\n');
-
-  // Free-floating note → mode 'full', no name replacements; pricing/PNs
-  // tokenized automatically by redactText.
-  const { text: redactedTranscript } = redactText(transcript.slice(0, 8000), { mode: 'full' });
-
-  const { json } = await messagesJson(env, {
-    model,
-    system,
-    user: redactedTranscript,
-    cacheSystem: true,
-    maxTokens: 64,
-  });
-
-  const type = String(json?.context_type || '').trim().toLowerCase();
-  return CONTEXT_TYPES.includes(type) ? type : 'other';
 }
 
 /**
