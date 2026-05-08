@@ -17,7 +17,10 @@
 import { layout, html, htmlResponse, raw, subnavTabs } from '../lib/layout.js';
 import { STATEHOOD_BY_NAME } from './data/statehood_dates.js';
 import { COUNTY_FOUNDING_BY_FIPS } from './data/county_founding_dates.js';
-import { COUNTY_MONTHLY_TEMPS_F } from './data/county_monthly_temps.js';
+import { COUNTY_MONTHLY_TEMPS_F }   from './data/county_monthly_temps.js';
+import { COUNTY_MONTHLY_HIGHS_F }   from './data/county_monthly_highs.js';
+import { COUNTY_MONTHLY_LOWS_F }    from './data/county_monthly_lows.js';
+import { COUNTY_MONTHLY_PRECIP_IN } from './data/county_monthly_precip.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 
@@ -64,7 +67,8 @@ export async function onRequestGet(context) {
   // routes). Defaults to statehood.
   const url = new URL(context.request.url);
   const layerParam = url.searchParams.get('layer');
-  const initialLayer = ['counties', 'temperature'].includes(layerParam) ? layerParam : 'statehood';
+  const VALID_LAYERS = ['counties', 'temperature', 'high', 'low', 'precipitation'];
+  const initialLayer = VALID_LAYERS.includes(layerParam) ? layerParam : 'statehood';
 
   const body = html`
     <style>
@@ -179,6 +183,18 @@ export async function onRequestGet(context) {
           #8b0000  83.33%, /* 100°F — dark red */
           #000000 100%);   /* 120°F+ — black */
       }
+      .usmap-legend-bar.precipitation {
+        background: linear-gradient(to right,
+          #fafaf6   0%,   /* 0"     — off-white, dry */
+          #ffeeb8   5%,   /* 1"     — pale yellow */
+          #c5e08f  10%,   /* 2"     — pale green */
+          #66c060  20%,   /* 4"     — green */
+          #2eb3b3  30%,   /* 6"     — teal */
+          #2d80c4  45%,   /* 9"     — medium blue */
+          #2050a0  60%,   /* 12"    — dark blue */
+          #2c1f6d  80%,   /* 16"    — deep blue */
+          #4b1d80 100%);  /* 20"+   — purple */
+      }
       .usmap-legend-key {
         margin-left: 16px;
         display: flex;
@@ -257,9 +273,12 @@ export async function onRequestGet(context) {
 
       <div class="usmap-layer-row" role="tablist" aria-label="Map layer">
         <span class="label">Layer</span>
-        <button class="usmap-layer-btn" data-layer="statehood"   type="button">Statehood</button>
-        <button class="usmap-layer-btn" data-layer="counties"    type="button">Counties</button>
-        <button class="usmap-layer-btn" data-layer="temperature" type="button">Temperature</button>
+        <button class="usmap-layer-btn" data-layer="statehood"     type="button">Statehood</button>
+        <button class="usmap-layer-btn" data-layer="counties"      type="button">Counties</button>
+        <button class="usmap-layer-btn" data-layer="temperature"   type="button">Avg Temp</button>
+        <button class="usmap-layer-btn" data-layer="high"          type="button">Daily High</button>
+        <button class="usmap-layer-btn" data-layer="low"           type="button">Daily Low</button>
+        <button class="usmap-layer-btn" data-layer="precipitation" type="button">Rainfall</button>
       </div>
 
       <div class="usmap-card">
@@ -299,6 +318,9 @@ export async function onRequestGet(context) {
       statehood: STATEHOOD_BY_NAME,
       counties: COUNTY_FOUNDING_BY_FIPS,
       temperature: COUNTY_MONTHLY_TEMPS_F,
+      highs: COUNTY_MONTHLY_HIGHS_F,
+      lows: COUNTY_MONTHLY_LOWS_F,
+      precip: COUNTY_MONTHLY_PRECIP_IN,
       stateNames: STATE_NAME_BY_FIPS,
       initialLayer,
     }))}</script>
@@ -311,12 +333,15 @@ export async function onRequestGet(context) {
 // above. Returned as a plain string (injected via raw()) so the JS
 // can use ${...} in template literals without colliding with the
 // outer html`...` template literal.
-function mapScript({ statehood, counties, temperature, stateNames, initialLayer }) {
+function mapScript({ statehood, counties, temperature, highs, lows, precip, stateNames, initialLayer }) {
   return `
 (function() {
   var STATEHOOD = ${JSON.stringify(statehood)};
   var COUNTIES  = ${JSON.stringify(counties)};
   var TEMPS     = ${JSON.stringify(temperature)};
+  var HIGHS     = ${JSON.stringify(highs)};
+  var LOWS      = ${JSON.stringify(lows)};
+  var PRECIP    = ${JSON.stringify(precip)};
   var STATE_NAMES = ${JSON.stringify(stateNames)};
   var INITIAL_LAYER = ${JSON.stringify(initialLayer)};
 
@@ -327,6 +352,23 @@ function mapScript({ statehood, counties, temperature, stateNames, initialLayer 
     var state = STATE_NAMES[fips.slice(0, 2)] || '';
     return state ? (name + ', ' + state) : name;
   }
+
+  // Day-of-year quick-jump positions for instant-day layers (mid-month
+  // anchors so each button lands on the central day of its month).
+  var MONTH_QUICK_JUMPS = [
+    { value: 15,  label: 'Jan' },
+    { value: 46,  label: 'Feb' },
+    { value: 75,  label: 'Mar' },
+    { value: 105, label: 'Apr' },
+    { value: 135, label: 'May' },
+    { value: 166, label: 'Jun' },
+    { value: 196, label: 'Jul' },
+    { value: 227, label: 'Aug' },
+    { value: 258, label: 'Sep' },
+    { value: 288, label: 'Oct' },
+    { value: 319, label: 'Nov' },
+    { value: 349, label: 'Dec' },
+  ];
 
   // Layer config — the platform's plug-in surface. Each entry has a
   // 'type' that picks which render strategy to use:
@@ -395,36 +437,112 @@ function mapScript({ statehood, counties, temperature, stateNames, initialLayer 
       objectName: 'counties',
       featureClass: 'counties',
       keyOf: function(d) { return String(d.id).padStart(5, '0'); },
-      data: TEMPS,  // { fips: [Jan..Dec °F] }
+      data: TEMPS,
       tooltipTitle: countyTitle,
+      tooltipFormat: function(v, dateLabel) { return v.toFixed(1) + '°F on ' + dateLabel; },
+      countFormat: function(avg, n) {
+        return { value: avg.toFixed(1) + '°F', label: 'national average across ' + n.toLocaleString() + ' counties' };
+      },
       drawStateOverlay: true,
       sliderMin: 1, sliderMax: 366, sliderStep: 1,
-      sliderInitial: 196,  // Jul 15 — peak summer for visual impact on first load
-      quickJumps: [
-        { value: 15,  label: 'Jan' },
-        { value: 46,  label: 'Feb' },
-        { value: 75,  label: 'Mar' },
-        { value: 105, label: 'Apr' },
-        { value: 135, label: 'May' },
-        { value: 166, label: 'Jun' },
-        { value: 196, label: 'Jul' },
-        { value: 227, label: 'Aug' },
-        { value: 258, label: 'Sep' },
-        { value: 288, label: 'Oct' },
-        { value: 319, label: 'Nov' },
-        { value: 349, label: 'Dec' },
-      ],
+      sliderInitial: 196,
+      quickJumps: MONTH_QUICK_JUMPS,
       legendMinLabel: '0°F',
       legendMaxLabel: '120°F',
       legendNotYet: 'No data',
       legendBarClass: 'diverging-temp',
       playMs: 30,
-      // 12-stop temperature spectrum. Values below 0°F clamp to dark
-      // purple; values above 120°F clamp to black. Stops are anchored
-      // at every 10°F so the legend bar gradient matches 1:1.
       colorScale: {
         domain: [0,        10,       20,       30,       40,       50,       60,       70,       80,       90,       100,      120     ],
         range:  ['#2e0854','#663399','#c8a2c8','#ffffff','#b8dff0','#7eb5d8','#91c98f','#ffff00','#ffa500','#ff0000','#8b0000','#000000'],
+      },
+    },
+    high: {
+      type: 'instant-day',
+      title: 'U.S. Daily High Temperature',
+      subtitle: '1991-2020 climate normals (NOAA climdiv-tmaxcy) — average daily maximum.',
+      topojsonUrl: 'https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json',
+      objectName: 'counties',
+      featureClass: 'counties',
+      keyOf: function(d) { return String(d.id).padStart(5, '0'); },
+      data: HIGHS,
+      tooltipTitle: countyTitle,
+      tooltipFormat: function(v, dateLabel) { return 'high ' + v.toFixed(1) + '°F on ' + dateLabel; },
+      countFormat: function(avg, n) {
+        return { value: avg.toFixed(1) + '°F', label: 'national avg daily high across ' + n.toLocaleString() + ' counties' };
+      },
+      drawStateOverlay: true,
+      sliderMin: 1, sliderMax: 366, sliderStep: 1,
+      sliderInitial: 196,
+      quickJumps: MONTH_QUICK_JUMPS,
+      legendMinLabel: '0°F',
+      legendMaxLabel: '120°F',
+      legendNotYet: 'No data',
+      legendBarClass: 'diverging-temp',
+      playMs: 30,
+      colorScale: {
+        domain: [0,        10,       20,       30,       40,       50,       60,       70,       80,       90,       100,      120     ],
+        range:  ['#2e0854','#663399','#c8a2c8','#ffffff','#b8dff0','#7eb5d8','#91c98f','#ffff00','#ffa500','#ff0000','#8b0000','#000000'],
+      },
+    },
+    low: {
+      type: 'instant-day',
+      title: 'U.S. Daily Low Temperature',
+      subtitle: '1991-2020 climate normals (NOAA climdiv-tmincy) — average daily minimum.',
+      topojsonUrl: 'https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json',
+      objectName: 'counties',
+      featureClass: 'counties',
+      keyOf: function(d) { return String(d.id).padStart(5, '0'); },
+      data: LOWS,
+      tooltipTitle: countyTitle,
+      tooltipFormat: function(v, dateLabel) { return 'low ' + v.toFixed(1) + '°F on ' + dateLabel; },
+      countFormat: function(avg, n) {
+        return { value: avg.toFixed(1) + '°F', label: 'national avg daily low across ' + n.toLocaleString() + ' counties' };
+      },
+      drawStateOverlay: true,
+      sliderMin: 1, sliderMax: 366, sliderStep: 1,
+      sliderInitial: 15,  // Jan 15 on initial load — coldest band shows the layer's character
+      quickJumps: MONTH_QUICK_JUMPS,
+      legendMinLabel: '0°F',
+      legendMaxLabel: '120°F',
+      legendNotYet: 'No data',
+      legendBarClass: 'diverging-temp',
+      playMs: 30,
+      colorScale: {
+        domain: [0,        10,       20,       30,       40,       50,       60,       70,       80,       90,       100,      120     ],
+        range:  ['#2e0854','#663399','#c8a2c8','#ffffff','#b8dff0','#7eb5d8','#91c98f','#ffff00','#ffa500','#ff0000','#8b0000','#000000'],
+      },
+    },
+    precipitation: {
+      type: 'instant-day',
+      title: 'U.S. Average Rainfall',
+      subtitle: '1991-2020 climate normals (NOAA climdiv-pcpncy). Smoothly interpolated monthly totals (inches).',
+      topojsonUrl: 'https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json',
+      objectName: 'counties',
+      featureClass: 'counties',
+      keyOf: function(d) { return String(d.id).padStart(5, '0'); },
+      data: PRECIP,
+      tooltipTitle: countyTitle,
+      tooltipFormat: function(v, dateLabel) { return v.toFixed(2) + '" near ' + dateLabel; },
+      countFormat: function(avg, n) {
+        return { value: avg.toFixed(2) + '"', label: 'national avg inches/month across ' + n.toLocaleString() + ' counties' };
+      },
+      drawStateOverlay: true,
+      sliderMin: 1, sliderMax: 366, sliderStep: 1,
+      sliderInitial: 105,  // Apr 15 — typical wet spring
+      quickJumps: MONTH_QUICK_JUMPS,
+      legendMinLabel: '0"',
+      legendMaxLabel: '20"+',
+      legendNotYet: 'No data',
+      legendBarClass: 'precipitation',
+      playMs: 30,
+      // White-to-purple precipitation gradient anchored at typical
+      // monthly rainfall thresholds. Anything ≥ 20" of monthly rain
+      // clamps to deep purple — already saturating in places like the
+      // PNW and parts of Hawaii.
+      colorScale: {
+        domain: [0,        1,        2,        4,        6,        9,        12,       16,       20      ],
+        range:  ['#fafaf6','#ffeeb8','#c5e08f','#66c060','#2eb3b3','#2d80c4','#2050a0','#2c1f6d','#4b1d80'],
       },
     },
   };
@@ -605,8 +723,7 @@ function mapScript({ statehood, counties, temperature, stateNames, initialLayer 
       var monthly = cfg.data[key];
       var doy = +document.getElementById('usmap-slider').value;
       var t = monthly ? interpDaily(monthly, doy) : null;
-      var line = (t == null) ? '—'
-        : (Math.round(t * 10) / 10).toFixed(1) + '°F on ' + doyToDateLabel(doy);
+      var line = (t == null) ? '—' : cfg.tooltipFormat(t, doyToDateLabel(doy));
       return '<strong>' + title + '</strong><span class="y">' + line + '</span>';
     }
     return '<strong>' + title + '</strong>';
@@ -655,11 +772,15 @@ function mapScript({ statehood, counties, temperature, stateNames, initialLayer 
           sumT += t;
           nT += 1;
         });
-      var avg = nT > 0 ? Math.round((sumT / nT) * 10) / 10 : null;
-      document.getElementById('usmap-count').textContent =
-        avg != null ? (avg.toFixed(1) + '°F') : '—';
-      document.getElementById('usmap-count-label').textContent =
-        'national average across ' + nT.toLocaleString() + ' counties';
+      if (nT > 0) {
+        var avg = sumT / nT;
+        var fmt = cfg.countFormat(avg, nT);
+        document.getElementById('usmap-count').textContent = fmt.value;
+        document.getElementById('usmap-count-label').textContent = fmt.label;
+      } else {
+        document.getElementById('usmap-count').textContent = '—';
+        document.getElementById('usmap-count-label').textContent = '';
+      }
       return;
     }
   }
