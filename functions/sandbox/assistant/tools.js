@@ -261,7 +261,7 @@ export async function makeAssistantTools({ env, user }) {
       description:
         'Create a new contact under an existing account. Required: account_id, last_name (or first_name). ' +
         'Optional: first_name, email, phone, mobile, title, notes, is_primary. Returns the new ' +
-        'contact id and an audit_id you should surface to the user so they can undo within 24h. ' +
+        'contact id and an audit_id you should surface to the user so they can undo within 72h. ' +
         'NEVER call this without explicit user confirmation. For batch flows (e.g. importing 12 ' +
         'contacts from a CSV) call it once per row, but only after the user has approved the batch ' +
         '("yes, create these"). Pass batch_id to group multiple writes so undo_claudia_write can ' +
