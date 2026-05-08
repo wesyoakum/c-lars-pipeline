@@ -19,21 +19,25 @@
 
 import { all, one } from './db.js';
 
-// Compact row shapes — drop columns the model doesn't need to keep
-// the prompt small. Each helper returns the keys we want surfaced.
+// Compact row shapes — drop columns the model doesn't need, but send
+// the FULL email body (capped only as a safety net against pathological
+// 1 MB+ outliers). Per Wes's directive: every email in cross-reference
+// gets its full body so the model can reason about actual contents,
+// not hedge from snippets. Sonnet's 200 K-token input window absorbs
+// even 6–8 long threads comfortably.
 //
-// Two doc variants:
-//   - principalDoc(d): the doc the event is ABOUT. Send full_text so
-//     the model can reason about its actual contents instead of
-//     hedging from a 240-char snippet. Capped at 60 KB as a safety
-//     net for the long-tail case (huge thread with quoted history) —
-//     rare emails hit this; most are <10 KB.
-//   - compactDoc(d): sibling/related doc surfaced via cross-reference.
-//     Send a 2 KB preview — enough to know what each is about
-//     without blowing up the prompt when there are 6–8 siblings.
+// Two variants share the cap; principalDoc carries a couple of extra
+// metadata fields (email_date, summary) that aren't worth shipping for
+// every sibling.
 
-const PRINCIPAL_TEXT_CAP = 60 * 1024;   // 60 KB (~15 K tokens)
-const SIBLING_TEXT_CAP   = 2 * 1024;    // 2 KB
+const DOC_TEXT_CAP = 150 * 1024;   // 150 KB (~37 K tokens) — effectively "all of every email" in 99.9% of cases.
+
+function clampText(s) {
+  if (!s) return null;
+  const str = String(s);
+  if (str.length <= DOC_TEXT_CAP) return str;
+  return str.slice(0, DOC_TEXT_CAP) + `\n[... ${str.length - DOC_TEXT_CAP} more chars truncated ...]`;
+}
 
 function principalDoc(d) {
   if (!d) return null;
@@ -49,11 +53,7 @@ function principalDoc(d) {
     category: d.category ?? null,
     retention: d.retention ?? null,
     summary: d.summary ?? null,
-    full_text: fullText
-      ? (fullText.length > PRINCIPAL_TEXT_CAP
-          ? fullText.slice(0, PRINCIPAL_TEXT_CAP) + `\n[... ${fullText.length - PRINCIPAL_TEXT_CAP} more chars truncated ...]`
-          : fullText)
-      : null,
+    full_text: clampText(fullText),
     full_text_chars: fullText ? fullText.length : 0,
     created_at: d.created_at,
   };
@@ -69,9 +69,11 @@ function compactDoc(d) {
     subject: d.subject ?? null,
     sender_email: d.sender_email ?? null,
     sender_name: d.sender_name ?? null,
+    email_date: d.email_date ?? null,
     category: d.category ?? null,
     retention: d.retention ?? null,
-    snippet: d.summary || (fullText ? fullText.slice(0, SIBLING_TEXT_CAP) : null),
+    full_text: clampText(fullText),
+    full_text_chars: fullText ? fullText.length : 0,
     created_at: d.created_at,
   };
 }
