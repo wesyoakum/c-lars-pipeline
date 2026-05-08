@@ -152,6 +152,12 @@ export const PERMISSION_GATED_ACTIONS_CATALOG = [
     label: 'Add an action to the triage queue',
     description: 'Insert a new claudia_actions row when Wes dictates a todo in chat ("remind me to make Stacy\'s birthday reservations", "add a follow-up with Bob to the Hot list", "I need to circle back on the Acme RFQ"). Does NOT execute anything — the action lands in the queue with proposed_action=null and Wes marks it Done when he completes it. Source attribution: source_kind=\'self\' (or \'chat\') and raised_by=\'wes\'. Quadrant defaults to plan unless Claudia infers otherwise.',
   },
+  {
+    action: 'replay_pending_events',
+    category: 'triage',
+    label: 'Re-queue undispatched Claudia events',
+    description: 'Operational tool. Walks claudia_events_pending for the user, finds rows with dispatched_at=NULL, re-publishes each to the cf-claudia-events queue so the consumer worker re-processes them. Useful when (a) events piled up during a worker outage / Access misconfig, or (b) the prompt or enrichment changed and old events should be re-evaluated against the new logic. Does NOT duplicate D1 rows — only re-publishes the queue side. Returns counts.',
+  },
   // account / contact merging (consolidate duplicate rows)
   {
     action: 'merge_accounts',

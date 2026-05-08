@@ -971,6 +971,32 @@ export async function makeAssistantTools({ env, user }) {
       },
     },
     {
+      name: 'replay_pending_events',
+      description:
+        'Operational tool. Re-publishes claudia_events_pending rows whose dispatched_at is NULL ' +
+        'to the cf-claudia-events queue, so the consumer worker re-processes them. Returns counts. ' +
+        'Use when (a) events piled up during a worker / Access outage, or (b) the prompt or ' +
+        'enrichment logic just changed and ${display} wants the recent events re-evaluated under ' +
+        'the new behavior. The chat tool returns immediately; actual processing happens in the ' +
+        'background via the queue, so ${display} should refresh /sandbox/assistant after ~30s ' +
+        'to see results. Does NOT duplicate D1 rows — only re-publishes the queue side. ' +
+        'When ${display} says "rerun those events" / "process the pending queue" / "re-evaluate ' +
+        'the recent emails," call this tool.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          limit: {
+            type: 'integer',
+            description: 'Max events to re-queue this turn. Default 25, hard cap 50.',
+          },
+          event_id: {
+            type: 'string',
+            description: 'Optional specific event id to re-queue. If set, limit is ignored and only this single event is published.',
+          },
+        },
+      },
+    },
+    {
       name: 'undo_claudia_write',
       description:
         'Reverse a previous Claudia write within the 24-hour undo window. For a CREATE: deletes ' +
@@ -1214,6 +1240,8 @@ export async function makeAssistantTools({ env, user }) {
         return notifyWes(env, user, input);
       case 'set_action':
         return setAction(env, user, input);
+      case 'replay_pending_events':
+        return replayPendingEvents(env, user, input);
       case 'undo_claudia_write':
         return undoClaudiaWrite(env, user, input);
       case 'list_recent_writes':
@@ -2680,6 +2708,84 @@ async function setAction(env, user, input = {}) {
     quadrant,
     due_at: dueAt,
     summary: `Added to ${quadrant.toUpperCase()}: "${title.length > 60 ? title.slice(0, 57) + '...' : title}"`,
+  };
+}
+
+async function replayPendingEvents(env, user, { limit, event_id } = {}) {
+  if (!env?.CLAUDIA_EVENTS?.send) {
+    return {
+      ok: false,
+      error: 'queue_unavailable',
+      message: 'CLAUDIA_EVENTS queue binding is not configured on this Pages deployment.',
+    };
+  }
+
+  let rows;
+  if (event_id) {
+    rows = await all(
+      env.DB,
+      `SELECT id, type, ref_id, summary
+         FROM claudia_events_pending
+        WHERE user_id = ? AND id = ? AND dispatched_at IS NULL`,
+      [user.id, String(event_id)]
+    );
+    if (rows.length === 0) {
+      return {
+        ok: false,
+        error: 'event_not_found',
+        message: `No undispatched event with id ${event_id} for this user.`,
+      };
+    }
+  } else {
+    const cap = Math.min(Math.max(Number(limit) || 25, 1), 50);
+    rows = await all(
+      env.DB,
+      `SELECT id, type, ref_id, summary
+         FROM claudia_events_pending
+        WHERE user_id = ? AND dispatched_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT ?`,
+      [user.id, cap]
+    );
+  }
+
+  if (rows.length === 0) {
+    return {
+      ok: true,
+      queued: 0,
+      message: 'No undispatched events found — nothing to replay.',
+    };
+  }
+
+  const ts = now();
+  let queued = 0;
+  const failures = [];
+  for (const ev of rows) {
+    try {
+      await env.CLAUDIA_EVENTS.send({
+        event_id: ev.id,
+        type: ev.type,
+        ref_id: ev.ref_id,
+        summary: ev.summary,
+        user_id: user.id,
+        sent_at: ts,
+        replay: true,
+      });
+      queued++;
+    } catch (err) {
+      failures.push({ event_id: ev.id, error: err?.message || String(err) });
+    }
+  }
+
+  return {
+    ok: queued > 0,
+    queued,
+    total_undispatched: rows.length,
+    failures: failures.length ? failures : undefined,
+    summary:
+      `Re-queued ${queued} of ${rows.length} pending event${rows.length === 1 ? '' : 's'}. ` +
+      `The consumer worker will re-process them in the background. ` +
+      `Refresh /sandbox/assistant in ~30 seconds to see the results.`,
   };
 }
 
