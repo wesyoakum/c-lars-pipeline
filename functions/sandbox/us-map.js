@@ -289,9 +289,15 @@ export async function onRequestGet(context) {
       .usmap-count-display strong { color: #1a3a5c; }
 
       .usmap-slider-row { display: flex; align-items: center; gap: 12px; }
+      .usmap-slider-row.hidden { display: none; }
+      .usmap-slider-row + .usmap-slider-row-2 { margin-top: 8px; }
       .usmap-slider-row input[type=range] { flex: 1; height: 6px; }
       .usmap-slider-bounds { font-size: 12px; color: #888; min-width: 44px; }
       .usmap-slider-bounds.right { text-align: right; }
+      .usmap-slider-label {
+        font-size: 12px; color: #555; font-weight: 600;
+        min-width: 44px;
+      }
 
       .usmap-button-row { margin-top: 12px; display: flex; gap: 8px; flex-wrap: wrap; }
       .usmap-button-row button {
@@ -390,10 +396,19 @@ export async function onRequestGet(context) {
       <div class="usmap-controls">
         <div class="usmap-year-display" id="usmap-year">—</div>
         <div class="usmap-count-display"><strong id="usmap-count">0</strong> <span id="usmap-count-label">—</span></div>
-        <div class="usmap-slider-row">
+        <div class="usmap-slider-row" id="usmap-slider-row">
+          <span class="usmap-slider-label" id="usmap-slider-prefix"></span>
           <span class="usmap-slider-bounds" id="usmap-slider-min">—</span>
           <input type="range" id="usmap-slider" min="0" max="1" value="0" step="1">
           <span class="usmap-slider-bounds right" id="usmap-slider-max">—</span>
+        </div>
+        <!-- Second slider only shown for the cities layer (population
+             window's upper bound). -->
+        <div class="usmap-slider-row usmap-slider-row-2 hidden" id="usmap-slider2-row">
+          <span class="usmap-slider-label">Max ≤</span>
+          <span class="usmap-slider-bounds" id="usmap-slider2-min">—</span>
+          <input type="range" id="usmap-slider2" min="0" max="1" value="1" step="1">
+          <span class="usmap-slider-bounds right" id="usmap-slider2-max">—</span>
         </div>
         <div class="usmap-button-row">
           <button id="usmap-play">▶ Play</button>
@@ -919,6 +934,15 @@ function mapScript({
     var hasSlider = cfg.type !== 'static';
     controlsEl.classList.toggle('no-slider', !hasSlider);
 
+    // The second slider is only used by point-symbols layers (cities)
+    // to put an upper bound on the population window.
+    var slider2Row = document.getElementById('usmap-slider2-row');
+    var slider2 = document.getElementById('usmap-slider2');
+    var sliderPrefix = document.getElementById('usmap-slider-prefix');
+    var hasMaxSlider = cfg.type === 'point-symbols';
+    slider2Row.classList.toggle('hidden', !hasMaxSlider);
+    sliderPrefix.textContent = hasMaxSlider ? 'Min ≥' : '';
+
     var slider = document.getElementById('usmap-slider');
     if (hasSlider) {
       slider.min = cfg.sliderMin;
@@ -928,12 +952,22 @@ function mapScript({
 
       document.getElementById('usmap-slider-min').textContent =
         cfg.type === 'instant-day' ? doyToDateLabel(cfg.sliderMin)
-        : cfg.type === 'point-symbols' ? '≥ 100'
+        : cfg.type === 'point-symbols' ? '100'
         : String(cfg.sliderMin);
       document.getElementById('usmap-slider-max').textContent =
         cfg.type === 'instant-day' ? doyToDateLabel(cfg.sliderMax)
-        : cfg.type === 'point-symbols' ? '≥ 10M'
+        : cfg.type === 'point-symbols' ? '10M'
         : String(cfg.sliderMax);
+
+      if (hasMaxSlider) {
+        slider2.min = cfg.sliderMin;
+        slider2.max = cfg.sliderMax;
+        slider2.step = cfg.sliderStep || 1;
+        // Default upper bound = slider's max (no cap until user moves it).
+        slider2.value = cfg.sliderMax;
+        document.getElementById('usmap-slider2-min').textContent = '100';
+        document.getElementById('usmap-slider2-max').textContent = '10M';
+      }
 
       // Quick-jump buttons.
       var btnHost = document.getElementById('usmap-year-buttons');
@@ -1225,19 +1259,22 @@ function mapScript({
     }
 
     if (cfg.type === 'point-symbols') {
-      // Slider value is log10(threshold). Filter circles by pop.
-      var threshold = Math.pow(10, sliderVal);
+      // Slider value is log10(threshold). Filter circles by population
+      // window — between minPop (slider 1) and maxPop (slider 2).
+      var minPop = Math.pow(10, sliderVal);
+      var s2 = document.getElementById('usmap-slider2');
+      var maxPop = Math.pow(10, +s2.value);
+      // Guard against the user dragging max below min — interpret as
+      // "no upper bound" so the map doesn't go blank surprisingly.
+      if (maxPop < minPop) maxPop = Infinity;
       document.getElementById('usmap-year').textContent =
-        '≥ ' + (threshold >= 1e6 ? (threshold/1e6).toFixed(1)+'M' : threshold >= 1000 ? Math.round(threshold/1000)+'k' : Math.round(threshold));
+        formatPop(minPop) + ' - ' + (Number.isFinite(maxPop) ? formatPop(maxPop) : '∞');
       var visible = 0;
       svg.selectAll('circle.usmap-city')
         .each(function(d) {
           var sel = d3.select(this);
-          if (d.city.pop >= threshold) {
+          if (d.city.pop >= minPop && d.city.pop <= maxPop) {
             sel.style('display', null);
-            // Radius scales with sqrt of population (so area is
-            // proportional to people). 1M pop → r≈10; 100k → r≈3.2;
-            // 10k → r≈1; 1k → r≈0.32.
             var r = Math.max(1, Math.sqrt(d.city.pop) * 0.012);
             sel.attr('r', r);
             visible++;
@@ -1246,15 +1283,27 @@ function mapScript({
           }
         });
       document.getElementById('usmap-count').textContent = visible.toLocaleString();
-      document.getElementById('usmap-count-label').textContent = 'cities visible at this threshold';
+      document.getElementById('usmap-count-label').textContent = 'cities in this population window';
       return;
     }
+  }
+
+  function formatPop(p) {
+    if (p >= 1e6) return (p/1e6).toFixed(1) + 'M';
+    if (p >= 1000) return Math.round(p/1000) + 'k';
+    return Math.round(p).toString();
   }
 
   // Slider listens once globally; current min/max get updated on
   // layer change.
   var slider = document.getElementById('usmap-slider');
   slider.addEventListener('input', function(e) { update(+e.target.value); });
+
+  // Second slider (max population for cities). Re-runs update() with
+  // the primary slider's current value; update() reads slider2's
+  // value internally for point-symbols layers.
+  var slider2 = document.getElementById('usmap-slider2');
+  slider2.addEventListener('input', function() { update(+slider.value); });
 
   // Play / pause. For instant-day layers the play loop wraps at the
   // year boundary instead of stopping, so the temperature animation
