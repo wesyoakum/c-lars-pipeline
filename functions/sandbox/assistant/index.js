@@ -629,11 +629,11 @@ export async function onRequestGet(context) {
            padding; restore real edges on phones so the chat panel
            isn't kissing the screen edge. */
         .assistant-layout {
-          padding: 0 0.75rem;
+          padding: 0 1rem;
           gap: 0.5rem;
         }
         .assistant-layout .assistant-wrap {
-          padding: 0.5rem 0.25rem;
+          padding: 0.5rem 0.5rem;
         }
         .claudia-obs-panel { padding: 0 0.4rem; }
         .claudia-obs {
@@ -650,8 +650,8 @@ export async function onRequestGet(context) {
         /* Chat bubbles on phone — leave a clear off-side gap so user
            and assistant bubbles read as distinct columns instead of
            one full-width wall. */
-        .assistant-msg { max-width: 88%; font-size: 15px; padding: 0.6rem 0.85rem; }
-        .assistant-msg.assistant { max-width: 90%; }
+        .assistant-msg { max-width: 80%; font-size: 15px; padding: 0.6rem 0.85rem; }
+        .assistant-msg.assistant { max-width: 82%; }
         /* Copy buttons should stay accessible without hover-only fade
            (no hover on touch). */
         .assistant-msg-copy {
