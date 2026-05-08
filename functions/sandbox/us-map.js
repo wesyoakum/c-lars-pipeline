@@ -134,6 +134,30 @@ export async function onRequestGet(context) {
         background: #1a3a5c; color: #fff; border-color: #1a3a5c;
       }
 
+      .usmap-layer-row-spacer { flex: 1; min-width: 12px; }
+      .usmap-toggle-btn {
+        padding: 7px 14px;
+        border: 1px solid #ccc;
+        background: #fafaf6;
+        border-radius: 4px;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.15s;
+      }
+      .usmap-toggle-btn:hover { background: #ebebe2; border-color: #999; }
+      .usmap-toggle-btn[aria-pressed="true"] {
+        background: #6d4c41; color: #fff; border-color: #6d4c41;
+      }
+
+      /* Faint terrain backdrop drawn underneath the active layer when
+         the underlay toggle is on. Built from the county elevation
+         chloropleth at low opacity so the active layer reads on top. */
+      .usmap-underlay-county {
+        stroke: none;
+        pointer-events: none;
+        opacity: 0.35;
+      }
+
       .usmap-card {
         background: #fff;
         padding: 16px;
@@ -394,6 +418,8 @@ export async function onRequestGet(context) {
         <button class="usmap-layer-btn" data-layer="cities"        type="button">Cities</button>
         <button class="usmap-layer-btn" data-layer="msaIncome"     type="button">MSA Income</button>
         <button class="usmap-layer-btn" data-layer="msaHomeValue"  type="button">MSA Home Value</button>
+        <span class="usmap-layer-row-spacer"></span>
+        <button class="usmap-toggle-btn" id="usmap-underlay-btn" type="button" aria-pressed="false" title="Show / hide a faint terrain underlay (county elevations)">Terrain underlay</button>
       </div>
 
       <div class="usmap-card">
@@ -982,6 +1008,38 @@ function mapScript({
   var playing = false;
   var playTimer = null;
 
+  // Terrain underlay state (toggled by the button at the right of the
+  // layer row). When on, the active layer's features render on top of
+  // a low-opacity county-elevation chloropleth so you can read both
+  // the data and the rough topography at the same time.
+  var underlayOn = false;
+  var TERRAIN_DOMAIN = [0, 500, 1500, 3000, 4500, 6500, 9000, 12000];
+  var TERRAIN_RANGE  = ['#1b5e20','#66bb6a','#c5e1a5','#fff8a1','#d4a373','#8b5a2b','#b8b8b8','#ffffff'];
+  var terrainScale = d3.scaleLinear().domain(TERRAIN_DOMAIN).range(TERRAIN_RANGE).clamp(true);
+
+  function renderUnderlay() {
+    if (!underlayOn) return;
+    loadTopo('https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json').then(function(us) {
+      var counties = topojson.feature(us, us.objects.counties).features.filter(function(d) {
+        var p = path(d);
+        return p != null && p !== '';
+      });
+      // Insert underlay paths at the start so they paint behind everything else.
+      var g = svg.insert('g', ':first-child').attr('class', 'usmap-underlay');
+      g.selectAll('path.usmap-underlay-county')
+        .data(counties)
+        .enter()
+        .append('path')
+        .attr('class', 'usmap-underlay-county')
+        .attr('d', path)
+        .attr('fill', function(d) {
+          var fips = String(d.id).padStart(5, '0');
+          var elev = ELEVATION[fips];
+          return elev != null ? terrainScale(elev) : '#e8e8e0';
+        });
+    });
+  }
+
   function activate(layerKey) {
     if (currentLayer && currentLayer.key === layerKey) return;
     stopPlay();
@@ -1074,6 +1132,9 @@ function mapScript({
 
     // Wipe previous layer's SVG content before redrawing.
     svg.selectAll('*').remove();
+    // Optional terrain underlay drawn first so the active layer paints
+    // on top. Cheap to skip when the toggle is off.
+    renderUnderlay();
 
     if (cfg.type === 'point-symbols') {
       renderPointSymbols(cfg, +slider.value);
@@ -1441,6 +1502,21 @@ function mapScript({
       window.history.replaceState(null, '', u.toString());
     });
   });
+
+  // Terrain underlay toggle. Re-runs activate() so the underlay either
+  // appears or vanishes from underneath the current layer.
+  var underlayBtn = document.getElementById('usmap-underlay-btn');
+  if (underlayBtn) {
+    underlayBtn.addEventListener('click', function() {
+      underlayOn = !underlayOn;
+      underlayBtn.setAttribute('aria-pressed', underlayOn ? 'true' : 'false');
+      // Re-run activate() to redraw with/without underlay. Force the
+      // currentLayer guard to miss by clearing it first.
+      var key = currentLayer && currentLayer.key;
+      currentLayer = null;
+      if (key) activate(key);
+    });
+  }
 
   // Boot.
   activate(INITIAL_LAYER);
