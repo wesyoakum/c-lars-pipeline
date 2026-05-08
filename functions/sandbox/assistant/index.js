@@ -1094,6 +1094,66 @@ export async function onRequestGet(context) {
         }
         recomputeSoon();
 
+        // ---- Proactive welcome-back ----
+        // Three triggers fire POST /sandbox/assistant/welcome-back:
+        //   1. Page load — initial visit / refresh
+        //   2. visibilitychange → visible — tab return after being hidden
+        //   3. 90s polling timer while tab is visible — live updates
+        // Endpoint returns 200 + an assistant bubble HTML if anything is
+        // new since last_active_at, or 204 if nothing new. The bubble is
+        // appended to #assistant-messages.
+        let welcomeBackInFlight = false;
+        async function checkWelcomeBack() {
+          if (welcomeBackInFlight) return;
+          if (document.hidden) return;
+          welcomeBackInFlight = true;
+          try {
+            const res = await fetch('/sandbox/assistant/welcome-back', {
+              method: 'POST',
+              headers: { 'content-type': 'application/x-www-form-urlencoded' },
+              body: '',
+            });
+            if (res.status === 204 || !res.ok) return;
+            const html = await res.text();
+            if (!html.trim() || !list) return;
+            // Drop the empty-state intro on first activity.
+            const empty = list.querySelector('.assistant-empty');
+            if (empty) empty.remove();
+            list.insertAdjacentHTML('beforeend', html);
+            scrollPageToBottom('smooth');
+            recomputeSoon();
+          } catch (err) {
+            console.warn('welcome-back check failed:', err);
+          } finally {
+            welcomeBackInFlight = false;
+          }
+        }
+        // Fire once on load. (Script runs end-of-body, DOM is parsed.)
+        checkWelcomeBack();
+        // Polling: every 90s while visible. Cleared when tab hidden so
+        // we don't burn D1 reads or tokens in the background.
+        const WELCOMEBACK_POLL_MS = 90000;
+        let welcomeBackTimer = null;
+        function startWelcomeBackPoll() {
+          if (welcomeBackTimer) return;
+          welcomeBackTimer = setInterval(checkWelcomeBack, WELCOMEBACK_POLL_MS);
+        }
+        function stopWelcomeBackPoll() {
+          if (welcomeBackTimer) {
+            clearInterval(welcomeBackTimer);
+            welcomeBackTimer = null;
+          }
+        }
+        if (!document.hidden) startWelcomeBackPoll();
+        document.addEventListener('visibilitychange', () => {
+          if (document.hidden) {
+            stopWelcomeBackPoll();
+          } else {
+            checkWelcomeBack();      // immediate check on return
+            startWelcomeBackPoll();  // resume the timer
+          }
+        });
+
         if (attachBtn && fileInput) {
           attachBtn.addEventListener('click', () => fileInput.click());
           fileInput.addEventListener('change', (e) => uploadFiles(e.target.files));

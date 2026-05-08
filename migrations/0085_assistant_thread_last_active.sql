@@ -1,0 +1,27 @@
+-- =====================================================================
+-- Migration 0085: assistant_threads.last_active_at
+--
+-- Tracks when the chat tab was last "active" for the user — used by
+-- the proactive welcome-back endpoint so Claudia can narrate
+-- background activity that occurred between visits OR while the
+-- tab is open in the background.
+--
+-- Triggers that update last_active_at:
+--   * GET /sandbox/assistant — initial page render
+--   * POST /sandbox/assistant/welcome-back — fires on:
+--       - DOMContentLoaded
+--       - visibilitychange → visible
+--       - 90s polling timer while tab is visible
+--
+-- The endpoint queries (uploads / actions / observations / writes)
+-- since last_active_at; if anything is new, calls the model for a
+-- single proactive message and INSERTs it as an assistant_messages
+-- row. last_active_at is updated whether or not a message was
+-- written, so the next poll's window starts from "now".
+--
+-- For threads created before this column existed, last_active_at
+-- starts NULL — the endpoint falls back to thread.updated_at on
+-- the first call.
+-- =====================================================================
+
+ALTER TABLE assistant_threads ADD COLUMN last_active_at TEXT;
