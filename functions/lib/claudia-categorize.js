@@ -36,7 +36,8 @@ export const DOCUMENT_CATEGORIES = [
   'meeting_note',  // Meeting notes / voice memo transcript / minutes
   'contact_list',  // Contact CSV / vCard / address export
   'marketing',     // Brochure / one-pager / capability statement
-  'badge',         // Conference badge photo
+  'badge',         // Conference / trade-show badge photo (with visible event branding)
+  'headshot',      // Professional portrait photo of one person — bio / website / org chart use
   'business_card', // Business card photo
   'invoice',       // Invoice (inbound or outbound)
   'spreadsheet',   // Generic data spreadsheet that doesn't fit above
@@ -55,12 +56,12 @@ const ALLOWED = new Set(DOCUMENT_CATEGORIES);
  *   - text is empty (extraction failed) AND filename is uninformative
  *   - filename heuristic gives a high-confidence guess (saves a call)
  */
-export async function categorizeDocument(env, { filename, contentType, text }) {
-  const heuristic = heuristicCategory(filename, contentType);
+export async function categorizeDocument(env, { filename, contentType, text, parentSubject }) {
+  const heuristic = heuristicCategory(filename, contentType, parentSubject);
   if (heuristic) return heuristic;
 
   const trimmedText = String(text || '').slice(0, CATEGORIZE_MAX_TEXT_CHARS).trim();
-  if (!trimmedText && !filename) return null;
+  if (!trimmedText && !filename && !parentSubject) return null;
 
   const system = [
     'You categorize one document for an offshore-engineering company\'s sales assistant.',
@@ -76,8 +77,9 @@ export async function categorizeDocument(env, { filename, contentType, text }) {
     '- meeting_note: Meeting notes, voice memo transcript, call summary, minutes.',
     '- contact_list: A spreadsheet/CSV/vCard of contacts (people + emails / phones).',
     '- marketing: Brochure, one-pager, marketing collateral, capability statement.',
-    '- badge: Conference / trade-show badge photo.',
-    '- business_card: Business card photo.',
+    '- badge: Conference / trade-show badge photo. ONLY when the image clearly shows a badge / lanyard / name-tag with a visible event name, conference branding, or booth number. A plain photo of a person without a visible badge is NOT a badge — it\'s a headshot.',
+    '- headshot: Professional portrait photo of one person, suitable for a bio / website / org chart. Generic plain-background photo of a face. When the parent email subject says "head shot", "headshot", "portrait", "bio photo", or similar — this is the right category.',
+    '- business_card: Business card photo — clearly shows a card layout with name + title + company.',
     '- invoice: Invoice document (inbound bill or outbound charge).',
     '- spreadsheet: Generic data spreadsheet with no obvious sales / contact / pricing context.',
     '- other: Anything that doesn\'t cleanly fit above.',
@@ -89,6 +91,7 @@ export async function categorizeDocument(env, { filename, contentType, text }) {
   const userBlob = JSON.stringify({
     filename: filename || null,
     content_type: contentType || null,
+    parent_email_subject: parentSubject || null,  // populated when this is an attachment of an .eml
     text_excerpt: trimmedText,
   });
 
@@ -124,9 +127,19 @@ export async function categorizeDocument(env, { filename, contentType, text }) {
  * Intentionally conservative — only matches when the extension or
  * keyword is unambiguous. Anything fuzzy goes through the LLM.
  */
-function heuristicCategory(filename, contentType) {
+function heuristicCategory(filename, contentType, parentSubject) {
   const fn = String(filename || '').toLowerCase();
   const ct = String(contentType || '').toLowerCase();
+  const ps = String(parentSubject || '').toLowerCase();
+
+  // Parent-email-subject heuristics — attachment carries forward the
+  // parent's intent. "Fw: Head shot" → the attached PNG is a headshot,
+  // not a generic image.
+  if (ps && (/\bhead[\s_-]?shot\b/.test(ps) || /\bportrait\b/.test(ps) || /\bbio[\s_-]?photo\b/.test(ps))) {
+    if (ct.startsWith('image/')) return 'headshot';
+  }
+  if (ps && /\bbusiness[\s_-]?card\b/.test(ps) && ct.startsWith('image/')) return 'business_card';
+  if (ps && /\bbadge\b/.test(ps) && ct.startsWith('image/')) return 'badge';
 
   if (ct === 'message/rfc822' || fn.endsWith('.eml')) return 'email';
   if (fn.endsWith('.mbox') || ct === 'application/mbox') return 'email';
@@ -141,6 +154,7 @@ function heuristicCategory(filename, contentType) {
   if (/\b(contacts?|address(es)?\s?book|people)\b/.test(fn) && (fn.endsWith('.csv') || fn.endsWith('.tsv'))) return 'contact_list';
   if (/\bbusiness[\s_-]?card\b/.test(fn)) return 'business_card';
   if (/\bbadge\b/.test(fn)) return 'badge';
+  if (/\bhead[\s_-]?shot\b/.test(fn) || /\bportrait\b/.test(fn) || /\bbio[\s_-]?photo\b/.test(fn)) return 'headshot';
   if (/\bbrochure\b/.test(fn) || /\bone[-_]?pager\b/.test(fn) || /\bcapabilit/.test(fn)) return 'marketing';
   if (/\b(meeting|minutes|notes?|call[-_]?notes?|voice[-_]?memo)\b/.test(fn)) return 'meeting_note';
 

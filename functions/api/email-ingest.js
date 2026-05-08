@@ -299,6 +299,11 @@ export async function onRequestPost(context) {
           filename: att.filename,
           contentType: att.contentType,
           text: attExtracted.text,
+          // Inherit parent context — "Fw: Head shot" → attachment is a
+          // headshot, not generic. Big quality lift on image attachments
+          // where the filename is opaque (UUID-style) and the content
+          // is a binary blob with no extractable text.
+          parentSubject: incomingMeta?.subject || null,
         });
       } catch (err) {
         console.error('[email-ingest] attachment categorize failed:', err?.message || err);

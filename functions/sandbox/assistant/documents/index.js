@@ -207,10 +207,12 @@ export async function onRequestPost(context) {
       // Ingest each attachment as its own child row. Same R2 + extract +
       // categorize flow as the parent loop. Failures on a single
       // attachment fall through to the errors list and don't abort the
-      // parent.
+      // parent. Pass the parent email's subject so the categorizer can
+      // chain context — "Fw: Head shot" → child PNG = headshot, not
+      // a generic image.
       for (const att of attachments) {
         try {
-          await ingestAttachment(env, user, att, docId, errors);
+          await ingestAttachment(env, user, att, docId, errors, emailMeta?.subject || null);
         } catch (err) {
           errors.push(`${att.filename || 'attachment'}: ${err?.message || String(err)}`);
         }
@@ -279,7 +281,7 @@ function isEmailFile(contentType, filename) {
   return /\.(eml|mbox)$/i.test(String(filename || ''));
 }
 
-async function ingestAttachment(env, user, att, parentId, errors) {
+async function ingestAttachment(env, user, att, parentId, errors, parentSubject) {
   const filename = String(att.filename || 'attachment').slice(0, 255);
   const contentType = att.contentType || 'application/octet-stream';
   const bytes = att.bytes;
@@ -326,6 +328,7 @@ async function ingestAttachment(env, user, att, parentId, errors) {
       filename,
       contentType,
       text: extracted.text,
+      parentSubject: parentSubject || null,
     });
   } catch (err) {
     console.error('[upload] attachment categorize failed:', err?.message || err);
