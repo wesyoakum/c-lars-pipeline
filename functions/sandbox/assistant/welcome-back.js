@@ -149,9 +149,22 @@ export async function onRequestPost(context) {
   // minutes. Things further out (next-4-hours) only narrate when
   // there's ALSO new activity — otherwise mid-day polls would chime
   // about meetings that aren't urgent.
+  //
+  // Two filters to keep imminent from over-firing:
+  //   1. All-day events are ongoing context, not discrete imminent
+  //      moments. An all-day "Moab/OOO" that started days ago has
+  //      start_ms days in the past; the prior `start - now < 30 min`
+  //      check trivially passed (any negative delta is < 30 min), so
+  //      every 90s poll fired another "heads up" about the same trip.
+  //   2. Require the start to be in the (near) future. A 2-minute grace
+  //      lets a meeting that just kicked off still ping; anything that
+  //      started earlier is already in progress and a ping is noise.
   const imminentCalendar = upcomingCalendar.filter((ev) => {
+    if (ev.all_day) return false;
     const startMs = Date.parse(ev.start || '');
-    return Number.isFinite(startMs) && startMs - nowMs < 30 * 60 * 1000;
+    if (!Number.isFinite(startMs)) return false;
+    const delta = startMs - nowMs;
+    return delta > -2 * 60 * 1000 && delta < 30 * 60 * 1000;
   });
   const hasNewState =
     newUploads.length > 0 ||
@@ -161,6 +174,27 @@ export async function onRequestPost(context) {
   const hasActivity = hasNewState || imminentCalendar.length > 0;
   if (!hasActivity) {
     return new Response(null, { status: 204 });
+  }
+
+  // Calendar-only cooldown: when the ONLY reason to fire is an
+  // imminent meeting (no new state), require at least 10 minutes
+  // since the last assistant message in this thread. Otherwise a
+  // legitimate 25-min-out meeting would ping every 90s polling tick
+  // for the next half hour. New-state triggers are unaffected — those
+  // are already gated by `last_active_at` so they only fire on
+  // genuinely fresh activity.
+  if (!hasNewState && imminentCalendar.length > 0) {
+    const lastAssistant = await one(
+      env.DB,
+      `SELECT created_at FROM assistant_messages
+         WHERE thread_id = ? AND role = 'assistant'
+         ORDER BY created_at DESC, id DESC LIMIT 1`,
+      [thread.id]
+    );
+    const lastMs = Date.parse(lastAssistant?.created_at || '');
+    if (Number.isFinite(lastMs) && nowMs - lastMs < 10 * 60 * 1000) {
+      return new Response(null, { status: 204 });
+    }
   }
 
   // Compose a single Claudia-voice message via Opus. Cheap (~$0.02
