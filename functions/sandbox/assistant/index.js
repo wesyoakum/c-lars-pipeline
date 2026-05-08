@@ -374,6 +374,11 @@ export async function onRequestGet(context) {
         max-width: none !important;
         padding-left: 0 !important;
         padding-right: 0 !important;
+        /* Belt-and-suspenders: if any deeply-nested element (markdown
+           code block, long URL, attachment thumbnail) tries to stretch
+           wider than the viewport, clip it here so the body — and the
+           sticky header riding on it — stays exactly viewport-wide. */
+        overflow-x: hidden;
       }
       /* ---- Layout: three columns (audio | chat | docs) ---- */
       .assistant-layout {
@@ -625,15 +630,15 @@ export async function onRequestGet(context) {
          conversation isn't pushed below the fold.
          ============================================================ */
       @media (max-width: 640px) {
-        /* The global .site-main override at the top removed page
-           padding; restore real edges on phones so the chat panel
-           isn't kissing the screen edge. */
+        /* Match the .site-header padding exactly (0.5rem 0.85rem on
+           ≤800px) so the chat panel's left/right edges line up with
+           the brand text and user info above. */
         .assistant-layout {
-          padding: 0 1rem;
+          padding: 0 0.85rem;
           gap: 0.5rem;
         }
         .assistant-layout .assistant-wrap {
-          padding: 0.5rem 0.5rem;
+          padding: 0.5rem 0;
         }
         .claudia-obs-panel { padding: 0 0.4rem; }
         .claudia-obs {
