@@ -218,6 +218,21 @@ function flattenAttachmentParts(node, referencedCids) {
   const isInline = disp.type === 'inline';
   const isImage = String(node.contentType || '').toLowerCase().startsWith('image/');
 
+  const filenameRaw = disp.params.filename || node.contentTypeParams?.name || '';
+  const filename = decodeRfc2047(filenameRaw) || `attachment.${guessExt(node.contentType)}`;
+
+  // Outlook auto-names inline signature/header content imageNNN.png
+  // and frequently sets Content-Disposition: attachment + a Content-Id
+  // referenced from the HTML signature. So both the disposition test
+  // AND the body-reference test pass — but the user still sees these
+  // as noise (tiny signature logos, social icons, dividers). Carve
+  // them out by name pattern + size: under 50KB AND named
+  // image\d{3}\.(png|jpg|jpeg|gif) → drop, regardless of disposition
+  // or cid-reference. Real attachments don't get auto-named that way.
+  if (isImage && /^image\d{3}\.(png|jpe?g|gif|webp)$/i.test(filename) && node.rawBytes.length < 50 * 1024) {
+    return [];
+  }
+
   // Inline images are the noise we want to filter out (signature
   // logos, tracking pixels, divider images). The keep rule is "the
   // image is actually shown in the body" — i.e. its Content-Id is
@@ -232,12 +247,9 @@ function flattenAttachmentParts(node, referencedCids) {
     }
   }
 
-  // Image attachments (Content-Disposition: attachment) ALWAYS pass
-  // through regardless of size — wes.yoakum 2026-05-07: those are
-  // real content the user explicitly attached. Same for non-image
-  // inline parts (rare but legitimate, e.g. inline CSV).
-  const filenameRaw = disp.params.filename || node.contentTypeParams?.name || '';
-  const filename = decodeRfc2047(filenameRaw) || `attachment.${guessExt(node.contentType)}`;
+  // Image attachments (Content-Disposition: attachment) pass through
+  // unless they hit the imageNNN.png + size carve-out above. Same for
+  // non-image inline parts (rare but legitimate, e.g. inline CSV).
 
   // Default-disposition (no Content-Disposition at all): legacy
   // pattern. Keep if there's a filename OR if it's not a tiny image.

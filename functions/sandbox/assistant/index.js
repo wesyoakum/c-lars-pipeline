@@ -597,20 +597,23 @@ export async function onRequestGet(context) {
         max-width: 880px; margin: 0.75rem auto 0; padding: 0 1rem;
         display: flex; flex-direction: column; gap: 0.5rem;
       }
+      /* Observations are ambient narration — neutral slate so they stop
+         looking like the yellow Questions panel. Yellow now means
+         "needs your input" exclusively. */
       .claudia-obs {
         display: flex; gap: 0.5rem; align-items: flex-start;
-        background: #fff7e6; border: 1px solid #facc8a; border-radius: 8px;
+        background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 8px;
         padding: 0.55rem 0.75rem; font-size: 13px; line-height: 1.45;
-        color: #4a3a1a;
+        color: #334155;
       }
       .claudia-obs-body { flex: 1; white-space: pre-wrap; word-wrap: break-word; }
-      .claudia-obs-meta { font-size: 11px; color: #8a6f3a; margin-bottom: 2px; }
+      .claudia-obs-meta { font-size: 11px; color: #64748b; margin-bottom: 2px; }
       .claudia-obs-dismiss {
-        background: transparent; border: 0; color: #8a6f3a; cursor: pointer;
+        background: transparent; border: 0; color: #64748b; cursor: pointer;
         font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: 4px;
         flex-shrink: 0;
       }
-      .claudia-obs-dismiss:hover { background: rgba(0,0,0,0.06); color: #4a3a1a; }
+      .claudia-obs-dismiss:hover { background: rgba(0,0,0,0.06); color: #1e293b; }
 
       ${raw(ACTIONS_PANEL_CSS)}
 
