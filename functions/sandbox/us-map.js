@@ -170,9 +170,9 @@ export async function onRequestGet(context) {
           #663399   8.33%, /* 10°F — purple */
           #c8a2c8  16.67%, /* 20°F — light purple */
           #ffffff  25%,    /* 30°F — white */
-          #add8e6  33.33%, /* 40°F — light blue */
-          #1e90ff  41.67%, /* 50°F — blue */
-          #228b22  50%,    /* 60°F — green */
+          #b8dff0  33.33%, /* 40°F — pastel light blue */
+          #7eb5d8  41.67%, /* 50°F — pastel blue */
+          #91c98f  50%,    /* 60°F — pastel green */
           #ffff00  58.33%, /* 70°F — yellow */
           #ffa500  66.67%, /* 80°F — orange */
           #ff0000  75%,    /* 90°F — red */
@@ -424,7 +424,7 @@ function mapScript({ statehood, counties, temperature, stateNames, initialLayer 
       // at every 10°F so the legend bar gradient matches 1:1.
       colorScale: {
         domain: [0,        10,       20,       30,       40,       50,       60,       70,       80,       90,       100,      120     ],
-        range:  ['#2e0854','#663399','#c8a2c8','#ffffff','#add8e6','#1e90ff','#228b22','#ffff00','#ffa500','#ff0000','#8b0000','#000000'],
+        range:  ['#2e0854','#663399','#c8a2c8','#ffffff','#b8dff0','#7eb5d8','#91c98f','#ffff00','#ffa500','#ff0000','#8b0000','#000000'],
       },
     },
   };
