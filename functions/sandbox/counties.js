@@ -1,7 +1,7 @@
-// functions/sandbox/statehood.js
+// functions/sandbox/counties.js
 //
-// GET /sandbox/statehood — kept as a thin 302 redirect to the unified
-// /sandbox/us-map?layer=statehood. The standalone statehood map was
+// GET /sandbox/counties — kept as a thin 302 redirect to the unified
+// /sandbox/us-map?layer=counties. The standalone counties map was
 // folded into the US-Map platform; any old bookmarks land here and
 // get forwarded to the right layer.
 
@@ -14,6 +14,6 @@ export async function onRequestGet(context) {
   }
   return new Response(null, {
     status: 302,
-    headers: { Location: '/sandbox/us-map?layer=statehood' },
+    headers: { Location: '/sandbox/us-map?layer=counties' },
   });
 }

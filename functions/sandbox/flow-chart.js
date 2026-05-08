@@ -25,7 +25,7 @@ export async function onRequestGet(context) {
   const tabs = subnavTabs(
     [
       { href: '/sandbox/assistant',  label: 'Claudia' },
-      { href: '/sandbox/statehood',  label: 'Statehood' },
+      { href: '/sandbox/us-map',     label: 'US Map' },
       { href: '/sandbox/flow-chart', label: 'Flow Chart' },
     ],
     '/sandbox/flow-chart'
