@@ -17,6 +17,7 @@
 import { layout, html, htmlResponse, raw, subnavTabs } from '../lib/layout.js';
 import { STATEHOOD_BY_NAME } from './data/statehood_dates.js';
 import { COUNTY_FOUNDING_BY_FIPS } from './data/county_founding_dates.js';
+import { COUNTY_MONTHLY_TEMPS_F } from './data/county_monthly_temps.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 
@@ -62,7 +63,8 @@ export async function onRequestGet(context) {
   // the redirects from the old /sandbox/statehood and /sandbox/counties
   // routes). Defaults to statehood.
   const url = new URL(context.request.url);
-  const initialLayer = url.searchParams.get('layer') === 'counties' ? 'counties' : 'statehood';
+  const layerParam = url.searchParams.get('layer');
+  const initialLayer = ['counties', 'temperature'].includes(layerParam) ? layerParam : 'statehood';
 
   const body = html`
     <style>
@@ -158,6 +160,13 @@ export async function onRequestGet(context) {
         background: linear-gradient(to right, #d4e4f0, #5a8db0, #1a3a5c);
         border-radius: 2px;
       }
+      /* When the active layer paints features by an absolute value
+         (e.g. temperature), the legend bar swaps to the matching
+         diverging gradient. JS toggles the modifier class. */
+      .usmap-legend-bar.diverging-temp {
+        background: linear-gradient(to right,
+          #1a3a5c 0%, #5a8db0 25%, #fafaf6 50%, #d68a55 75%, #a02137 100%);
+      }
       .usmap-legend-key {
         margin-left: 16px;
         display: flex;
@@ -236,8 +245,9 @@ export async function onRequestGet(context) {
 
       <div class="usmap-layer-row" role="tablist" aria-label="Map layer">
         <span class="label">Layer</span>
-        <button class="usmap-layer-btn" data-layer="statehood" type="button">Statehood</button>
-        <button class="usmap-layer-btn" data-layer="counties"  type="button">Counties</button>
+        <button class="usmap-layer-btn" data-layer="statehood"   type="button">Statehood</button>
+        <button class="usmap-layer-btn" data-layer="counties"    type="button">Counties</button>
+        <button class="usmap-layer-btn" data-layer="temperature" type="button">Temperature</button>
       </div>
 
       <div class="usmap-card">
@@ -276,6 +286,7 @@ export async function onRequestGet(context) {
     <script>${raw(mapScript({
       statehood: STATEHOOD_BY_NAME,
       counties: COUNTY_FOUNDING_BY_FIPS,
+      temperature: COUNTY_MONTHLY_TEMPS_F,
       stateNames: STATE_NAME_BY_FIPS,
       initialLayer,
     }))}</script>
@@ -288,19 +299,32 @@ export async function onRequestGet(context) {
 // above. Returned as a plain string (injected via raw()) so the JS
 // can use ${...} in template literals without colliding with the
 // outer html`...` template literal.
-function mapScript({ statehood, counties, stateNames, initialLayer }) {
+function mapScript({ statehood, counties, temperature, stateNames, initialLayer }) {
   return `
 (function() {
   var STATEHOOD = ${JSON.stringify(statehood)};
   var COUNTIES  = ${JSON.stringify(counties)};
+  var TEMPS     = ${JSON.stringify(temperature)};
   var STATE_NAMES = ${JSON.stringify(stateNames)};
   var INITIAL_LAYER = ${JSON.stringify(initialLayer)};
 
-  // Layer config — the platform's plug-in surface. Each entry tells
-  // the renderer where to fetch geometry from, how to key features
-  // against the data lookup, and how to label things.
+  // Helper: county name + state for tooltip on county-keyed layers.
+  function countyTitle(d) {
+    var fips = String(d.id).padStart(5, '0');
+    var name = (d.properties && d.properties.name) || 'County';
+    var state = STATE_NAMES[fips.slice(0, 2)] || '';
+    return state ? (name + ', ' + state) : name;
+  }
+
+  // Layer config — the platform's plug-in surface. Each entry has a
+  // 'type' that picks which render strategy to use:
+  //   'monotonic'   — feature gets a value Y; filled if Y <= slider.
+  //   'instant-day' — slider is day-of-year (1..366); each feature has
+  //                   12 monthly values that get interpolated to a
+  //                   daily value, then colored on a diverging scale.
   var LAYERS = {
     statehood: {
+      type: 'monotonic',
       title: 'U.S. Statehood by Year',
       subtitle: 'Drag the slider or press play to watch states join the union from 1787 to 1959.',
       topojsonUrl: 'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json',
@@ -312,14 +336,21 @@ function mapScript({ statehood, counties, stateNames, initialLayer }) {
       tooltipVerb: 'Joined',
       countLabel: 'states have joined the union',
       countTotalOverride: 50,
-      minYear: 1787,
-      maxYear: 1959,
-      yearButtons: [1787, 1820, 1865, 1900, 1959],
+      sliderMin: 1787, sliderMax: 1959, sliderStep: 1,
+      sliderInitial: 1787,
+      quickJumps: [1787, 1820, 1865, 1900, 1959].map(function(y) {
+        return { value: y, label: String(y) };
+      }),
+      legendMinLabel: '1787',
+      legendMaxLabel: '1959',
       legendNotYet: 'Not yet a state',
+      legendBarClass: '',
       playMs: 120,
       drawStateOverlay: false,
+      colorInterpolatorRgb: ['#d4e4f0', '#1a3a5c'],
     },
     counties: {
+      type: 'monotonic',
       title: 'U.S. Counties by Founding Year',
       subtitle: 'Drag the slider or press play to watch counties get carved out from 1607 to 2013.',
       topojsonUrl: 'https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json',
@@ -327,23 +358,104 @@ function mapScript({ statehood, counties, stateNames, initialLayer }) {
       featureClass: 'counties',
       keyOf: function(d) { return String(d.id).padStart(5, '0'); },
       data: COUNTIES,
-      tooltipTitle: function(d) {
-        var fips = String(d.id).padStart(5, '0');
-        var name = (d.properties && d.properties.name) || 'County';
-        var state = STATE_NAMES[fips.slice(0, 2)] || '';
-        return state ? (name + ', ' + state) : name;
-      },
+      tooltipTitle: countyTitle,
       tooltipVerb: 'Founded',
       countLabel: 'counties have been founded',
       countTotalOverride: null,  // set at runtime to # of rendered features
-      minYear: 1607,
-      maxYear: 2013,
-      yearButtons: [1607, 1700, 1800, 1850, 1900, 2013],
+      sliderMin: 1607, sliderMax: 2013, sliderStep: 1,
+      sliderInitial: 1607,
+      quickJumps: [1607, 1700, 1800, 1850, 1900, 2013].map(function(y) {
+        return { value: y, label: String(y) };
+      }),
+      legendMinLabel: '1607',
+      legendMaxLabel: '2013',
       legendNotYet: 'Not yet founded',
+      legendBarClass: '',
       playMs: 80,
       drawStateOverlay: true,
+      colorInterpolatorRgb: ['#d4e4f0', '#1a3a5c'],
+    },
+    temperature: {
+      type: 'instant-day',
+      title: 'U.S. Average Temperature by Day',
+      subtitle: '1991-2020 climate normals (NOAA climdiv-tmpccy). Daily values are interpolated from monthly means.',
+      topojsonUrl: 'https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json',
+      objectName: 'counties',
+      featureClass: 'counties',
+      keyOf: function(d) { return String(d.id).padStart(5, '0'); },
+      data: TEMPS,  // { fips: [Jan..Dec °F] }
+      tooltipTitle: countyTitle,
+      drawStateOverlay: true,
+      sliderMin: 1, sliderMax: 366, sliderStep: 1,
+      sliderInitial: 196,  // Jul 15 — peak summer for visual impact on first load
+      quickJumps: [
+        { value: 15,  label: 'Jan' },
+        { value: 46,  label: 'Feb' },
+        { value: 75,  label: 'Mar' },
+        { value: 105, label: 'Apr' },
+        { value: 135, label: 'May' },
+        { value: 166, label: 'Jun' },
+        { value: 196, label: 'Jul' },
+        { value: 227, label: 'Aug' },
+        { value: 258, label: 'Sep' },
+        { value: 288, label: 'Oct' },
+        { value: 319, label: 'Nov' },
+        { value: 349, label: 'Dec' },
+      ],
+      legendMinLabel: '−10°F',
+      legendMaxLabel: '95°F',
+      legendNotYet: 'No data',
+      legendBarClass: 'diverging-temp',
+      playMs: 30,
+      // Diverging color scale stops (must mirror the legend gradient).
+      colorScale: {
+        domain: [-10, 30, 50, 70, 95],
+        range:  ['#1a3a5c', '#5a8db0', '#fafaf6', '#d68a55', '#a02137'],
+      },
     },
   };
+
+  // Day-of-year helpers ------------------------------------------------
+
+  // Cumulative day-of-year for the 1st of each month (non-leap year).
+  // Index 0 = Jan 1 (DOY 1), index 12 = Jan 1 of next year (DOY 366).
+  var MONTH_FIRST_DOY = [1, 32, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335, 366];
+
+  // Day-of-year of the midpoint of each month (used as anchors for
+  // monthly→daily linear interpolation). Computed as (firstOfMonth +
+  // firstOfNextMonth) / 2 in DOY space.
+  var MONTH_MID_DOY = (function() {
+    var out = [];
+    for (var i = 0; i < 12; i++) {
+      out.push((MONTH_FIRST_DOY[i] + MONTH_FIRST_DOY[i + 1]) / 2);
+    }
+    return out; // [16.0, 45.5, 75.0, ...]
+  })();
+
+  // Linear interpolation between adjacent monthly midpoints, with
+  // wraparound (Dec mid → Jan mid spans the year boundary).
+  function interpDaily(monthly, doy) {
+    if (!monthly || monthly.length !== 12) return null;
+    // Extend midpoints with a wrap on each end so DOY values before the
+    // Jan midpoint and after the Dec midpoint resolve to a segment.
+    // -16 ≈ Dec midpoint - 365; 381 ≈ Jan midpoint + 365.
+    var mids = [MONTH_MID_DOY[11] - 365].concat(MONTH_MID_DOY).concat([MONTH_MID_DOY[0] + 365]);
+    var vals = [monthly[11]].concat(monthly).concat([monthly[0]]);
+    for (var i = 0; i < mids.length - 1; i++) {
+      if (doy >= mids[i] && doy <= mids[i + 1]) {
+        var t = (doy - mids[i]) / (mids[i + 1] - mids[i]);
+        return vals[i] + (vals[i + 1] - vals[i]) * t;
+      }
+    }
+    return monthly[0];
+  }
+
+  function doyToDateLabel(doy) {
+    // Use a non-leap year so DOY 60 = Mar 1 (not Feb 29). Day 366 still
+    // resolves to Dec 31 because Date wraps.
+    var d = new Date(2025, 0, doy);
+    return d.toLocaleString('en-US', { month: 'short', day: 'numeric' });
+  }
 
   var svg = d3.select('#usmap-svg');
   var tooltip = d3.select('#usmap-tooltip');
@@ -373,29 +485,34 @@ function mapScript({ statehood, counties, stateNames, initialLayer }) {
 
     document.getElementById('usmap-title').textContent = cfg.title;
     document.getElementById('usmap-subtitle').textContent = cfg.subtitle;
-    document.getElementById('usmap-legend-min').textContent = cfg.minYear;
-    document.getElementById('usmap-legend-max').textContent = cfg.maxYear;
+    document.getElementById('usmap-legend-min').textContent = cfg.legendMinLabel;
+    document.getElementById('usmap-legend-max').textContent = cfg.legendMaxLabel;
     document.getElementById('usmap-legend-not-yet').textContent = cfg.legendNotYet;
-    document.getElementById('usmap-slider-min').textContent = cfg.minYear;
-    document.getElementById('usmap-slider-max').textContent = cfg.maxYear;
-    document.getElementById('usmap-count-label').textContent = cfg.countLabel;
+    var legendBar = document.querySelector('.usmap-legend-bar');
+    legendBar.className = 'usmap-legend-bar' + (cfg.legendBarClass ? ' ' + cfg.legendBarClass : '');
 
     var slider = document.getElementById('usmap-slider');
-    slider.min = cfg.minYear;
-    slider.max = cfg.maxYear;
-    slider.value = cfg.minYear;
+    slider.min = cfg.sliderMin;
+    slider.max = cfg.sliderMax;
+    slider.step = cfg.sliderStep || 1;
+    slider.value = cfg.sliderInitial != null ? cfg.sliderInitial : cfg.sliderMin;
 
-    // Year buttons.
+    document.getElementById('usmap-slider-min').textContent =
+      cfg.type === 'instant-day' ? doyToDateLabel(cfg.sliderMin) : String(cfg.sliderMin);
+    document.getElementById('usmap-slider-max').textContent =
+      cfg.type === 'instant-day' ? doyToDateLabel(cfg.sliderMax) : String(cfg.sliderMax);
+
+    // Quick-jump buttons.
     var btnHost = document.getElementById('usmap-year-buttons');
     btnHost.innerHTML = '';
-    cfg.yearButtons.forEach(function(y) {
+    cfg.quickJumps.forEach(function(j) {
       var b = document.createElement('button');
-      b.textContent = String(y);
-      b.dataset.year = String(y);
+      b.textContent = j.label;
+      b.dataset.value = String(j.value);
       b.addEventListener('click', function() {
         stopPlay();
-        slider.value = y;
-        update(y);
+        slider.value = j.value;
+        update(j.value);
       });
       btnHost.appendChild(b);
     });
@@ -405,9 +522,16 @@ function mapScript({ statehood, counties, stateNames, initialLayer }) {
       b.classList.toggle('active', b.dataset.layer === layerKey);
     });
 
-    currentColorScale = d3.scaleSequential()
-      .domain([cfg.minYear, cfg.maxYear])
-      .interpolator(d3.interpolateRgb('#d4e4f0', '#1a3a5c'));
+    if (cfg.type === 'monotonic') {
+      currentColorScale = d3.scaleSequential()
+        .domain([cfg.sliderMin, cfg.sliderMax])
+        .interpolator(d3.interpolateRgb(cfg.colorInterpolatorRgb[0], cfg.colorInterpolatorRgb[1]));
+    } else if (cfg.type === 'instant-day') {
+      currentColorScale = d3.scaleLinear()
+        .domain(cfg.colorScale.domain)
+        .range(cfg.colorScale.range)
+        .clamp(true);
+    }
 
     // Wipe previous layer's SVG content before redrawing.
     svg.selectAll('*').remove();
@@ -432,13 +556,11 @@ function mapScript({ statehood, counties, stateNames, initialLayer }) {
         .attr('class', 'usmap-feature ' + cfg.featureClass + ' not-yet')
         .attr('d', path)
         .on('mousemove', function(event, d) {
-          var key = cfg.keyOf(d);
-          var year = cfg.data[key];
           tooltip
             .style('opacity', 1)
             .style('left', (event.pageX + 12) + 'px')
             .style('top', (event.pageY - 28) + 'px')
-            .html('<strong>' + cfg.tooltipTitle(d) + '</strong><span class="y">' + (year ? cfg.tooltipVerb + ' ' + year : '—') + '</span>');
+            .html(buildTooltipHtml(d));
         })
         .on('mouseleave', function() { tooltip.style('opacity', 0); });
 
@@ -450,34 +572,82 @@ function mapScript({ statehood, counties, stateNames, initialLayer }) {
           .attr('d', path(stateMesh));
       }
 
-      update(cfg.minYear);
+      update(+slider.value);
     });
   }
 
-  function update(year) {
-    if (!currentLayer) return;
-    currentYear = year;
-    document.getElementById('usmap-year').textContent = year;
-
+  // Tooltip body — branches on layer type. Uses currentLayer so the
+  // closure captured in mousemove always reads the active config.
+  function buildTooltipHtml(d) {
     var cfg = currentLayer;
-    var count = 0;
-    svg.selectAll('path.usmap-feature')
-      .each(function(d) {
-        var key = cfg.keyOf(d);
-        var dataYear = cfg.data[key];
-        var sel = d3.select(this);
-        if (dataYear && dataYear <= year) {
-          sel.classed('not-yet', false).attr('fill', currentColorScale(dataYear));
-          count++;
-        } else {
-          sel.classed('not-yet', true).attr('fill', null);
-        }
-      });
+    var title = cfg.tooltipTitle(d);
+    var key = cfg.keyOf(d);
+    if (cfg.type === 'monotonic') {
+      var year = cfg.data[key];
+      var line = year ? (cfg.tooltipVerb + ' ' + year) : '—';
+      return '<strong>' + title + '</strong><span class="y">' + line + '</span>';
+    }
+    if (cfg.type === 'instant-day') {
+      var monthly = cfg.data[key];
+      var doy = +document.getElementById('usmap-slider').value;
+      var t = monthly ? interpDaily(monthly, doy) : null;
+      var line = (t == null) ? '—'
+        : (Math.round(t * 10) / 10).toFixed(1) + '°F on ' + doyToDateLabel(doy);
+      return '<strong>' + title + '</strong><span class="y">' + line + '</span>';
+    }
+    return '<strong>' + title + '</strong>';
+  }
 
-    var total = cfg.countTotalOverride != null ? cfg.countTotalOverride : currentFeatures.length;
-    document.getElementById('usmap-count').textContent = count.toLocaleString();
-    document.getElementById('usmap-count-label').textContent =
-      'of ' + total.toLocaleString() + ' ' + cfg.countLabel;
+  function update(sliderVal) {
+    if (!currentLayer) return;
+    var cfg = currentLayer;
+
+    if (cfg.type === 'monotonic') {
+      document.getElementById('usmap-year').textContent = sliderVal;
+      var count = 0;
+      svg.selectAll('path.usmap-feature')
+        .each(function(d) {
+          var key = cfg.keyOf(d);
+          var dataYear = cfg.data[key];
+          var sel = d3.select(this);
+          if (dataYear && dataYear <= sliderVal) {
+            sel.classed('not-yet', false).attr('fill', currentColorScale(dataYear));
+            count++;
+          } else {
+            sel.classed('not-yet', true).attr('fill', null);
+          }
+        });
+      var total = cfg.countTotalOverride != null ? cfg.countTotalOverride : currentFeatures.length;
+      document.getElementById('usmap-count').textContent = count.toLocaleString();
+      document.getElementById('usmap-count-label').textContent =
+        'of ' + total.toLocaleString() + ' ' + cfg.countLabel;
+      return;
+    }
+
+    if (cfg.type === 'instant-day') {
+      document.getElementById('usmap-year').textContent = doyToDateLabel(sliderVal);
+      var sumT = 0, nT = 0;
+      svg.selectAll('path.usmap-feature')
+        .each(function(d) {
+          var key = cfg.keyOf(d);
+          var monthly = cfg.data[key];
+          var sel = d3.select(this);
+          if (!monthly) {
+            sel.classed('not-yet', true).attr('fill', null);
+            return;
+          }
+          var t = interpDaily(monthly, sliderVal);
+          sel.classed('not-yet', false).attr('fill', currentColorScale(t));
+          sumT += t;
+          nT += 1;
+        });
+      var avg = nT > 0 ? Math.round((sumT / nT) * 10) / 10 : null;
+      document.getElementById('usmap-count').textContent =
+        avg != null ? (avg.toFixed(1) + '°F') : '—';
+      document.getElementById('usmap-count-label').textContent =
+        'national average across ' + nT.toLocaleString() + ' counties';
+      return;
+    }
   }
 
   // Slider listens once globally; current min/max get updated on
@@ -485,18 +655,24 @@ function mapScript({ statehood, counties, stateNames, initialLayer }) {
   var slider = document.getElementById('usmap-slider');
   slider.addEventListener('input', function(e) { update(+e.target.value); });
 
-  // Play / pause.
+  // Play / pause. For instant-day layers the play loop wraps at the
+  // year boundary instead of stopping, so the temperature animation
+  // cycles continuously until the user pauses.
   var playBtn = document.getElementById('usmap-play');
   playBtn.addEventListener('click', function() {
     if (!currentLayer) return;
     if (playing) { stopPlay(); return; }
-    if (+slider.value >= currentLayer.maxYear) slider.value = currentLayer.minYear;
+    if (+slider.value >= currentLayer.sliderMax) slider.value = currentLayer.sliderMin;
     playing = true;
     playBtn.textContent = '❚❚ Pause';
     playBtn.classList.add('playing');
+    var wraps = currentLayer.type === 'instant-day';
     playTimer = setInterval(function() {
       var v = +slider.value + 1;
-      if (v > currentLayer.maxYear) { stopPlay(); return; }
+      if (v > currentLayer.sliderMax) {
+        if (wraps) v = currentLayer.sliderMin;
+        else { stopPlay(); return; }
+      }
       slider.value = v;
       update(v);
     }, currentLayer.playMs);
@@ -512,8 +688,9 @@ function mapScript({ statehood, counties, stateNames, initialLayer }) {
   document.getElementById('usmap-reset').addEventListener('click', function() {
     if (!currentLayer) return;
     stopPlay();
-    slider.value = currentLayer.minYear;
-    update(currentLayer.minYear);
+    var v = currentLayer.sliderInitial != null ? currentLayer.sliderInitial : currentLayer.sliderMin;
+    slider.value = v;
+    update(v);
   });
 
   // Layer buttons.
