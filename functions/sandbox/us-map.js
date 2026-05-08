@@ -21,6 +21,12 @@ import { COUNTY_MONTHLY_TEMPS_F }   from './data/county_monthly_temps.js';
 import { COUNTY_MONTHLY_HIGHS_F }   from './data/county_monthly_highs.js';
 import { COUNTY_MONTHLY_LOWS_F }    from './data/county_monthly_lows.js';
 import { COUNTY_MONTHLY_PRECIP_IN } from './data/county_monthly_precip.js';
+import { COUNTY_ELEVATIONS_FT }     from './data/county_elevations.js';
+import { COUNTY_MEDIAN_INCOME }     from './data/county_median_income.js';
+import { COUNTY_ANNUAL_PDSI, COUNTY_ANNUAL_PDSI_YEARS } from './data/county_annual_pdsi.js';
+import { COUNTY_POPULATION, COUNTY_POPULATION_YEARS }   from './data/county_population.js';
+import { COUNTY_ELECTIONS, COUNTY_ELECTION_YEARS }      from './data/county_elections.js';
+import { CITIES }                   from './data/cities.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 
@@ -67,7 +73,10 @@ export async function onRequestGet(context) {
   // routes). Defaults to statehood.
   const url = new URL(context.request.url);
   const layerParam = url.searchParams.get('layer');
-  const VALID_LAYERS = ['counties', 'temperature', 'high', 'low', 'precipitation'];
+  const VALID_LAYERS = [
+    'counties', 'temperature', 'high', 'low', 'precipitation',
+    'elevation', 'income', 'drought', 'population', 'elections', 'cities',
+  ];
   const initialLayer = VALID_LAYERS.includes(layerParam) ? layerParam : 'statehood';
 
   const body = html`
@@ -195,6 +204,55 @@ export async function onRequestGet(context) {
           #2c1f6d  80%,   /* 16"    — deep blue */
           #4b1d80 100%);  /* 20"+   — purple */
       }
+      .usmap-legend-bar.elevation {
+        background: linear-gradient(to right,
+          #1b5e20   0%,   /* sea level — deep forest green */
+          #66bb6a  10%,   /* 500 ft */
+          #c5e1a5  25%,   /* 1500 ft */
+          #fff8a1  40%,   /* 3000 ft — pale yellow / plains */
+          #d4a373  55%,   /* 4500 ft — tan */
+          #8b5a2b  70%,   /* 6500 ft — brown */
+          #b8b8b8  85%,   /* 9000 ft — gray (above treeline) */
+          #ffffff 100%);  /* 12000+ ft — snow white */
+      }
+      .usmap-legend-bar.income {
+        background: linear-gradient(to right,
+          #f7fcf5   0%,   /* very low */
+          #c7e9c0  20%,
+          #74c476  45%,
+          #2e7d32  70%,
+          #1b3a14 100%);  /* highest */
+      }
+      .usmap-legend-bar.pdsi {
+        /* drought (brown) → normal (white) → wet (green/blue) */
+        background: linear-gradient(to right,
+          #5e2c00   0%,   /* extreme drought */
+          #b85e1e  20%,
+          #f4d3a1  40%,
+          #ffffff  50%,   /* normal */
+          #b3e0a1  60%,
+          #4caf50  80%,
+          #1b5e20 100%);  /* extreme wet */
+      }
+      .usmap-legend-bar.elections {
+        /* GOP (red) → tied (white) → Dem (blue) */
+        background: linear-gradient(to right,
+          #1b3c8a   0%,   /* D +30 */
+          #5b8ce8  25%,
+          #ffffff  50%,
+          #e85b6b  75%,
+          #8a1b2e 100%);  /* R +30 */
+      }
+      .usmap-legend-bar.population {
+        /* log-scale: small county (light) → large city county (dark) */
+        background: linear-gradient(to right,
+          #f7fcf5   0%,
+          #d2efd0  20%,
+          #91c98f  40%,
+          #3a8f54  60%,
+          #1c3d6f  80%,
+          #1a1a4a 100%);
+      }
       .usmap-legend-key {
         margin-left: 16px;
         display: flex;
@@ -265,6 +323,35 @@ export async function onRequestGet(context) {
       }
       .usmap-tooltip strong { display: block; font-size: 14px; }
       .usmap-tooltip .y { color: #9ec5e8; }
+
+      /* Hide the slider/play row when the active layer has no time
+         dimension (e.g. elevation, income). The year-display still
+         shows a stat (e.g. average), and the count text shows context. */
+      .usmap-controls.no-slider .usmap-slider-row,
+      .usmap-controls.no-slider .usmap-button-row { display: none; }
+
+      /* Cities layer — point symbols on top of a quiet country backdrop. */
+      .usmap-country-fill {
+        fill: #f5f5f0;
+        stroke: #999;
+        stroke-width: 0.5;
+        pointer-events: none;
+      }
+      .usmap-state-mesh-faint {
+        fill: none;
+        stroke: #c8c8c0;
+        stroke-width: 0.5;
+        pointer-events: none;
+      }
+      .usmap-city {
+        fill: #1a3a5c;
+        fill-opacity: 0.7;
+        stroke: #fff;
+        stroke-width: 0.4;
+        cursor: pointer;
+        transition: fill-opacity 0.15s;
+      }
+      .usmap-city:hover { fill-opacity: 1; stroke: #222; stroke-width: 1; }
     </style>
     ${tabs}
     <div class="usmap-page">
@@ -279,6 +366,12 @@ export async function onRequestGet(context) {
         <button class="usmap-layer-btn" data-layer="high"          type="button">Daily High</button>
         <button class="usmap-layer-btn" data-layer="low"           type="button">Daily Low</button>
         <button class="usmap-layer-btn" data-layer="precipitation" type="button">Rainfall</button>
+        <button class="usmap-layer-btn" data-layer="elevation"     type="button">Elevation</button>
+        <button class="usmap-layer-btn" data-layer="income"        type="button">Income</button>
+        <button class="usmap-layer-btn" data-layer="drought"       type="button">Drought</button>
+        <button class="usmap-layer-btn" data-layer="population"    type="button">Population</button>
+        <button class="usmap-layer-btn" data-layer="elections"     type="button">Elections</button>
+        <button class="usmap-layer-btn" data-layer="cities"        type="button">Cities</button>
       </div>
 
       <div class="usmap-card">
@@ -321,6 +414,15 @@ export async function onRequestGet(context) {
       highs: COUNTY_MONTHLY_HIGHS_F,
       lows: COUNTY_MONTHLY_LOWS_F,
       precip: COUNTY_MONTHLY_PRECIP_IN,
+      elevation: COUNTY_ELEVATIONS_FT,
+      income: COUNTY_MEDIAN_INCOME,
+      pdsi: COUNTY_ANNUAL_PDSI,
+      pdsiYears: COUNTY_ANNUAL_PDSI_YEARS,
+      population: COUNTY_POPULATION,
+      populationYears: COUNTY_POPULATION_YEARS,
+      elections: COUNTY_ELECTIONS,
+      electionYears: COUNTY_ELECTION_YEARS,
+      cities: CITIES,
       stateNames: STATE_NAME_BY_FIPS,
       initialLayer,
     }))}</script>
@@ -333,7 +435,12 @@ export async function onRequestGet(context) {
 // above. Returned as a plain string (injected via raw()) so the JS
 // can use ${...} in template literals without colliding with the
 // outer html`...` template literal.
-function mapScript({ statehood, counties, temperature, highs, lows, precip, stateNames, initialLayer }) {
+function mapScript({
+  statehood, counties, temperature, highs, lows, precip,
+  elevation, income, pdsi, pdsiYears, population, populationYears,
+  elections, electionYears, cities,
+  stateNames, initialLayer,
+}) {
   return `
 (function() {
   var STATEHOOD = ${JSON.stringify(statehood)};
@@ -342,6 +449,15 @@ function mapScript({ statehood, counties, temperature, highs, lows, precip, stat
   var HIGHS     = ${JSON.stringify(highs)};
   var LOWS      = ${JSON.stringify(lows)};
   var PRECIP    = ${JSON.stringify(precip)};
+  var ELEVATION = ${JSON.stringify(elevation)};
+  var INCOME    = ${JSON.stringify(income)};
+  var PDSI = ${JSON.stringify(pdsi)};
+  var PDSI_YEARS = ${JSON.stringify(pdsiYears)};
+  var POPULATION = ${JSON.stringify(population)};
+  var POPULATION_YEARS = ${JSON.stringify(populationYears)};
+  var ELECTIONS = ${JSON.stringify(elections)};
+  var ELECTION_YEARS = ${JSON.stringify(electionYears)};
+  var CITIES = ${JSON.stringify(cities)};
   var STATE_NAMES = ${JSON.stringify(stateNames)};
   var INITIAL_LAYER = ${JSON.stringify(initialLayer)};
 
@@ -545,6 +661,180 @@ function mapScript({ statehood, counties, temperature, highs, lows, precip, stat
         range:  ['#fafaf6','#ffeeb8','#c5e08f','#66c060','#2eb3b3','#2d80c4','#2050a0','#2c1f6d','#4b1d80'],
       },
     },
+    elevation: {
+      type: 'static',
+      title: 'U.S. County Elevation',
+      subtitle: 'Approximate elevation at each county centroid. Source: USGS via Open-Meteo, county centroids from the 2024 Census Gazetteer.',
+      topojsonUrl: 'https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json',
+      objectName: 'counties',
+      featureClass: 'counties',
+      keyOf: function(d) { return String(d.id).padStart(5, '0'); },
+      data: ELEVATION,
+      tooltipTitle: countyTitle,
+      tooltipFormat: function(v) { return v.toLocaleString() + ' ft'; },
+      countFormat: function(v) { return { value: v, label: '' }; },
+      summaryFormat: function(stats) {
+        return { value: Math.round(stats.mean).toLocaleString() + ' ft', label: 'national mean — range ' + stats.min.toLocaleString() + ' to ' + stats.max.toLocaleString() + ' ft' };
+      },
+      drawStateOverlay: true,
+      legendMinLabel: '0 ft',
+      legendMaxLabel: '12,000+ ft',
+      legendNotYet: 'No data',
+      legendBarClass: 'elevation',
+      colorScale: {
+        domain: [0,        500,      1500,     3000,     4500,     6500,     9000,     12000   ],
+        range:  ['#1b5e20','#66bb6a','#c5e1a5','#fff8a1','#d4a373','#8b5a2b','#b8b8b8','#ffffff'],
+      },
+    },
+    income: {
+      type: 'static',
+      title: 'U.S. Median Household Income',
+      subtitle: 'ACS 2018-2022 5-year estimate (table B19013). Inflation-adjusted dollars.',
+      topojsonUrl: 'https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json',
+      objectName: 'counties',
+      featureClass: 'counties',
+      keyOf: function(d) { return String(d.id).padStart(5, '0'); },
+      data: INCOME,
+      tooltipTitle: countyTitle,
+      tooltipFormat: function(v) { return '$' + v.toLocaleString(); },
+      summaryFormat: function(stats) {
+        return { value: '$' + Math.round(stats.mean).toLocaleString(), label: 'national mean — range $' + stats.min.toLocaleString() + ' to $' + stats.max.toLocaleString() };
+      },
+      drawStateOverlay: true,
+      legendMinLabel: '$25k',
+      legendMaxLabel: '$160k+',
+      legendNotYet: 'No data',
+      legendBarClass: 'income',
+      colorScale: {
+        domain: [25000,    50000,    75000,    100000,   160000  ],
+        range:  ['#f7fcf5','#c7e9c0','#74c476','#2e7d32','#1b3a14'],
+      },
+    },
+    drought: {
+      type: 'time-series',
+      title: 'U.S. Annual Mean Drought Index (PDSI)',
+      subtitle: 'Annual-mean Palmer Drought Severity Index per county, 1900-' + (PDSI_YEARS[PDSI_YEARS.length-1]) + '. Source: NOAA climdiv-pdsicy.',
+      topojsonUrl: 'https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json',
+      objectName: 'counties',
+      featureClass: 'counties',
+      keyOf: function(d) { return String(d.id).padStart(5, '0'); },
+      data: PDSI,
+      years: PDSI_YEARS,
+      tooltipTitle: countyTitle,
+      tooltipFormat: function(v, label) { return (v >= 0 ? '+' : '') + v.toFixed(1) + ' PDSI in ' + label; },
+      countFormat: function(avg, n) {
+        return { value: (avg >= 0 ? '+' : '') + avg.toFixed(2), label: 'national mean PDSI across ' + n.toLocaleString() + ' counties' };
+      },
+      drawStateOverlay: true,
+      sliderMin: PDSI_YEARS[0], sliderMax: PDSI_YEARS[PDSI_YEARS.length-1], sliderStep: 1,
+      sliderInitial: 1934,  // Dust Bowl peak
+      quickJumps: [1934, 1956, 1988, 2002, 2012, 2022].map(function(y) {
+        return { value: y, label: String(y) };
+      }),
+      legendMinLabel: '−6 (dry)',
+      legendMaxLabel: '+6 (wet)',
+      legendNotYet: 'No data',
+      legendBarClass: 'pdsi',
+      playMs: 200,
+      // Diverging brown→white→green
+      colorScale: {
+        domain: [-6,       -3,       -1,        1,        3,         6      ],
+        range:  ['#5e2c00','#b85e1e','#f4d3a1','#b3e0a1','#4caf50','#1b5e20'],
+      },
+    },
+    population: {
+      type: 'time-series',
+      title: 'U.S. County Population by Decade',
+      subtitle: 'Decennial Census, 1900-2020. Source: Andrew Van Leuven, Harvard Dataverse (doi:10.7910/DVN/WLS5GF).',
+      topojsonUrl: 'https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json',
+      objectName: 'counties',
+      featureClass: 'counties',
+      keyOf: function(d) { return String(d.id).padStart(5, '0'); },
+      data: POPULATION,
+      years: POPULATION_YEARS,
+      tooltipTitle: countyTitle,
+      tooltipFormat: function(v, label) { return v.toLocaleString() + ' in ' + label; },
+      countFormat: function(avg, n, sum) {
+        return { value: (sum/1e6).toFixed(1) + ' M', label: 'total population across ' + n.toLocaleString() + ' counties (≥ 1 person)' };
+      },
+      drawStateOverlay: true,
+      sliderMin: POPULATION_YEARS[0], sliderMax: POPULATION_YEARS[POPULATION_YEARS.length-1], sliderStep: 10,
+      sliderInitial: 2020,
+      quickJumps: POPULATION_YEARS.map(function(y) { return { value: y, label: String(y) }; }),
+      legendMinLabel: '< 1k',
+      legendMaxLabel: '5M+',
+      legendNotYet: 'No data',
+      legendBarClass: 'population',
+      playMs: 800,
+      // log10-scaled domain: 1 → 5,000,000 mapped to 0..6.7
+      // Use a custom value transform in update() (log scale).
+      colorScale: {
+        // domain in log10 space; transform applied in update()
+        domain: [0,        2,        3,        4,        5,        6,        6.7     ],
+        range:  ['#f7fcf5','#d2efd0','#91c98f','#3a8f54','#1c3d6f','#1a1a4a','#0a0a2a'],
+      },
+      logScale: true,  // signal to update() to log10 the value before color
+    },
+    elections: {
+      type: 'time-series',
+      title: 'U.S. Presidential Elections by County',
+      subtitle: 'Margin (R% − D%) per county, 2008-2024. Positive = Republican lean. Source: tonmcg/US_County_Level_Election_Results.',
+      topojsonUrl: 'https://cdn.jsdelivr.net/npm/us-atlas@3/counties-10m.json',
+      objectName: 'counties',
+      featureClass: 'counties',
+      keyOf: function(d) { return String(d.id).padStart(5, '0'); },
+      data: ELECTIONS,
+      years: ELECTION_YEARS,
+      tooltipTitle: countyTitle,
+      tooltipFormat: function(v, label) {
+        var lean = v > 0 ? 'R+' : 'D+';
+        return lean + Math.abs(v).toFixed(1) + ' in ' + label;
+      },
+      countFormat: function(avg, n) {
+        var lean = avg > 0 ? 'R+' : 'D+';
+        return { value: lean + Math.abs(avg).toFixed(1), label: 'avg margin across ' + n.toLocaleString() + ' counties (unweighted)' };
+      },
+      drawStateOverlay: true,
+      sliderMin: ELECTION_YEARS[0], sliderMax: ELECTION_YEARS[ELECTION_YEARS.length-1], sliderStep: 4,
+      sliderInitial: 2024,
+      quickJumps: ELECTION_YEARS.map(function(y) { return { value: y, label: String(y) }; }),
+      legendMinLabel: 'D+30',
+      legendMaxLabel: 'R+30',
+      legendNotYet: 'No data',
+      legendBarClass: 'elections',
+      playMs: 1500,
+      colorScale: {
+        domain: [-30,      -15,      -5,        5,       15,       30      ],
+        range:  ['#1b3c8a','#5b8ce8','#cbd6f0','#f0c9d0','#e85b6b','#8a1b2e'],
+      },
+    },
+    cities: {
+      type: 'point-symbols',
+      title: 'U.S. Cities by Population',
+      subtitle: 'Drag the slider to filter by minimum population. Sources: Census 2024 Gazetteer (centroids) + ACS 2022 5-year (population).',
+      // No topojson features for the colored layer — just a quiet
+      // country backdrop drawn from the states TopoJSON.
+      topojsonUrl: 'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json',
+      objectName: 'states',
+      data: CITIES,
+      // Slider runs in log10(population) space so each unit is a
+      // "factor of 10" jump. UI shows the linear threshold value.
+      sliderMin: 2.0, sliderMax: 7.0, sliderStep: 0.05,
+      sliderInitial: 4.0,  // ≥ 10,000 people on initial load
+      quickJumps: [
+        { value: 2.0, label: '100' },
+        { value: 3.0, label: '1k' },
+        { value: 4.0, label: '10k' },
+        { value: 5.0, label: '100k' },
+        { value: 6.0, label: '1M' },
+        { value: 7.0, label: '10M' },
+      ],
+      legendMinLabel: '',
+      legendMaxLabel: '',
+      legendNotYet: 'Filtered out',
+      legendBarClass: '',  // no gradient — just dots
+      playMs: 80,
+    },
   };
 
   // Day-of-year helpers ------------------------------------------------
@@ -617,37 +907,49 @@ function mapScript({ statehood, counties, temperature, highs, lows, precip, stat
 
     document.getElementById('usmap-title').textContent = cfg.title;
     document.getElementById('usmap-subtitle').textContent = cfg.subtitle;
-    document.getElementById('usmap-legend-min').textContent = cfg.legendMinLabel;
-    document.getElementById('usmap-legend-max').textContent = cfg.legendMaxLabel;
-    document.getElementById('usmap-legend-not-yet').textContent = cfg.legendNotYet;
+    document.getElementById('usmap-legend-min').textContent = cfg.legendMinLabel || '';
+    document.getElementById('usmap-legend-max').textContent = cfg.legendMaxLabel || '';
+    document.getElementById('usmap-legend-not-yet').textContent = cfg.legendNotYet || '';
     var legendBar = document.querySelector('.usmap-legend-bar');
     legendBar.className = 'usmap-legend-bar' + (cfg.legendBarClass ? ' ' + cfg.legendBarClass : '');
 
+    // Slider/play row only makes sense for layers with a time or
+    // threshold dimension. Hide it for static layers.
+    var controlsEl = document.querySelector('.usmap-controls');
+    var hasSlider = cfg.type !== 'static';
+    controlsEl.classList.toggle('no-slider', !hasSlider);
+
     var slider = document.getElementById('usmap-slider');
-    slider.min = cfg.sliderMin;
-    slider.max = cfg.sliderMax;
-    slider.step = cfg.sliderStep || 1;
-    slider.value = cfg.sliderInitial != null ? cfg.sliderInitial : cfg.sliderMin;
+    if (hasSlider) {
+      slider.min = cfg.sliderMin;
+      slider.max = cfg.sliderMax;
+      slider.step = cfg.sliderStep || 1;
+      slider.value = cfg.sliderInitial != null ? cfg.sliderInitial : cfg.sliderMin;
 
-    document.getElementById('usmap-slider-min').textContent =
-      cfg.type === 'instant-day' ? doyToDateLabel(cfg.sliderMin) : String(cfg.sliderMin);
-    document.getElementById('usmap-slider-max').textContent =
-      cfg.type === 'instant-day' ? doyToDateLabel(cfg.sliderMax) : String(cfg.sliderMax);
+      document.getElementById('usmap-slider-min').textContent =
+        cfg.type === 'instant-day' ? doyToDateLabel(cfg.sliderMin)
+        : cfg.type === 'point-symbols' ? '≥ 100'
+        : String(cfg.sliderMin);
+      document.getElementById('usmap-slider-max').textContent =
+        cfg.type === 'instant-day' ? doyToDateLabel(cfg.sliderMax)
+        : cfg.type === 'point-symbols' ? '≥ 10M'
+        : String(cfg.sliderMax);
 
-    // Quick-jump buttons.
-    var btnHost = document.getElementById('usmap-year-buttons');
-    btnHost.innerHTML = '';
-    cfg.quickJumps.forEach(function(j) {
-      var b = document.createElement('button');
-      b.textContent = j.label;
-      b.dataset.value = String(j.value);
-      b.addEventListener('click', function() {
-        stopPlay();
-        slider.value = j.value;
-        update(j.value);
+      // Quick-jump buttons.
+      var btnHost = document.getElementById('usmap-year-buttons');
+      btnHost.innerHTML = '';
+      (cfg.quickJumps || []).forEach(function(j) {
+        var b = document.createElement('button');
+        b.textContent = j.label;
+        b.dataset.value = String(j.value);
+        b.addEventListener('click', function() {
+          stopPlay();
+          slider.value = j.value;
+          update(j.value);
+        });
+        btnHost.appendChild(b);
       });
-      btnHost.appendChild(b);
-    });
+    }
 
     // Layer button active state.
     document.querySelectorAll('.usmap-layer-btn').forEach(function(b) {
@@ -658,7 +960,9 @@ function mapScript({ statehood, counties, temperature, highs, lows, precip, stat
       currentColorScale = d3.scaleSequential()
         .domain([cfg.sliderMin, cfg.sliderMax])
         .interpolator(d3.interpolateRgb(cfg.colorInterpolatorRgb[0], cfg.colorInterpolatorRgb[1]));
-    } else if (cfg.type === 'instant-day') {
+    } else if (cfg.colorScale) {
+      // instant-day, static, time-series — all use d3.scaleLinear
+      // over a multi-stop diverging or sequential gradient.
       currentColorScale = d3.scaleLinear()
         .domain(cfg.colorScale.domain)
         .range(cfg.colorScale.range)
@@ -667,6 +971,11 @@ function mapScript({ statehood, counties, temperature, highs, lows, precip, stat
 
     // Wipe previous layer's SVG content before redrawing.
     svg.selectAll('*').remove();
+
+    if (cfg.type === 'point-symbols') {
+      renderPointSymbols(cfg, +slider.value);
+      return;
+    }
 
     loadTopo(cfg.topojsonUrl).then(function(us) {
       var features = topojson.feature(us, us.objects[cfg.objectName]).features;
@@ -704,7 +1013,53 @@ function mapScript({ statehood, counties, temperature, highs, lows, precip, stat
           .attr('d', path(stateMesh));
       }
 
-      update(+slider.value);
+      update(hasSlider ? +slider.value : 0);
+    });
+  }
+
+  // Render the cities point-symbols layer. Country backdrop + faint
+  // state mesh for context, then a circle per city sized by population.
+  function renderPointSymbols(cfg, sliderVal) {
+    loadTopo(cfg.topojsonUrl).then(function(us) {
+      // Backdrop: state polygons unioned into a single country fill.
+      var states = topojson.feature(us, us.objects.states).features;
+      svg.selectAll('path.usmap-country-fill')
+        .data(states)
+        .enter()
+        .append('path')
+        .attr('class', 'usmap-country-fill')
+        .attr('d', path);
+      // Faint internal state borders so the eye still parses the map.
+      var stateMesh = topojson.mesh(us, us.objects.states, function(a, b) { return a !== b; });
+      svg.append('path')
+        .attr('class', 'usmap-state-mesh-faint')
+        .attr('d', path(stateMesh));
+
+      // Project each city; drop those outside the AlbersUSA frame.
+      var projected = [];
+      cfg.data.forEach(function(c) {
+        var p = projection([c.lon, c.lat]);
+        if (p) projected.push({ city: c, x: p[0], y: p[1] });
+      });
+      currentFeatures = projected;
+
+      svg.selectAll('circle.usmap-city')
+        .data(projected, function(d) { return d.city.name + d.city.st; })
+        .enter()
+        .append('circle')
+        .attr('class', 'usmap-city')
+        .attr('cx', function(d) { return d.x; })
+        .attr('cy', function(d) { return d.y; })
+        .on('mousemove', function(event, d) {
+          tooltip
+            .style('opacity', 1)
+            .style('left', (event.pageX + 12) + 'px')
+            .style('top', (event.pageY - 28) + 'px')
+            .html('<strong>' + d.city.name + ', ' + d.city.st + '</strong><span class="y">' + d.city.pop.toLocaleString() + ' people</span>');
+        })
+        .on('mouseleave', function() { tooltip.style('opacity', 0); });
+
+      update(sliderVal);
     });
   }
 
@@ -726,7 +1081,32 @@ function mapScript({ statehood, counties, temperature, highs, lows, precip, stat
       var line = (t == null) ? '—' : cfg.tooltipFormat(t, doyToDateLabel(doy));
       return '<strong>' + title + '</strong><span class="y">' + line + '</span>';
     }
+    if (cfg.type === 'static') {
+      var v = cfg.data[key];
+      var line = (v == null) ? '—' : cfg.tooltipFormat(v);
+      return '<strong>' + title + '</strong><span class="y">' + line + '</span>';
+    }
+    if (cfg.type === 'time-series') {
+      var arr = cfg.data[key];
+      var year = +document.getElementById('usmap-slider').value;
+      // Snap to the closest available year in cfg.years (handles
+      // slider steps that overshoot, e.g. 4-yr election grid).
+      var idx = closestYearIndex(cfg.years, year);
+      var snapYear = cfg.years[idx];
+      var v = arr ? arr[idx] : null;
+      var line = (v == null) ? '—' : cfg.tooltipFormat(v, String(snapYear));
+      return '<strong>' + title + '</strong><span class="y">' + line + '</span>';
+    }
     return '<strong>' + title + '</strong>';
+  }
+
+  function closestYearIndex(years, year) {
+    var bestI = 0, bestD = Infinity;
+    for (var i = 0; i < years.length; i++) {
+      var d = Math.abs(years[i] - year);
+      if (d < bestD) { bestD = d; bestI = i; }
+    }
+    return bestI;
   }
 
   function update(sliderVal) {
@@ -783,6 +1163,92 @@ function mapScript({ statehood, counties, temperature, highs, lows, precip, stat
       }
       return;
     }
+
+    if (cfg.type === 'static') {
+      // No slider — paint each feature once, then summarize.
+      document.getElementById('usmap-year').textContent = '';
+      var sumS = 0, nS = 0, lo = Infinity, hi = -Infinity;
+      svg.selectAll('path.usmap-feature')
+        .each(function(d) {
+          var key = cfg.keyOf(d);
+          var v = cfg.data[key];
+          var sel = d3.select(this);
+          if (v == null) {
+            sel.classed('not-yet', true).attr('fill', null);
+            return;
+          }
+          sel.classed('not-yet', false).attr('fill', currentColorScale(v));
+          sumS += v; nS += 1;
+          if (v < lo) lo = v;
+          if (v > hi) hi = v;
+        });
+      if (nS > 0 && cfg.summaryFormat) {
+        var fmt = cfg.summaryFormat({ mean: sumS / nS, min: lo, max: hi, n: nS });
+        document.getElementById('usmap-count').textContent = fmt.value;
+        document.getElementById('usmap-count-label').textContent = fmt.label;
+      } else {
+        document.getElementById('usmap-count').textContent = '—';
+        document.getElementById('usmap-count-label').textContent = '';
+      }
+      return;
+    }
+
+    if (cfg.type === 'time-series') {
+      var idx = closestYearIndex(cfg.years, sliderVal);
+      var snapYear = cfg.years[idx];
+      document.getElementById('usmap-year').textContent = String(snapYear);
+      var sumV = 0, nV = 0;
+      svg.selectAll('path.usmap-feature')
+        .each(function(d) {
+          var key = cfg.keyOf(d);
+          var arr = cfg.data[key];
+          var sel = d3.select(this);
+          if (!arr || arr[idx] == null) {
+            sel.classed('not-yet', true).attr('fill', null);
+            return;
+          }
+          var v = arr[idx];
+          var colorIn = cfg.logScale ? Math.log10(Math.max(1, v)) : v;
+          sel.classed('not-yet', false).attr('fill', currentColorScale(colorIn));
+          sumV += v; nV += 1;
+        });
+      if (nV > 0) {
+        var avg = sumV / nV;
+        var fmt = cfg.countFormat(avg, nV, sumV);
+        document.getElementById('usmap-count').textContent = fmt.value;
+        document.getElementById('usmap-count-label').textContent = fmt.label;
+      } else {
+        document.getElementById('usmap-count').textContent = '—';
+        document.getElementById('usmap-count-label').textContent = '';
+      }
+      return;
+    }
+
+    if (cfg.type === 'point-symbols') {
+      // Slider value is log10(threshold). Filter circles by pop.
+      var threshold = Math.pow(10, sliderVal);
+      document.getElementById('usmap-year').textContent =
+        '≥ ' + (threshold >= 1e6 ? (threshold/1e6).toFixed(1)+'M' : threshold >= 1000 ? Math.round(threshold/1000)+'k' : Math.round(threshold));
+      var visible = 0;
+      svg.selectAll('circle.usmap-city')
+        .each(function(d) {
+          var sel = d3.select(this);
+          if (d.city.pop >= threshold) {
+            sel.style('display', null);
+            // Radius scales with sqrt of population (so area is
+            // proportional to people). 1M pop → r≈10; 100k → r≈3.2;
+            // 10k → r≈1; 1k → r≈0.32.
+            var r = Math.max(1, Math.sqrt(d.city.pop) * 0.012);
+            sel.attr('r', r);
+            visible++;
+          } else {
+            sel.style('display', 'none');
+          }
+        });
+      document.getElementById('usmap-count').textContent = visible.toLocaleString();
+      document.getElementById('usmap-count-label').textContent = 'cities visible at this threshold';
+      return;
+    }
   }
 
   // Slider listens once globally; current min/max get updated on
@@ -796,14 +1262,16 @@ function mapScript({ statehood, counties, temperature, highs, lows, precip, stat
   var playBtn = document.getElementById('usmap-play');
   playBtn.addEventListener('click', function() {
     if (!currentLayer) return;
+    if (currentLayer.type === 'static') return;
     if (playing) { stopPlay(); return; }
     if (+slider.value >= currentLayer.sliderMax) slider.value = currentLayer.sliderMin;
     playing = true;
     playBtn.textContent = '❚❚ Pause';
     playBtn.classList.add('playing');
     var wraps = currentLayer.type === 'instant-day';
+    var step = currentLayer.sliderStep || 1;
     playTimer = setInterval(function() {
-      var v = +slider.value + 1;
+      var v = +slider.value + step;
       if (v > currentLayer.sliderMax) {
         if (wraps) v = currentLayer.sliderMin;
         else { stopPlay(); return; }
