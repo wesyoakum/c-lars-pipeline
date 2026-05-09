@@ -752,6 +752,58 @@ export async function onRequestGet(context) {
         }
         .claudia-icon-lg { width: 44px; height: 44px; }
 
+        /* ---- Mobile side-panel tabs ----
+           Voice / Docs / Triage / Questions all stack below the chat
+           on phones today. The tabs let them share one screen-region
+           instead — only the active panel renders, the rest hide.
+           CSS `order` on the layout grid items pulls voice (which is
+           DOM-first / left sidebar on desktop) below the chat so its
+           panel sits in the same vertical band as the others. */
+        .claudia-mobile-tabs {
+          display: flex;
+          gap: 0;
+          margin: 0.5rem 0 0;
+          border-bottom: 1px solid #e2e8f0;
+        }
+        .claudia-mobile-tabs button {
+          flex: 1; min-width: 0;
+          background: transparent; border: 0;
+          padding: 0.55rem 0.3rem;
+          font: inherit; font-size: 13px; font-weight: 500;
+          color: #64748b;
+          cursor: pointer;
+          border-bottom: 2px solid transparent;
+          margin-bottom: -1px;
+        }
+        .claudia-mobile-tabs button.active {
+          color: #1a1a22;
+          border-bottom-color: #2566ff;
+          font-weight: 600;
+        }
+        .assistant-layout .claudia-side.audio-side { order: 2; }
+        .assistant-layout .assistant-wrap          { order: 0; }
+        .assistant-layout .claudia-side.docs-side  { order: 1; }
+
+        body[data-claudia-tab="voice"] .claudia-side.docs-side,
+        body[data-claudia-tab="voice"] .claudia-actions-panel,
+        body[data-claudia-tab="voice"] .claudia-questions-panel    { display: none !important; }
+
+        body[data-claudia-tab="docs"] .claudia-side.audio-side,
+        body[data-claudia-tab="docs"] .claudia-actions-panel,
+        body[data-claudia-tab="docs"] .claudia-questions-panel     { display: none !important; }
+
+        body[data-claudia-tab="triage"] .claudia-side,
+        body[data-claudia-tab="triage"] .claudia-questions-panel   { display: none !important; }
+
+        body[data-claudia-tab="questions"] .claudia-side,
+        body[data-claudia-tab="questions"] .claudia-actions-panel  { display: none !important; }
+      }
+
+      /* Tab strip is mobile-only — hidden on every viewport above the
+         chat-tightening breakpoint, where the sidebars and triage panel
+         use their normal positions. */
+      @media (min-width: 641px) {
+        .claudia-mobile-tabs { display: none; }
       }
     </style>
     ${tabs}
@@ -818,6 +870,12 @@ export async function onRequestGet(context) {
         ></textarea>
         <button type="submit" id="send-btn">Send</button>
       </form>
+      <nav class="claudia-mobile-tabs" id="claudia-mobile-tabs" aria-label="Side panel tabs">
+        <button type="button" data-mobile-tab="voice">Voice</button>
+        <button type="button" data-mobile-tab="docs" class="active">Docs</button>
+        <button type="button" data-mobile-tab="triage">Triage</button>
+        <button type="button" data-mobile-tab="questions">Questions</button>
+      </nav>
     </div>
     <aside class="claudia-side docs-side" id="claudia-side-docs">
       <h3>Documents</h3>
@@ -837,6 +895,33 @@ export async function onRequestGet(context) {
     ` : ''}
     <script>
       const CLAUDIA_ICON_HTML = ${raw(JSON.stringify(CLAUDIA_ICON_SVG))};
+
+      // Mobile side-panel tabs. The CSS at ≤640px uses
+      // body[data-claudia-tab=X] to choose which of voice / docs /
+      // triage / questions is visible. JS just owns the active state
+      // and persists it across reloads.
+      (function () {
+        const tabsEl = document.getElementById('claudia-mobile-tabs');
+        if (!tabsEl) return;
+        const VALID = ['voice', 'docs', 'triage', 'questions'];
+        const STORAGE_KEY = 'claudia.mobile-tab';
+        function setTab(name) {
+          if (!VALID.includes(name)) name = 'docs';
+          document.body.setAttribute('data-claudia-tab', name);
+          tabsEl.querySelectorAll('button[data-mobile-tab]').forEach((b) => {
+            b.classList.toggle('active', b.dataset.mobileTab === name);
+          });
+          try { localStorage.setItem(STORAGE_KEY, name); } catch (_) {}
+        }
+        tabsEl.addEventListener('click', (e) => {
+          const btn = e.target.closest('button[data-mobile-tab]');
+          if (!btn) return;
+          setTab(btn.dataset.mobileTab);
+        });
+        let stored = 'docs';
+        try { stored = localStorage.getItem(STORAGE_KEY) || 'docs'; } catch (_) {}
+        setTab(stored);
+      })();
 
       (function () {
         const form = document.querySelector('.assistant-form');
