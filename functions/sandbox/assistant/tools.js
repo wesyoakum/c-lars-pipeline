@@ -1293,6 +1293,17 @@ export async function makeAssistantTools({ env, user }) {
         required: ['sql'],
       },
     },
+    // Anthropic-managed server tool — the API runs the search, returns
+    // results + citations in the same assistant turn, and bills $0.01
+    // per search on top of token costs. No local handler in execute()
+    // because server tools emit `server_tool_use` blocks (not
+    // `tool_use`), which messagesWithTools() leaves alone. max_uses
+    // caps cost per turn.
+    {
+      type: 'web_search_20250305',
+      name: 'web_search',
+      max_uses: 5,
+    },
   ];
 
   // Filter out disabled mutation tools so Claude never sees them in the

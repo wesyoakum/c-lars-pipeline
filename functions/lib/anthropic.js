@@ -265,6 +265,13 @@ export async function messagesWithTools(env, opts) {
     // Add the assistant turn to history (full content block array).
     messages.push({ role: 'assistant', content });
 
+    // Server-side tools (e.g. web_search) can pause a long sequence and
+    // ask the client to resume by re-sending. The assistant turn is
+    // already in `messages`; just loop again with no new user turn.
+    if (data.stop_reason === 'pause_turn') {
+      continue;
+    }
+
     if (data.stop_reason !== 'tool_use') {
       const text = content
         .filter((b) => b?.type === 'text')
