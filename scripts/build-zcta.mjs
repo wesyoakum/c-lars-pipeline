@@ -55,6 +55,34 @@ async function fetchACS() {
   return res.json();
 }
 
+// d3.geoPath uses the spherical winding convention: exterior rings
+// must be clockwise (negative planar signed area), holes the opposite.
+// TIGERweb returns RFC-7946 GeoJSON with the OPPOSITE convention, so
+// every ring renders as "the rest of the sphere" — which AlbersUSA
+// then clips to a giant viewBox-sized rectangle that paints over the
+// whole map. Rewind exterior/holes so d3 sees the small region as the
+// inside.
+function ringSignedArea(ring) {
+  let a = 0;
+  for (let i = 0; i < ring.length - 1; i++) {
+    a += ring[i][0] * ring[i + 1][1] - ring[i + 1][0] * ring[i][1];
+  }
+  return a / 2;
+}
+function rewindPolygon(rings) {
+  return rings.map(function(ring, i) {
+    const isExterior = i === 0;
+    const isCW = ringSignedArea(ring) < 0;
+    return isExterior === isCW ? ring : ring.slice().reverse();
+  });
+}
+function rewindGeometry(g) {
+  if (!g) return g;
+  if (g.type === 'Polygon') return { type: 'Polygon', coordinates: rewindPolygon(g.coordinates) };
+  if (g.type === 'MultiPolygon') return { type: 'MultiPolygon', coordinates: g.coordinates.map(rewindPolygon) };
+  return g;
+}
+
 // Drop ZIPs in territories that AlbersUSA won't render anyway.
 // PR ZIPs start with 006/007/009; USVI 008; GU/MP/AS in 96910-96952/96799/etc.
 function isInLower48OrAKHI(geoid) {
@@ -82,7 +110,7 @@ async function main() {
       features.push({
         type: 'Feature',
         properties: { z: geoid },  // shorter key to save bytes ×33K
-        geometry: f.geometry,
+        geometry: rewindGeometry(f.geometry),
       });
       kept++;
     }
