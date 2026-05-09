@@ -11,6 +11,7 @@
 // Also pulls ACS 5-year 2022 estimates per ZCTA:
 //   B19013_001E — median household income
 //   B01003_001E — total population (used for population layer)
+//   B19301_001E — per-capita income in past 12 months
 //
 // Run with:  node scripts/build-zcta.mjs
 
@@ -23,7 +24,7 @@ const REPO_ROOT = resolve(__dirname, '..');
 const OUT_DIR = resolve(REPO_ROOT, 'functions/sandbox/data');
 
 const TIGER_URL = 'https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/PUMA_TAD_TAZ_UGA_ZCTA/MapServer/1/query';
-const ACS_URL = 'https://api.census.gov/data/2022/acs/acs5?get=NAME,B19013_001E,B01003_001E&for=zip%20code%20tabulation%20area:*';
+const ACS_URL = 'https://api.census.gov/data/2022/acs/acs5?get=NAME,B19013_001E,B01003_001E,B19301_001E&for=zip%20code%20tabulation%20area:*';
 
 const PAGE_SIZE = 1000;
 const TOLERANCE = 0.05;        // ~5 km — fine for national-scale chloropleth
@@ -145,18 +146,21 @@ export const ZCTA_GEOJSON = ${geomJson};
   const header = acs[0];
   const iIncome = header.indexOf('B19013_001E');
   const iPop = header.indexOf('B01003_001E');
+  const iPerCap = header.indexOf('B19301_001E');
   const iZcta = header.indexOf('zip code tabulation area');
 
-  const income = {}, pop = {};
+  const income = {}, pop = {}, perCap = {};
   for (let i = 1; i < acs.length; i++) {
     const r = acs[i];
     const z = String(r[iZcta]);
     const inc = parseInt(r[iIncome], 10);
     const p = parseInt(r[iPop], 10);
+    const pc = parseInt(r[iPerCap], 10);
     if (Number.isFinite(inc) && inc > 0) income[z] = inc;
     if (Number.isFinite(p) && p > 0) pop[z] = p;
+    if (Number.isFinite(pc) && pc > 0) perCap[z] = pc;
   }
-  console.log(`income: ${Object.keys(income).length}, pop: ${Object.keys(pop).length}`);
+  console.log(`income: ${Object.keys(income).length}, pop: ${Object.keys(pop).length}, perCap: ${Object.keys(perCap).length}`);
 
   await writeFile(resolve(OUT_DIR, 'zcta_income.js'),
 `// Auto-generated. Median household income per ZCTA, ACS 2022 5-year B19013.
@@ -166,7 +170,11 @@ export const ZCTA_INCOME = ${JSON.stringify(income)};
 `// Auto-generated. Total population per ZCTA, ACS 2022 5-year B01003.
 export const ZCTA_POPULATION = ${JSON.stringify(pop)};
 `);
-  console.log('wrote ZCTA income + population data files');
+  await writeFile(resolve(OUT_DIR, 'zcta_income_per_capita.js'),
+`// Auto-generated. Per-capita income (past 12 months) per ZCTA, ACS 2022 5-year B19301.
+export const ZCTA_INCOME_PER_CAPITA = ${JSON.stringify(perCap)};
+`);
+  console.log('wrote ZCTA income + population + per-capita data files');
 }
 
 main().catch(err => { console.error(err); process.exit(1); });

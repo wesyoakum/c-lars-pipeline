@@ -29,6 +29,7 @@ import { HUC8_GEOJSON }             from '../../data/huc8_geometry.js';
 import { MIGRATION_FLOWS }          from '../../data/migration_flows.js';
 import { ZCTA_GEOJSON }             from '../../data/zcta_geometry.js';
 import { ZCTA_INCOME }              from '../../data/zcta_income.js';
+import { ZCTA_INCOME_PER_CAPITA }   from '../../data/zcta_income_per_capita.js';
 import { ZCTA_POPULATION }          from '../../data/zcta_population.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
@@ -55,8 +56,9 @@ const REGISTRY = {
   'huc8':            () => HUC8_GEOJSON,
   'migration':       () => MIGRATION_FLOWS,
   'zcta-geometry':   () => ZCTA_GEOJSON,
-  'zcta-income':     () => ZCTA_INCOME,
-  'zcta-population': () => ZCTA_POPULATION,
+  'zcta-income':            () => ZCTA_INCOME,
+  'zcta-income-per-capita': () => ZCTA_INCOME_PER_CAPITA,
+  'zcta-population':        () => ZCTA_POPULATION,
 };
 
 export async function onRequestGet(context) {

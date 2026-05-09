@@ -71,7 +71,7 @@ export async function onRequestGet(context) {
     'counties', 'temperature', 'high', 'low', 'precipitation',
     'elevation', 'income', 'drought', 'population', 'elections', 'cities',
     'msaIncome', 'msaHomeValue', 'watersheds', 'migration',
-    'zipIncome', 'zipPopulation',
+    'zipIncome', 'zipIncomePerCapita', 'zipPopulation',
   ];
   const initialLayer = VALID_LAYERS.includes(layerParam) ? layerParam : 'statehood';
 
@@ -440,8 +440,9 @@ export async function onRequestGet(context) {
         <button class="usmap-layer-btn" data-layer="msaHomeValue"  type="button">MSA Home Value</button>
         <button class="usmap-layer-btn" data-layer="watersheds"    type="button">Watersheds</button>
         <button class="usmap-layer-btn" data-layer="migration"     type="button">Migration</button>
-        <button class="usmap-layer-btn" data-layer="zipIncome"     type="button">ZIP Income</button>
-        <button class="usmap-layer-btn" data-layer="zipPopulation" type="button">ZIP Population</button>
+        <button class="usmap-layer-btn" data-layer="zipIncome"          type="button">ZIP Income</button>
+        <button class="usmap-layer-btn" data-layer="zipIncomePerCapita" type="button">ZIP Per-Cap Income</button>
+        <button class="usmap-layer-btn" data-layer="zipPopulation"      type="button">ZIP Population</button>
         <span class="usmap-layer-row-spacer"></span>
         <button class="usmap-toggle-btn" id="usmap-underlay-btn" type="button" aria-pressed="false" title="Show / hide a faint terrain underlay (county elevations)">Terrain underlay</button>
       </div>
@@ -978,6 +979,31 @@ function mapScript({ stateNames, initialLayer }) {
       colorScale: {
         domain: [25000,    50000,    75000,    100000,   150000,    200000  ],
         range:  ['#f7fcf5','#c7e9c0','#74c476','#2e7d32','#1b3a14',  '#0a1f08'],
+      },
+    },
+    zipIncomePerCapita: {
+      type: 'static',
+      title: 'Per-Capita Income by ZIP Code',
+      subtitle: '~33,000 ZCTAs (Census 2020 boundaries) at simplified geometry. ACS 2018-2022 5-year (B19301) — total income in past 12 months ÷ total population. Heavy initial fetch (~6 MB) — first activation takes a few seconds.',
+      fetch: { geojson: 'zcta-geometry', data: 'zcta-income-per-capita' },
+      featureClass: 'zcta',
+      keyOf: function(d) { return d.properties.z; },
+      tooltipTitle: function(d) { return 'ZIP ' + d.properties.z; },
+      tooltipFormat: function(v) { return '$' + v.toLocaleString(); },
+      summaryFormat: function(stats) {
+        return { value: '$' + Math.round(stats.mean).toLocaleString(), label: 'mean across ' + stats.n.toLocaleString() + ' ZCTAs — range $' + stats.min.toLocaleString() + ' to $' + stats.max.toLocaleString() };
+      },
+      drawStateOverlay: true,
+      legendMinLabel: '$10k',
+      legendMaxLabel: '$100k+',
+      legendNotYet: 'No data',
+      legendBarClass: 'income',
+      // Tighter range than zipIncome — per-capita figures sit roughly
+      // half the household-income values, so the gradient anchors at
+      // $10k / $25k / $40k / $60k / $80k / $100k+.
+      colorScale: {
+        domain: [10000,    25000,    40000,    60000,    80000,    100000  ],
+        range:  ['#f7fcf5','#c7e9c0','#74c476','#2e7d32','#1b3a14','#0a1f08'],
       },
     },
     zipPopulation: {
