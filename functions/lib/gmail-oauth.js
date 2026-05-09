@@ -22,9 +22,13 @@
 //      refreshes via the refresh_token.
 //
 // Scopes:
-//   gmail.readonly is the default — read messages, threads, labels,
-//   history, profile. No send/modify. If we ever want draft creation
-//   later, request gmail.compose then.
+//   - gmail.readonly: read messages, threads, labels, history, profile.
+//   - calendar.events: read+write events on the user's calendars.
+//   - calendar.readonly: list calendars (so Claudia can pick a non-
+//     primary calendar by label / id).
+//   No gmail send/modify. If we ever want gmail draft creation later,
+//   request gmail.compose then. Re-consent is required after this
+//   scope set changes — the connect endpoint forces prompt=consent.
 
 import { one, run } from './db.js';
 import { now } from './ids.js';
@@ -34,6 +38,8 @@ const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 export const GMAIL_DEFAULT_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar.readonly',
   'openid',
   'email',
   'profile',

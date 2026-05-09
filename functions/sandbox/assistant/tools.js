@@ -27,6 +27,12 @@ import {
 } from '../../lib/gmail-api.js';
 import { getGmailConnectionStatus } from '../../lib/gmail-oauth.js';
 import {
+  listCalendars as gcalListCalendars,
+  createEvent as gcalCreateEvent,
+  updateEvent as gcalUpdateEvent,
+  deleteEvent as gcalDeleteEvent,
+} from '../../lib/google-calendar-api.js';
+import {
   claudiaInsert,
   claudiaUpdate,
   claudiaUndo,
@@ -621,6 +627,113 @@ export async function makeAssistantTools({ env, user }) {
       input_schema: {
         type: 'object',
         properties: {},
+      },
+    },
+    {
+      name: 'list_calendars',
+      description:
+        'List the Google calendars on the connected Google account (primary + any shared / ' +
+        'subscribed). Read-only — call freely whenever you need the calendar id for a write. ' +
+        'Returns id, summary, primary, access_role, time_zone. The "primary" entry is ' +
+        'the default target for create/update/delete when no calendar_id is specified. ' +
+        'Errors: gmail_not_connected (route to /settings/claudia), calendar_scope_missing ' +
+        '(reconnect to grant the new scope).',
+      input_schema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+    {
+      name: 'create_calendar_event',
+      description:
+        'Create an event on the connected Google Calendar (default: primary). Provide summary + ' +
+        'start + end. start/end are objects: { dateTime: "2026-05-09T15:00:00-05:00" } for timed ' +
+        'events (include CT offset — UTC−5/UTC−6 per the prompt) OR { date: "2026-05-09" } for ' +
+        'all-day. Optional: description, location, attendees ([{email,...}]), calendar_id (omit ' +
+        'for primary), time_zone (e.g. "America/Chicago" — pairs with naive dateTime). Returns the ' +
+        'server-assigned event_id, htmlLink, and the canonical event body. ' +
+        'CONFIRMATION: ${display} accepted that an event he dictates verbatim ("create an event ' +
+        'tomorrow 3-4pm called Quarterly review with Alex") fires immediately — that dictation IS ' +
+        'the confirmation. If ANY field is your inference rather than verbatim from him (a guessed ' +
+        'time, a guessed attendee, a paraphrased title), confirm before firing. After firing, ' +
+        'always echo the event_id and htmlLink back so he can click through.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          summary: { type: 'string', description: 'Event title.' },
+          description: { type: 'string', description: 'Long-form notes / agenda.' },
+          location: { type: 'string', description: 'Free-text location ("Conference Room A", "Zoom", an address).' },
+          start: {
+            type: 'object',
+            description: 'Start time. Either { dateTime, time_zone? } or { date } (YYYY-MM-DD all-day).',
+          },
+          end: {
+            type: 'object',
+            description: 'End time. Same shape as start. For all-day events, end.date is exclusive (a 1-day event has end.date = start.date + 1).',
+          },
+          attendees: {
+            type: 'array',
+            items: { type: 'object' },
+            description: 'Optional attendees [{ email, displayName?, optional? }, ...].',
+          },
+          time_zone: {
+            type: 'string',
+            description: 'Optional IANA tz applied to naive dateTime values (e.g. "America/Chicago"). Ignored if dateTime already has an offset.',
+          },
+          calendar_id: { type: 'string', description: 'Target calendar id from list_calendars. Omit for primary.' },
+          send_updates: {
+            type: 'string',
+            enum: ['all', 'externalOnly', 'none'],
+            description: 'Whether Google notifies attendees. Default "none" (no email blast on creation).',
+          },
+        },
+        required: ['summary', 'start', 'end'],
+      },
+    },
+    {
+      name: 'update_calendar_event',
+      description:
+        'Patch an existing Google Calendar event. Identify by event_id (from create_calendar_event ' +
+        'or list_calendars + the event listing — though we don\'t expose a list_events tool yet, so ' +
+        'in practice the user gives you the id or you echo one you just created). Pass only the ' +
+        'fields you want to change — others stay untouched. ALWAYS confirm with ${display} before ' +
+        'firing (even verbatim dictation: edits affect existing events that may have attendees). ' +
+        'Returns the updated event body.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          event_id: { type: 'string', description: 'Google-assigned event id.' },
+          calendar_id: { type: 'string', description: 'Target calendar id. Omit for primary.' },
+          summary: { type: 'string' },
+          description: { type: 'string' },
+          location: { type: 'string' },
+          start: { type: 'object' },
+          end: { type: 'object' },
+          attendees: { type: 'array', items: { type: 'object' } },
+          send_updates: { type: 'string', enum: ['all', 'externalOnly', 'none'] },
+        },
+        required: ['event_id'],
+      },
+    },
+    {
+      name: 'delete_calendar_event',
+      description:
+        'Delete a Google Calendar event by event_id. NOT undoable from Pipeline (no Google API for ' +
+        'soft-delete restore on individual events). ALWAYS confirm with ${display} before firing — ' +
+        'even when he says "cancel that meeting", echo back the summary + start time and wait for ' +
+        '"yes". Returns { ok: true }.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          event_id: { type: 'string' },
+          calendar_id: { type: 'string', description: 'Target calendar id. Omit for primary.' },
+          send_updates: {
+            type: 'string',
+            enum: ['all', 'externalOnly', 'none'],
+            description: 'Whether Google notifies attendees of cancellation. Default "all" — they should know.',
+          },
+        },
+        required: ['event_id'],
       },
     },
     {
@@ -1255,6 +1368,14 @@ export async function makeAssistantTools({ env, user }) {
         return readGmailThread(env, user, input);
       case 'gmail_status':
         return gmailStatus(env, user, input);
+      case 'list_calendars':
+        return listCalendarsTool(env, user, input);
+      case 'create_calendar_event':
+        return createCalendarEventTool(env, user, input);
+      case 'update_calendar_event':
+        return updateCalendarEventTool(env, user, input);
+      case 'delete_calendar_event':
+        return deleteCalendarEventTool(env, user, input);
       case 'read_account_intel':
         return readAccountIntel(env, user, input);
       case 'set_account_intel':
@@ -1410,6 +1531,10 @@ export async function listTableNames(env) {
  * Wrap a Gmail tool call so the various error codes from
  * lib/gmail-oauth.js (gmail_not_connected, refresh_failed) come back
  * as structured tool results Claudia can surface, instead of throwing.
+ *
+ * Also catches the calendar_scope_missing case from
+ * lib/google-calendar-api.js — same Google OAuth row, so the routing
+ * advice (reconnect at /settings/claudia) is identical.
  */
 async function gmailGuard(fn) {
   try {
@@ -1425,6 +1550,13 @@ async function gmailGuard(fn) {
       return {
         error: 'gmail_refresh_failed',
         message: 'Gmail refresh token failed (commonly: expired in Testing mode after 7 days, or revoked). Send Wes to /settings/claudia to reconnect.',
+        detail: err.message,
+      };
+    }
+    if (err?.code === 'calendar_scope_missing') {
+      return {
+        error: 'calendar_scope_missing',
+        message: 'Google Calendar scopes are not granted on the current connection. Send Wes to /settings/claudia and reconnect Gmail — Google will re-prompt for the new Calendar scopes.',
         detail: err.message,
       };
     }
@@ -1477,6 +1609,104 @@ async function readGmailThread(env, user, { id } = {}) {
 async function gmailStatus(env, user) {
   const status = await getGmailConnectionStatus(env, user.id);
   return status;
+}
+
+// ---------- Google Calendar (write surface) ----------
+
+async function listCalendarsTool(env, user) {
+  return gmailGuard(async () => {
+    const calendars = await gcalListCalendars(env, user.id);
+    return { calendars, count: calendars.length };
+  });
+}
+
+// Build a Google Events resource time field from the tool input. Pass
+// through { date } as-is for all-day; for { dateTime, time_zone? }
+// emit { dateTime, timeZone }.
+function buildEventTime(t, fallbackTz) {
+  if (!t || typeof t !== 'object') return undefined;
+  if (t.date) return { date: String(t.date) };
+  if (t.dateTime) {
+    const out = { dateTime: String(t.dateTime) };
+    const tz = t.time_zone || t.timeZone || fallbackTz;
+    if (tz) out.timeZone = String(tz);
+    return out;
+  }
+  return undefined;
+}
+
+async function createCalendarEventTool(env, user, input = {}) {
+  return gmailGuard(async () => {
+    const body = {};
+    if (input.summary) body.summary = String(input.summary);
+    if (input.description) body.description = String(input.description);
+    if (input.location) body.location = String(input.location);
+    body.start = buildEventTime(input.start, input.time_zone);
+    body.end = buildEventTime(input.end, input.time_zone);
+    if (!body.start || !body.end) {
+      return { error: 'invalid_input', message: 'start and end are required (each as { dateTime, time_zone? } or { date }).' };
+    }
+    if (Array.isArray(input.attendees) && input.attendees.length > 0) {
+      body.attendees = input.attendees
+        .map((a) => (a && typeof a === 'object' ? a : null))
+        .filter(Boolean);
+    }
+    const created = await gcalCreateEvent(env, user.id, input.calendar_id, body, {
+      sendUpdates: input.send_updates,
+    });
+    return {
+      ok: true,
+      event_id: created?.id || null,
+      html_link: created?.htmlLink || null,
+      calendar_id: created?.organizer?.email || input.calendar_id || 'primary',
+      summary: created?.summary || null,
+      start: created?.start || null,
+      end: created?.end || null,
+      raw: created,
+    };
+  });
+}
+
+async function updateCalendarEventTool(env, user, input = {}) {
+  if (!input.event_id) return { error: 'invalid_input', message: 'event_id is required.' };
+  return gmailGuard(async () => {
+    const patch = {};
+    if (input.summary !== undefined) patch.summary = String(input.summary);
+    if (input.description !== undefined) patch.description = String(input.description);
+    if (input.location !== undefined) patch.location = String(input.location);
+    if (input.start) patch.start = buildEventTime(input.start, input.time_zone);
+    if (input.end) patch.end = buildEventTime(input.end, input.time_zone);
+    if (Array.isArray(input.attendees)) {
+      patch.attendees = input.attendees
+        .map((a) => (a && typeof a === 'object' ? a : null))
+        .filter(Boolean);
+    }
+    if (Object.keys(patch).length === 0) {
+      return { error: 'invalid_input', message: 'At least one mutable field (summary/description/location/start/end/attendees) is required.' };
+    }
+    const updated = await gcalUpdateEvent(env, user.id, input.calendar_id, input.event_id, patch, {
+      sendUpdates: input.send_updates,
+    });
+    return {
+      ok: true,
+      event_id: updated?.id || input.event_id,
+      html_link: updated?.htmlLink || null,
+      summary: updated?.summary || null,
+      start: updated?.start || null,
+      end: updated?.end || null,
+      raw: updated,
+    };
+  });
+}
+
+async function deleteCalendarEventTool(env, user, input = {}) {
+  if (!input.event_id) return { error: 'invalid_input', message: 'event_id is required.' };
+  return gmailGuard(async () => {
+    await gcalDeleteEvent(env, user.id, input.calendar_id, input.event_id, {
+      sendUpdates: input.send_updates,
+    });
+    return { ok: true, event_id: input.event_id, calendar_id: input.calendar_id || 'primary' };
+  });
 }
 
 async function readAccountIntel(env, user, { account_id } = {}) {
