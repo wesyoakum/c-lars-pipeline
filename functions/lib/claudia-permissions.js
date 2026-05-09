@@ -164,6 +164,26 @@ export const PERMISSION_GATED_ACTIONS_CATALOG = [
     label: 'Mark a triage queue action complete',
     description: 'Flip one or more open claudia_actions to status=\'completed\' from chat. Use when Wes says "resolved" / "handled" / "I\'m done with X" / "we already took care of Y" — find the matching Hot/Plan/Quick rows by title fuzzy match and clear them. Same effect as clicking Done in the queue panel. Pass either an exact id, or a substring match against title (case-insensitive) — when match hits multiple rows, ALL get completed (so "resolved on the MATE thing" clears every MATE-related action at once).',
   },
+  // calendar (Google Calendar via the shared OAuth row)
+  {
+    action: 'create_calendar_event',
+    category: 'calendar',
+    label: 'Create calendar events',
+    description: 'Create events on the connected Google Calendar (default: primary). Verbatim-dictated events (title + time + day all spoken) fire immediately; inferred fields require confirmation. Defaults to send_updates=none on creation so attendees don\'t get a surprise email blast.',
+  },
+  {
+    action: 'update_calendar_event',
+    category: 'calendar',
+    label: 'Update calendar events',
+    description: 'Patch fields on an existing Google Calendar event by event_id. Always confirms first (existing events may have attendees). Send-updates default carries through Google\'s normal invite-update behavior.',
+  },
+  {
+    action: 'delete_calendar_event',
+    category: 'calendar',
+    label: 'Delete calendar events',
+    description: 'Cancel a Google Calendar event by event_id. NOT undoable from Pipeline — Google does not expose a soft-delete restore API for individual events. Always confirms; defaults send_updates=all so attendees see the cancellation.',
+    defaultEnabled: false,
+  },
   // account / contact merging (consolidate duplicate rows)
   {
     action: 'merge_accounts',
@@ -249,6 +269,11 @@ export const PERMISSION_CATEGORIES = [
     key: 'merging',
     label: 'Merging (deduplication)',
     blurb: 'Consolidate duplicate accounts or contacts into one row. Repoints every FK reference and deletes the loser. NOT undoable — only enable when actively de-duping.',
+  },
+  {
+    key: 'calendar',
+    label: 'Google Calendar',
+    blurb: 'Create / update / delete events on the connected Google Calendar. Uses the same Google OAuth row as Gmail — connect once at the top of this page. Delete is default-off and not undoable from Pipeline.',
   },
 ];
 

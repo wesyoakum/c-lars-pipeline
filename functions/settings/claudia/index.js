@@ -150,16 +150,23 @@ function renderRow(catalogEntry, dbRow) {
  */
 function renderGmailSection(gmail, env) {
   const hasOauthApp = !!(env?.GMAIL_CLIENT_ID && env?.GMAIL_CLIENT_SECRET);
+  // Detect connections from before Calendar scopes were added —
+  // existing tokens won't have calendar.events, so the calendar
+  // tools will return calendar_scope_missing until Wes reconnects.
+  const calendarScopeGranted = !!(gmail?.scopes && /calendar\.events/.test(gmail.scopes));
+  const needsCalendarReconnect = gmail?.connected && !calendarScopeGranted;
 
   return html`
     <section class="card" style="margin-top:1rem">
       <div class="card-header">
-        <h2>Gmail connection</h2>
+        <h2>Google connection (Gmail + Calendar)</h2>
       </div>
       <p class="muted">
-        Read-only Gmail access for Claudia. When connected, she can search and read your Gmail
-        through her chat tools (search_gmail, read_gmail_message, list_gmail_threads,
-        read_gmail_thread). She can&rsquo;t send, can&rsquo;t modify, can&rsquo;t delete.
+        One Google connection covers two surfaces. Gmail: read-only — search and read messages
+        / threads (search_gmail, read_gmail_message, list_gmail_threads, read_gmail_thread).
+        Calendar: read + write — list calendars and create / update / delete events on the
+        connected account (list_calendars, create_calendar_event, update_calendar_event,
+        delete_calendar_event). Gmail send/modify is still off.
       </p>
 
       ${!hasOauthApp ? html`
@@ -174,6 +181,9 @@ function renderGmailSection(gmail, env) {
             <br>
             Get the values from a Google Cloud Console OAuth client (Web application type, with
             redirect URI <code>https://&lt;your-host&gt;/sandbox/assistant/gmail/callback</code>).
+            The OAuth consent screen also needs the <code>gmail.readonly</code>,
+            <code>calendar.events</code>, and <code>calendar.readonly</code> scopes added under
+            &ldquo;Scopes&rdquo;.
           </p>
         </div>
       ` : !gmail.connected ? html`
@@ -181,12 +191,12 @@ function renderGmailSection(gmail, env) {
           <strong>Not connected.</strong>
           <p style="margin:0.4rem 0 0.8rem">
             Click Connect to authenticate with Google. You&rsquo;ll see Google&rsquo;s consent
-            screen, grant the gmail.readonly scope, and be redirected back here.
+            screen, grant Gmail + Calendar scopes, and be redirected back here.
           </p>
-          <a class="btn primary" href="/sandbox/assistant/gmail/connect">Connect Gmail</a>
+          <a class="btn primary" href="/sandbox/assistant/gmail/connect">Connect Google</a>
         </div>
       ` : html`
-        <div class="claudia-gmail-state ${gmail.last_error ? 'claudia-gmail-state--err' : 'claudia-gmail-state--on'}">
+        <div class="claudia-gmail-state ${gmail.last_error ? 'claudia-gmail-state--err' : (needsCalendarReconnect ? 'claudia-gmail-state--err' : 'claudia-gmail-state--on')}">
           ${gmail.last_error ? html`
             <strong>Connected, but last refresh failed.</strong>
             <p style="margin:0.4rem 0">
@@ -196,6 +206,13 @@ function renderGmailSection(gmail, env) {
               Most common cause: in Google Cloud &ldquo;Testing&rdquo; mode, refresh tokens expire
               after 7 days. Reconnect to mint fresh ones.
             </p>
+          ` : needsCalendarReconnect ? html`
+            <strong>Connected as ${escape(gmail.connected_email || '(unknown email)')} — Calendar scope missing.</strong>
+            <p style="margin:0.4rem 0;font-size:0.9rem">
+              Calendar scopes (<code>calendar.events</code>, <code>calendar.readonly</code>) were
+              added after this connection was made. Reconnect to grant them — Gmail keeps working
+              either way; the Calendar tools will fail until you reconnect.
+            </p>
           ` : html`
             <strong>Connected as ${escape(gmail.connected_email || '(unknown email)')}.</strong>
             <p class="muted" style="margin:0.4rem 0 0.8rem;font-size:0.85rem">
@@ -204,12 +221,12 @@ function renderGmailSection(gmail, env) {
               ${gmail.scopes ? html`<br>Scopes: <code style="font-size:0.8rem">${escape(gmail.scopes)}</code>` : ''}
             </p>
           `}
-          <a class="btn ${gmail.last_error ? 'primary' : ''}" href="/sandbox/assistant/gmail/connect">
-            ${gmail.last_error ? 'Reconnect' : 'Reconnect (force re-auth)'}
+          <a class="btn ${(gmail.last_error || needsCalendarReconnect) ? 'primary' : ''}" href="/sandbox/assistant/gmail/connect">
+            ${needsCalendarReconnect ? 'Reconnect to grant Calendar scope' : (gmail.last_error ? 'Reconnect' : 'Reconnect (force re-auth)')}
           </a>
           <form method="post" action="/sandbox/assistant/gmail/disconnect"
                 style="display:inline;margin-left:0.5rem"
-                onsubmit="return confirm('Disconnect Gmail? Claudia will lose Gmail access until reconnected.');">
+                onsubmit="return confirm('Disconnect Google? Claudia will lose Gmail + Calendar access until reconnected.');">
             <button type="submit" class="btn">Disconnect</button>
           </form>
         </div>
