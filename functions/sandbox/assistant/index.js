@@ -756,7 +756,7 @@ export async function onRequestGet(context) {
            Voice / Docs / Triage / Questions all stack below the chat
            on phones today. The tabs let them share one screen-region
            instead — only the active panel renders, the rest hide.
-           CSS `order` on the layout grid items pulls voice (which is
+           CSS 'order' on the layout grid items pulls voice (which is
            DOM-first / left sidebar on desktop) below the chat so its
            panel sits in the same vertical band as the others. */
         .claudia-mobile-tabs {
