@@ -29,7 +29,7 @@
 import { all, one, run } from '../../lib/db.js';
 import { now, uuid } from '../../lib/ids.js';
 import { messages } from '../../lib/anthropic.js';
-import { COMPANY_CONTEXT, INDUSTRY_TERMS } from '../../lib/claudia-knowledge.js';
+import { COMPANY_CONTEXT, INDUSTRY_TERMS, dayContext } from '../../lib/claudia-knowledge.js';
 import { getEventsInWindow } from '../../lib/claudia-calendar.js';
 import { renderMarkdown } from '../../lib/claudia-markdown.js';
 import { escape } from '../../lib/layout.js';
@@ -201,16 +201,18 @@ export async function onRequestPost(context) {
   // per fire) and the voice match matters — these messages interleave
   // with normal chat replies in the same thread.
   const display = user.display_name || user.email;
-  const today = new Date().toISOString().slice(0, 10);
+  const dayAnchors = dayContext();
 
   const system = [
     COMPANY_CONTEXT,
     '',
     INDUSTRY_TERMS,
     '',
+    dayAnchors,
+    '',
     '─────────────────────────────────────────────────────────',
     '',
-    `You are Claudia, ${display}'s personal assistant. Today is ${today}. You are writing ONE proactive chat message because new activity occurred while ${display} wasn't typing in the chat — he just opened the page, returned to the tab, OR the polling timer fired while the tab was visible. Tell him what landed, briefly, in your normal chat voice.`,
+    `You are Claudia, ${display}'s personal assistant. You are writing ONE proactive chat message because new activity occurred while ${display} wasn't typing in the chat — he just opened the page, returned to the tab, OR the polling timer fired while the tab was visible. Tell him what landed, briefly, in your normal chat voice.`,
     '',
     'OUTPUT: just the message text. No JSON, no markdown fences, no surrounding prose. ONE single message.',
     '',
@@ -240,6 +242,7 @@ export async function onRequestPost(context) {
     '- For items 1-4 hours out, mention only when it changes the framing ("the email can wait — your 4pm is the higher priority").',
     '- The data lists each event\'s source label (work / family / wife / etc.). Family-calendar events (kids\' games, wife\'s appointments, etc.) are AS RELEVANT as work events. Don\'t skew toward Pipeline.',
     '- Always cite the start time in CT format ("3:00 PM" not "15:00", and definitely not the raw ISO).',
+    '- Use the DAY ANCHORS block at the top of this prompt as the source of truth for "today / tomorrow / next Monday / this weekend." Lead day citations with the WEEKDAY (e.g. "Saturday 5/9", not "5/9" alone). Never switch labels for the same day mid-message.',
   ].join('\n');
 
   const stateBlob = JSON.stringify({

@@ -143,6 +143,67 @@ export function userContext(user, memoryRows = []) {
 }
 
 /**
+ * dayContext — explicit weekday anchors for "today / tomorrow / next
+ * Monday / this weekend" in America/Chicago. Returns a single-line
+ * markdown-ish string ready to inline into a system prompt. Bug this
+ * fixes: the model occasionally slipped on day labels mid-reply (e.g.
+ * listed Saturday's agenda then closed with "Monday's going to be
+ * busy"). Giving it the labels up front kills the failure mode.
+ *
+ * Output looks like:
+ *   "DAY ANCHORS — Today: Friday 2026-05-08. Tomorrow: Saturday
+ *    2026-05-09. This weekend: Sat 5/9 + Sun 5/10. Next Monday:
+ *    2026-05-11. Tonight = this evening of 2026-05-08; do NOT
+ *    conflate with tomorrow."
+ *
+ * Pass `nowMs` (defaults to Date.now()) — used by tests + cron jobs
+ * that want a deterministic input.
+ */
+export function dayContext(nowMs = Date.now()) {
+  const ymdFmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Chicago',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  const dayFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Chicago',
+    weekday: 'long',
+  });
+
+  const ctYmd = (offsetDays) => ymdFmt.format(new Date(nowMs + offsetDays * 86400000));
+  const ctDay = (offsetDays) => dayFmt.format(new Date(nowMs + offsetDays * 86400000));
+  const shortMd = (ymd) => {
+    const [y, m, d] = ymd.split('-');
+    return `${parseInt(m, 10)}/${parseInt(d, 10)}`;
+  };
+
+  const todayYmd = ctYmd(0);
+  const todayDay = ctDay(0);
+  const tomorrowYmd = ctYmd(1);
+  const tomorrowDay = ctDay(1);
+
+  // Find next Monday — could be today (if today IS Monday) through 7 days out.
+  // Mon=0 in this calc. We want strictly "next Monday after today" except when today is Monday.
+  let mondayOffset = 1;
+  while (mondayOffset <= 7 && ctDay(mondayOffset) !== 'Monday') mondayOffset++;
+  const mondayYmd = ctYmd(mondayOffset);
+
+  // This weekend = the next Saturday + Sunday after today (or today if today is Sat/Sun).
+  let satOffset = 0;
+  while (satOffset <= 7 && ctDay(satOffset) !== 'Saturday') satOffset++;
+  const satYmd = ctYmd(satOffset);
+  const sunYmd = ctYmd(satOffset + 1);
+
+  return [
+    'DAY ANCHORS:',
+    `- Today: ${todayDay} ${todayYmd} (${shortMd(todayYmd)})`,
+    `- Tomorrow: ${tomorrowDay} ${tomorrowYmd} (${shortMd(tomorrowYmd)})`,
+    `- This weekend: Sat ${shortMd(satYmd)} + Sun ${shortMd(sunYmd)}`,
+    `- Next Monday: ${mondayYmd} (${shortMd(mondayYmd)})`,
+    `- Tonight = this evening of ${todayYmd}. Do NOT mix tonight references into a tomorrow agenda — they are different days.`,
+  ].join('\n');
+}
+
+/**
  * loadUserMemoryRows — convenience helper for AI flows that need to
  * build a userContext block. Reads all keys for the given user_id.
  * Returns an empty array on error so callers don't have to handle
