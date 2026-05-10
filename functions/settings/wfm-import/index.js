@@ -198,6 +198,54 @@ export async function onRequestGet(context) {
             shuffle.
           </p>
 
+          <!-- WFM counts strip — what's actually in WFM right now,
+               by kind. Loads on page open + on Refresh click. Uses
+               the same wfmCount() helper Claudia exposes via her
+               wfm_count chat tool, so the numbers always match. -->
+          <div style="margin:.4rem 0 .8rem 0;padding:.5rem .7rem;border:1px solid #c8e3ff;border-radius:6px;background:#f4f9ff"
+               x-init="wfmCountsLoad()">
+            <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center">
+              <strong style="font-size:.92rem">In WFM right now</strong>
+              <span class="muted" style="font-size:.78rem;flex:1;min-width:12rem"
+                    x-show="!wfmCounts && !wfmCountsBusy && !wfmCountsError">
+                Live counts straight from BlueRock — independent of what's been imported into Pipeline.
+              </span>
+              <span class="muted" style="font-size:.78rem;flex:1;min-width:12rem"
+                    x-show="wfmCountsBusy">
+                Polling WFM…
+              </span>
+              <span style="font-size:.78rem;color:#cf222e;flex:1;min-width:12rem"
+                    x-show="wfmCountsError"
+                    x-text="wfmCountsError"></span>
+              <span class="muted" style="font-size:.74rem"
+                    x-show="wfmCounts && wfmCounts.fetched_at"
+                    x-text="'as of ' + (wfmCounts && wfmCounts.fetched_at ? wfmCounts.fetched_at.replace(/\\..*/,'').replace('T',' ') + 'Z' : '')"></span>
+              <button type="button" class="btn"
+                      @click="wfmCountsRefresh()"
+                      :disabled="wfmCountsBusy"
+                      style="font-size:.78rem">
+                <span x-show="!wfmCountsBusy">Refresh</span>
+                <span x-show="wfmCountsBusy">…</span>
+              </button>
+            </div>
+            <div x-show="wfmCounts" x-cloak
+                 style="margin-top:.4rem;display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:.4rem;font-size:.82rem">
+              <template x-for="kind in ['client','lead','quote','job','invoice','staff']" :key="kind">
+                <div style="padding:.3rem .5rem;border:1px solid #cfdcec;border-radius:4px;background:white">
+                  <div style="display:flex;justify-content:space-between;gap:.4rem;align-items:baseline">
+                    <span style="font-variant:small-caps;color:#555" x-text="kind"></span>
+                    <span style="font-family:ui-monospace,monospace;font-weight:600"
+                          :style="(wfmCounts && wfmCounts.counts && wfmCounts.counts[kind] == null) ? 'color:#cf222e' : ''"
+                          x-text="wfmCounts && wfmCounts.counts ? (wfmCounts.counts[kind] == null ? 'err' : wfmCounts.counts[kind]) : '—'"></span>
+                  </div>
+                  <div class="muted" style="font-size:.7rem"
+                       x-show="wfmCounts && wfmCounts.errors && wfmCounts.errors[kind]"
+                       x-text="wfmCounts && wfmCounts.errors ? wfmCounts.errors[kind] : ''"></div>
+                </div>
+              </template>
+            </div>
+          </div>
+
           <!-- Full-import row (top — most prominent action).
                Background mode (Option 3): browser kicks off, cron
                worker drains the queue every minute, page polls
@@ -687,6 +735,13 @@ export async function onRequestGet(context) {
                 // Import-time options. Off by default; user opts in.
                 synthOrphanQuotes: false,
 
+                // ---------- WFM counts strip ----------
+                // Polls /settings/wfm-import/counts on init (and on
+                // Refresh click) to show what's actually in WFM.
+                wfmCounts: null,
+                wfmCountsBusy: false,
+                wfmCountsError: '',
+
                 // ---------- Full-import state (background mode) ----------
                 // Server-side: /full/start enqueues plans, /api/cron/wfm-step
                 // drains them every minute, /full/status reports progress.
@@ -1139,6 +1194,38 @@ export async function onRequestGet(context) {
                   const k = this.fullProgress.by_kind[kind];
                   return k.done + ' / ' + k.total +
                     (k.error > 0 ? ' (' + k.error + ' err)' : '');
+                },
+
+                async wfmCountsLoad() {
+                  // Boot fetch — runs on x-init when the strip mounts.
+                  // Quiet failure: if WFM isn't connected yet (the
+                  // counts endpoint will 401/500 because the OAuth
+                  // gate refused), we just leave wfmCounts null and
+                  // surface a one-line error.
+                  if (this.wfmCountsBusy || this.wfmCounts) return;
+                  await this._wfmCountsFetch();
+                },
+                async wfmCountsRefresh() {
+                  await this._wfmCountsFetch();
+                },
+                async _wfmCountsFetch() {
+                  this.wfmCountsBusy = true;
+                  this.wfmCountsError = '';
+                  try {
+                    const res = await fetch('/settings/wfm-import/counts', {
+                      credentials: 'same-origin',
+                    });
+                    const j = await res.json();
+                    if (!j.ok) {
+                      this.wfmCountsError = j.error || 'failed to load counts';
+                      return;
+                    }
+                    this.wfmCounts = j;
+                  } catch (e) {
+                    this.wfmCountsError = e.message || String(e);
+                  } finally {
+                    this.wfmCountsBusy = false;
+                  }
                 },
 
                 async fullImportStart() {
