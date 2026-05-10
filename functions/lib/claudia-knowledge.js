@@ -47,6 +47,27 @@ Typical system structure: winch (hydraulic or electric, Lebus grooved) + A-frame
 Sales context: long cycles, mixed stakeholders, frequent early ambiguity (budgetary pricing, partial specs). Clean concept → quote → execution transition is critical. Watch for: missing inputs before quoting, scope ambiguity, descriptions that don't match deliverables, downstream issues from unclear scope.`;
 
 /**
+ * WES_PERSONAL_CONTEXT — stable identifiers for people and teams in
+ * Wes's personal life. Single-user app; baked in here rather than in
+ * assistant_memory so the facts ship universally and survive memory
+ * resets. Add a line whenever Wes corrects a hallucination with a
+ * "remember: X is Y" — that's the cue that the fact is stable enough
+ * to live here.
+ *
+ * Anti-hallucination intent: when an upload or screenshot mentions
+ * one of these names, Claudia should match it against this block
+ * BEFORE inferring categories from the name's vibe. ("Twelve" sounds
+ * like it could be anything; the literal mapping says baseball.)
+ */
+export const WES_PERSONAL_CONTEXT = `WES PERSONAL CONTEXT — stable identifiers (do not infer around these):
+
+Sports / teams:
+- "Twelve" / "Twelve 12U" / "Twelve 12U-Black" — Silas's baseball team. Anywhere the team name "Twelve" appears, the sport is BASEBALL. Never narrate a "Twelve" event as another sport (no disc golf, no soccer, no anything-else); the name has been repurposed conversationally enough times that the model drifts. If a screenshot or feed shows a "Twelve" event, it is baseball.
+- "Scrap Yard MDC" — venue / event-host name for Silas's baseball events in Conroe (Scrap Yard Sports complex). Not disc golf despite the "MDC" acronym.
+
+(Add new stable family / team / venue identifiers here as Wes corrects them — this block is the single source of truth for things that should never drift.)`;
+
+/**
  * INDUSTRY_TERMS — verbatim-preserve glossary. The model must NOT
  * expand acronyms or substitute alternatives — domain experts read
  * Claudia's output and they expect their lingo back.
