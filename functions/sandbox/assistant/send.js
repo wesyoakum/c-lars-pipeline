@@ -217,6 +217,13 @@ export async function onRequestPost(context) {
     assistantText = `Error: ${err?.message || String(err)}`;
   }
 
+  // Defense in depth — strip any leading "[YYYY-MM-DD HH:MM] " or
+  // "[CT YYYY-MM-DD HH:MM] " prefix the model echoed from history.
+  // The system prompt forbids it, but Opus drifts under load; the
+  // double-render in the UI ("[2026-05-10 00:10] [2026-05-10 00:10] ...")
+  // is too jarring to leave to prompt-only enforcement.
+  assistantText = stripLeadingTimestampPrefix(assistantText);
+
   const replyTs = now();
   await run(
     env.DB,
@@ -276,6 +283,23 @@ function autoTitleFromMessage(text) {
   // Truncate at the last space before char 60 so we don't break a word.
   const cut = cleaned.lastIndexOf(' ', 57);
   return (cut > 30 ? cleaned.slice(0, cut) : cleaned.slice(0, 57)) + '…';
+}
+
+// Strip any leading "[YYYY-MM-DD HH:MM] " or "[CT YYYY-MM-DD HH:MM] "
+// prefix the model echoed from the system-injected history annotations.
+// The page renders its own per-bubble timestamp; an echoed prefix
+// shows up doubled. Idempotent — runs at most twice in the rare case
+// the model double-prefixed.
+const TS_PREFIX_RE = /^\[(?:CT\s+)?\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\]\s*/;
+function stripLeadingTimestampPrefix(text) {
+  if (!text) return text;
+  let out = String(text);
+  for (let i = 0; i < 2; i++) {
+    const next = out.replace(TS_PREFIX_RE, '');
+    if (next === out) break;
+    out = next;
+  }
+  return out;
 }
 
 // Format a UTC ISO 8601 timestamp into "YYYY-MM-DD HH:MM" in
@@ -438,6 +462,8 @@ End with ONE short question about which action to take next. NEVER end asking pe
 Special case: contacts CSV. Filename contains contacts/people/address OR headers include first/last name + email → call propose_contact_imports(id) instead of read_document. Present the dedupe summary clearly (X to update, Y to create under existing account, Z need a new account first, N duplicates). Don't dump the full proposals array — summarize buckets and quote a few representative rows.
 
 If extraction_status is "error" or "partial", say so plainly and ask ${display} to re-upload or describe — that is the ONE case where stopping after step 1 is acceptable.
+
+DOCUMENT-CONTENT FIDELITY. When narrating what you read in an upload (especially a screenshot / image transcript), every CATEGORICAL LABEL you apply — sport ("baseball" / "disc golf" / "soccer"), event type ("tournament" / "practice" / "scrimmage"), venue type, person's role, organization type — must be supported by LITERAL TEXT in the extracted content. Do NOT infer the category from a name pattern, an acronym, or a vibe. The exact failure mode: a TeamReach screenshot showed "Twelve 12U-Black" and "Scrap Yard MDC" (a baseball event) and Claudia narrated it as a "disc golf tournament" — "MDC" + "Twelve" sounded right, the literal text never said disc golf. If the extracted text doesn't contain the category word, either quote the strings you see and let ${display} fill in the framing, or call read_document and grep for the exact term before naming it. Same rule for sender, recipient, dates, dollar amounts in document content: quote what the extract literally says, do not paraphrase into a category that wasn't there.
 ` : '';
 
   const iterativeReviewBlock = isIterativeReview ? `
