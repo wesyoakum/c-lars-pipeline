@@ -44,9 +44,9 @@ export async function onRequestGet(context) {
   }
 
   const rows = await all(env.DB,
-    `SELECT id, started_at, finished_at, triggered_by, ok, summary,
+    `SELECT id, mode, started_at, finished_at, triggered_by, ok, summary,
             counts_json, errors_json, links_json,
-            selection_summary_json, selection_size
+            selection_summary_json, selection_size, total_planned
        FROM wfm_import_runs
        ORDER BY started_at DESC
        LIMIT ?`,
@@ -61,7 +61,8 @@ export async function onRequestGet(context) {
         <a href="/settings/wfm-import" class="btn" style="font-size:.85rem">← Back to import</a>
       </div>
       <p class="muted" style="margin-top:0">
-        One row per call to <code>/settings/wfm-import/commit</code>.
+        One row per import run — sample/commit selections, full imports,
+        and delta refreshes all land here.
         Showing the ${rows.length === 1 ? 'most recent run' : 'last ' + rows.length + ' runs'}
         (newest first; cap ${MAX_ROWS}). Click a row to expand details.
       </p>
@@ -120,16 +121,48 @@ export async function onRequestGet(context) {
               : ['Errors / skip reasons — ' + fmtTs(row.started_at) + ':',
                  ...errors.map((e) => '  - ' + e)].join('\n');
 
+            // Selection-summary entries come in three shapes depending
+            // on which path produced the run:
+            //   - sample/commit  → per-record entries with name/id/uuid
+            //   - full import    → per-kind entries { kind, count }
+            //   - delta refresh  → per-kind entries { kind, fetched, queued }
+            // Detect by looking at the first entry's shape so the
+            // Submitted panel below can render each correctly.
+            const isPerRecord = selection.length > 0 &&
+              selection[0] && (selection[0].name || selection[0].id || selection[0].uuid);
+            const isDeltaSummary = selection.length > 0 &&
+              selection[0] && Object.prototype.hasOwnProperty.call(selection[0], 'fetched');
+            const isFullSummary = selection.length > 0 && !isPerRecord && !isDeltaSummary;
+
+            // Delta runs: compute totals fetched vs queued so the header
+            // can carry the savings line ("queued 23 of 5847 fetched").
+            let deltaTotals = null;
+            if (isDeltaSummary) {
+              const fetched = selection.reduce((s, e) => s + (Number(e.fetched) || 0), 0);
+              const queued  = selection.reduce((s, e) => s + (Number(e.queued)  || 0), 0);
+              deltaTotals = { fetched, queued, skipped: Math.max(fetched - queued, 0) };
+            }
+
+            const modeLabel = row.mode || 'selective';
+            const modeBadgeStyle = modeLabel === 'delta'
+              ? 'background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;'
+              : modeLabel === 'full'
+                ? 'background:#fef3c7;color:#854d0e;border:1px solid #fcd34d;'
+                : 'background:#f3f4f6;color:#444;border:1px solid #d1d5db;';
+
             return html`
               <details class="card" style="margin:0;padding:.4rem .8rem">
                 <summary style="cursor:pointer;display:flex;gap:.6rem;align-items:baseline;flex-wrap:wrap;list-style:revert">
                   <code style="font-size:.78rem;color:#666">${escape(fmtTs(row.started_at))}</code>
+                  <span style="font-size:.7rem;padding:.05rem .35rem;border-radius:3px;font-variant:small-caps;letter-spacing:.02em;${modeBadgeStyle}">${escape(modeLabel)}</span>
                   ${okBadge}
                   <span class="muted" style="font-size:.82rem">
                     by <strong>${escape(row.triggered_by || '?')}</strong>
                   </span>
                   <span class="muted" style="font-size:.82rem">
-                    ${row.selection_size} record${row.selection_size === 1 ? '' : 's'} submitted
+                    ${deltaTotals
+                      ? html`${deltaTotals.queued} queued / ${deltaTotals.fetched} fetched${deltaTotals.skipped > 0 ? html` <span style="color:#1a7f37">(skipped ${deltaTotals.skipped} unchanged)</span>` : ''}`
+                      : html`${row.selection_size} record${row.selection_size === 1 ? '' : 's'} submitted`}
                   </span>
                   <span style="font-size:.85rem;flex:1;min-width:0">
                     ${escape(row.summary || '(no summary)')}
@@ -166,22 +199,65 @@ export async function onRequestGet(context) {
                     </table>
                   </div>
 
-                  <!-- Selection summary — what was submitted -->
+                  <!-- Selection summary — what was submitted (or, for
+                       full / delta runs, per-kind aggregate counts). -->
                   <div>
-                    <strong style="font-size:.82rem">Submitted</strong>
+                    <strong style="font-size:.82rem">${isDeltaSummary ? 'Per-kind delta breakdown' : (isFullSummary ? 'Per-kind import breakdown' : 'Submitted')}</strong>
                     ${selection.length === 0
                       ? html`<p class="muted" style="font-size:.78rem;margin:.3rem 0 0 0">(empty selection)</p>`
-                      : html`
-                        <ul style="margin:.3rem 0 0 0;padding-left:1.1rem;font-size:.78rem;line-height:1.5">
-                          ${selection.map((s) => html`
-                            <li>
-                              <span style="color:#666;font-variant:small-caps">${escape(s.kind || '?')}</span>
-                              ${' '}<strong>${escape(s.name || s.id || s.uuid || '?')}</strong>
-                              ${s.uuid ? html` <code style="font-size:.7rem;color:#999">${escape(String(s.uuid).slice(0, 8))}…</code>` : ''}
-                            </li>
-                          `)}
-                        </ul>
-                      `}
+                      : isDeltaSummary
+                        ? html`
+                          <table style="margin-top:.3rem;border-collapse:collapse;font-size:.78rem;width:100%">
+                            <thead>
+                              <tr style="color:#666;font-weight:normal;border-bottom:1px solid #e5e7eb">
+                                <td style="padding:.15rem .35rem .15rem 0">kind</td>
+                                <td style="padding:.15rem .35rem;text-align:right">fetched</td>
+                                <td style="padding:.15rem .35rem;text-align:right">queued</td>
+                                <td style="padding:.15rem 0;text-align:right">skipped</td>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              ${selection.map((s) => {
+                                const fetched = Number(s.fetched) || 0;
+                                const queued  = Number(s.queued)  || 0;
+                                const skipped = Math.max(fetched - queued, 0);
+                                return html`
+                                  <tr>
+                                    <td style="padding:.1rem .35rem .1rem 0;font-variant:small-caps;color:#444">${escape(s.kind || '?')}</td>
+                                    <td style="padding:.1rem .35rem;font-family:ui-monospace,monospace;text-align:right">${escape(fetched)}</td>
+                                    <td style="padding:.1rem .35rem;font-family:ui-monospace,monospace;text-align:right;color:${queued > 0 ? '#1a7f37' : '#999'}">${escape(queued)}</td>
+                                    <td style="padding:.1rem 0;font-family:ui-monospace,monospace;text-align:right;color:#666">${escape(skipped)}</td>
+                                  </tr>
+                                `;
+                              })}
+                            </tbody>
+                          </table>
+                          <p class="muted" style="font-size:.72rem;margin:.4rem 0 0 0;line-height:1.4">
+                            <em>queued</em> rows had a changed JSON payload; <em>skipped</em> rows had byte-identical payloads and were left untouched (no <code>updated_at</code> bump).
+                          </p>
+                        `
+                        : isFullSummary
+                          ? html`
+                            <table style="margin-top:.3rem;border-collapse:collapse;font-size:.78rem">
+                              ${selection.map((s) => html`
+                                <tr>
+                                  <td style="padding:.1rem .5rem .1rem 0;font-variant:small-caps;color:#666">${escape(s.kind || '?')}</td>
+                                  <td style="padding:.1rem 0;font-family:ui-monospace,monospace;text-align:right">${escape(Number(s.count) || 0)}</td>
+                                </tr>
+                              `)}
+                            </table>
+                          `
+                          : html`
+                            <ul style="margin:.3rem 0 0 0;padding-left:1.1rem;font-size:.78rem;line-height:1.5">
+                              ${selection.map((s) => html`
+                                <li>
+                                  <span style="color:#666;font-variant:small-caps">${escape(s.kind || '?')}</span>
+                                  ${' '}<strong>${escape(s.name || s.id || s.uuid || '?')}</strong>
+                                  ${s.uuid ? html` <code style="font-size:.7rem;color:#999">${escape(String(s.uuid).slice(0, 8))}…</code>` : ''}
+                                </li>
+                              `)}
+                            </ul>
+                          `}
                   </div>
 
                   <!-- Result links -->
