@@ -30,24 +30,26 @@ export async function onRequestGet(context) {
   if (!user) return json({ ok: false, error: 'sign_in_required' }, 401);
   if (!hasRole(user, 'admin')) return json({ ok: false, error: 'admin_only' }, 403);
 
-  // Find the latest full-import run (in_progress preferred; fall back
-  // to most-recent any-status so the page can show "last completed
-  // run" even when nothing is running now).
+  // Find the latest full/delta-import run (in_progress preferred; fall
+  // back to most-recent any-status so the page can show "last completed
+  // run" even when nothing is running now). Both modes use the same
+  // status surface — the response includes the `mode` field so the
+  // page can label them.
   let run = await one(env.DB,
-    `SELECT id, started_at, finished_at, triggered_by, status, summary,
+    `SELECT id, mode, started_at, finished_at, triggered_by, status, summary,
             counts_json, errors_json, links_json, total_planned,
             options_json, updated_at
        FROM wfm_import_runs
-      WHERE mode = 'full' AND status = 'in_progress'
+      WHERE mode IN ('full', 'delta') AND status = 'in_progress'
       ORDER BY started_at DESC LIMIT 1`);
 
   if (!run) {
     run = await one(env.DB,
-      `SELECT id, started_at, finished_at, triggered_by, status, summary,
+      `SELECT id, mode, started_at, finished_at, triggered_by, status, summary,
               counts_json, errors_json, links_json, total_planned,
               options_json, updated_at
          FROM wfm_import_runs
-        WHERE mode = 'full'
+        WHERE mode IN ('full', 'delta')
         ORDER BY started_at DESC LIMIT 1`);
   }
 
@@ -83,6 +85,7 @@ export async function onRequestGet(context) {
     ok: true,
     run: {
       id: run.id,
+      mode: run.mode,
       status: run.status,
       started_at: run.started_at,
       finished_at: run.finished_at,

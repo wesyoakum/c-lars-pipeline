@@ -93,17 +93,20 @@ export async function onRequestPost(context) {
   const options = (body && body.options) || {};
   const synthOrphanQuotes = !!options.synth_orphan_quotes;
 
-  // Refuse if there's already an in-progress full-import run.
+  // Refuse if any full or delta import is in progress. Both modes
+  // touch the same Pipeline rows; concurrent runs would race on
+  // UPDATEs and the audit trail.
   const existing = await one(env.DB,
-    `SELECT id FROM wfm_import_runs
-      WHERE mode = 'full' AND status = 'in_progress'
+    `SELECT id, mode FROM wfm_import_runs
+      WHERE mode IN ('full', 'delta') AND status = 'in_progress'
       ORDER BY started_at DESC LIMIT 1`);
   if (existing) {
     return json({
       ok: false,
       error: 'already_in_progress',
       run_id: existing.id,
-      message: 'A full import is already running. Cancel it first or wait for it to finish.',
+      mode: existing.mode,
+      message: `A ${existing.mode} import is already running. Cancel it first or wait for it to finish.`,
     }, 409);
   }
 

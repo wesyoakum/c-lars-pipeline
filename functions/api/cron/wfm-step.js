@@ -142,16 +142,18 @@ export async function runOneStep(env) {
   const tickStart = Date.now();
 
   try {
-    // 1. Find the latest in-progress full-import run.
+    // 1. Find the latest in-progress run (full or delta — the work is
+    //    identical from the cron worker's perspective; only the planning
+    //    differs upstream in /full/start vs /delta/start).
     const runRow = await one(env.DB,
       `SELECT id, options_json, counts_json, errors_json, links_json,
               triggered_by, started_at
          FROM wfm_import_runs
-        WHERE mode = 'full' AND status = 'in_progress'
+        WHERE mode IN ('full', 'delta') AND status = 'in_progress'
         ORDER BY started_at DESC
         LIMIT 1`);
     if (!runRow) {
-      return json({ ok: true, no_run: true, message: 'No in-progress full-import run.' });
+      return json({ ok: true, no_run: true, message: 'No in-progress full/delta-import run.' });
     }
     const runId = runRow.id;
     const options = (() => { try { return JSON.parse(runRow.options_json || '{}'); } catch { return {}; } })();
