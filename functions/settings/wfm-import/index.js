@@ -221,11 +221,20 @@ export async function onRequestGet(context) {
                 <input type="checkbox" x-model="fullImportSynth" :disabled="busy">
                 <span class="muted">Synth orphan quotes</span>
               </label>
+              <button type="button" class="btn"
+                      @click="deltaImportStart()"
+                      :disabled="busy || (fullRun && fullRun.status === 'in_progress')"
+                      title="Fetch every WFM list, but only INSERT/UPDATE rows whose JSON payload differs from what's stored. Untouched rows don't get an updated_at bump.">
+                <span x-show="!fullRun || fullRun.status !== 'in_progress'">Refresh changed only</span>
+                <span x-show="fullRun && fullRun.status === 'in_progress' && fullRun.mode === 'delta'">Running delta…</span>
+                <span x-show="fullRun && fullRun.status === 'in_progress' && fullRun.mode !== 'delta'">(full running)</span>
+              </button>
               <button type="button" class="btn primary"
                       @click="fullImportStart()"
                       :disabled="busy || (fullRun && fullRun.status === 'in_progress')">
                 <span x-show="!fullRun || fullRun.status !== 'in_progress'">Start full import</span>
-                <span x-show="fullRun && fullRun.status === 'in_progress'">Running…</span>
+                <span x-show="fullRun && fullRun.status === 'in_progress' && fullRun.mode !== 'delta'">Running…</span>
+                <span x-show="fullRun && fullRun.status === 'in_progress' && fullRun.mode === 'delta'">(delta running)</span>
               </button>
               <button type="button" class="btn"
                       @click="fullImportCancel()"
@@ -1149,6 +1158,35 @@ export async function onRequestGet(context) {
                       return;
                     }
                     // Refresh status immediately so the progress block appears.
+                    await this._fullStatusFetch();
+                    this._fullStatusEnsurePolling();
+                  } catch (e) {
+                    alert('Failed to start: ' + (e.message || e));
+                  } finally {
+                    this.busy = false;
+                  }
+                },
+
+                async deltaImportStart() {
+                  if (!confirm('Queue a delta refresh? Fetches every WFM list (same as a full import) but only INSERTs/UPDATEs rows whose JSON payload changed. Untouched rows do NOT get an updated_at bump. You can close this tab.')) return;
+                  this.busy = true;
+                  try {
+                    const res = await fetch('/settings/wfm-import/delta/start', {
+                      method: 'POST', credentials: 'same-origin',
+                      headers: { 'content-type': 'application/json' },
+                      body: JSON.stringify({
+                        options: { synth_orphan_quotes: !!this.fullImportSynth },
+                      }),
+                    });
+                    const j = await res.json();
+                    if (!j.ok) {
+                      alert('Failed: ' + (j.message || j.error || 'unknown'));
+                      return;
+                    }
+                    // Empty deltas finish immediately — surface that.
+                    if (j.total === 0) {
+                      alert('Nothing changed in WFM since the last import. No rows queued.');
+                    }
                     await this._fullStatusFetch();
                     this._fullStatusEnsurePolling();
                   } catch (e) {

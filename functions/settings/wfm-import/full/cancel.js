@@ -28,8 +28,8 @@ export async function onRequestPost(context) {
   if (!hasRole(user, 'admin')) return json({ ok: false, error: 'admin_only' }, 403);
 
   const runRow = await one(env.DB,
-    `SELECT id FROM wfm_import_runs
-      WHERE mode = 'full' AND status = 'in_progress'
+    `SELECT id, mode FROM wfm_import_runs
+      WHERE mode IN ('full', 'delta') AND status = 'in_progress'
       ORDER BY started_at DESC LIMIT 1`);
   if (!runRow) {
     return json({ ok: false, error: 'no_in_progress_run' }, 404);
