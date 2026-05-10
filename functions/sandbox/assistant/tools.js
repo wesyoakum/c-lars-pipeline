@@ -32,6 +32,7 @@ import {
   updateEvent as gcalUpdateEvent,
   deleteEvent as gcalDeleteEvent,
 } from '../../lib/google-calendar-api.js';
+import { normalizeAccountName, matchScore, matchRank } from '../../lib/account-name-match.js';
 import {
   claudiaInsert,
   claudiaUpdate,
@@ -66,12 +67,18 @@ export async function makeAssistantTools({ env, user }) {
       name: 'search_accounts',
       description:
         'Fuzzy-search Pipeline accounts (companies / customers) by name or alias. ' +
-        'Returns up to 20 matches with id, name, segment, alias, parent_group, is_active. ' +
-        'Use when the user mentions a company by name and you need to look it up.',
+        'TOKEN-SUBSET MATCHING: corporate suffixes (inc, llc, ltd, AS, SA, GmbH, "and associates", ' +
+        '"holdings", "group", etc.) are stripped from BOTH the query and stored names before ' +
+        'matching, so "Drift Offshore Inc." finds "Drift", "helix" finds "Helix Robotics", and ' +
+        '"Acme Industrial Group, LLC" finds "Acme Industrial". Search by the SHORTEST distinguishing ' +
+        'token if the long form returns nothing — never assume "no matching account" without trying ' +
+        'a one-token query first. Returns up to 20 matches with id, name, segment, alias, ' +
+        'parent_group, is_active, plus a match_score field ("exact" / "query_subset" / "row_subset") ' +
+        'so you know how confident the match is.',
       input_schema: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'Substring to search for in account name or alias.' },
+          query: { type: 'string', description: 'Company / account name. Suffixes stripped automatically.' },
           include_inactive: { type: 'boolean', description: 'Include inactive accounts. Default false.' },
         },
         required: ['query'],
@@ -1772,16 +1779,57 @@ async function setAccountIntel(env, user, { account_id, intel_notes } = {}) {
 async function searchAccounts(env, { query, include_inactive }) {
   const q = String(query || '').trim();
   if (!q) return { rows: [], note: 'Empty query.' };
-  const like = `%${q}%`;
+  const qTokens = normalizeAccountName(q);
+  if (qTokens.length === 0) {
+    // All-suffix or punctuation-only query (e.g. "LLC" or ", Inc.").
+    // Fall back to raw substring against the original query so we don't
+    // silently return nothing when Wes happens to type something weird.
+    const like = `%${q}%`;
+    const rows = await all(
+      env.DB,
+      `SELECT id, name, segment, alias, parent_group, is_active
+         FROM accounts
+        WHERE (name LIKE ? OR alias LIKE ?)
+          ${include_inactive ? '' : 'AND is_active = 1'}
+        ORDER BY name LIMIT 20`,
+      [like, like]
+    );
+    return { rows: rows.map((r) => ({ ...r, match_score: 'substring' })), count: rows.length, note: 'All tokens were stripped as suffixes; ran a raw substring search instead.' };
+  }
+  // Coarse SQL prefilter: candidate rows must contain AT LEAST ONE of
+  // the query tokens as a substring in name OR alias. This keeps us
+  // from pulling every account row on every search call.
+  const tokenLikeClauses = qTokens.flatMap(() => ['name LIKE ?', 'alias LIKE ?']).join(' OR ');
+  const tokenLikeParams = qTokens.flatMap((t) => [`%${t}%`, `%${t}%`]);
   const sql = `
     SELECT id, name, segment, alias, parent_group, is_active
       FROM accounts
-     WHERE (name LIKE ? OR alias LIKE ?)
+     WHERE (${tokenLikeClauses})
        ${include_inactive ? '' : 'AND is_active = 1'}
-     ORDER BY name
-     LIMIT 20
+     LIMIT 200
   `;
-  const rows = await all(env.DB, sql, [like, like]);
+  const candidates = await all(env.DB, sql, tokenLikeParams);
+  // Score each candidate via the token-subset matcher against name + alias;
+  // keep the better of the two scores.
+  const scored = [];
+  for (const row of candidates) {
+    const nameTokens = normalizeAccountName(row.name);
+    const aliasTokens = normalizeAccountName(row.alias);
+    const sName = matchScore(qTokens, nameTokens);
+    const sAlias = matchScore(qTokens, aliasTokens);
+    const sNameRank = matchRank(sName);
+    const sAliasRank = matchRank(sAlias);
+    const bestRank = Math.min(sNameRank, sAliasRank);
+    if (bestRank >= 99) continue; // no match on either field
+    const bestScore = sNameRank <= sAliasRank ? sName : sAlias;
+    scored.push({ ...row, match_score: bestScore, _rank: bestRank });
+  }
+  // Sort: best score first, then shorter row name (more specific row wins).
+  scored.sort((a, b) => a._rank - b._rank || (a.name || '').length - (b.name || '').length || (a.name || '').localeCompare(b.name || ''));
+  const rows = scored.slice(0, 20).map((r) => {
+    const { _rank, ...rest } = r;
+    return rest;
+  });
   return { rows, count: rows.length };
 }
 
