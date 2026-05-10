@@ -15,7 +15,14 @@ import { escape } from '../../lib/layout.js';
 import { renderMarkdown } from '../../lib/claudia-markdown.js';
 import { formBody } from '../../lib/http.js';
 import { makeAssistantTools, listTableNames } from './tools.js';
-import { COMPANY_CONTEXT, INDUSTRY_TERMS, dayContext } from '../../lib/claudia-knowledge.js';
+import {
+  COMPANY_CONTEXT,
+  INDUSTRY_TERMS,
+  WES_PERSONAL_CONTEXT,
+  dayContext,
+  userContext,
+  loadUserMemoryRows,
+} from '../../lib/claudia-knowledge.js';
 
 const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 
@@ -195,10 +202,18 @@ export async function onRequestPost(context) {
     [user.id, sinceIso]
   );
 
+  // Load persisted memory rows so set_memory facts ("remember Silas's
+  // team is Twelve") flow into the chat prompt the same way they
+  // already flow into the brief / triage flows. Failure-tolerant —
+  // empty array on any error (we'd rather lose memory than the chat).
+  const memoryRows = await loadUserMemoryRows(env, user.id);
+  const userCtx = userContext(user, memoryRows);
+
   const system = buildSystemPrompt(user, tableNames, recentUploads, {
     newActions,
     newObservations,
     recentWrites,
+    userCtx,
   }, text);
 
   let assistantText;
@@ -348,6 +363,7 @@ function buildSystemPrompt(user, tableNames, recentUploads = [], background = {}
   const newActions = Array.isArray(background.newActions) ? background.newActions : [];
   const newObservations = Array.isArray(background.newObservations) ? background.newObservations : [];
   const recentWrites = Array.isArray(background.recentWrites) ? background.recentWrites : [];
+  const userCtx = typeof background.userCtx === 'string' ? background.userCtx : '';
 
   const uploadLines = recentUploads.length > 0
     ? recentUploads
@@ -660,6 +676,8 @@ ${INDUSTRY_TERMS}
 
 ${COMPANY_CONTEXT}
 
+${WES_PERSONAL_CONTEXT}
+${userCtx ? `\n${userCtx}\n` : ''}
 Intervention triggers — step in when you detect, in the data:
 - Missed or upcoming commitments (with a specific date)
 - Stale threads / work started but not closed (with a specific updated_at)

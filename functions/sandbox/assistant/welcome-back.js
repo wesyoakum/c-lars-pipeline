@@ -29,7 +29,14 @@
 import { all, one, run } from '../../lib/db.js';
 import { now, uuid } from '../../lib/ids.js';
 import { messages } from '../../lib/anthropic.js';
-import { COMPANY_CONTEXT, INDUSTRY_TERMS, dayContext } from '../../lib/claudia-knowledge.js';
+import {
+  COMPANY_CONTEXT,
+  INDUSTRY_TERMS,
+  WES_PERSONAL_CONTEXT,
+  dayContext,
+  userContext,
+  loadUserMemoryRows,
+} from '../../lib/claudia-knowledge.js';
 import { getEventsInWindow } from '../../lib/claudia-calendar.js';
 import { renderMarkdown } from '../../lib/claudia-markdown.js';
 import { escape } from '../../lib/layout.js';
@@ -202,11 +209,17 @@ export async function onRequestPost(context) {
   // with normal chat replies in the same thread.
   const display = user.display_name || user.email;
   const dayAnchors = dayContext();
+  const memoryRows = await loadUserMemoryRows(env, user.id);
+  const userCtx = userContext(user, memoryRows);
 
   const system = [
     COMPANY_CONTEXT,
     '',
     INDUSTRY_TERMS,
+    '',
+    WES_PERSONAL_CONTEXT,
+    '',
+    userCtx,
     '',
     dayAnchors,
     '',
