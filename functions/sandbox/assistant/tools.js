@@ -44,7 +44,7 @@ import {
   PERMISSION_GATED_ACTIONS,
   loadPermissionMap,
 } from '../../lib/claudia-permissions.js';
-import { wfmSearch, wfmGet } from './wfm-tools.js';
+import { wfmSearch, wfmGet, wfmCount } from './wfm-tools.js';
 
 /**
  * Build the toolset bound to a particular request (env + acting user).
@@ -1231,13 +1231,15 @@ export async function makeAssistantTools({ env, user }) {
     {
       name: 'wfm_search',
       description:
-        'Fuzzy-search WFM (BlueRock WorkflowMax) records by name or short ID. Read-only, hits WFM live. ' +
+        'Search OR list WFM (BlueRock WorkflowMax) records. Read-only, hits WFM live. ' +
         'Use when WFM is the source of truth (jobs in flight, current quote status, freshly-promoted ' +
-        'leads) and Pipeline\'s synced copy might be stale or missing — for example, when ${display} ' +
-        'asks "where does this stand in WFM?" and you need to look up the current record. ' +
-        '`type` is one of: client | lead | quote | job | invoice. ' +
-        'Returns up to 20 matches as { uuid, id, name, state, client? }. Pass the uuid (preferred) or ' +
-        'short id back into wfm_get for the full record + first-level relations. ' +
+        'leads) and Pipeline\'s synced copy might be stale or missing. `type` is one of: client | lead | ' +
+        'quote | job | invoice. ' +
+        'WITH `query`: substring filter against Name / ID / parent client name (filtered mode). ' +
+        'WITHOUT `query` (omit it): list mode — returns the first `limit` records as-is, useful for ' +
+        '"show me the leads sitting in WFM right now" or "what jobs does WFM think are open". ' +
+        'Returns up to 50 matches as { uuid, id, name, state, client? } plus a `mode` flag. Pass the uuid ' +
+        '(preferred) or short id into wfm_get for the full record + first-level relations. ' +
         'If WFM is not connected, returns { error: "wfm_not_connected" } — surface that and point ' +
         '${display} to /settings/wfm-import.',
       input_schema: {
@@ -1250,12 +1252,23 @@ export async function makeAssistantTools({ env, user }) {
           },
           query: {
             type: 'string',
-            description: 'Substring to match against the record\'s Name, ID, or parent client name.',
+            description: 'Optional substring against Name / ID / parent client name. Omit for list mode.',
           },
           limit: { type: 'integer', description: 'Default 20, hard cap 50.' },
         },
-        required: ['type', 'query'],
+        required: ['type'],
       },
+    },
+    {
+      name: 'wfm_count',
+      description:
+        'Count records currently in WFM, per kind (client / lead / quote / job / invoice / staff). ' +
+        'Read-only, hits WFM live. Use as a health-check ("how much is in WFM?"), to compare ' +
+        'against Pipeline\'s synced totals (mismatch = something hasn\'t imported yet), or before a ' +
+        'delta refresh to gauge fetch size. Cheap — uses the API\'s TotalRecords hint where available, ' +
+        'falls back to a single full-list fetch otherwise. Returns { counts, errors?, fetched_at, ' +
+        'duration_ms }. A null count for a kind means that endpoint failed; check `errors`.',
+      input_schema: { type: 'object', properties: {} },
     },
     {
       name: 'wfm_get',
@@ -1346,6 +1359,8 @@ export async function makeAssistantTools({ env, user }) {
         return wfmSearch(env, input);
       case 'wfm_get':
         return wfmGet(env, input);
+      case 'wfm_count':
+        return wfmCount(env);
       case 'get_calendar_events':
         return getCalendarEvents(env, user, input);
       case 'list_documents':
@@ -1492,6 +1507,7 @@ const WORKER_ALLOWED_TOOLS = new Set([
   // Read — WFM
   'wfm_search',
   'wfm_get',
+  'wfm_count',
   // Read — Claudia state
   'read_brief',
   'list_recent_writes',

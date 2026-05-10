@@ -97,7 +97,8 @@ function asToolError(err) {
 }
 
 // ---------------------------------------------------------------------
-// wfm_search — fuzzy match by name or short ID
+// wfm_search — fuzzy match by name or short ID, OR list-mode if query
+// is omitted (returns first N records as a "what's in WFM" peek).
 // ---------------------------------------------------------------------
 
 export async function wfmSearch(env, input) {
@@ -107,9 +108,6 @@ export async function wfmSearch(env, input) {
 
   if (!VALID_TYPES.includes(type)) {
     return { error: 'invalid_type', message: `type must be one of: ${VALID_TYPES.join(', ')}` };
-  }
-  if (!query) {
-    return { error: 'invalid_query', message: 'query is required (substring to match against record names / IDs)' };
   }
 
   const cfg = ENTITY_CONFIG[type];
@@ -133,19 +131,97 @@ export async function wfmSearch(env, input) {
   for (const rec of records) {
     const summary = summarizeRecord(rec);
     if (!summary) continue;
-    const haystack = `${summary.name} ${summary.id} ${summary.client || ''}`.toLowerCase();
-    if (haystack.includes(q)) {
-      matches.push(summary);
-      if (matches.length >= limit) break;
+    if (q) {
+      // Filter mode: substring against a few searchable fields.
+      const haystack = `${summary.name} ${summary.id} ${summary.client || ''}`.toLowerCase();
+      if (!haystack.includes(q)) continue;
     }
+    // No-query mode: just return first N as-is.
+    matches.push(summary);
+    if (matches.length >= limit) break;
   }
 
   return {
     type,
-    query,
+    query: q || null,
     matches,
     matched_count: matches.length,
     total_records_searched: records.length,
+    mode: q ? 'filtered' : 'list',
+  };
+}
+
+// ---------------------------------------------------------------------
+// wfm_count — totals per kind, lightweight health-check probe.
+// ---------------------------------------------------------------------
+//
+// Strategy: try Response.TotalRecords from a page=1&pageSize=1 fetch
+// (paginated endpoints expose it). When it isn't present (the
+// /current endpoints are single-shot and don't carry the field),
+// fall back to fetching the full list and using its length. Total
+// wall-clock for the cheap path: ~1–2s; full-fallback path: same as
+// a list refresh.
+
+const COUNT_KINDS = [
+  { kind: 'client',  list: 'client.api/list',     listKey: 'Client' },
+  { kind: 'lead',    list: 'lead.api/current',    listKey: 'Lead' },
+  { kind: 'quote',   list: 'quote.api/current',   listKey: 'Quote' },
+  { kind: 'job',     list: 'job.api/current',     listKey: 'Job' },
+  { kind: 'invoice', list: 'invoice.api/current', listKey: 'Invoice' },
+  { kind: 'staff',   list: 'staff.api/list',      listKey: 'Staff' },
+];
+
+async function wfmTotalRecordsHint(env, basePath) {
+  const sep = basePath.includes('?') ? '&' : '?';
+  const r = await apiGet(env, basePath + sep + 'page=1&pageSize=1');
+  if (!r.ok) return { ok: false, status: r.status };
+  const totalStr = r.body?.Response?.TotalRecords;
+  if (totalStr == null) return { ok: true, count: null }; // signal: needs full fetch
+  const n = parseInt(totalStr, 10);
+  return { ok: true, count: Number.isNaN(n) ? null : n };
+}
+
+async function countOneKind(env, cfg) {
+  try {
+    const hint = await wfmTotalRecordsHint(env, cfg.list);
+    if (!hint.ok) {
+      return { count: null, error: `http_${hint.status}` };
+    }
+    if (hint.count != null) {
+      return { count: hint.count, source: 'total_records' };
+    }
+    // Fallback: pull the full list, count locally.
+    const r = await apiGet(env, cfg.list);
+    if (!r.ok) {
+      return { count: null, error: `http_${r.status}` };
+    }
+    const records = recordList(r.body, cfg.listKey);
+    return { count: records.length, source: 'full_list' };
+  } catch (err) {
+    if (err?.code === 'reconnect_required')   return { count: null, error: 'wfm_not_connected' };
+    if (err?.code === 'no_refresh_token')     return { count: null, error: 'wfm_not_configured' };
+    if (err?.code === 'no_oauth_app')         return { count: null, error: 'wfm_not_configured' };
+    return { count: null, error: err?.message || String(err) };
+  }
+}
+
+export async function wfmCount(env) {
+  const start = Date.now();
+  const results = await Promise.all(COUNT_KINDS.map(async (cfg) => {
+    const r = await countOneKind(env, cfg);
+    return { kind: cfg.kind, ...r };
+  }));
+  const counts = {};
+  const errors = {};
+  for (const r of results) {
+    counts[r.kind] = r.count;
+    if (r.error) errors[r.kind] = r.error;
+  }
+  return {
+    counts,
+    errors: Object.keys(errors).length > 0 ? errors : undefined,
+    fetched_at: new Date().toISOString(),
+    duration_ms: Date.now() - start,
   };
 }
 
