@@ -152,6 +152,10 @@ export async function onRequestGet(context) {
               <button class="btn btn-sm primary" type="submit">Mark complete</button>
             </form>
           ` : ''}
+          ${act.due_at ? html`
+            <a class="btn btn-sm" href="/activities/${escape(actId)}/ics" download
+               title="Download .ics calendar file">Download .ics</a>
+          ` : ''}
           <form method="post" action="/activities/${escape(actId)}/delete"
                 onsubmit="return confirm('Delete this activity?')">
             <button class="btn btn-sm" type="submit">Delete</button>

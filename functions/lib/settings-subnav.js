@@ -50,11 +50,12 @@ const GROUPS = [
   {
     type: 'dropdown', label: 'Admin tools', adminOnly: true,
     items: [
-      { key: 'auto-tasks',   label: 'Auto-Task Rules', href: '/settings/auto-tasks' },
-      { key: 'fake-names',   label: 'Fake names',      href: '/settings/fake-names' },
-      { key: 'history',      label: 'History',         href: '/settings/history' },
-      { key: 'data-refresh', label: 'Data refresh',    href: '/settings/data-refresh' },
-      { key: 'claudia',      label: 'Claudia',         href: '/settings/claudia', wesOnly: true },
+      { key: 'auto-tasks',         label: 'Auto-Task Rules',   href: '/settings/auto-tasks' },
+      { key: 'fake-names',         label: 'Fake names',        href: '/settings/fake-names' },
+      { key: 'history',            label: 'History',           href: '/settings/history' },
+      { key: 'data-refresh',       label: 'Data refresh',      href: '/settings/data-refresh' },
+      { key: 'rerun-extractions',  label: 'Rerun extractions', href: '/settings/rerun-extractions' },
+      { key: 'claudia',            label: 'Claudia',           href: '/settings/claudia', wesOnly: true },
     ],
   },
 ];

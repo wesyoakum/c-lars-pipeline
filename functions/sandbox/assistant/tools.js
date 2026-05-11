@@ -18,6 +18,7 @@ import { stagesFor, evaluateGate, loadGateContext } from '../../lib/stages.js';
 import { checkInactivateBlockers } from '../../lib/inactivate-blocker.js';
 import { readBrief, regenerateBrief } from '../../lib/claudia-brief.js';
 import { getCalendarEvents } from '../../lib/claudia-calendar.js';
+import { buildIcsCalendar } from '../../lib/ics.js';
 import teamsProvider from '../../lib/notify-providers/teams.js';
 import {
   searchMessages as gmailSearchMessages,
@@ -203,6 +204,49 @@ export async function makeAssistantTools({ env, user }) {
             description: 'Optional list of label names (without the "calendar.url." prefix) to scope the query. Omit to query all configured calendars merged.',
           },
         },
+      },
+    },
+    {
+      name: 'create_ics_file',
+      description:
+        'Generate a downloadable .ics calendar file from one or more events. Use when the user asks ' +
+        'for a calendar invite, an .ics attachment, or "save this to my calendar" for an ad-hoc event ' +
+        'that does NOT already exist in the activities table or Google Calendar. Prefer ' +
+        'create_calendar_event when the user wants the event committed to their actual Google calendar; ' +
+        'use this tool only when they specifically want a portable .ics file (e.g. to forward to ' +
+        'someone else or attach to an email). Times must be supplied as ISO 8601. Relative phrases ' +
+        'like "tomorrow at 2pm" should be resolved against the current CT date already injected into ' +
+        'your system prompt before calling this tool. Returns a download_url the user can click to ' +
+        'open the file in their calendar app.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          events: {
+            type: 'array',
+            description: 'One or more events to include in the calendar file.',
+            items: {
+              type: 'object',
+              properties: {
+                summary:     { type: 'string', description: 'Event title (required).' },
+                start:       { type: 'string', description: 'ISO 8601 start datetime (required). UTC or with offset.' },
+                end:         { type: 'string', description: 'ISO 8601 end datetime. Defaults to start + 30 min.' },
+                description: { type: 'string', description: 'Body / notes.' },
+                location:    { type: 'string', description: 'Address or meeting URL.' },
+                attendees:   {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Optional list of attendee email addresses.',
+                },
+              },
+              required: ['summary', 'start'],
+            },
+          },
+          filename: {
+            type: 'string',
+            description: 'Suggested download filename. Defaults to "claudia-event.ics".',
+          },
+        },
+        required: ['events'],
       },
     },
     {
@@ -1348,6 +1392,8 @@ export async function makeAssistantTools({ env, user }) {
         return wfmGet(env, input);
       case 'get_calendar_events':
         return getCalendarEvents(env, user, input);
+      case 'create_ics_file':
+        return createIcsFile(env, user, input);
       case 'list_documents':
         return listDocuments(env, user, input);
       case 'search_documents':
@@ -3663,6 +3709,68 @@ function getMappedField(row, key) {
 // ---------- Calendar (published .ics URLs, multi-source) ----------
 // All implementation lives in lib/claudia-calendar.js so the welcome-
 // back endpoint, brief regen, and worker enrichment can share it.
+
+// ---------- Ad-hoc .ics file generation ----------
+
+async function createIcsFile(env, user, input = {}) {
+  const events = Array.isArray(input?.events) ? input.events : [];
+  if (events.length === 0) {
+    throw new Error('create_ics_file requires at least one event.');
+  }
+
+  // Normalize + validate each event before building the file. Surface
+  // shape errors clearly so the model can correct and retry.
+  const normalized = events.map((ev, i) => {
+    if (!ev || typeof ev !== 'object') {
+      throw new Error(`create_ics_file: event[${i}] must be an object.`);
+    }
+    const summary = String(ev.summary || '').trim();
+    if (!summary) throw new Error(`create_ics_file: event[${i}].summary is required.`);
+    const start = ev.start ? new Date(ev.start) : null;
+    if (!start || isNaN(start.getTime())) {
+      throw new Error(`create_ics_file: event[${i}].start must be a valid ISO 8601 datetime.`);
+    }
+    let end = ev.end ? new Date(ev.end) : null;
+    if (end && isNaN(end.getTime())) end = null;
+    return {
+      uid: `claudia-${crypto.randomUUID()}@c-lars.com`,
+      summary,
+      start,
+      end,
+      durationMins: 30,
+      description: ev.description ? String(ev.description) : null,
+      location: ev.location ? String(ev.location) : null,
+      attendees: Array.isArray(ev.attendees) ? ev.attendees : null,
+    };
+  });
+
+  const ics = buildIcsCalendar({ events: normalized });
+
+  // Persist to R2 under a fresh UUID. Keep customMetadata.filename so
+  // the download endpoint can suggest a sensible name without us
+  // needing a separate index table.
+  const uid = crypto.randomUUID();
+  const key = `claudia-ics/${uid}.ics`;
+  const filename = String(input?.filename || 'claudia-event.ics').replace(/[^a-zA-Z0-9._-]+/g, '_') || 'claudia-event.ics';
+  const finalName = filename.endsWith('.ics') ? filename : `${filename}.ics`;
+
+  await env.DOCS.put(key, ics, {
+    httpMetadata: { contentType: 'text/calendar; charset=utf-8' },
+    customMetadata: {
+      filename: finalName,
+      created_by: user?.email || user?.id || 'claudia',
+      created_at: now(),
+    },
+  });
+
+  return {
+    ok: true,
+    download_url: `/api/claudia/ics/${uid}`,
+    filename: finalName,
+    event_count: normalized.length,
+    expires: 'never (no automatic cleanup; files are tiny)',
+  };
+}
 
 async function setMemory(env, user, { key, value }) {
   const k = String(key || '').trim();
