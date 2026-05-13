@@ -2673,6 +2673,18 @@ body.col-resizing * { cursor: col-resize !important; user-select: none; }
 .col-filter-popover .col-filter-list {
   max-height: 260px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-gutter: stable;
+}
+.col-filter-popover .col-filter-list::-webkit-scrollbar {
+  width: 10px;
+}
+.col-filter-popover .col-filter-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+}
+.col-filter-popover .col-filter-list::-webkit-scrollbar-thumb:hover {
+  background: var(--fg-muted);
 }
 .col-filter-popover .col-filter-item {
   display: flex;

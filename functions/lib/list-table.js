@@ -723,6 +723,9 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
 
       popContent.innerHTML = buildPopoverContent(col);
       popover.style.display = '';
+      // Reset any prior dynamic sizing so we measure the natural height.
+      var listEl = popover.querySelector('.col-filter-list');
+      if (listEl) listEl.style.maxHeight = '';
 
       // Position the popover below the th, left-aligned. Clamp to
       // viewport so it doesn't spill off the right edge.
@@ -739,6 +742,30 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         left = Math.max(8, viewportRight - popWidth - 8);
       }
       popover.style.left = left + 'px';
+
+      // Vertical clamp: if the popover would extend past the viewport,
+      // either flip it above the header or shrink the scrollable list
+      // so the user can actually reach the bottom items.
+      var viewportH = document.documentElement.clientHeight;
+      var spaceBelow = viewportH - rect.bottom - 8;
+      var spaceAbove = rect.top - 8;
+      var popHeight = popover.offsetHeight;
+      if (popHeight > spaceBelow) {
+        if (spaceAbove > spaceBelow && listEl) {
+          // Flip above the header.
+          var listH = listEl.offsetHeight;
+          var nonList = popHeight - listH;
+          var maxList = Math.max(120, spaceAbove - nonList);
+          listEl.style.maxHeight = maxList + 'px';
+          var newHeight = Math.min(popover.offsetHeight, spaceAbove);
+          popover.style.top = (rect.top + window.scrollY - newHeight - 2) + 'px';
+        } else if (listEl) {
+          var listH2 = listEl.offsetHeight;
+          var nonList2 = popHeight - listH2;
+          var maxList2 = Math.max(120, spaceBelow - nonList2);
+          listEl.style.maxHeight = maxList2 + 'px';
+        }
+      }
 
       currentPopoverKey = key;
       currentAnchor = th;
