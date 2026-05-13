@@ -75,6 +75,15 @@ export async function onRequestPost(context) {
           AND parent_line_id = ?`,
       [ts, quoteId, lineId]
     ),
+    // Defensive: detach any cost_build that somehow ended up linked
+    // to the parent header row, otherwise the FK on cost_builds.quote_line_id
+    // blocks the DELETE below. Parents normally don't have builds,
+    // but the schema allows it.
+    stmt(
+      env.DB,
+      'UPDATE cost_builds SET quote_line_id = NULL WHERE quote_line_id = ?',
+      [lineId]
+    ),
     stmt(
       env.DB,
       'DELETE FROM quote_lines WHERE id = ? AND quote_id = ?',

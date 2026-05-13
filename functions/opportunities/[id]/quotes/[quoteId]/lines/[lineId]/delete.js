@@ -51,6 +51,17 @@ export async function onRequestPost(context) {
   const ts = now();
 
   await batch(env.DB, [
+    // Detach any price build linked to this line first. cost_builds
+    // has a RESTRICT-style FK on quote_line_id (no ON DELETE action
+    // declared in migration 0008), so D1 refuses to delete the line
+    // while a build still points at it. Setting quote_line_id = NULL
+    // preserves the cost_build for later reference; it just stops
+    // showing up under this line.
+    stmt(
+      env.DB,
+      'UPDATE cost_builds SET quote_line_id = NULL WHERE quote_line_id = ?',
+      [lineId]
+    ),
     stmt(
       env.DB,
       'DELETE FROM quote_lines WHERE id = ? AND quote_id = ?',
