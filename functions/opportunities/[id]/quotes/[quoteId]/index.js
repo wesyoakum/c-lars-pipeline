@@ -324,7 +324,39 @@ export async function onRequestGet(context) {
   // editors on this quote when false. Stored discount data is still
   // applied to totals / PDFs regardless.
   const showDiscounts = quote.show_discounts === 1 || quote.show_discounts === true;
-  const subtotal = lines.reduce((a, l) => a + Number(l.extended_price ?? 0), 0);
+
+  // Migration 0086 — parent/child grouping and is_active.
+  //
+  // childrenByParent: parent_line_id -> [child rows], in their existing
+  // sort_order. parentIds: set of line ids that have ≥1 child (so the
+  // editor treats them as group headers).
+  //
+  // Calculations: a line is included in the subtotal iff it is
+  // (a) active (is_active != 0) AND
+  // (b) NOT a parent (parents carry no own price; their displayed
+  //     total is derived from their children, which are counted
+  //     individually).
+  const childrenByParent = new Map();
+  const parentIds = new Set();
+  for (const l of lines) {
+    if (l.parent_line_id) {
+      if (!childrenByParent.has(l.parent_line_id)) {
+        childrenByParent.set(l.parent_line_id, []);
+      }
+      childrenByParent.get(l.parent_line_id).push(l);
+      parentIds.add(l.parent_line_id);
+    }
+  }
+  const isLineActive = (l) => Number(l.is_active ?? 1) !== 0;
+  const lineCountsTowardTotals = (l) => isLineActive(l) && !parentIds.has(l.id);
+  const childrenSum = (parentLineId) =>
+    (childrenByParent.get(parentLineId) || [])
+      .filter(isLineActive)
+      .reduce((s, c) => s + Number(c.extended_price ?? 0), 0);
+  const subtotal = lines.reduce(
+    (a, l) => (lineCountsTowardTotals(l) ? a + Number(l.extended_price ?? 0) : a),
+    0
+  );
   // T3.2 Phase 1 — header-level discount is applied to the full subtotal
   // (same base the server-side recompute uses via SUM(extended_price)).
   // Phantom discounts don't reduce the stored total — they're a
@@ -700,13 +732,17 @@ export async function onRequestGet(context) {
 
   // ── 4. Line items card ─────────────────────────────────────────────
   const pbUrl = (lineId) => `/opportunities/${oppId}/quotes/${quoteId}/lines/${lineId}/price-build`;
-  const optionSubtotal = lines.filter(l => l.is_option).reduce((a, l) => a + Number(l.extended_price ?? 0), 0);
+  const optionSubtotal = lines
+    .filter(l => l.is_option && lineCountsTowardTotals(l))
+    .reduce((a, l) => a + Number(l.extended_price ?? 0), 0);
   const includedSubtotal = subtotal - optionSubtotal;
 
   // T3.4 Sub-feature A — per-section subtotals for hybrid quotes.
   // Sum extended_price of non-option lines grouped by line_type.
   // Unassigned lines (line_type NULL) get their own "Unassigned"
   // bucket so the user can see they still need to be tagged.
+  // Inactive lines and parent (group header) lines are excluded — see
+  // the comment on the main subtotal calc above.
   const sectionSubtotals = [];
   if (isHybrid) {
     const bucket = new Map();
@@ -716,6 +752,7 @@ export async function onRequestGet(context) {
     bucket.set('_unassigned', { key: '_unassigned', label: 'Unassigned', total: 0, count: 0 });
     for (const l of lines) {
       if (l.is_option) continue;
+      if (!lineCountsTowardTotals(l)) continue;
       const key = l.line_type && quoteTypeParts.includes(l.line_type) ? l.line_type : '_unassigned';
       const b = bucket.get(key);
       if (b) {
@@ -729,19 +766,81 @@ export async function onRequestGet(context) {
   }
   const hasUnassigned = sectionSubtotals.some(s => s.key === '_unassigned');
 
+  // Build the rendered row order: every top-level row, then its
+  // children inserted immediately below (preserving their sort_order
+  // within the group). Each entry tags whether it's a top-level row,
+  // a parent (group header), or a child so the renderer can branch on
+  // row layout, indentation, and which action buttons appear.
+  //
+  // We also pre-compute reorder bounds (isFirstInGroup / isLastInGroup)
+  // so the up/down arrows can be disabled at the edges. "Group" here
+  // means the line's nesting bucket — top-level rows form one bucket,
+  // each parent's children form their own.
+  const topLevelLines = lines.filter(l => !l.parent_line_id);
+  const displayRows = [];
+  for (let i = 0; i < topLevelLines.length; i++) {
+    const l = topLevelLines[i];
+    const isParent = parentIds.has(l.id);
+    displayRows.push({
+      line: l,
+      isParent,
+      isChild: false,
+      isFirstInGroup: i === 0,
+      isLastInGroup: i === topLevelLines.length - 1,
+    });
+    if (isParent) {
+      const kids = childrenByParent.get(l.id) || [];
+      for (let j = 0; j < kids.length; j++) {
+        displayRows.push({
+          line: kids[j],
+          isParent: false,
+          isChild: true,
+          isFirstInGroup: j === 0,
+          isLastInGroup: j === kids.length - 1,
+        });
+      }
+    }
+  }
+
+  // Migration 0086 — URL helpers for the new line endpoints + an
+  // out-of-table form that the per-row "group" checkboxes submit to.
+  const moveUrl   = (lineId) => `/opportunities/${oppId}/quotes/${quoteId}/lines/${lineId}/move`;
+  const lineUrl   = (lineId) => `/opportunities/${oppId}/quotes/${quoteId}/lines/${lineId}`;
+  const ungroupUrl= (lineId) => `/opportunities/${oppId}/quotes/${quoteId}/lines/${lineId}/ungroup`;
+  const groupUrl  = `/opportunities/${oppId}/quotes/${quoteId}/lines/group`;
+  const groupFormId = 'group-form';
+
   const linesSection = html`
     <section class="card quote-doc-card">
       <div class="card-header">
         <h2>Line items</h2>
-        <div class="header-actions">
+        <div class="header-actions" style="display:flex;align-items:center;gap:0.6rem">
+          ${!readOnly ? html`
+            <input type="text" name="title" form="${groupFormId}"
+                   placeholder="Group title"
+                   class="group-title-input"
+                   style="font-size:0.85em;padding:0.2rem 0.4rem;width:9rem">
+            <button type="submit" form="${groupFormId}"
+                    id="group-selected-btn"
+                    class="btn small"
+                    disabled
+                    title="Wrap the selected top-level lines under a group header">
+              Group selected
+            </button>
+          ` : ''}
           <span class="header-value" id="q-lines-subtotal">${fmtDollar(includedSubtotal)} subtotal</span>
         </div>
       </div>
+
+      ${!readOnly ? html`
+        <form method="post" action="${groupUrl}" id="${groupFormId}" style="display:none"></form>
+      ` : ''}
 
       <table class="data compact quote-lines-table" data-live-calc="quote-lines" id="quote-lines-table">
         <thead>
           <tr>
             <th class="col-num">#</th>
+            ${!readOnly ? html`<th class="col-actions" style="width:6rem">Actions</th>` : ''}
             <th class="col-item">Item</th>
             <th class="num col-qty">Qty</th>
             <th class="col-unit">Unit</th>
@@ -751,15 +850,108 @@ export async function onRequestGet(context) {
           </tr>
         </thead>
         <tbody>
-          ${lines.map((l, i) => {
+          ${displayRows.map((row, i) => {
+            const l = row.line;
+            const active = isLineActive(l);
+            const isParent = row.isParent;
+            const isChild = row.isChild;
             const lineHasDiscount =
               l.discount_amount != null ||
               l.discount_pct != null ||
               (l.discount_description && String(l.discount_description).trim() !== '') ||
               l.discount_is_phantom === 1;
+
+            // Per-row actions cell — up/down reorder arrows, active
+            // toggle, and (for top-level non-parent rows only) the
+            // group-selection checkbox. The active toggle posts a
+            // minimal form to the line update endpoint flipping
+            // is_active; the autosave layer ignores it because it's a
+            // hard submit, not a data-autosave field change.
+            const actionsCell = readOnly ? '' : html`
+              <td class="col-actions">
+                <div class="line-actions-cell" style="display:flex;flex-direction:column;align-items:center;gap:0.15rem">
+                  <div style="display:flex;gap:0.15rem">
+                    <form method="post" action="${moveUrl(l.id)}" class="inline-form line-move-form" style="display:inline">
+                      <input type="hidden" name="direction" value="up">
+                      <button type="submit" class="btn-icon" title="Move up" ${row.isFirstInGroup ? 'disabled' : ''} style="padding:0 0.3rem">▲</button>
+                    </form>
+                    <form method="post" action="${moveUrl(l.id)}" class="inline-form line-move-form" style="display:inline">
+                      <input type="hidden" name="direction" value="down">
+                      <button type="submit" class="btn-icon" title="Move down" ${row.isLastInGroup ? 'disabled' : ''} style="padding:0 0.3rem">▼</button>
+                    </form>
+                  </div>
+                  <div style="display:flex;gap:0.15rem;align-items:center">
+                    <button type="button" class="btn-icon line-active-toggle"
+                            data-line-id="${escape(l.id)}"
+                            data-target-active="${active ? '0' : '1'}"
+                            title="${active ? 'Mark inactive (excluded from totals and PDF)' : 'Reactivate'}"
+                            style="padding:0 0.3rem">${active ? '◉' : '○'}</button>
+                    ${!isParent && !isChild ? html`
+                      <input type="checkbox" name="line_ids" value="${escape(l.id)}"
+                             form="${groupFormId}"
+                             class="line-group-check"
+                             title="Select to group with others">
+                    ` : ''}
+                    ${isParent ? html`
+                      <form method="post" action="${ungroupUrl(l.id)}" class="inline-form" style="display:inline">
+                        <button type="submit" class="btn-icon" title="Ungroup — children become top-level lines" style="padding:0 0.3rem">✂</button>
+                      </form>
+                    ` : ''}
+                  </div>
+                </div>
+              </td>
+            `;
+
+            // Parent (group header) rows render as a single big header
+            // strip: title + line_notes spanning the data columns, and
+            // a bold summed total in the price-ext column. Children's
+            // individual rows follow below.
+            if (isParent) {
+              const parentSum = childrenSum(l.id);
+              const parentRowClasses = [
+                'line-group-parent',
+                l.is_option ? 'line-option' : '',
+                !active ? 'line-inactive' : '',
+              ].filter(Boolean).join(' ');
+              return html`
+                <tr data-line-row data-line-id="${escape(l.id)}" class="${parentRowClasses}">
+                  <td class="col-num">${i + 1}<br><span class="pill" style="font-size:0.7em;background:#e0e7ff;color:#3730a3;border-color:#c7d2fe">GROUP</span></td>
+                  ${actionsCell}
+                  <td class="col-item" colspan="4">
+                    <form method="post" action="${lineUrl(l.id)}" class="inline-form" id="line-form-${escape(l.id)}">
+                      <div class="line-item-fields">
+                        <input type="text" name="title" value="${escape(l.title ?? '')}" ${readOnly ? 'disabled' : ''}
+                               placeholder="Group title" class="line-title group-parent-title"
+                               style="font-weight:600" data-autosave>
+                      </div>
+                      <textarea name="line_notes" ${readOnly ? 'disabled' : ''}
+                                placeholder="Group notes (appear on the PDF under the header)..."
+                                class="line-notes" data-autosave>${escape(l.line_notes ?? '')}</textarea>
+                      <input type="hidden" name="is_option" value="${l.is_option ? '1' : '0'}">
+                      <input type="hidden" name="is_active" value="${active ? '1' : '0'}">
+                    </form>
+                  </td>
+                  <td class="num col-ext" data-line-extended>
+                    <strong>${fmtDollar(parentSum)}</strong>
+                  </td>
+                  <td class="col-build"></td>
+                </tr>
+              `;
+            }
+
+            const trClasses = [
+              l.is_option ? 'line-option' : '',
+              isChild ? 'line-group-child' : '',
+              !active ? 'line-inactive' : '',
+            ].filter(Boolean).join(' ');
             return html`
-            <tr data-line-row data-line-id="${escape(l.id)}" class="${l.is_option ? 'line-option' : ''}">
-              <td class="col-num">${i + 1}${l.is_option ? html`<br><span class="pill" style="font-size:0.7em">OPT</span>` : ''}</td>
+            <tr data-line-row data-line-id="${escape(l.id)}" class="${trClasses}">
+              <td class="col-num">
+                ${isChild ? html`<span class="line-child-indent" style="color:var(--fg-muted)">↳ </span>` : ''}${i + 1}
+                ${l.is_option ? html`<br><span class="pill" style="font-size:0.7em">OPT</span>` : ''}
+                ${!active ? html`<br><span class="pill" style="font-size:0.7em;background:var(--bg-alt);color:var(--fg-muted)">INACTIVE</span>` : ''}
+              </td>
+              ${actionsCell}
               <td class="col-item">
                 <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}" class="inline-form" id="line-form-${escape(l.id)}">
                   ${isHybrid ? html`
@@ -798,6 +990,7 @@ export async function onRequestGet(context) {
                   ` : ''}
                   ${showDiscounts ? renderLineDiscountEditor({ line: l, readOnly, hasDiscount: lineHasDiscount }) : ''}
                   <input type="hidden" name="is_option" value="${l.is_option ? '1' : '0'}">
+                  <input type="hidden" name="is_active" value="${active ? '1' : '0'}">
                 </form>
               </td>
               <td class="num col-qty">
@@ -845,7 +1038,8 @@ export async function onRequestGet(context) {
           ${!readOnly
             ? html`
               <tr class="new-line-row" data-line-row>
-                <td class="col-num muted">${lines.length + 1}</td>
+                <td class="col-num muted">${displayRows.length + 1}</td>
+                <td class="col-actions"></td>
                 <td class="col-item">
                   <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines" class="inline-form" id="new-line-form">
                     ${isHybrid ? html`
@@ -882,7 +1076,7 @@ export async function onRequestGet(context) {
             : ''}
           ${isHybrid && sectionSubtotals.length > 0 ? sectionSubtotals.map(s => html`
             <tr class="totals-row section-subtotal-row ${s.key === '_unassigned' ? 'section-unassigned' : ''}">
-              <td colspan="5" class="num">
+              <td colspan="${readOnly ? 5 : 6}" class="num">
                 <span class="muted" style="font-size:0.9em">${escape(s.label)} subtotal</span>
                 ${s.key === '_unassigned'
                   ? html` <span class="pill" style="font-size:0.65em;background:#fef3c7;color:#92400e;border-color:#fde68a">assign a section</span>`
@@ -893,20 +1087,34 @@ export async function onRequestGet(context) {
             </tr>
           `) : ''}
           <tr class="totals-row">
-            <td colspan="5" class="num"><strong>Subtotal</strong></td>
+            <td colspan="${readOnly ? 5 : 6}" class="num"><strong>Subtotal</strong></td>
             <td class="num" id="q-subtotal"><strong>${fmtDollar(includedSubtotal)}</strong></td>
             <td></td>
           </tr>
+          ${(() => {
+            const inactives = lines.filter(l => !isLineActive(l) && !parentIds.has(l.id));
+            if (!inactives.length) return '';
+            const skipped = inactives.reduce((s, l) => s + Number(l.extended_price ?? 0), 0);
+            return html`
+              <tr class="totals-row">
+                <td colspan="${readOnly ? 5 : 6}" class="num">
+                  <span class="muted" style="font-size:0.85em">${inactives.length} inactive line${inactives.length === 1 ? '' : 's'} (excluded)</span>
+                </td>
+                <td class="num"><span class="muted">${fmtDollar(skipped)}</span></td>
+                <td></td>
+              </tr>
+            `;
+          })()}
           ${optionSubtotal > 0 ? html`
             <tr class="totals-row">
-              <td colspan="5" class="num"><em>Options (not included)</em></td>
+              <td colspan="${readOnly ? 5 : 6}" class="num"><em>Options (not included)</em></td>
               <td class="num"><em>${fmtDollar(optionSubtotal)}</em></td>
               <td></td>
             </tr>
           ` : ''}
           ${showDiscounts ? renderDiscountRow({ quote, readOnly, headerDiscountApplied }) : ''}
           <tr class="totals-row">
-            <td colspan="5" class="num"><strong>Total</strong></td>
+            <td colspan="${readOnly ? 5 : 6}" class="num"><strong>Total</strong></td>
             <td class="num" id="q-total"><strong>${fmtDollar(total)}</strong></td>
             <td></td>
           </tr>
@@ -1780,6 +1988,52 @@ export async function onRequestGet(context) {
         sessionStorage.removeItem('_scrollY');
         window.scrollTo(0, parseInt(savedY, 10));
       }
+
+      // ── Migration 0086 client wiring ─────────────────────────────
+      //
+      // 1. Group-selected button: enables once ≥2 checkboxes are
+      //    ticked. Submitting reloads the page (server redirects after
+      //    the group is created).
+      // 2. Active toggle: POSTs the current line form with is_active
+      //    flipped, then reloads so the row shows its new
+      //    inactive/active treatment.
+      var groupBtn = document.getElementById('group-selected-btn');
+      function recountGroupSelection() {
+        if (!groupBtn) return;
+        var n = document.querySelectorAll('.line-group-check:checked').length;
+        groupBtn.disabled = n < 2;
+        groupBtn.textContent = n >= 2
+          ? 'Group selected (' + n + ')'
+          : 'Group selected';
+      }
+      document.querySelectorAll('.line-group-check').forEach(function(cb) {
+        cb.addEventListener('change', recountGroupSelection);
+      });
+      recountGroupSelection();
+
+      document.querySelectorAll('.line-active-toggle').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var lineId = btn.getAttribute('data-line-id');
+          var target = btn.getAttribute('data-target-active');
+          var form = document.getElementById('line-form-' + lineId);
+          if (!form) return;
+          // Update the hidden is_active input, then save + reload.
+          var hidden = form.querySelector('input[name="is_active"]');
+          if (hidden) hidden.value = target;
+          var fd = new FormData(form);
+          fd.set('is_active', target);
+          var scrollY = window.scrollY;
+          sessionStorage.setItem('_scrollY', scrollY);
+          fetch(form.action, {
+            method: 'POST',
+            headers: { 'accept': 'application/json' },
+            body: fd,
+          }).then(function() { window.location.reload(); })
+            .catch(function(err) {
+              console.error('Active toggle failed:', err);
+            });
+        });
+      });
     })();
     </script>
   `;
@@ -2041,6 +2295,10 @@ function formatSize(bytes) {
  * the quote is read-only and has no discount, returns nothing.
  */
 function renderDiscountRow({ quote, readOnly, headerDiscountApplied }) {
+  // Total columns to span before the "amount" column. Editable mode has
+  // an Actions column inserted between # and Item (migration 0086), so
+  // the label spans one extra cell.
+  const labelSpan = readOnly ? 5 : 6;
   const hasDiscount =
     quote.discount_amount != null ||
     quote.discount_pct != null ||
@@ -2058,7 +2316,7 @@ function renderDiscountRow({ quote, readOnly, headerDiscountApplied }) {
   if (readOnly) {
     return html`
       <tr class="totals-row discount-row">
-        <td colspan="5" class="num"><em>${escape(descVal || 'Discount')}</em></td>
+        <td colspan="${labelSpan}" class="num"><em>${escape(descVal || 'Discount')}</em></td>
         <td class="num"><em>-${fmtDollar(headerDiscountApplied)}</em></td>
         <td></td>
       </tr>
@@ -2068,7 +2326,7 @@ function renderDiscountRow({ quote, readOnly, headerDiscountApplied }) {
   // Editable rendering: inline inputs for description / amount / pct / phantom.
   return html`
     <tr class="totals-row discount-row" x-data="quoteDiscount()">
-      <td colspan="5" class="num" style="text-align:right">
+      <td colspan="${labelSpan}" class="num" style="text-align:right">
         <div class="discount-editor" style="display:inline-flex;gap:0.5rem;align-items:center;flex-wrap:wrap;justify-content:flex-end">
           <label class="muted" style="font-size:0.85em">
             <input type="checkbox" name="discount_is_phantom"

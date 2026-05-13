@@ -825,6 +825,25 @@ export function validateQuoteLine(input) {
       ? 1
       : 0;
 
+  // Active flag — inactive lines stay in the DB but are excluded from
+  // totals and rendered output. Default to active when omitted.
+  if (input.is_active === undefined || input.is_active === null || input.is_active === '') {
+    value.is_active = 1;
+  } else {
+    value.is_active =
+      input.is_active === '0' ||
+      input.is_active === 0 ||
+      input.is_active === false ||
+      input.is_active === 'false'
+        ? 0
+        : 1;
+  }
+
+  // Parent line id — null for top-level rows. Single-level grouping
+  // only; the route handler enforces that the referenced parent is
+  // itself top-level (not a child) and belongs to the same quote.
+  value.parent_line_id = trim(input.parent_line_id) || null;
+
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, value };
 }
