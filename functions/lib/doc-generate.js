@@ -124,14 +124,70 @@ export async function getQuoteDocData(env, quoteId) {
     || addresses.find(a => isBilling(a))
     || addresses[0];
 
-  // Line items
-  const lines = await all(
+  // Line items.
+  //
+  // Inactive lines (is_active = 0) are excluded entirely — they don't
+  // render and don't contribute to totals.
+  //
+  // Grouping (parent_line_id): a parent line collapses its children
+  // into a single rendered row showing the parent's title + the summed
+  // extended_price of its (active) children. Children themselves are
+  // not rendered on the PDF / DOCX. Subtotals still tie out because
+  // the parent's displayed amount equals what its children would have
+  // summed to.
+  const rawLines = await all(
     env.DB,
     `SELECT * FROM quote_lines
       WHERE quote_id = ?
+        AND COALESCE(is_active, 1) = 1
       ORDER BY sort_order, id`,
     [quoteId]
   );
+
+  // Bucket children under their parent, in their existing sort order.
+  const childrenByParent = new Map();
+  const parentIds = new Set();
+  for (const l of rawLines) {
+    if (l.parent_line_id) {
+      if (!childrenByParent.has(l.parent_line_id)) {
+        childrenByParent.set(l.parent_line_id, []);
+      }
+      childrenByParent.get(l.parent_line_id).push(l);
+      parentIds.add(l.parent_line_id);
+    }
+  }
+
+  // Visible line list: top-level rows only. A parent's extended_price
+  // is overwritten with the sum of its (active) children's extended_price
+  // so fmtLine() and downstream subtotal math treat it as a single row
+  // carrying that amount. Children disappear from the rendered output.
+  const lines = [];
+  for (const l of rawLines) {
+    if (l.parent_line_id) continue; // hidden under its parent
+    if (parentIds.has(l.id)) {
+      const kids = childrenByParent.get(l.id) || [];
+      const sumExt = kids.reduce(
+        (s, c) => s + (Number(c.extended_price) || 0),
+        0
+      );
+      lines.push({
+        ...l,
+        quantity: null,
+        unit: '',
+        unit_price: null,
+        extended_price: sumExt,
+        // Parents carry no own discount in v1 — children's real
+        // discounts are already baked into their extended_price and
+        // therefore into sumExt.
+        discount_amount: null,
+        discount_pct: null,
+        discount_description: null,
+        discount_is_phantom: 0,
+      });
+    } else {
+      lines.push(l);
+    }
+  }
 
   // Split into regular lines vs option lines (refurb)
   const regularLines = lines.filter(l => !l.is_option);

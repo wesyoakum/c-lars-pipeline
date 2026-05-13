@@ -625,27 +625,31 @@ export function computePhantomMarkup(discount, realNet) {
  * INSERT/UPDATE/DELETE of the line that triggered the recompute.
  */
 export function quoteTotalsRecomputeStmt(db, quoteId, ts) {
+  // Inactive lines and parent (grouping) lines are excluded from the
+  // SUM: parents carry no extended_price of their own — their displayed
+  // total is the sum of their children, which are already counted here
+  // as individual rows.
   return stmt(
     db,
     `UPDATE quotes
-        SET subtotal_price = (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ?),
+        SET subtotal_price = (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ? AND COALESCE(is_active, 1) = 1 AND id NOT IN (SELECT parent_line_id FROM quote_lines WHERE quote_id = ? AND parent_line_id IS NOT NULL)),
             total_price    =
-              (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ?)
+              (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ? AND COALESCE(is_active, 1) = 1 AND id NOT IN (SELECT parent_line_id FROM quote_lines WHERE quote_id = ? AND parent_line_id IS NOT NULL))
               - CASE
                   WHEN COALESCE(discount_is_phantom, 0) = 1 THEN 0
                   WHEN discount_amount IS NOT NULL AND discount_amount > 0 THEN
                     MIN(
                       discount_amount,
-                      (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ?)
+                      (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ? AND COALESCE(is_active, 1) = 1 AND id NOT IN (SELECT parent_line_id FROM quote_lines WHERE quote_id = ? AND parent_line_id IS NOT NULL))
                     )
                   WHEN discount_pct IS NOT NULL AND discount_pct > 0 THEN
-                    (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ?)
+                    (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ? AND COALESCE(is_active, 1) = 1 AND id NOT IN (SELECT parent_line_id FROM quote_lines WHERE quote_id = ? AND parent_line_id IS NOT NULL))
                       * (MIN(discount_pct, 100.0) / 100.0)
                   ELSE 0
                 END
               + COALESCE(tax_amount, 0),
             updated_at     = ?
       WHERE id = ?`,
-    [quoteId, quoteId, quoteId, quoteId, ts, quoteId]
+    [quoteId, quoteId, quoteId, quoteId, quoteId, quoteId, quoteId, quoteId, ts, quoteId]
   );
 }

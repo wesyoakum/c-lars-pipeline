@@ -3492,13 +3492,60 @@ table.data.compact td {
 
 /* Line items table — Item column layout. */
 .quote-lines-table { table-layout: fixed; width: 100%; }
-.quote-lines-table .col-num   { width: 40px; }
-.quote-lines-table .col-item  { width: auto; }
-.quote-lines-table .col-qty   { width: 70px; }
-.quote-lines-table .col-unit  { width: 70px; }
-.quote-lines-table .col-price { width: 100px; }
-.quote-lines-table .col-ext   { width: 110px; }
-.quote-lines-table .col-build { width: 100px; }
+.quote-lines-table .col-num     { width: 40px; }
+.quote-lines-table .col-actions { width: 96px; }
+.quote-lines-table .col-item    { width: auto; }
+.quote-lines-table .col-qty     { width: 70px; }
+.quote-lines-table .col-unit    { width: 70px; }
+.quote-lines-table .col-price   { width: 100px; }
+.quote-lines-table .col-ext     { width: 110px; }
+.quote-lines-table .col-build   { width: 100px; }
+
+/* Migration 0086 — inactive lines and group parent/child styling. */
+.quote-lines-table tr.line-inactive td {
+  opacity: 0.45;
+}
+.quote-lines-table tr.line-inactive td input,
+.quote-lines-table tr.line-inactive td textarea,
+.quote-lines-table tr.line-inactive td select,
+.quote-lines-table tr.line-inactive td .line-desc,
+.quote-lines-table tr.line-inactive td .line-title {
+  text-decoration: line-through;
+}
+.quote-lines-table tr.line-group-parent {
+  background: var(--bg-alt);
+}
+.quote-lines-table tr.line-group-parent .group-parent-title {
+  font-weight: 600;
+  font-size: 1.02em;
+}
+.quote-lines-table tr.line-group-child td.col-num {
+  padding-left: 1.2rem;
+}
+.quote-lines-table tr.line-group-child {
+  background: rgba(0, 0, 0, 0.015);
+}
+.quote-lines-table .col-actions .btn-icon {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.78em;
+  line-height: 1;
+  padding: 0.18rem 0.35rem;
+  cursor: pointer;
+  color: var(--fg-muted);
+}
+.quote-lines-table .col-actions .btn-icon:hover:not(:disabled) {
+  background: var(--bg);
+  color: var(--fg);
+}
+.quote-lines-table .col-actions .btn-icon:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+.quote-lines-table .col-actions .line-group-check {
+  margin: 0;
+}
 .quote-lines-table .inline-form {
   display: block;
   margin: 0;
