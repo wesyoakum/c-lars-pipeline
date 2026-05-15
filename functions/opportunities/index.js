@@ -16,7 +16,7 @@ import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
 import { loadStageCatalog } from '../lib/stages.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
-import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
+import { ieText, ieSelect, listInlineEditScript } from '../lib/list-inline-edit.js';
 import { displayAccountForGroupMode } from '../lib/account-groups.js';
 import { isActiveOnly, opportunityActivePredicate } from '../lib/activeness.js';
 
@@ -55,14 +55,27 @@ export async function onRequestGet(context) {
             o.expected_close_date, o.rfq_received_date, o.rfq_due_date,
             o.rfi_due_date, o.quoted_date,
             o.external_source,
+            o.owner_user_id,
+            ou.display_name AS owner_name,
             a.name AS account_name, a.alias AS account_alias,
             a.parent_group AS account_parent_group,
             a.id AS account_id
        FROM opportunities o
        LEFT JOIN accounts a ON a.id = o.account_id
+       LEFT JOIN users ou ON ou.id = o.owner_user_id
       ${activeWhere}
       ORDER BY o.updated_at DESC
       LIMIT 500`
+  );
+
+  // Active users for the inline-edit Owner dropdown — same canonical
+  // picker query the accounts / activities pages use (active=1, by name).
+  const userRows = await all(
+    env.DB,
+    `SELECT id, display_name, email FROM users WHERE active = 1 ORDER BY display_name`
+  );
+  const ownerOptions = [{ value: '', label: '—' }].concat(
+    userRows.map((u) => ({ value: u.id, label: u.display_name || u.email }))
   );
 
   // Stage catalog gives us per-row label rendering. Cached in lib/stages.js.
@@ -79,6 +92,7 @@ export async function onRequestGet(context) {
     { key: 'account_name', label: 'Account',      sort: 'text',   filter: 'text',   default: true },
     { key: 'type_label',   label: 'Type',         sort: 'text',   filter: 'select', default: true },
     { key: 'stage_label',  label: 'Stage',        sort: 'text',   filter: 'select', default: true },
+    { key: 'owner',        label: 'Owner',        sort: 'text',   filter: 'select', default: true },
     { key: 'value',        label: 'Value',        sort: 'number', filter: 'range',  default: true },
     { key: 'close',        label: 'Close',        sort: 'date',   filter: 'text',   default: true },
     { key: 'updated',      label: 'Updated',      sort: 'date',   filter: 'text',   default: true },
@@ -114,6 +128,8 @@ export async function onRequestGet(context) {
     account_href: acct.href,
     type_label: parseTransactionTypes(r.transaction_type).map(t => TYPE_LABELS[t] ?? t).join(', ') || '—',
     stage_label: stageLabel(catalog, parseTransactionTypes(r.transaction_type)[0] ?? 'spares', r.stage),
+    owner_user_id: r.owner_user_id ?? '',
+    owner: r.owner_name ?? '',
     value: r.estimated_value_usd == null ? '' : Number(r.estimated_value_usd),
     value_display:
       r.estimated_value_usd != null ? `$${formatMoney(r.estimated_value_usd)}` : '',
@@ -157,6 +173,7 @@ export async function onRequestGet(context) {
                         data-account_name="${escape(r.account_name)}"
                         data-type_label="${escape(r.type_label)}"
                         data-stage_label="${escape(r.stage_label)}"
+                        data-owner="${escape(r.owner)}"
                         data-value="${escape(r.value === '' ? '' : String(r.value))}"
                         data-close="${escape(r.close)}"
                         data-updated="${escape(r.updated)}"
@@ -177,6 +194,9 @@ export async function onRequestGet(context) {
                       </td>
                       <td class="col-type_label" data-col="type_label">${escape(r.type_label)}</td>
                       <td class="col-stage_label" data-col="stage_label">${escape(r.stage_label)}</td>
+                      <td class="col-owner" data-col="owner">
+                        ${ieSelect('owner_user_id', r.owner_user_id, ownerOptions)}
+                      </td>
                       <td class="col-value num" data-col="value">
                         ${ieText('estimated_value_usd', r.value === '' ? '' : String(r.value), {
                           inputType: 'number',
