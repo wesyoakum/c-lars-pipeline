@@ -151,7 +151,11 @@
       prefs: {
         module_order: ['my_tasks', 'my_notes', 'shared', 'mentions'],
         module_collapsed: {},
-        hidden_until: null,
+        // Hidden by default until the first /board/state poll resolves,
+        // so the panels never flash visible on load. Mirrors
+        // BOARD_DEFAULT_HIDDEN_UNTIL in functions/lib/board.js — keep
+        // these two byte-identical.
+        hidden_until: '2999-12-31T23:59:59.000Z',
       },
       serverTime: null,
       nowMs: Date.now(),

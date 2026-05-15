@@ -33,6 +33,13 @@ const DEFAULT_MODULE_COLLAPSED = {
   mentions: false,
 };
 
+// The board is hidden by default. hidden_until is a snooze timestamp;
+// a far-future sentinel encodes "hidden indefinitely / by default" with
+// no schema change. Users who click the restore button persist
+// hidden_until=null and stay shown. Must stay byte-identical to the
+// client mirror in js/board-sidebar.js.
+const BOARD_DEFAULT_HIDDEN_UNTIL = '2999-12-31T23:59:59.000Z';
+
 /**
  * Extract a de-duplicated list of { ref_type, ref_id } from a card body.
  */
@@ -84,7 +91,7 @@ export async function getPrefs(db, userId) {
     return {
       module_order: DEFAULT_MODULE_ORDER.slice(),
       module_collapsed: { ...DEFAULT_MODULE_COLLAPSED },
-      hidden_until: null,
+      hidden_until: BOARD_DEFAULT_HIDDEN_UNTIL,
     };
   }
   const r = rows[0];
