@@ -12,13 +12,12 @@ import { all, one, run, stmt, batch } from '../lib/db.js';
 import { auditStmt } from '../lib/audit.js';
 import { validateOpportunity, parseTransactionTypes } from '../lib/validators.js';
 import { uuid, now, nextSequenceValue } from '../lib/ids.js';
-import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
+import { layout, htmlResponse, html, raw, escape, subnavTabs } from '../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
 import { loadStageCatalog } from '../lib/stages.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieText, ieSelect, listInlineEditScript } from '../lib/list-inline-edit.js';
 import { displayAccountForGroupMode } from '../lib/account-groups.js';
-import { isActiveOnly, opportunityActivePredicate } from '../lib/activeness.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
@@ -42,10 +41,14 @@ export async function onRequestGet(context) {
   // Pull alias + parent_group alongside name so the Account column can
   // honor the per-user `show_alias` and `group_rollup` toggles via
   // displayAccountForGroupMode().
-  // Active-only filter: opps are active if their stage is non-closed
-  // and either they have no quotes yet (grace window for fresh leads)
-  // or at least one active quote.
-  const activeWhere = isActiveOnly(user) ? `WHERE ${opportunityActivePredicate('o')}` : '';
+  // Default view = "Active Opportunities": exclude terminal stages
+  // (won, completed, lost, abandoned, closed_died — every
+  // stage_definitions row with is_terminal = 1). The "Show all" toggle
+  // (?all=1) drops the filter so closed / won / completed opps show too.
+  const showAll = url.searchParams.get('all') === '1';
+  const activeWhere = showAll
+    ? ''
+    : `WHERE o.stage NOT IN (SELECT stage_key FROM stage_definitions WHERE is_terminal = 1)`;
 
   const rows = await all(
     env.DB,
@@ -147,10 +150,22 @@ export async function onRequestGet(context) {
   });
   });
 
+  const tabs = subnavTabs(
+    [
+      { href: '/opportunities', label: 'Opportunities' },
+      { href: '/quotes',        label: 'Quotes' },
+      { href: '/jobs',          label: 'Jobs' },
+    ],
+    '/opportunities'
+  );
+
   const body = html`
+    ${tabs}
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Opportunities</h1>
+        <a class="btn btn-xs" href="${showAll ? '/opportunities' : '/opportunities?all=1'}"
+           title="${showAll ? 'Show only active opportunities' : 'Include won, lost, closed, abandoned, completed'}">${showAll ? 'Active only' : 'Show all'}</a>
         ${listToolbar({ id: 'opp', count: rows.length, columns, newOnClick: "window.Pipeline.openWizard('opportunity', {})", newLabel: 'New opportunity' })}
       </div>
 

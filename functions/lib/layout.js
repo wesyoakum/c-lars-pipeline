@@ -1578,12 +1578,10 @@ export function layout(title, body, opts = {}) {
     <nav class="site-nav" id="site-nav">
       ${navLink('/accounts', 'Accounts', activeNav)}
       ${navLink('/opportunities', 'Opportunities', activeNav)}
-      ${navLink('/quotes', 'Quotes', activeNav)}
       ${navLink('/activities', 'Tasks', activeNav)}
       ${navLink('/documents/library', 'Documents', activeNav)}
       ${navLink('/library', 'Library', activeNav)}
       ${navLink('/reports', 'Reports', activeNav)}
-      ${navLink('/jobs', 'Jobs', activeNav)}
       ${navLink('/settings', 'Settings', activeNav)}
       ${user && user.email === 'wes.yoakum@c-lars.com' ? navLink('/ai-inbox', 'AI Inbox', activeNav) : ''}
       ${user && user.email === 'wes.yoakum@c-lars.com' ? navLink('/sandbox', 'Sandbox', activeNav) : ''}

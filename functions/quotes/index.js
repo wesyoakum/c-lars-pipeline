@@ -4,7 +4,7 @@
 // Full sort/filter/column-toggle table using shared list-table controller.
 
 import { all } from '../lib/db.js';
-import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
+import { layout, htmlResponse, html, raw, escape, subnavTabs } from '../lib/layout.js';
 import { readFlash } from '../lib/http.js';
 import { fmtDollar } from '../lib/pricing.js';
 import {
@@ -134,7 +134,17 @@ export async function onRequestGet(context) {
     }
   }
 
+  const tabs = subnavTabs(
+    [
+      { href: '/opportunities', label: 'Opportunities' },
+      { href: '/quotes',        label: 'Quotes' },
+      { href: '/jobs',          label: 'Jobs' },
+    ],
+    '/quotes'
+  );
+
   const body = html`
+    ${tabs}
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Quotes</h1>
@@ -219,7 +229,7 @@ export async function onRequestGet(context) {
     layout('Quotes', body, {
       user,
       env: data?.env,
-      activeNav: '/quotes',
+      activeNav: '/opportunities',
       flash: readFlash(url),
       breadcrumbs: [
         { label: 'Quotes' },

@@ -6,7 +6,7 @@
 import { all, one, stmt, batch } from '../lib/db.js';
 import { auditStmt } from '../lib/audit.js';
 import { uuid, now, nextNumber, currentYear } from '../lib/ids.js';
-import { layout, htmlResponse, html, raw, escape } from '../lib/layout.js';
+import { layout, htmlResponse, html, raw, escape, subnavTabs } from '../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../lib/http.js';
 import { parseTransactionTypes } from '../lib/validators.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
@@ -123,7 +123,17 @@ export async function onRequestGet(context) {
     };
   });
 
+  const tabs = subnavTabs(
+    [
+      { href: '/opportunities', label: 'Opportunities' },
+      { href: '/quotes',        label: 'Quotes' },
+      { href: '/jobs',          label: 'Jobs' },
+    ],
+    '/jobs'
+  );
+
   const body = html`
+    ${tabs}
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Jobs</h1>
@@ -167,7 +177,7 @@ export async function onRequestGet(context) {
     layout('Jobs', body, {
       user,
       env: data?.env,
-      activeNav: '/jobs',
+      activeNav: '/opportunities',
       flash: readFlash(url),
       breadcrumbs: [{ label: 'Jobs' }],
     })
