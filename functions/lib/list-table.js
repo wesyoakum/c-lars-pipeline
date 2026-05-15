@@ -1006,9 +1006,13 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       if (currentAnchor && currentAnchor.contains(e.target)) return;
       hidePopover();
     });
-    // Also hide on scroll so the popover doesn't drift away from its anchor.
-    window.addEventListener('scroll', function() {
-      if (popover && popover.style.display !== 'none') hidePopover();
+    // Hide on scroll so the popover doesn't drift from its anchor — but
+    // NOT when the scroll happens inside the popover's own (scrollable)
+    // option list, otherwise scrolling a long filter list dismisses it.
+    window.addEventListener('scroll', function(e) {
+      if (!popover || popover.style.display === 'none') return;
+      if (e.target && e.target.nodeType && popover.contains(e.target)) return;
+      hidePopover();
     }, true);
 
     menuScope.querySelectorAll('[data-column-toggle]').forEach(function(cb) {
