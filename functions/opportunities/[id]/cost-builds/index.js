@@ -42,11 +42,11 @@ export async function onRequestPost(context) {
     stmt(
       env.DB,
       `INSERT INTO cost_builds
-         (id, opportunity_id, label, status,
+         (id, opportunity_id, label, status, build_kind,
           dm_user_cost, dl_user_cost, imoh_user_cost, other_user_cost,
           quote_price_user, use_dm_library, use_labor_library,
           notes, created_at, updated_at, created_by_user_id)
-       VALUES (?, ?, ?, 'draft',
+       VALUES (?, ?, ?, 'draft', 'new_build',
                NULL, NULL, NULL, NULL,
                NULL, 0, 0,
                NULL, ?, ?, ?)`,

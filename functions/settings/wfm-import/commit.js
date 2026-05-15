@@ -758,7 +758,7 @@ async function syncQuoteLines(env, pipelineQuoteId, wfmQuoteUuid, ctx) {
           quote_price_user,
           use_dm_library, use_labor_library, discount_is_phantom,
           notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'draft', 'wfm_reference',
+       VALUES (?, ?, ?, ?, 'draft', 'new_build',
                ?, ?, 0, 0,
                ?,
                0, 0, 0,

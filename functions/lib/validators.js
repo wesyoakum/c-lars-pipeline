@@ -616,6 +616,30 @@ export function quoteTypeSubtitle(quoteType) {
       || quoteType;
 }
 
+// Price Build "kind" taxonomy (cost_builds.build_kind). For now every
+// kind renders the same default price-builder layout — the kinds are a
+// selectable label so the per-kind field/behavior differences can be
+// built out later. Order = display order in the picker.
+export const PRICE_BUILD_KINDS = [
+  { value: 'new_build',         label: 'New Build' },
+  { value: 'buy_ship',          label: 'Buy/Ship' },
+  { value: 'cylinder_buy_ship', label: 'Cylinder (Buy/Ship)' },
+  { value: 'cylinder_build',    label: 'Cylinder (Build)' },
+  { value: 'refurb',            label: 'Refurb' },
+  { value: 'service',           label: 'Service' },
+];
+const PRICE_BUILD_KIND_SET = new Set(PRICE_BUILD_KINDS.map((k) => k.value));
+export const DEFAULT_PRICE_BUILD_KIND = 'new_build';
+
+/**
+ * Coerce any stored/posted build_kind to a valid kind. Legacy values
+ * (eps_full / spares_simple / wfm_reference / service_*) and anything
+ * unknown fall back to the default.
+ */
+export function normalizePriceBuildKind(v) {
+  return PRICE_BUILD_KIND_SET.has(String(v)) ? String(v) : DEFAULT_PRICE_BUILD_KIND;
+}
+
 /**
  * T3.4 Sub-feature A — Hybrid quotes.
  *

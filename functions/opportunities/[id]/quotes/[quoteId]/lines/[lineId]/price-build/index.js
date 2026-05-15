@@ -9,7 +9,7 @@
 
 import { one, all, stmt, batch } from '../../../../../../../lib/db.js';
 import { auditStmt } from '../../../../../../../lib/audit.js';
-import { validateCostBuild, validateWorkcenterEntries } from '../../../../../../../lib/validators.js';
+import { validateCostBuild, validateWorkcenterEntries, PRICE_BUILD_KINDS, normalizePriceBuildKind } from '../../../../../../../lib/validators.js';
 import { layout, htmlResponse, html, escape, raw } from '../../../../../../../lib/layout.js';
 import { uuid, now } from '../../../../../../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../../../../../../lib/http.js';
@@ -797,6 +797,26 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
         </div>
       </div>
 
+      <div class="pb-kind-row" style="display:flex;align-items:center;gap:.5rem;margin:.5rem 0">
+        <label for="pb-kind" class="muted" style="font-size:.8rem">Price Build kind</label>
+        <select id="pb-kind" class="num-input" style="width:auto;min-width:190px" ${locked ? 'disabled' : ''}>
+          ${PRICE_BUILD_KINDS.map((k) => html`<option value="${escape(k.value)}" ${normalizePriceBuildKind(build.build_kind) === k.value ? 'selected' : ''}>${escape(k.label)}</option>`)}
+        </select>
+      </div>
+      <script>${raw(`(function(){
+  var sel = document.getElementById('pb-kind');
+  if (!sel || sel.disabled) return;
+  sel.addEventListener('change', function(){
+    var p = location.pathname; if (p.charAt(p.length-1) === '/') p = p.slice(0, -1);
+    var fd = new FormData(); fd.append('build_kind', sel.value);
+    sel.disabled = true;
+    fetch(p + '/kind', { method:'POST', credentials:'same-origin', body: fd })
+      .then(function(r){ return r.json().catch(function(){ return {}; }); })
+      .then(function(j){ if (j && j.ok) { location.reload(); } else { sel.disabled = false; alert((j && j.error) || 'Could not update kind.'); } })
+      .catch(function(){ sel.disabled = false; alert('Could not update kind.'); });
+  });
+})()`)}</script>
+
       <h2 class="section-h">Cost Inputs &amp; Summary</h2>
       <p class="muted" style="margin-top:-0.5rem">
         ${build.build_kind === 'spares_simple'
@@ -1017,18 +1037,11 @@ async function handleCreate(context, ctx, input) {
   const label = input.label || line.description || 'Price build';
   const templateId = input.builds_library_id || null;
 
-  // Derive build_kind from the parent quote's quote_type. WFM-imported
-  // builds get 'wfm_reference' (set by the WFM importer, not here).
-  // Spares quotes get the simpler material+other UI; everything else
-  // currently gets the full eps_full UI.
-  const buildKind = (function () {
-    const qt = String(line.quote_type || '').toLowerCase();
-    if (qt === 'spares')                return 'spares_simple';
-    if (qt === 'eps')                   return 'eps_full';
-    if (qt === 'service')               return 'eps_full';   // service_* variant TBD
-    if (qt.startsWith('refurb'))        return 'eps_full';
-    return 'eps_full';
-  })();
+  // Every new price build starts as 'new_build'. The kind is a
+  // selectable label on the editor (PRICE_BUILD_KINDS); per-kind
+  // field/behavior differences are deferred, so all kinds render the
+  // same default layout for now.
+  const buildKind = 'new_build';
 
   // Auto-generate price build number: P{quoteSeq}.{lineIndex}
   // quoteSeq is the quote's position (1, 2, 3...) and lineIndex is
@@ -1084,9 +1097,7 @@ async function handleCreate(context, ctx, input) {
       statements.push(stmt(env.DB, 'INSERT INTO cost_build_labor (cost_build_id, workcenter, hours, rate) VALUES (?, ?, ?, ?)', [id, e.workcenter, e.hours, e.rate]));
     }
   } else {
-    // Spares-simple builds default Other to 0 (per user spec) so the
-    // "Other" field shows zero rather than null on first render.
-    const defaultOther = buildKind === 'spares_simple' ? 0 : null;
+    const defaultOther = null;
     statements.push(
       stmt(env.DB,
         `INSERT INTO cost_builds
