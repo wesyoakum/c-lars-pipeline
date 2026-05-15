@@ -392,7 +392,6 @@ export async function onRequestGet(context) {
     'change_order_under_revision',
     'revised_change_order_submitted',
     'change_order_won',
-    'amended_oc_drafted',
     'amended_oc_submitted',
   ]);
   const hideChangeOrderStages = opp.change_order !== 1;

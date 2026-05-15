@@ -5,8 +5,8 @@
 //
 // Writes amended_oc_* fields onto the change_orders row, fires
 // `change_order.amended_oc_issued` which triggers the seeded submit-
-// task rule, advances the opp to `amended_oc_drafted`, and emits the
-// amended OC PDF.
+// task rule (now a non-advancing reminder), advances the opp straight
+// to `amended_oc_submitted`, and emits the amended OC PDF.
 
 import { one, stmt, batch } from '../../../../lib/db.js';
 import { auditStmt } from '../../../../lib/audit.js';
@@ -81,10 +81,12 @@ export async function onRequestPost(context) {
     }),
   ]);
 
-  // Advance opp to amended_oc_drafted — submit task is pending, task
-  // completion will carry it to amended_oc_submitted.
+  // Issuing the amended OC moves the opp straight to
+  // `amended_oc_submitted`. The old `amended_oc_drafted` holding stage
+  // was removed (migration 0088); the "Submit amended OC" auto-task
+  // stays on as a non-advancing reminder.
   if (co.opportunity_id) {
-    await changeOppStage(context, co.opportunity_id, 'amended_oc_drafted', {
+    await changeOppStage(context, co.opportunity_id, 'amended_oc_submitted', {
       reason: `Amended OC ${amendedOcNumber} issued (CO ${co.number})`,
       onlyForward: true,
     });

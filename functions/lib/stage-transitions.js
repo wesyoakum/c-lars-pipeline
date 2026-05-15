@@ -27,10 +27,13 @@ import { fireEvent } from './auto-tasks.js';
 // status determines whether we move to quote_submitted or
 // revised_quote_submitted.
 const SUBMIT_QUOTE_RULE_ID               = 'rule-seed-submit-quote-to-customer';
-const SUBMIT_OC_RULE_ID                  = 'rule-seed-submit-oc-to-customer';
 const SUBMIT_NTP_RULE_ID                 = 'rule-seed-submit-ntp-to-customer';
 const SUBMIT_CHANGE_ORDER_RULE_ID        = 'rule-seed-submit-change-order-to-customer';
-const SUBMIT_AMENDED_OC_RULE_ID          = 'rule-seed-submit-amended-oc-to-customer';
+// The submit-OC and submit-amended-OC rules are intentionally NOT mapped
+// here. Issuing the (amended) OC now moves the opp straight to the
+// *_submitted stage (migration 0088 removed the *_drafted holding
+// stages), so those tasks are non-advancing reminders — completing one
+// must not re-drive the stage.
 
 const TASK_RULE_STAGE_MAP = {
   // Baseline + change-order quote flows both use the same submit-task
@@ -46,7 +49,6 @@ const TASK_RULE_STAGE_MAP = {
     if (quote?.status === 'revision_issued') return 'revised_quote_submitted';
     return null;
   },
-  [SUBMIT_OC_RULE_ID]:  () => 'oc_submitted',
   [SUBMIT_NTP_RULE_ID]: () => 'ntp_submitted',
   // Change-order quote: mirrors baseline-quote behavior but advances the
   // opp through the CO stages. The CO quote's `change_order_id` is
@@ -63,7 +65,6 @@ const TASK_RULE_STAGE_MAP = {
     if (quote?.status === 'revision_issued') return 'revised_change_order_submitted';
     return null;
   },
-  [SUBMIT_AMENDED_OC_RULE_ID]: () => 'amended_oc_submitted',
 };
 
 /**

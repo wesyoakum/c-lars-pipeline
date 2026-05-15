@@ -222,7 +222,6 @@ export const STAGE_KEYS = [
   { key: 'revised_quote_submitted',           label: 'Revised quote submitted' },
 
   // OC / win
-  { key: 'oc_drafted',                        label: 'OC drafted' },
   { key: 'won',                               label: 'Won (OC issued)' },
   { key: 'oc_submitted',                      label: 'OC submitted' },
 
@@ -233,7 +232,6 @@ export const STAGE_KEYS = [
   { key: 'change_order_under_revision',       label: 'Change order under revision' },
   { key: 'revised_change_order_submitted',    label: 'Revised change order submitted' },
   { key: 'change_order_won',                  label: 'Change order won' },
-  { key: 'amended_oc_drafted',                label: 'Amended OC drafted' },
   { key: 'amended_oc_submitted',              label: 'Amended OC submitted' },
   { key: 'completed',                         label: 'Completed' },
 

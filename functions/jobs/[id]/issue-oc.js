@@ -96,13 +96,13 @@ export async function onRequestPost(context) {
     }),
   ]);
 
-  // Advance the opp to `oc_drafted` (intermediate — OC is out in the
-  // world, task pending to formally submit it to the customer). The
-  // helper's onlyForward guard skips regression for opps already past
-  // this point (e.g. revisited OCs). Task completion then advances
-  // to `oc_submitted` via advanceStageOnTaskComplete.
+  // Issuing the OC moves the opp straight to `oc_submitted`. The old
+  // intermediate `oc_drafted` holding stage was removed (migration
+  // 0088); the "Submit OC to customer" auto-task still fires but only
+  // as a non-advancing reminder. onlyForward guards against regressing
+  // opps already past this point (e.g. revisited OCs).
   if (opp) {
-    await changeOppStage(context, opp.id, 'oc_drafted', {
+    await changeOppStage(context, opp.id, 'oc_submitted', {
       reason: `OC ${ocNumber} issued`,
       onlyForward: true,
     });

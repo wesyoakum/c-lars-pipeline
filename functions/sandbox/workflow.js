@@ -64,12 +64,11 @@ flowchart TD
     T2 --> S6["Revised quote submitted"]
     S6 --> G1
 
-    O1a --> S7["OC drafted"]
+    O1a --> S8["OC submitted"]
     O1c --> TL(["Closed — Lost"])
     O1d --> TC(["Cancelled"])
 
-    S7 --> T3[["Task: Submit OC to customer"]]
-    T3 --> S8["OC submitted"]
+    S8 -.->|reminder| T3[["Task: Submit OC to customer"]]
 
     S8 --> G2{"Transaction type?"}
     G2 --> O2a[/"Spares / Service / Refurb"/]
@@ -107,9 +106,8 @@ flowchart TD
     O4c --> S11
     O4d --> S11
 
-    S16 --> S17["Amended OC drafted"]
-    S17 --> T7[["Task: Submit amended OC"]]
-    T7 --> S18["Amended OC submitted"]
+    S16 --> S18["Amended OC submitted"]
+    S18 -.->|reminder| T7[["Task: Submit amended OC"]]
     S18 --> S11
 
     classDef terminal fill:#dafbe1,stroke:#1a7f37,color:#1a7f37
@@ -141,7 +139,7 @@ flowchart TD
         <dt>① After quote submission — <em>Customer response?</em></dt>
         <dd>
           <ul>
-            <li><strong>Accepts</strong> (PO received) → <code>oc_drafted</code>. OC flow begins — there's no intermediate "Won" state; acceptance just moves straight into OC work.</li>
+            <li><strong>Accepts</strong> (PO received) → OC flow begins. Issuing the OC moves the opp straight to <code>oc_submitted</code> (no intermediate "drafted" state). A "Submit OC to customer" task is still auto-created as a non-advancing reminder.</li>
             <li><strong>Requests changes</strong> → <code>quote_under_revision</code> → revised quote → back to the same question. Any number of revisions is allowed.</li>
             <li><strong>Rejects</strong> → <code>closed_lost</code> (terminal).</li>
             <li><strong>Cancels</strong> → <strong>Cancelled</strong> (terminal). Covers every flavour of "opp no longer active" — customer went quiet, project scrapped, budget pulled, changed vendor, etc. Kept separate from Rejects so reporting can tell "no" apart from "went away."</li>
@@ -169,7 +167,7 @@ flowchart TD
         <dd>
           Mirrors decision ① but with a softer rejection path:
           <ul>
-            <li><strong>Accepts</strong> → <code>change_order_won</code> → <code>amended_oc_drafted</code> → amended OC → <code>amended_oc_submitted</code> → back to <code>job_in_progress</code> (or <code>completed</code> if the job's done).</li>
+            <li><strong>Accepts</strong> → <code>change_order_won</code> → issuing the amended OC → <code>amended_oc_submitted</code> → back to <code>job_in_progress</code> (or <code>completed</code> if the job's done).</li>
             <li><strong>Requests changes</strong> → <code>change_order_under_revision</code> → revised CO → back to the same question.</li>
             <li><strong>Rejects</strong> or <strong>Cancels</strong> → revert to <code>job_in_progress</code>. The baseline OC still stands; user can open a fresh CO if scope changes again.</li>
           </ul>
@@ -181,7 +179,7 @@ flowchart TD
       <h2>Implementation notes</h2>
       <ul class="muted" style="font-size:0.9em">
         <li>Stage transitions go through <code>functions/lib/stage-transitions.js</code> (<code>changeOppStage</code>) so the gate / audit / event-fire side effects are consistent.</li>
-        <li>Each "Issue" action fires an event (<code>quote.issued</code>, <code>oc.issued</code>, <code>change_order.issued</code>, <code>change_order.amended_oc_issued</code>) that triggers a seeded auto-task rule creating a "Submit to customer" task. Completing that task walks the opp to the matching <code>*_submitted</code> stage via <code>advanceStageOnTaskComplete</code>.</li>
+        <li>Each "Issue" action fires an event (<code>quote.issued</code>, <code>oc.issued</code>, <code>change_order.issued</code>, <code>change_order.amended_oc_issued</code>) that triggers a seeded auto-task rule creating a "Submit to customer" task. For quote / NTP / change-order, completing that task walks the opp to the matching <code>*_submitted</code> stage via <code>advanceStageOnTaskComplete</code>. For OC and amended OC, issuing the document already moves the opp to <code>oc_submitted</code> / <code>amended_oc_submitted</code>, so those submit tasks are non-advancing reminders.</li>
         <li>Change orders live in their own table (<code>change_orders</code>); CO quotes are regular <code>quotes</code> rows with <code>change_order_id</code> set. A job can have many COs in sequence.</li>
         <li>All intermediate stages after <code>closed_won</code> have <code>is_won = 1</code>. The single terminal <code>completed</code> is won + terminal; <code>closed_lost</code> and <code>closed_died</code> are terminal but not won.</li>
         <li>The stage graph is enforced in <em>warn</em> mode — gate violations surface as toast warnings but don't block transitions. The picker UI suggests the next stage; the user can always jump.</li>
