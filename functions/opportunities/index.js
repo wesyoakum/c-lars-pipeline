@@ -159,8 +159,61 @@ export async function onRequestGet(context) {
     '/opportunities'
   );
 
+  // Condensed horizontal bar chart of opportunity count by stage,
+  // recomputed client-side from the rows currently visible in the
+  // table (post server-scope + post client filter / quick search).
+  // Driven by the `list:filtered` event list-table.js fires on every
+  // filter pass, so it always mirrors exactly what's in the table.
+  const stageChartScript = `
+(function(){
+  var chart = document.querySelector('[data-role="stage-chart"]');
+  if (!chart) return;
+  var host = document.querySelector('.opp-list');
+  var bodyEl = chart.querySelector('[data-role="stage-chart-body"]');
+  function esc(x){ return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function render(){
+    if (!host || !bodyEl){ chart.hidden = true; return; }
+    var trs = host.querySelectorAll('tbody[data-role="rows"] tr[data-row-id]');
+    var counts = {}, order = [], total = 0;
+    for (var i=0;i<trs.length;i++){
+      var tr = trs[i];
+      if (tr.style.display === 'none') continue;
+      var s = (tr.getAttribute('data-stage_label') || '').trim() || '—';
+      if (!(s in counts)){ counts[s] = 0; order.push(s); }
+      counts[s]++; total++;
+    }
+    if (total === 0){ chart.hidden = true; bodyEl.innerHTML = ''; return; }
+    var max = 0; for (var k in counts){ if (counts[k] > max) max = counts[k]; }
+    order.sort(function(a,b){ return counts[b]-counts[a] || a.localeCompare(b); });
+    bodyEl.innerHTML = order.map(function(s){
+      var pct = max ? Math.round(counts[s]/max*100) : 0;
+      return '<div class="osc-row"><span class="osc-label" title="'+esc(s)+'">'+esc(s)+'</span>'+
+             '<span class="osc-track"><span class="osc-bar" style="width:'+pct+'%"></span></span>'+
+             '<span class="osc-count">'+counts[s]+'</span></div>';
+    }).join('');
+    chart.hidden = false;
+  }
+  render();
+  if (host) host.addEventListener('list:filtered', render);
+})();
+`;
+
   const body = html`
     ${tabs}
+    <style>
+      .opp-stage-chart{margin:.4rem 0 .6rem;padding:.5rem .7rem;background:var(--bg-alt,#f5f5f7);border-radius:var(--radius,6px)}
+      .opp-stage-chart[hidden]{display:none}
+      .opp-stage-chart h2{margin:0 0 .35rem;font-size:.72rem;font-weight:600;color:var(--muted,#666);text-transform:uppercase;letter-spacing:.04em}
+      .osc-row{display:grid;grid-template-columns:150px 1fr 34px;align-items:center;gap:.5rem;margin:.1rem 0;font-size:.8rem}
+      .osc-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text,#222)}
+      .osc-track{background:var(--border,#e3e3e6);border-radius:3px;height:11px;overflow:hidden}
+      .osc-bar{background:var(--accent,#3e63dd);height:100%;border-radius:3px;min-width:2px;transition:width .15s}
+      .osc-count{text-align:right;color:var(--muted,#666);font-variant-numeric:tabular-nums}
+    </style>
+    <div class="opp-stage-chart" data-role="stage-chart" hidden>
+      <h2>Opportunities by stage</h2>
+      <div data-role="stage-chart-body"></div>
+    </div>
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Opportunities</h1>
@@ -256,6 +309,7 @@ export async function onRequestGet(context) {
               quoted_date: 'quoted',
             },
           }))}</script>
+          <script>${raw(stageChartScript)}</script>
         `}
     </section>
   `;

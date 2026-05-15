@@ -633,6 +633,13 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       });
       if (countEl) countEl.textContent = 'Showing ' + shown + ' of ' + totalRows;
       updateFilterIndicators();
+      // Let page-specific widgets (e.g. the opportunities by-stage
+      // chart) recompute from the now-visible rows.
+      try {
+        host.dispatchEvent(new CustomEvent('list:filtered', {
+          detail: { shown: shown, total: totalRows },
+        }));
+      } catch (e) {}
     }
 
     function updateFilterIndicators() {
