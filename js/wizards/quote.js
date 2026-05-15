@@ -271,27 +271,48 @@
       if (!oppId) return Promise.resolve({ ok: false, error: 'Missing opportunity.' });
       if (!qt)    return Promise.resolve({ ok: false, error: 'Missing quote type.' });
 
-      var fd = new FormData();
-      fd.append('quote_type', qt);
       var title = (answers.title || '').trim();
-      if (title) fd.append('title', title);
       var description = (answers.description || '').trim();
-      if (description) fd.append('description', description);
-      // valid_until stays blank — server seeds a default from the
-      // quote_type. The draft lands on the detail page for edits.
-
       var url = '/opportunities/' + encodeURIComponent(oppId) + '/quotes';
-      return fetch(url, {
-        method: 'POST',
-        credentials: 'same-origin',
-        body: fd,
-        headers: { 'x-requested-with': 'XMLHttpRequest', 'accept': 'text/html' }
-      })
+
+      function post(addCategory) {
+        var fd = new FormData();
+        fd.append('quote_type', qt);
+        if (title) fd.append('title', title);
+        if (description) fd.append('description', description);
+        if (addCategory) fd.append('add_category', '1');
+        // valid_until stays blank — server seeds a default from the
+        // quote_type. The draft lands on the detail page for edits.
+        return fetch(url, {
+          method: 'POST',
+          credentials: 'same-origin',
+          body: fd,
+          headers: { 'x-requested-with': 'XMLHttpRequest', 'accept': 'text/html' }
+        });
+      }
+
+      // The server 302s to the new quote detail (success) or back to
+      // the Quotes tab with an error flash. If the chosen quote type's
+      // category isn't on the opportunity, it returns 409 JSON asking
+      // whether to add that category — confirm, then re-post.
+      return post(false)
         .then(function (res) {
-          // The server 302s to either the new quote detail (success)
-          // or back to the opportunity's Quotes tab (error flash).
-          // fetch follows redirects by default and res.url is the
-          // final landing URL — we navigate the browser there.
+          if (res.status === 409) {
+            return res.json().then(function (j) {
+              if (j && j.needs_category_confirm) {
+                var msg = j.message ||
+                  'This opportunity is missing the quote’s category. Add it and create the quote?';
+                if (window.confirm(msg)) {
+                  return post(true).then(function (res2) {
+                    if (!res2.ok) return { ok: false, error: 'Could not create quote (HTTP ' + res2.status + ').' };
+                    return { ok: true, redirectUrl: res2.url };
+                  });
+                }
+                return { ok: false, error: 'Quote not created — opportunity category unchanged.' };
+              }
+              return { ok: false, error: (j && j.error) || 'Could not create quote.' };
+            });
+          }
           if (!res.ok) return { ok: false, error: 'Could not create quote (HTTP ' + res.status + ').' };
           return { ok: true, redirectUrl: res.url };
         })

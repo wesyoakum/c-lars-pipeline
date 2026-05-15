@@ -17,10 +17,19 @@ import {
   validateQuote,
   allowedQuoteTypes,
   parseQuoteTypes,
+  parseTransactionTypes,
+  quoteTypeCategory,
 } from '../../../lib/validators.js';
 import { getQuoteTermDefault } from '../../../lib/quote-term-defaults.js';
 import { formBody } from '../../../lib/http.js';
 import { changeOppStage } from '../../../lib/stage-transitions.js';
+
+const TXN_LABELS = {
+  spares: 'Spares',
+  eps: 'Engineered Product (EPS)',
+  refurb: 'Refurbishment',
+  service: 'Service',
+};
 
 export async function onRequestGet(context) {
   const oppId = context.params.id;
@@ -40,6 +49,73 @@ export async function onRequestPost(context) {
   if (!opp) return new Response('Opportunity not found', { status: 404 });
 
   const input = await formBody(request);
+
+  // If the chosen quote type implies a transaction category the
+  // opportunity doesn't have yet, offer to add it instead of hard-
+  // failing validation. The quote wizard re-submits with add_category=1
+  // once the user confirms. No-JS posts fall through to the standard
+  // validateQuote error below.
+  const wantParts = parseQuoteTypes(input.quote_type);
+  const oppCats = parseTransactionTypes(opp.transaction_type);
+  const missingCats = [];
+  for (const p of wantParts) {
+    const cat = quoteTypeCategory(p);
+    if (cat && !oppCats.includes(cat) && !missingCats.includes(cat)) {
+      missingCats.push(cat);
+    }
+  }
+  if (missingCats.length) {
+    const confirmed = ['1', 'true', 'yes', 'on'].includes(
+      String(input.add_category || '').toLowerCase()
+    );
+    const isAjax =
+      (request.headers.get('x-requested-with') || '').toLowerCase() ===
+      'xmlhttprequest';
+    if (!confirmed && isAjax) {
+      const labels = missingCats.map((c) => TXN_LABELS[c] || c);
+      return new Response(
+        JSON.stringify({
+          ok: false,
+          needs_category_confirm: true,
+          categories: missingCats,
+          category_labels: labels,
+          message: `This opportunity does not have the ${labels.join(
+            ' / '
+          )} category. Add it to the opportunity and create the quote?`,
+        }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+    if (confirmed) {
+      const merged = oppCats.slice();
+      for (const c of missingCats) if (!merged.includes(c)) merged.push(c);
+      const newTxn = merged.join(',');
+      const ts0 = now();
+      await batch(env.DB, [
+        stmt(
+          env.DB,
+          `UPDATE opportunities SET transaction_type = ?, updated_at = ? WHERE id = ?`,
+          [newTxn, ts0, oppId]
+        ),
+        auditStmt(env.DB, {
+          entityType: 'opportunity',
+          entityId: oppId,
+          eventType: 'updated',
+          user,
+          summary: `Added ${missingCats
+            .map((c) => TXN_LABELS[c] || c)
+            .join(', ')} category while creating a quote`,
+          changes: {
+            transaction_type: { from: opp.transaction_type, to: newTxn },
+          },
+        }),
+      ]);
+      opp.transaction_type = newTxn;
+    }
+    // Not confirmed + non-AJAX: fall through; validateQuote emits the
+    // standard "not valid for this opportunity's type(s)" flash error.
+  }
+
   const { ok, value, errors } = validateQuote(input, {
     transactionType: opp.transaction_type,
     requireType: true,

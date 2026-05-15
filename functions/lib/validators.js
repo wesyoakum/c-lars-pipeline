@@ -565,6 +565,18 @@ export function allowedQuoteTypes(transactionType) {
 }
 
 /**
+ * Map one quote_type part to the opportunity transaction_type category
+ * it belongs to (refurb_baseline / refurb_modified -> refurb; spares /
+ * eps / service -> themselves). Returns null for unknown parts.
+ */
+export function quoteTypeCategory(part) {
+  for (const [txn, qts] of Object.entries(QUOTE_TYPES_BY_TRANSACTION)) {
+    if (qts.includes(part)) return txn;
+  }
+  return null;
+}
+
+/**
  * Human-readable labels for quote_type keys.
  */
 export const QUOTE_TYPE_LABELS = {
