@@ -1,20 +1,37 @@
-// functions/workflow/index.js
+// functions/sandbox/workflow.js
 //
-// GET /workflow — Visual road map of the opportunity lifecycle.
+// GET /sandbox/workflow — Visual road map of the opportunity lifecycle.
 //
 // Embeds a Mermaid flowchart rendered client-side via the Mermaid
 // CDN build. The diagram mirrors the stage catalog (migration 0045 —
 // universal Change Order model) and the branching logic implemented
 // across accept.js, reject.js, submit.js, issue-oc.js, issue-ntp.js,
 // jobs/[id]/change-orders/[coId]/issue-amended-oc.js.
+//
+// Wes-only — same email gate as the rest of /sandbox/*.
 
-import { layout, htmlResponse, html, raw } from '../lib/layout.js';
+import { layout, htmlResponse, html, subnavTabs } from '../lib/layout.js';
+
+const SANDBOX_OWNER = 'wes.yoakum@c-lars.com';
 
 export async function onRequestGet(context) {
   const user = context.data?.user;
-  if (!user) return new Response('', { status: 302, headers: { Location: '/login' } });
+  if (!user || user.email !== SANDBOX_OWNER) {
+    return new Response('Not found', { status: 404 });
+  }
+
+  const tabs = subnavTabs(
+    [
+      { href: '/sandbox/assistant',  label: 'Claudia' },
+      { href: '/sandbox/us-map',     label: 'US Map' },
+      { href: '/sandbox/flow-chart', label: 'Flow Chart' },
+      { href: '/sandbox/workflow',   label: 'Workflow' },
+    ],
+    '/sandbox/workflow'
+  );
 
   const body = html`
+    ${tabs}
     <section class="card">
       <div class="card-header">
         <div>
@@ -183,9 +200,5 @@ flowchart TD
     </script>
   `;
 
-  return htmlResponse(layout('Workflow', body, {
-    user,
-    env: context.data?.env,
-    breadcrumbs: [{ label: 'Workflow' }],
-  }));
+  return htmlResponse(layout('Workflow', body, { user, activeNav: '/sandbox' }));
 }

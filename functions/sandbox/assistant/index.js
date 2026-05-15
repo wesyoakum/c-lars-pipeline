@@ -131,6 +131,7 @@ export async function onRequestGet(context) {
       { href: '/sandbox/assistant',  label: 'Claudia' },
       { href: '/sandbox/us-map',     label: 'US Map' },
       { href: '/sandbox/flow-chart', label: 'Flow Chart' },
+      { href: '/sandbox/workflow',   label: 'Workflow' },
     ],
     '/sandbox/assistant'
   );
