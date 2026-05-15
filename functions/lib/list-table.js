@@ -85,6 +85,16 @@ export function listToolbar({ id, count, columns = null, newHref, newOnClick, ne
         <input type="search" id="${id}-quicksearch" data-role="quicksearch" placeholder="Search...">
       </div>
       <span class="muted" data-role="count" style="font-size:0.8em;white-space:nowrap">${count}</span>
+      <!-- Clear all filters + quick search. Hidden until at least one
+           filter (or the search box) is active; the controller toggles
+           it in updateFilterIndicators(). -->
+      <button type="button" class="icon-btn" data-role="clear-filters" hidden
+              title="Clear all filters" aria-label="Clear all filters">
+        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 4 H16 L11.5 9.5 V15 L8.5 16.5 V9.5 Z"/>
+          <line x1="3" y1="17" x2="17" y2="3"/>
+        </svg>
+      </button>
       <!-- Table / Card view toggle. Default is table; client persists
            the choice per-list-page in localStorage and applies via a
            data-view-mode attribute on .opp-list. CSS does the rest. -->
@@ -210,6 +220,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     var totalRows = allRows.length;
     var countEl = document.querySelector('[data-role="count"]');
     var quickSearchInput = document.querySelector('[data-role="quicksearch"]');
+    var clearFiltersBtn = document.querySelector('[data-role="clear-filters"]');
     // Columns-menu elements live in the toolbar (a sibling of .opp-list),
     // not inside it, so queries go through document instead of host.
     var menuScope = host.closest('.card') || document;
@@ -630,6 +641,11 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         if (!th) return;
         th.classList.toggle('col-filter-active', isFilterActive(c.key));
       });
+      if (clearFiltersBtn) {
+        var anyActive = columns.some(function(c) { return isFilterActive(c.key); }) ||
+          !!(quickSearchInput && quickSearchInput.value && quickSearchInput.value.trim() !== '');
+        clearFiltersBtn.hidden = !anyActive;
+      }
     }
 
     function distinctValuesForColumn(key) {
@@ -963,6 +979,18 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     });
 
     if (quickSearchInput) quickSearchInput.addEventListener('input', applyFilters);
+
+    // Clear-all-filters button: wipe every column filter + the quick
+    // search box, then re-apply and persist. Distinct from the columns
+    // menu "Reset" (which also resets column visibility/order/sort).
+    function clearAllFilters() {
+      filterState = {};
+      if (quickSearchInput) quickSearchInput.value = '';
+      hidePopover();
+      applyFilters();
+      save();
+    }
+    if (clearFiltersBtn) clearFiltersBtn.addEventListener('click', clearAllFilters);
 
     // Dismiss the filter popover when clicking anywhere else on the page.
     document.addEventListener('mousedown', function(e) {
