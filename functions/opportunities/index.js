@@ -206,8 +206,8 @@ export async function onRequestGet(context) {
       .opp-stage-chart h2{margin:0 0 .35rem;font-size:.72rem;font-weight:600;color:var(--muted,#666);text-transform:uppercase;letter-spacing:.04em}
       .osc-row{display:grid;grid-template-columns:150px 1fr 34px;align-items:center;gap:.5rem;margin:.1rem 0;font-size:.8rem}
       .osc-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text,#222)}
-      .osc-track{background:var(--border,#e3e3e6);border-radius:3px;height:11px;overflow:hidden}
-      .osc-bar{background:var(--accent,#3e63dd);height:100%;border-radius:3px;min-width:2px;transition:width .15s}
+      .osc-track{display:block;width:100%;background:#e5e7eb;border-radius:3px;height:11px;overflow:hidden}
+      .osc-bar{display:block;height:100%;background:#3b82f6;border-radius:3px;min-width:2px;transition:width .15s}
       .osc-count{text-align:right;color:var(--muted,#666);font-variant-numeric:tabular-nums}
     </style>
     <div class="opp-stage-chart" data-role="stage-chart" hidden>
