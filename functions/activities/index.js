@@ -169,6 +169,7 @@ export async function onRequestGet(context) {
                               class="task-complete-toggle ${r.isCompleted ? 'is-completed' : ''}"
                               title="${r.isCompleted ? 'Mark pending' : 'Mark complete'}"
                               aria-label="${r.isCompleted ? 'Mark pending' : 'Mark complete'}"></button>
+                      <form method="post" action="/activities/${escape(r.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this task?')"><input type="hidden" name="return_to" value="/activities"><button type="submit" class="row-delete-btn" title="Delete task" aria-label="Delete task">×</button></form>
                     </td>
                     <td class="col-subject" data-col="subject">
                       ${ieText('subject', r.subject, { placeholder: '(no subject)' })}

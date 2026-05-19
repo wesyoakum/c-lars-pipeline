@@ -242,6 +242,10 @@ export async function onRequestGet(context) {
                         </svg>
                       </button>
                     </form>
+                    <form method="post" action="/activities/${escape(t.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this task?')">
+                      <input type="hidden" name="return_to" value="/">
+                      <button type="submit" class="row-delete-btn" title="Delete task" aria-label="Delete task">×</button>
+                    </form>
                   </td>
                   <td><a href="/activities/${escape(t.id)}"><strong>${escape(t.subject || '(no subject)')}</strong></a></td>
                   <td>${t.opp_id
