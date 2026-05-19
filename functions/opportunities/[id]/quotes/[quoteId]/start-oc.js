@@ -2,35 +2,19 @@
 //
 // POST /opportunities/:id/quotes/:quoteId/start-oc
 //
-// Entry point for "accept a quote → issue an Order Confirmation". The
-// accepted-quote detail page exposes a single "Start Order Confirmation"
-// button that POSTs here. This route:
-//
-//   1. Guards that the quote is actually accepted.
-//   2. Looks up an existing job sourced from THIS specific quote
-//      (jobs.quote_id = quoteId). An opportunity can have multiple
-//      accepted quotes, each producing its own job — a job from quote A
-//      must not be reused for quote B because the OC fields live on
-//      the job row and would overwrite each other.
-//      - If one already exists, redirects to /jobs/:jobId/oc.
-//      - If not, creates a new job (with quote_id set) and redirects
-//        straight into /jobs/:jobId/oc.
+// The accepted-quote detail page exposes a "Start Order Confirmation"
+// button that POSTs here. Accepting the quote already auto-creates the
+// job and moves the opp to `oc_drafted` (see accept.js), so this route
+// is now mainly a navigation shortcut: find the job sourced from this
+// quote (create it if for some reason it doesn't exist yet — e.g. quotes
+// accepted before this behavior shipped) and drop the user on the
+// /jobs/:jobId/oc form to capture the OC number and issue it.
 //
 // /jobs/:jobId/oc submits to /jobs/:jobId/issue-oc which fires the
-// oc.issued auto-task event (drives the seeded "Notify Finance to send
-// initial invoice" rule, migration 0037).
-//
-// Why a separate route rather than reusing POST /jobs directly:
-//   - POST /jobs expects form fields (`opportunity_id`, etc.). We want
-//     a zero-field button on the quote page.
-//   - The accepted-quote context lets us log a more specific audit
-//     summary ("Job X created from accepted quote Y") than the generic
-//     POST /jobs path.
-//   - Keeps the button wiring trivial: <form action="…/start-oc">.
+// oc.issued auto-task event and advances the opp to `oc_submitted`.
 
-import { one, stmt, batch } from '../../../../lib/db.js';
-import { auditStmt } from '../../../../lib/audit.js';
-import { uuid, now, nextNumber, currentYear } from '../../../../lib/ids.js';
+import { one } from '../../../../lib/db.js';
+import { ensureOcJobForQuote } from '../../../../lib/oc-jobs.js';
 import { redirectWithFlash } from '../../../../lib/http.js';
 
 export async function onRequestPost(context) {
@@ -41,7 +25,7 @@ export async function onRequestPost(context) {
 
   const quote = await one(
     env.DB,
-    'SELECT * FROM quotes WHERE id = ?',
+    'SELECT id, opportunity_id, status FROM quotes WHERE id = ?',
     [quoteId]
   );
   if (!quote || quote.opportunity_id !== oppId) {
@@ -56,73 +40,15 @@ export async function onRequestPost(context) {
     );
   }
 
-  // Existing job sourced from THIS quote? Per-quote check, not per-opp:
-  // a single opportunity can produce multiple jobs (one per accepted
-  // quote), so we must not redirect to a sibling quote's job.
-  const existing = await one(
-    env.DB,
-    `SELECT id, number, status FROM jobs
-      WHERE quote_id = ? AND status != 'cancelled'`,
-    [quoteId]
-  );
-  if (existing) {
-    return redirectWithFlash(
-      `/jobs/${existing.id}/oc`,
-      `Using existing job ${existing.number}. Review the OC and issue.`
-    );
-  }
-
-  // No job yet — create one seeded from the opportunity, matching the
-  // field set POST /jobs uses so the row is indistinguishable from a
-  // manually-created job.
-  const opp = await one(
-    env.DB,
-    `SELECT id, number, title, transaction_type, customer_po_number
-       FROM opportunities
-      WHERE id = ?`,
-    [oppId]
-  );
-  if (!opp) {
+  const job = await ensureOcJobForQuote(env, quoteId, { user });
+  if (!job) {
     return new Response('Opportunity not found', { status: 404 });
   }
 
-  const id = uuid();
-  const number = await nextNumber(env.DB, `JOB-${currentYear()}`);
-  const ts = now();
-
-  const title = opp.title;
-  const customerPo = opp.customer_po_number || null;
-  const isEps = String(opp.transaction_type || '').split(',').map(s => s.trim()).includes('eps');
-
-  await batch(env.DB, [
-    stmt(
-      env.DB,
-      `INSERT INTO jobs
-         (id, number, opportunity_id, quote_id, job_type, status, title,
-          customer_po_number, ntp_required, created_at, updated_at,
-          created_by_user_id)
-       VALUES (?, ?, ?, ?, ?, 'created', ?, ?, ?, ?, ?, ?)`,
-      [
-        id, number, oppId, quoteId, opp.transaction_type, title,
-        customerPo, isEps ? 1 : 0, ts, ts, user?.id ?? null,
-      ]
-    ),
-    auditStmt(env.DB, {
-      entityType: 'job',
-      entityId: id,
-      eventType: 'created',
-      user,
-      summary: `Job ${number} created from accepted quote ${quote.number} Rev ${quote.revision}`,
-      changes: {
-        opportunity_id: oppId,
-        quote_id: quoteId,
-        job_type: opp.transaction_type,
-      },
-    }),
-  ]);
-
   return redirectWithFlash(
-    `/jobs/${id}/oc`,
-    `Job ${number} created from ${quote.number} Rev ${quote.revision}. Review the OC and issue.`
+    `/jobs/${job.jobId}/oc`,
+    job.created
+      ? `Job ${job.number} created. Review the OC and issue.`
+      : `Using existing job ${job.number}. Review the OC and issue.`
   );
 }

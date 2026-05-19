@@ -139,7 +139,7 @@ flowchart TD
         <dt>① After quote submission — <em>Customer response?</em></dt>
         <dd>
           <ul>
-            <li><strong>Accepts</strong> (PO received) → OC flow begins. Issuing the OC moves the opp straight to <code>oc_submitted</code> (no intermediate "drafted" state). A "Submit OC to customer" task is still auto-created as a non-advancing reminder.</li>
+            <li><strong>Accepts</strong> (PO received) → the OC job is auto-created and the opp moves to <code>oc_drafted</code> immediately (no manual "Start Order Confirmation" step required). Issuing the OC then advances it to <code>oc_submitted</code>. A "Submit OC to customer" task is still auto-created as a non-advancing reminder.</li>
             <li><strong>Requests changes</strong> → <code>quote_under_revision</code> → revised quote → back to the same question. Any number of revisions is allowed.</li>
             <li><strong>Rejects</strong> → <code>closed_lost</code> (terminal).</li>
             <li><strong>Cancels</strong> → <strong>Cancelled</strong> (terminal). Covers every flavour of "opp no longer active" — customer went quiet, project scrapped, budget pulled, changed vendor, etc. Kept separate from Rejects so reporting can tell "no" apart from "went away."</li>

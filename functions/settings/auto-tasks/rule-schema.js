@@ -222,6 +222,7 @@ export const STAGE_KEYS = [
 
   // OC / win
   { key: 'won',                               label: 'Won (OC issued)' },
+  { key: 'oc_drafted',                        label: 'OC drafted' },
   { key: 'oc_submitted',                      label: 'OC submitted' },
 
   // Post-win execution + change-order cycle

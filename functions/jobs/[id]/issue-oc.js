@@ -96,11 +96,12 @@ export async function onRequestPost(context) {
     }),
   ]);
 
-  // Issuing the OC moves the opp straight to `oc_submitted`. The old
-  // intermediate `oc_drafted` holding stage was removed (migration
-  // 0088); the "Submit OC to customer" auto-task still fires but only
-  // as a non-advancing reminder. onlyForward guards against regressing
-  // opps already past this point (e.g. revisited OCs).
+  // Issuing the OC advances the opp `oc_drafted` → `oc_submitted`.
+  // Accepting the quote already parked it in `oc_drafted` (reinstated
+  // in migration 0091); issuing here moves it forward one stop. The
+  // "Submit OC to customer" auto-task still fires as a non-advancing
+  // reminder. onlyForward guards against regressing opps already past
+  // this point (e.g. revisited OCs).
   if (opp) {
     await changeOppStage(context, opp.id, 'oc_submitted', {
       reason: `OC ${ocNumber} issued`,
