@@ -148,17 +148,25 @@ export async function onRequestPost(context) {
   const isCloseLoss = targetDef.stage_key === 'lost' || targetDef.stage_key === 'closed_died';
   const lossReasonTag = isCloseLoss ? (value.override_reason || null) : null;
 
+  // Entering the RFQ stage stamps the RFQ received date with today
+  // (when not already set). The RFQ due date is prompted client-side.
+  const setRfqReceived =
+    targetDef.stage_key === 'rfq_received' && !opp.rfq_received_date;
+  const todayDate = ts.slice(0, 10);
+
   const statements = [
     stmt(
       env.DB,
       `UPDATE opportunities
           SET stage = ?, stage_entered_at = ?, probability = ?,
+              ${setRfqReceived ? 'rfq_received_date = ?,' : ''}
               ${isTerminal ? 'close_reason = ?, actual_close_date = ?,' : ''}
               ${isCloseLoss ? 'loss_reason_tag = ?,' : ''}
               updated_at = ?
         WHERE id = ?`,
       [
         targetDef.stage_key, ts, newProbability,
+        ...(setRfqReceived ? [todayDate] : []),
         ...(isTerminal ? [closeReason, ts] : []),
         ...(isCloseLoss ? [lossReasonTag] : []),
         ts, oppId,

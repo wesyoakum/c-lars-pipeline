@@ -48,7 +48,7 @@ export async function onRequestGet(context) {
       <div class="workflow-chart" style="padding:1rem; overflow-x:auto;">
         <div class="mermaid">
 flowchart TD
-    S1["Lead"] --> S2["RFQ received"]
+    S1["Lead"] --> S2["RFQ"]
     S2 --> S3["Quote drafted"]
     S3 --> T1[["Task: Submit quote to customer"]]
     T1 --> S4["Quote submitted"]

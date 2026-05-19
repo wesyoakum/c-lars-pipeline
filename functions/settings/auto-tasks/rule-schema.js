@@ -212,8 +212,7 @@ export const TOKEN_PATHS = {
 export const STAGE_KEYS = [
   // Pre-quote
   { key: 'lead',                              label: 'Lead' },
-  { key: 'rfq_received',                      label: 'RFQ received' },
-  { key: 'awaiting_client_feedback',          label: 'Awaiting client feedback' },
+  { key: 'rfq_received',                      label: 'RFQ' },
 
   // Quote cycle
   { key: 'quote_drafted',                     label: 'Quote drafted' },
