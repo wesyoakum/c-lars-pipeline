@@ -795,9 +795,7 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
                  class="num-input pricing-input ${(build.quote_price_user == null || build.quote_price_user === '') && auto.quote !== null ? 'pb-autocalc' : ''}"
                  ${locked ? 'disabled' : ''} placeholder="$0">
           ${errText('quote_price_user')}
-          ${(build.quote_price_user == null || build.quote_price_user === '') && auto.quote !== null
-            ? html`<div class="muted" style="font-size:0.7rem">auto calculated</div>`
-            : ''}
+          <div id="cb-quote-autonote" class="muted" style="font-size:0.7rem;display:${(build.quote_price_user == null || build.quote_price_user === '') && auto.quote !== null ? '' : 'none'}">auto calculated</div>
         </div>
         <div class="pricing-box ${marg.status === 'good' ? 'margin-good' : marg.status === 'low' ? 'margin-low' : ''}" id="cb-margin-box">
           <div class="muted">Estimated Gross Margin</div>

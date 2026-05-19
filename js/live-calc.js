@@ -116,10 +116,14 @@
         var trimmed = e.target.value.replace(/[$,\s]/g, '').trim();
         if (trimmed === '') {
           delete userEdited[n];
-          e.target.classList.add('auto-filled');
         } else {
           userEdited[n] = true;
-          e.target.classList.remove('auto-filled');
+        }
+        // Auto-calc styling applies only to the quote price now (cost
+        // fields no longer auto-fill).
+        if (n === 'quote_price_user') {
+          e.target.classList.toggle('pb-autocalc', trimmed === '');
+          toggleQuoteAutoNote(trimmed === '');
         }
       }
     });
@@ -133,11 +137,19 @@
       return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
+    function toggleQuoteAutoNote(show) {
+      var note = document.getElementById('cb-quote-autonote');
+      if (note) note.style.display = show ? '' : 'none';
+    }
     function setAutoVal(name, v) {
       var el = form.querySelector('[name="' + name + '"]');
       if (!el) return;
       el.value = fmtInput(v);
-      el.classList.add('auto-filled');
+      // Only the quote price auto-calculates now — show it dim + note.
+      if (name === 'quote_price_user') {
+        el.classList.add('pb-autocalc');
+        toggleQuoteAutoNote(true);
+      }
     }
 
     // Format pricing inputs on blur (add $ and commas)
@@ -189,26 +201,9 @@
 
       var effQuote = quote;
 
-      // DM from quote
-      if (isAutoFillable('dm_user_cost') && !dmLinked && effQuote !== null && effQuote > 0) {
-        dm = effQuote * p.dm;
-        setAutoVal('dm_user_cost', dm);
-      }
-      // DL from quote
-      if (isAutoFillable('dl_user_cost') && !laborLinked && effQuote !== null && effQuote > 0) {
-        dl = effQuote * p.dl;
-        setAutoVal('dl_user_cost', dl);
-      }
-      // IMOH from quote
-      if (isAutoFillable('imoh_user_cost') && effQuote !== null && effQuote > 0) {
-        imoh = effQuote * p.imoh;
-        setAutoVal('imoh_user_cost', imoh);
-      }
-      // Other from quote
-      if (isAutoFillable('other_user_cost') && effQuote !== null && effQuote > 0) {
-        other = effQuote * p.other;
-        setAutoVal('other_user_cost', other);
-      }
+      // Cost-field auto-fill disabled for now (per request) — only the
+      // quote price auto-calculates. DM/DL/IMOH/Other keep user-entered
+      // values; the estimates/margin below still compute from them.
 
       // Sum known costs
       var costs = [dm, dl, imoh, other];
