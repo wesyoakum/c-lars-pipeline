@@ -13,7 +13,7 @@
 
 import { one, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
-import { now } from '../../lib/ids.js';
+import { now, deriveDocNumber } from '../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../lib/http.js';
 import { fireEvent, reportError } from '../../lib/auto-tasks.js';
 import { changeOppStage } from '../../lib/stage-transitions.js';
@@ -46,12 +46,11 @@ export async function onRequestPost(context) {
   }
 
   const input = await formBody(request);
-  const ocNumber = (input.oc_number || '').trim();
-  if (!ocNumber) {
-    return redirectWithFlash(`/jobs/${jobId}`, 'OC number is required.', 'error');
-  }
-
   const ts = now();
+
+  // OC number is canonical: OC-{sourceQuoteNumber}. Derived, never
+  // typed — keeps the scheme consistent and typo-proof.
+  const ocNumber = await deriveDocNumber(env.DB, job, 'OC');
 
   // Determine next status based on job type. EPS gates work commencement
   // on the NTP, not the OC, so OC issuance leaves the job awaiting NTP;

@@ -24,6 +24,7 @@ import { ICON_PDF, ICON_DOCX } from '../../../lib/icons.js';
 import { templateManagerHtml, templateTypeForOC } from '../../../lib/template-catalog.js';
 import { getOcDocData } from '../../../lib/doc-generate.js';
 import { renderJobTabs } from '../../../lib/job-tabs.js';
+import { deriveDocNumber } from '../../../lib/ids.js';
 
 const STATUS_LABELS = {
   created: 'Created',
@@ -124,8 +125,10 @@ export async function onRequestGet(context) {
   }[jobType] || jobType;
   const ocTemplateKey = templateTypeForOC(jobType);
 
-  const defaultOcNumber =
-    job.oc_number || (sourceQuote ? `OC-${sourceQuote.number}` : '');
+  // OC number is canonical (OC-{sourceQuoteNumber}) — derived, not
+  // editable. Same helper issue-oc.js uses, so the displayed value is
+  // exactly what gets persisted.
+  const ocNumber = job.oc_number || await deriveDocNumber(env.DB, job, 'OC');
   const defaultPoNumber = job.customer_po_number || job.opp_po_number || '';
 
   // ── 1. Header card ────────────────────────────────────────────────
@@ -253,7 +256,7 @@ export async function onRequestGet(context) {
               <table class="quote-meta-table">
                 <tr>
                   <td class="meta-label">OC No:</td>
-                  <td><input type="text" name="oc_number" value="${escape(defaultOcNumber)}" class="meta-input" required style="width:100%"></td>
+                  <td><strong>${escape(ocNumber)}</strong> <span class="muted" style="font-size:0.8em">· auto from quote</span></td>
                 </tr>
                 <tr>
                   <td class="meta-label">Date:</td>

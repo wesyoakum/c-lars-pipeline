@@ -71,6 +71,32 @@ export async function nextNumber(db, scope) {
 }
 
 /**
+ * Canonical customer-facing Order-Confirmation / Notice-to-Proceed
+ * document number. Derived from the job's SOURCE QUOTE — never typed by
+ * hand — so the scheme is consistent and typo-proof:
+ *
+ *   OC-{quoteNumber}     NTP-{quoteNumber}
+ *
+ * (Quote numbers are already `Q{oppNumber}-{seq}`, so an OC reads e.g.
+ * `OC-Q1042-1`.) Falls back to the job number when the job has no
+ * source quote (a job created directly via the stage→won auto-create
+ * path rather than from an accepted quote — rare but possible).
+ *
+ * @param {D1Database} db
+ * @param {object} job     jobs row (needs `quote_id` and `number`)
+ * @param {string} prefix  'OC' | 'NTP'
+ * @returns {Promise<string>}
+ */
+export async function deriveDocNumber(db, job, prefix) {
+  let base = job?.number || '';
+  if (job?.quote_id) {
+    const q = await one(db, 'SELECT number FROM quotes WHERE id = ?', [job.quote_id]);
+    if (q?.number) base = q.number;
+  }
+  return `${prefix}-${base}`;
+}
+
+/**
  * Convenience: returns the current year as a 4-digit string.
  * Used to build scopes like `OPP-${currentYear()}`.
  */

@@ -21,6 +21,7 @@ import { ICON_PDF, ICON_DOCX } from '../../../lib/icons.js';
 import { templateManagerHtml } from '../../../lib/template-catalog.js';
 import { getOcDocData } from '../../../lib/doc-generate.js';
 import { renderJobTabs } from '../../../lib/job-tabs.js';
+import { deriveDocNumber } from '../../../lib/ids.js';
 
 const STATUS_LABELS = {
   created: 'Created',
@@ -98,7 +99,10 @@ export async function onRequestGet(context) {
   // (status stays handed_off, ntp_issued_at cleared).
   const canIssue = !isIssued;
   const canGenerate = !!docData;
-  const defaultNtpNumber = job.ntp_number || `NTP-${job.number}`;
+  // NTP number is canonical (NTP-{sourceQuoteNumber}) — derived, not
+  // editable. Same helper issue-ntp.js uses, so the displayed value is
+  // exactly what gets persisted.
+  const ntpNumber = job.ntp_number || await deriveDocNumber(env.DB, job, 'NTP');
 
   // ── 1. Header card ────────────────────────────────────────────────
   const headerSection = html`
@@ -212,7 +216,7 @@ export async function onRequestGet(context) {
               <table class="quote-meta-table">
                 <tr>
                   <td class="meta-label">NTP No:</td>
-                  <td><input type="text" name="ntp_number" value="${escape(defaultNtpNumber)}" class="meta-input" style="width:100%"></td>
+                  <td><strong>${escape(ntpNumber)}</strong> <span class="muted" style="font-size:0.8em">· auto from quote</span></td>
                 </tr>
                 <tr>
                   <td class="meta-label">Date:</td>

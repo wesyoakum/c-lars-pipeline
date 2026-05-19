@@ -5,8 +5,8 @@
 
 import { one, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
-import { now } from '../../lib/ids.js';
-import { redirectWithFlash, formBody } from '../../lib/http.js';
+import { now, deriveDocNumber } from '../../lib/ids.js';
+import { redirectWithFlash } from '../../lib/http.js';
 import { fireEvent, reportError } from '../../lib/auto-tasks.js';
 import { changeOppStage } from '../../lib/stage-transitions.js';
 import { getOcDocData, renderPdfOrPlaceholder } from '../../lib/doc-generate.js';
@@ -17,7 +17,7 @@ import {
 } from '../../lib/filename-templates.js';
 
 export async function onRequestPost(context) {
-  const { env, data, request, params } = context;
+  const { env, data, params } = context;
   const user = data?.user;
   const jobId = params.id;
 
@@ -35,9 +35,11 @@ export async function onRequestPost(context) {
     );
   }
 
-  const input = await formBody(request);
   const ts = now();
-  const ntpNumber = (input.ntp_number || '').trim() || null;
+
+  // NTP number is canonical: NTP-{sourceQuoteNumber}. Derived, never
+  // typed — keeps the scheme consistent and typo-proof.
+  const ntpNumber = await deriveDocNumber(env.DB, job, 'NTP');
   // Re-issuance after a Revise leaves status=handed_off; first-time
   // issuance comes in at status=awaiting_ntp. Either way the NTP being
   // out the door bumps status to handed_off (no-op when already there).
