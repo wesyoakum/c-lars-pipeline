@@ -519,13 +519,12 @@ export async function onRequestGet(context) {
                   x-model="selected"
                   @change="onChange()">
             <option value="">\u2014 Select stage \u2014</option>
-            ${carouselStages.map(s => {
-              const isCurrent = s.stage_key === opp.stage;
-              const isLoss = s.stage_key === 'closed_lost' || s.stage_key === 'closed_died';
-              const disabled = isCurrent ? 'disabled' : '';
-              const suffix = isCurrent ? ' (current)' : (isLoss ? ' (close)' : '');
-              return html`<option value="${escape(s.stage_key)}" ${raw(disabled)}>${s.label}${suffix}</option>`;
-            })}
+            ${carouselStages
+              .filter(s => (s.sort_order ?? 0) > (currentStage?.sort_order ?? -1))
+              .map(s => {
+                const isLoss = s.stage_key === 'closed_lost' || s.stage_key === 'closed_died';
+                return html`<option value="${escape(s.stage_key)}">${s.label}${isLoss ? ' (close)' : ''}</option>`;
+              })}
           </select>
         </div>
 
