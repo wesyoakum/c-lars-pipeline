@@ -375,6 +375,13 @@ export async function onRequestGet(context) {
     [oppId, oppId, oppId, oppId]
   );
 
+  // Most recent audit event that touched the opportunity description —
+  // drives the small "last edited by … on …" note under the field.
+  const descEdit = events.find(
+    (e) => e.entity_type === 'opportunity' &&
+           e.changes_json && e.changes_json.indexOf('"description"') !== -1
+  );
+
   const primaryContactName = [opp.contact_first, opp.contact_last].filter(Boolean).join(' ');
   const authorityName = [opp.auth_first, opp.auth_last].filter(Boolean).join(' ');
   const ownerLabel = opp.owner_name ?? opp.owner_email ?? '—';
@@ -562,7 +569,7 @@ export async function onRequestGet(context) {
           </div>
           <div class="detail-pair">
             <span class="detail-label">RFQ due</span>
-            <span class="detail-value">${inlineDate('rfq_due_date', opp.rfq_due_date)}</span>
+            <span class="detail-value">${inlineDate('rfq_due_date', opp.rfq_due_date)}${opp.stage === 'rfq_received' && !opp.rfq_due_date ? html` <small style="color:var(--warning,#bf8700);font-weight:600">← enter the RFQ due date</small>` : ''}</span>
           </div>
           ${opp.customer_po_number ? html`
           <div class="detail-pair">
@@ -589,6 +596,7 @@ export async function onRequestGet(context) {
         <div style="margin-top:0.5rem">
           <span class="detail-label" style="display:block; margin-bottom:0.15rem">Description</span>
           ${inlineTextarea('description', opp.description ?? '', { placeholder: 'Click to add description...' })}
+          ${descEdit ? html`<small class="muted" style="display:block;margin-top:0.15rem">Last edited by ${escape(descEdit.user_name || descEdit.user_email || 'someone')} · ${escape((descEdit.at ?? '').slice(0, 10))}</small>` : ''}
         </div>
 
         <!-- Internal notes (C-LARS only) — paired yellow tinted box,
