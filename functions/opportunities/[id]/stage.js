@@ -94,6 +94,19 @@ export async function onRequestPost(context) {
     );
   }
 
+  // ---- Customer PO required to enter the won / OC / job phase ---------
+  // Mirrors the close-reason hard guard above: a human cannot push a
+  // deal into any is_won stage (won, oc_drafted, oc_submitted,
+  // job_in_progress, the change-order stages, completed) via the picker
+  // without a recorded customer PO. The auto-accept path bypasses this
+  // intentionally (changeOppStage, not this endpoint) so drafting can
+  // begin pre-PO; issuing the OC then enforces the PO too (issue-oc.js).
+  if (targetDef.is_won && !String(opp.customer_po_number || '').trim()) {
+    const msg = `A customer PO number is required to move to "${targetDef.label}". Add the PO on the opportunity first.`;
+    if (ajax) return jsonResponse({ ok: false, error: msg }, 400);
+    return redirectWithFlash(`/opportunities/${oppId}`, msg, 'error');
+  }
+
   // ---- Gate evaluation ------------------------------------------------
   const gateCtx = await loadGateContext(env.DB, opp);
   const gateResult = await evaluateGate(env.DB, primaryType, targetDef.stage_key, gateCtx);

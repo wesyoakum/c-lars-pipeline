@@ -261,7 +261,7 @@ export async function onRequestGet(context) {
                 </tr>
                 <tr>
                   <td class="meta-label">Customer PO:</td>
-                  <td><input type="text" name="customer_po_number" value="${escape(defaultPoNumber)}" class="meta-input" placeholder="(optional)" style="width:100%"></td>
+                  <td><input type="text" name="customer_po_number" value="${escape(defaultPoNumber)}" class="meta-input" required placeholder="Required to issue" style="width:100%"></td>
                 </tr>
                 <tr>
                   <td class="meta-label">Source Quote:</td>

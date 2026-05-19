@@ -52,7 +52,6 @@ export async function onRequestPost(context) {
   }
 
   const ts = now();
-  const customerPo = (input.customer_po_number || '').trim() || job.customer_po_number;
 
   // Determine next status based on job type. EPS gates work commencement
   // on the NTP, not the OC, so OC issuance leaves the job awaiting NTP;
@@ -62,12 +61,26 @@ export async function onRequestPost(context) {
     ? 'awaiting_ntp'
     : 'handed_off';
 
-  // Load parent opp for downstream event payloads. Stage advance is
-  // handled below via changeOppStage — we never write the dead
-  // `oc_issued` key directly anymore (see migration 0041).
+  // Load parent opp for downstream event payloads + customer-PO
+  // fallback. Stage advance is handled below via changeOppStage — we
+  // never write the dead `oc_issued` key directly anymore (see 0041).
   const opp = job.opportunity_id
     ? await one(env.DB, 'SELECT * FROM opportunities WHERE id = ?', [job.opportunity_id])
     : null;
+
+  // Customer PO is mandatory to issue an OC. Resolve from the form,
+  // then the job, then the parent opp. Hard stop — no override path.
+  const customerPo =
+    (input.customer_po_number || '').trim() ||
+    (job.customer_po_number || '').trim() ||
+    (opp?.customer_po_number || '').trim();
+  if (!customerPo) {
+    return redirectWithFlash(
+      `/jobs/${jobId}/oc`,
+      'A customer PO number is required to issue an OC.',
+      'error'
+    );
+  }
 
   await batch(env.DB, [
     stmt(env.DB,
@@ -94,6 +107,16 @@ export async function onRequestPost(context) {
         status: { from: job.status, to: newStatus },
       },
     }),
+    // Backfill the opportunity's customer PO when it didn't have one,
+    // so the opp-level requirement (stage.js) and gate context stay
+    // in sync with the PO captured at OC issuance.
+    ...(opp && !String(opp.customer_po_number || '').trim()
+      ? [stmt(env.DB,
+          `UPDATE opportunities
+              SET customer_po_number = ?, updated_at = ?
+            WHERE id = ?`,
+          [customerPo, ts, opp.id])]
+      : []),
   ]);
 
   // Issuing the OC advances the opp `oc_drafted` → `oc_submitted`.
