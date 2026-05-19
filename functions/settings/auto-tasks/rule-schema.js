@@ -219,6 +219,7 @@ export const STAGE_KEYS = [
   { key: 'quote_submitted',                   label: 'Quote submitted' },
   { key: 'quote_under_revision',              label: 'Quote under revision' },
   { key: 'revised_quote_submitted',           label: 'Revised quote submitted' },
+  { key: 'quote_expired',                     label: 'Quote Expired' },
 
   // OC / win
   { key: 'won',                               label: 'Won (OC issued)' },
