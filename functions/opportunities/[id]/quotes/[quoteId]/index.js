@@ -846,7 +846,7 @@ export async function onRequestGet(context) {
             <th class="col-unit">Unit</th>
             <th class="num col-price">Unit price</th>
             <th class="num col-ext">Price ext</th>
-            <th class="col-build">Build</th>
+            <th class="col-build">Price Builder</th>
           </tr>
         </thead>
         <tbody>
@@ -972,8 +972,8 @@ export async function onRequestGet(context) {
                   <div class="line-item-fields">
                     <input type="text" name="title" value="${escape(l.title ?? '')}" ${readOnly ? 'disabled' : ''}
                            placeholder="Title / Part #" class="line-title" data-autosave>
-                    <input type="text" name="description" value="${escape(l.description ?? '')}" ${readOnly ? 'disabled' : ''}
-                           placeholder="Description" class="line-desc" data-autosave>
+                    <textarea name="description" ${readOnly ? 'disabled' : ''}
+                              placeholder="Description" class="line-desc" rows="1" data-autosave>${escape(l.description ?? '')}</textarea>
                   </div>
                   <textarea name="line_notes" ${readOnly ? 'disabled' : ''}
                             placeholder="Item notes..." class="line-notes" data-autosave>${escape(l.line_notes ?? '')}</textarea>
@@ -1029,7 +1029,7 @@ export async function onRequestGet(context) {
                       </form>` : html`<span class="muted">\u2014</span>`)}
                 ${!readOnly ? html`
                   <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}/delete" class="inline-form" style="display:inline">
-                    <button class="btn small danger" type="submit" title="Delete line">\u00d7</button>
+                    <button class="row-delete-btn" type="submit" title="Delete line" aria-label="Delete line">\u00d7</button>
                   </form>
                 ` : ''}
               </td>

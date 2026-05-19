@@ -184,9 +184,12 @@ export async function onRequestGet(context) {
     }
     if (total === 0){ chart.hidden = true; bodyEl.innerHTML = ''; return; }
     var max = 0; for (var k in counts){ if (counts[k] > max) max = counts[k]; }
+    // Scale so 100% width = the next multiple of 50 at/above the max
+    // stage count (e.g. max 84 -> axis 100; max 26 -> axis 50).
+    var axis = Math.max(50, Math.ceil(max / 50) * 50);
     order.sort(function(a,b){ return counts[b]-counts[a] || a.localeCompare(b); });
     bodyEl.innerHTML = order.map(function(s){
-      var pct = max ? Math.round(counts[s]/max*100) : 0;
+      var pct = Math.round(counts[s]/axis*100);
       return '<div class="osc-row"><span class="osc-label" title="'+esc(s)+'">'+esc(s)+'</span>'+
              '<span class="osc-track"><span class="osc-bar" style="width:'+pct+'%"></span></span>'+
              '<span class="osc-count">'+counts[s]+'</span></div>';

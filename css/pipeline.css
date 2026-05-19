@@ -2948,6 +2948,11 @@ table.data.compact td {
   font-variant-numeric: tabular-nums;
   background: var(--bg);
 }
+.num-input.pb-autocalc {
+  color: #9aa0a6;
+  font-style: italic;
+  background: #f3f4f6;
+}
 .num-input.auto-filled {
   background: #e0eaf4;
   color: #364b66;
@@ -3563,13 +3568,13 @@ table.data.compact.quote-lines-table .col-price input.num-input {
 }
 .line-item-fields {
   display: flex;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.3rem;
   width: 100%;
 }
 .line-title {
-  flex: 1;
-  min-width: 0;
-  max-width: none;
+  width: 100%;
+  box-sizing: border-box;
   padding: 0.25rem 0.45rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -3577,15 +3582,23 @@ table.data.compact.quote-lines-table .col-price input.num-input {
   background: var(--bg);
 }
 .line-desc {
-  flex: 2;
-  min-width: 0;
-  max-width: none;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
   padding: 0.25rem 0.45rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
   font: inherit;
   background: var(--bg);
+  field-sizing: content;
+  min-height: 1.9rem;
+  resize: vertical;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
+/* Hidden for now (per request) — AI "Polish with AI" on line items.
+   !important to beat the element's inline display:inline-flex. */
+.line-polish-btn { display: none !important; }
 .line-notes {
   display: block;
   width: 100%;

@@ -243,6 +243,12 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
             Quote <a href="${quoteUrl(oppId, quoteId)}">${escape(line.quote_number)} Rev ${escape(line.revision)}</a>
             · <a href="/opportunities/${escape(oppId)}">${escape(line.opp_number)}</a>
           </p>
+          <div class="pb-kind-row" style="display:flex;align-items:center;gap:.5rem;margin-top:.4rem">
+            <label for="pb-kind" class="muted" style="font-size:.8rem">Price Build kind</label>
+            <select id="pb-kind" class="num-input" style="width:auto;min-width:190px" ${locked ? 'disabled' : ''}>
+              ${PRICE_BUILD_KINDS.map((k) => html`<option value="${escape(k.value)}" ${normalizePriceBuildKind(bundle.build.build_kind) === k.value ? 'selected' : ''}>${escape(k.label)}</option>`)}
+            </select>
+          </div>
         </div>
         <div class="header-actions">
           ${locked
@@ -281,6 +287,18 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
       });
     });
     </script>
+    <script>${raw(`(function(){
+  var sel=document.getElementById('pb-kind');
+  if(!sel||sel.disabled) return;
+  sel.addEventListener('change',function(){
+    var fd=new FormData(); fd.append('build_kind', sel.value);
+    sel.disabled=true;
+    fetch(${JSON.stringify(base + '/kind')},{method:'POST',credentials:'same-origin',body:fd})
+      .then(function(r){return r.json().catch(function(){return {};});})
+      .then(function(j){ if(j&&j.ok){location.reload();} else {sel.disabled=false;alert((j&&j.error)||'Could not update kind.');} })
+      .catch(function(){sel.disabled=false;alert('Could not update kind.');});
+  });
+})()`)}</script>
   `;
 
   // Document upload + list for reference files
@@ -749,8 +767,8 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
       <td><strong>${label}</strong></td>
       <td class="num">
         <input type="text" name="${id}_user_cost"
-               value="${valOrAuto(userVal, autoVal)}"
-               class="num-input ${autoClass(userVal, autoVal)}"
+               value="${userVal == null || userVal === '' ? '' : fmtInput(userVal)}"
+               class="num-input"
                ${disabled || locked ? 'disabled' : ''} placeholder="$0">
         ${errText(id + '_user_cost')}
         ${noteText ? html`<div class="muted" style="font-size:0.75rem">${escape(noteText)}</div>` : ''}
@@ -774,11 +792,11 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
           <div class="muted">Quote Price</div>
           <input type="text" name="quote_price_user"
                  value="${valOrAuto(build.quote_price_user, auto.quote)}"
-                 class="num-input pricing-input ${autoClass(build.quote_price_user, auto.quote)}"
+                 class="num-input pricing-input ${(build.quote_price_user == null || build.quote_price_user === '') && auto.quote !== null ? 'pb-autocalc' : ''}"
                  ${locked ? 'disabled' : ''} placeholder="$0">
           ${errText('quote_price_user')}
-          ${auto.quote !== null
-            ? html`<div class="muted" style="font-size:0.75rem">${escape(notes.quote)}</div>`
+          ${(build.quote_price_user == null || build.quote_price_user === '') && auto.quote !== null
+            ? html`<div class="muted" style="font-size:0.7rem">auto calculated</div>`
             : ''}
         </div>
         <div class="pricing-box ${marg.status === 'good' ? 'margin-good' : marg.status === 'low' ? 'margin-low' : ''}" id="cb-margin-box">
@@ -796,26 +814,6 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
             : ''}</div>
         </div>
       </div>
-
-      <div class="pb-kind-row" style="display:flex;align-items:center;gap:.5rem;margin:.5rem 0">
-        <label for="pb-kind" class="muted" style="font-size:.8rem">Price Build kind</label>
-        <select id="pb-kind" class="num-input" style="width:auto;min-width:190px" ${locked ? 'disabled' : ''}>
-          ${PRICE_BUILD_KINDS.map((k) => html`<option value="${escape(k.value)}" ${normalizePriceBuildKind(build.build_kind) === k.value ? 'selected' : ''}>${escape(k.label)}</option>`)}
-        </select>
-      </div>
-      <script>${raw(`(function(){
-  var sel = document.getElementById('pb-kind');
-  if (!sel || sel.disabled) return;
-  sel.addEventListener('change', function(){
-    var p = location.pathname; if (p.charAt(p.length-1) === '/') p = p.slice(0, -1);
-    var fd = new FormData(); fd.append('build_kind', sel.value);
-    sel.disabled = true;
-    fetch(p + '/kind', { method:'POST', credentials:'same-origin', body: fd })
-      .then(function(r){ return r.json().catch(function(){ return {}; }); })
-      .then(function(j){ if (j && j.ok) { location.reload(); } else { sel.disabled = false; alert((j && j.error) || 'Could not update kind.'); } })
-      .catch(function(){ sel.disabled = false; alert('Could not update kind.'); });
-  });
-})()`)}</script>
 
       <h2 class="section-h">Cost Inputs &amp; Summary</h2>
       <p class="muted" style="margin-top:-0.5rem">
