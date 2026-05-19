@@ -130,7 +130,14 @@
 
     function isAutoFillable(name) {
       var el = form.querySelector('[name="' + name + '"]');
-      return el && !userEdited[name] && !el.disabled;
+      // Never overwrite the field the user is currently editing — that
+      // is what made clearing a prepopulated value snap straight back
+      // to the calculated number on every keystroke. While the field
+      // has focus the user owns it (even when momentarily empty); the
+      // calculated value is only restored on blur-if-empty (see the
+      // blur handler below).
+      return el && !userEdited[name] && !el.disabled
+        && el !== document.activeElement;
     }
 
     function fmtInput(n) {
@@ -152,7 +159,12 @@
       }
     }
 
-    // Format pricing inputs on blur (add $ and commas)
+    // Format pricing inputs on blur (add $ and commas), then re-run the
+    // cascade. The field just deactivated: if the user left it empty
+    // the calculated value (held back while it had focus) is restored
+    // now; if they entered a value it stays as typed. This is the
+    // "only show the calculated value if the field deactivates with
+    // nothing in it" behavior. recalc() is hoisted.
     form.addEventListener('blur', function(e) {
       var n = e.target.name;
       if (n && (n.indexOf('_user_cost') !== -1 || n === 'quote_price_user')) {
@@ -160,6 +172,7 @@
         if (v !== null) {
           e.target.value = fmtInput(v);
         }
+        recalc();
       }
     }, true);
 
