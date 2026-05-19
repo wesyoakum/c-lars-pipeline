@@ -23,6 +23,7 @@ import {
   isHybridQuote,
   QUOTE_TYPE_LABELS,
 } from './validators.js';
+import { getEffectiveValidityDays } from './quote-term-defaults.js';
 
 // ── Template key mapping ────────────────────────────────────────────
 
@@ -202,6 +203,23 @@ export async function getQuoteDocData(env, quoteId) {
       });
     } catch { return iso; }
   };
+
+  // Expiration / valid-until (migration 0038): issued quotes have
+  // `valid_until` frozen at submission; DRAFTS leave it NULL and the
+  // date is computed "today + N" live at render time (N = per-quote-
+  // type validity_days default). doc-generate previously only read the
+  // raw column, so every generated draft doc showed a BLANK expiration.
+  // Mirror the quote detail page's logic so the document matches what
+  // the user sees on screen.
+  let effectiveValidUntil = quote.valid_until || '';
+  if (!effectiveValidUntil) {
+    const n = await getEffectiveValidityDays(env, quote.quote_type, 14);
+    const d = new Date();
+    d.setUTCHours(0, 0, 0, 0);
+    d.setUTCDate(d.getUTCDate() + n);
+    effectiveValidUntil = d.toISOString().slice(0, 10);
+  }
+  const quoteExpirationStr = fmtDate(effectiveValidUntil);
 
   // Format dollar amounts for line items.
   //
@@ -523,7 +541,7 @@ export async function getQuoteDocData(env, quoteId) {
     clientAddress: billingAddr?.address || '',
     quoteNumber: quoteNumDisplay,
     quoteDate: fmtDate(quote.submitted_at) || fmtDate(new Date().toISOString()),
-    quoteExpiration: fmtDate(quote.valid_until),
+    quoteExpiration: quoteExpirationStr,
     delivery: quote.delivery_estimate || '',
     description: quote.description || '',
 
@@ -619,7 +637,7 @@ export async function getQuoteDocData(env, quoteId) {
     QuoteNumber: quoteNumDisplay,
     QuoteName: quote.title || '',
     QuoteDescription: quote.description || '',
-    QuoteValidDate: fmtDate(quote.valid_until),
+    QuoteValidDate: quoteExpirationStr,
     Date: fmtDate(quote.submitted_at) || fmtDate(new Date().toISOString()),
     Today: fmtDate(new Date().toISOString()),
     TITLE: quote.title || '',
@@ -720,6 +738,38 @@ export async function getQuoteDocData(env, quoteId) {
 
     DeliveryTerms:     quote.delivery_terms || '',
     delivery_terms:    quote.delivery_terms || '',
+
+    // Expiration / valid-until — every common spelling, since user
+    // templates vary and a blank quote-expiry is a frequent "my doc
+    // shows nothing" report. All resolve to the computed effective
+    // date (issued = frozen column; draft = today + N).
+    ValidUntil:            quoteExpirationStr,
+    validUntil:            quoteExpirationStr,
+    valid_until:           quoteExpirationStr,
+    Valid_Until:           quoteExpirationStr,
+    ValidUntilDate:        quoteExpirationStr,
+    ValidDate:             quoteExpirationStr,
+    validDate:             quoteExpirationStr,
+    ValidThrough:          quoteExpirationStr,
+    validThrough:          quoteExpirationStr,
+    QuoteValidUntil:       quoteExpirationStr,
+    QuoteValidUntilDate:   quoteExpirationStr,
+    QuoteValidThrough:     quoteExpirationStr,
+    QuoteValidityDate:     quoteExpirationStr,
+    QuoteExpiration:       quoteExpirationStr,
+    QuoteExpirationDate:   quoteExpirationStr,
+    QuoteExpiry:           quoteExpirationStr,
+    QuoteExpiryDate:       quoteExpirationStr,
+    Expiration:            quoteExpirationStr,
+    expiration:            quoteExpirationStr,
+    ExpirationDate:        quoteExpirationStr,
+    expirationDate:        quoteExpirationStr,
+    Expiry:                quoteExpirationStr,
+    expiry:                quoteExpirationStr,
+    ExpiryDate:            quoteExpirationStr,
+    expiryDate:            quoteExpirationStr,
+    ExpiresOn:             quoteExpirationStr,
+    ValidUntilText:        quoteExpirationStr,
 
     // Numeric-only totals for templates that hardcode the "$" prefix.
     // (Otherwise users get "$$1,234,567.00" because both the template
