@@ -1103,31 +1103,92 @@ function rewriteWfmLoopMarkers(zip) {
 // ── Convert to PDF ──────────────────────────────────────────────────
 
 /**
- * Convert a .docx ArrayBuffer to PDF via ConvertAPI.
+ * Base64-encode an ArrayBuffer (chunked so large-ish docx buffers
+ * don't blow the call stack via String.fromCharCode spread).
+ */
+function arrayBufferToBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(bin);
+}
+
+/**
+ * Convert a .docx ArrayBuffer to PDF via CloudConvert (v2 jobs API).
  * Returns the PDF as an ArrayBuffer.
+ *
+ * Flow: create a job (import/base64 → convert docx→pdf → export/url),
+ * block on the sync API until it settles, then download the PDF.
  */
 export async function convertToPdf(env, docxBuffer) {
-  const secret = env.CONVERTAPI_SECRET;
-  if (!secret) {
-    throw new Error('CONVERTAPI_SECRET is not configured');
+  const apiKey = env.CLOUDCONVERT_API_KEY;
+  if (!apiKey) {
+    throw new Error('CLOUDCONVERT_API_KEY is not configured');
   }
 
-  const resp = await fetch(
-    `https://v2.convertapi.com/convert/docx/to/pdf?Secret=${secret}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'Content-Disposition': 'attachment; filename="document.docx"',
+  const createResp = await fetch('https://api.cloudconvert.com/v2/jobs', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      tasks: {
+        'import-1': {
+          operation: 'import/base64',
+          file: arrayBufferToBase64(docxBuffer),
+          filename: 'document.docx',
+        },
+        'convert-1': {
+          operation: 'convert',
+          input: 'import-1',
+          input_format: 'docx',
+          output_format: 'pdf',
+        },
+        'export-1': { operation: 'export/url', input: 'convert-1' },
       },
-      body: docxBuffer,
-    }
-  );
+    }),
+  });
+  if (!createResp.ok) {
+    const t = await createResp.text().catch(() => '');
+    throw new Error(
+      `CloudConvert job create failed (${createResp.status}): ${t.slice(0, 300)}`
+    );
+  }
+  const jobId = (await createResp.json())?.data?.id;
+  if (!jobId) throw new Error('CloudConvert: no job id returned');
 
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    throw new Error(`ConvertAPI failed (${resp.status}): ${text}`);
+  // Sync API blocks until the job finishes (or errors / times out).
+  const waitResp = await fetch(
+    `https://sync.api.cloudconvert.com/v2/jobs/${jobId}?include=tasks`,
+    { headers: { Authorization: `Bearer ${apiKey}` } }
+  );
+  if (!waitResp.ok) {
+    const t = await waitResp.text().catch(() => '');
+    throw new Error(
+      `CloudConvert job wait failed (${waitResp.status}): ${t.slice(0, 300)}`
+    );
+  }
+  const job = (await waitResp.json())?.data;
+  if (!job || job.status !== 'finished') {
+    const failed = (job?.tasks || []).find((x) => x.status === 'error');
+    throw new Error(
+      `CloudConvert job did not finish (${job?.status}): ${failed?.message || 'unknown error'}`
+    );
   }
 
-  return await resp.arrayBuffer();
+  const exportTask = (job.tasks || []).find(
+    (x) => x.name === 'export-1' && x.status === 'finished'
+  );
+  const fileUrl = exportTask?.result?.files?.[0]?.url;
+  if (!fileUrl) throw new Error('CloudConvert: no exported file URL');
+
+  const fileResp = await fetch(fileUrl);
+  if (!fileResp.ok) {
+    throw new Error(`CloudConvert PDF download failed (${fileResp.status})`);
+  }
+  return await fileResp.arrayBuffer();
 }
