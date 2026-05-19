@@ -801,22 +801,38 @@ export async function onRequestGet(context) {
             <a class="btn btn-sm" href="/opportunities/${escape(opp.id)}?tab=quotes">View all</a>
           </div>
           <table class="data compact quotes-table">
-            <thead><tr><th>Number</th><th>Rev</th><th>Type</th><th>Title</th><th>Status</th><th class="num">Total</th><th></th></tr></thead>
+            <thead><tr><th>Number</th><th>Rev</th><th>Type</th><th>Title</th><th>Status</th><th class="num">Total</th></tr></thead>
             <tbody>
               ${quoteRows.map(q => {
                 const statusClass = quoteStatusPillClass(q.status);
-                return html`<tr>
+                return html`<tr class="row-clickable" style="cursor:pointer"
+                  data-row-href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">
                   <td style="white-space:nowrap"><code>${escape(q.number)}</code></td>
                   <td style="white-space:nowrap">${escape(q.revision)}</td>
                   <td style="white-space:nowrap">${escape(quoteTypeDisplayLabel(q.quote_type))}</td>
-                  <td><a href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">${escape(q.title || '(no title)')}</a></td>
+                  <td>${escape(q.title || '(no title)')}</td>
                   <td style="white-space:nowrap"><span class="pill ${statusClass}">${escape(QUOTE_STATUS_LABELS[q.status] ?? q.status)}</span></td>
                   <td class="num" style="white-space:nowrap">${fmtDollar(q.total_price)}</td>
-                  <td class="row-actions" style="white-space:nowrap"><a class="btn small" href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">Open</a></td>
                 </tr>`;
               })}
             </tbody>
           </table>
+          <script>(function(){
+            var tb = document.querySelector('.quotes-table tbody');
+            if (!tb) return;
+            function hrefFor(e){ var tr = e.target.closest('tr[data-row-href]'); return tr ? tr.getAttribute('data-row-href') : null; }
+            tb.addEventListener('click', function(e){
+              if (e.target.closest('a,button,input,select,textarea,label')) return;
+              var href = hrefFor(e); if (!href) return;
+              if (e.metaKey || e.ctrlKey || e.button === 1) window.open(href, '_blank', 'noopener');
+              else window.location.href = href;
+            });
+            tb.addEventListener('auxclick', function(e){
+              if (e.button !== 1) return;
+              var href = hrefFor(e); if (!href) return;
+              e.preventDefault(); window.open(href, '_blank', 'noopener');
+            });
+          })();</script>
         </section>`
       : ''}
 
