@@ -662,7 +662,28 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         if (v != null && v !== '') set[v] = true;
       });
       var arr = Object.keys(set);
-      arr.sort(function(a, b) { return String(a).localeCompare(String(b)); });
+      // A column may declare an optionOrder (array of values in the
+      // desired dropdown order) — e.g. pipeline stages in workflow
+      // order rather than alphabetical. Listed values sort by their
+      // index; anything not listed falls to the end, alphabetical
+      // among themselves. No optionOrder = plain alphabetical.
+      var colDef = null;
+      for (var ci = 0; ci < columns.length; ci++) {
+        if (columns[ci].key === key) { colDef = columns[ci]; break; }
+      }
+      var ord = colDef && colDef.optionOrder;
+      if (ord && ord.length) {
+        var rank = {};
+        for (var oi = 0; oi < ord.length; oi++) rank[ord[oi]] = oi;
+        arr.sort(function(a, b) {
+          var ra = (a in rank) ? rank[a] : Infinity;
+          var rb = (b in rank) ? rank[b] : Infinity;
+          if (ra !== rb) return ra - rb;
+          return String(a).localeCompare(String(b));
+        });
+      } else {
+        arr.sort(function(a, b) { return String(a).localeCompare(String(b)); });
+      }
       return arr;
     }
 

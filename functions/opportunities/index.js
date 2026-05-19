@@ -46,9 +46,28 @@ export async function onRequestGet(context) {
   // stage_definitions row with is_terminal = 1). The "Show all" toggle
   // (?all=1) drops the filter so closed / won / completed opps show too.
   const showAll = url.searchParams.get('all') === '1';
-  const activeWhere = showAll
-    ? ''
-    : `WHERE o.stage NOT IN (SELECT stage_key FROM stage_definitions WHERE is_terminal = 1)`;
+  // "Hide WFM" toggle (?nowfm=1): exclude opportunities imported from
+  // WFM (external_source set). Composes with the active/all toggle.
+  const hideWfm = url.searchParams.get('nowfm') === '1';
+  const whereConds = [];
+  if (!showAll) {
+    whereConds.push(
+      `o.stage NOT IN (SELECT stage_key FROM stage_definitions WHERE is_terminal = 1)`
+    );
+  }
+  if (hideWfm) whereConds.push(`o.external_source IS NULL`);
+  const activeWhere = whereConds.length
+    ? `WHERE ${whereConds.join(' AND ')}`
+    : '';
+
+  // Build a list URL for a given (all, nowfm) state so the two toggle
+  // buttons preserve each other's setting.
+  const listUrl = (a, nw) => {
+    const p = [];
+    if (a) p.push('all=1');
+    if (nw) p.push('nowfm=1');
+    return '/opportunities' + (p.length ? `?${p.join('&')}` : '');
+  };
 
   const rows = await all(
     env.DB,
@@ -84,6 +103,25 @@ export async function onRequestGet(context) {
   // Stage catalog gives us per-row label rendering. Cached in lib/stages.js.
   const catalog = await loadStageCatalog(env.DB);
 
+  // Ordered list of distinct stage labels, in pipeline order-of-
+  // operations (stage_definitions.sort_order across all transaction
+  // types, deduped by label). Drives the Stage column's filter
+  // dropdown so it reads lead → RFQ → quote → … → completed instead
+  // of alphabetical.
+  const stageOrder = (() => {
+    const defs = [];
+    for (const arr of catalog.values()) {
+      for (const s of arr) defs.push(s);
+    }
+    defs.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    const seen = new Set();
+    const out = [];
+    for (const s of defs) {
+      if (s.label && !seen.has(s.label)) { seen.add(s.label); out.push(s.label); }
+    }
+    return out;
+  })();
+
   // Column catalog — label, key, filter type, default visibility. The
   // client-side controller lets the user toggle visibility, reorder,
   // sort, and filter per column, and persists the state to localStorage
@@ -94,7 +132,7 @@ export async function onRequestGet(context) {
     { key: 'title',        label: 'Title',        sort: 'text',   filter: 'text',   default: true },
     { key: 'account_name', label: 'Account',      sort: 'text',   filter: 'text',   default: true },
     { key: 'type_label',   label: 'Type',         sort: 'text',   filter: 'select', default: true },
-    { key: 'stage_label',  label: 'Stage',        sort: 'text',   filter: 'select', default: true },
+    { key: 'stage_label',  label: 'Stage',        sort: 'text',   filter: 'select', default: true, optionOrder: stageOrder },
     { key: 'owner',        label: 'Owner',        sort: 'text',   filter: 'select', default: true },
     { key: 'value',        label: 'Value',        sort: 'number', filter: 'range',  default: true },
     { key: 'close',        label: 'Close',        sort: 'date',   filter: 'text',   default: true },
@@ -220,8 +258,10 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Opportunities</h1>
-        <a class="btn btn-xs" href="${showAll ? '/opportunities' : '/opportunities?all=1'}"
+        <a class="btn btn-xs" href="${listUrl(!showAll, hideWfm)}"
            title="${showAll ? 'Show only active opportunities' : 'Include won, lost, closed, abandoned, completed'}">${showAll ? 'Active only' : 'Show all'}</a>
+        <a class="btn btn-xs" href="${listUrl(showAll, !hideWfm)}"
+           title="${hideWfm ? 'Include opportunities imported from WFM' : 'Hide opportunities imported from WFM'}">${hideWfm ? 'Show WFM' : 'Hide WFM'}</a>
         ${listToolbar({ id: 'opp', count: rows.length, columns, newOnClick: "window.Pipeline.openWizard('opportunity', {})", newLabel: 'New opportunity' })}
       </div>
 
