@@ -23,5 +23,6 @@ export function docsSubNav(active) {
          href="/documents/templates">Templates</a>
       <a class="nav-link ${active === 'resources' ? 'active' : ''}"
          href="/documents/resources">Resources</a>
+      <a class="nav-link" href="/library/dm-items">Library</a>
     </nav>`;
 }

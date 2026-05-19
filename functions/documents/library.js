@@ -246,7 +246,7 @@ export async function onRequestGet(context) {
     layout('Documents', body, {
       user,
       env: data?.env,
-      activeNav: '/documents',
+      activeNav: '/library',
       flash: readFlash(url),
       breadcrumbs: [{ label: 'Documents' }],
     })

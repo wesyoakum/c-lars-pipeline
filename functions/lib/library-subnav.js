@@ -21,5 +21,7 @@ export function librarySubNav(active) {
          href="/library/items">Line Items</a>
       <a class="nav-link ${active === 'builds' ? 'active' : ''}"
          href="/library/builds">Price Builds</a>
+      <a class="nav-link ${active === 'documents' ? 'active' : ''}"
+         href="/documents/library">Documents</a>
     </nav>`;
 }

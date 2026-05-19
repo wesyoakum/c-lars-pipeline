@@ -360,7 +360,7 @@ function tplUpload() {
     layout('Templates', body, {
       user,
       env: data?.env,
-      activeNav: '/documents',
+      activeNav: '/library',
       flash: readFlash(url),
       breadcrumbs: [
         { label: 'Documents', href: '/documents/library' },
