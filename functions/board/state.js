@@ -61,6 +61,10 @@ export async function onRequestGet(context) {
         WHERE assigned_user_id = ?
           AND status = 'pending'
           AND type = 'task'
+          -- Hide tasks until ~a week before they're due. Overdue and
+          -- no-due-date tasks always show; keeps the board on what's
+          -- actionable now rather than far-future scheduled work.
+          AND (due_at IS NULL OR date(due_at) <= date('now', '+7 days'))
         ORDER BY
           CASE WHEN due_at IS NULL THEN 1 ELSE 0 END,
           due_at ASC,

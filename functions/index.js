@@ -78,6 +78,9 @@ export async function onRequestGet(context) {
            LEFT JOIN opportunities o ON o.id = a.opportunity_id
           WHERE a.status = 'pending'
             AND a.assigned_user_id = ?
+            -- Hide tasks until ~a week before due (overdue / no-due
+            -- always show).
+            AND (a.due_at IS NULL OR date(a.due_at) <= date('now', '+7 days'))
           ORDER BY
             CASE WHEN a.due_at IS NOT NULL THEN 0 ELSE 1 END,
             a.due_at ASC,
