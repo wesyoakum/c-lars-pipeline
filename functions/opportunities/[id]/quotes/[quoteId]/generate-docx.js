@@ -16,6 +16,7 @@ import {
   getFilenameTemplate,
   renderFilenameTemplate,
   buildQuoteFilenameContext,
+  quoteDraftSuffix,
 } from '../../../../lib/filename-templates.js';
 
 export async function onRequestPost(context) {
@@ -25,7 +26,7 @@ export async function onRequestPost(context) {
   const quoteId = params.quoteId;
   const returnTo = `/opportunities/${oppId}/quotes/${quoteId}`;
 
-  const quote = await one(env.DB, 'SELECT id, opportunity_id, quote_type, number, revision, title FROM quotes WHERE id = ?', [quoteId]);
+  const quote = await one(env.DB, 'SELECT id, opportunity_id, quote_type, number, revision, title, status FROM quotes WHERE id = ?', [quoteId]);
   if (!quote || quote.opportunity_id !== oppId) {
     return new Response('Quote not found', { status: 404 });
   }
@@ -63,7 +64,8 @@ export async function onRequestPost(context) {
     );
     const docxFilename =
       (renderFilenameTemplate(fnTpl, fnCtx) ||
-        `${quote.number}${fnCtx.revisionSuffix}`) + '.docx';
+        `${quote.number}${fnCtx.revisionSuffix}`) +
+      quoteDraftSuffix(quote.status) + '.docx';
 
     const docId = await storeGeneratedDoc(env, {
       opportunityId: oppId,

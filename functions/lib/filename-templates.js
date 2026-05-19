@@ -78,6 +78,14 @@ export async function listFilenameTemplates(env) {
  *
  * Exposed tokens: see FILENAME_TOKENS below for the full list.
  */
+/**
+ * " DRAFT" suffix for quote docs generated before the quote is issued
+ * (draft / revision_draft statuses). Empty once issued.
+ */
+export function quoteDraftSuffix(status) {
+  return status === 'draft' || status === 'revision_draft' ? ' DRAFT' : '';
+}
+
 export function buildQuoteFilenameContext({
   quote,
   accountName,
