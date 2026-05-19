@@ -504,15 +504,32 @@ export function computeDiscountApplied(discount, scopeValue) {
 
 /**
  * Build a normalized discount object from a D1 row. Accepts either the
- * raw column names (discount_amount, discount_pct, discount_is_phantom)
- * or the short form (amount, pct, isPhantom). Returns null if the row
- * has no discount fields at all (so callers can cheaply early-out).
+ * raw column names (discount_amount, discount_pct, discount_is_phantom,
+ * discount_description) or the short form (amount, pct, isPhantom,
+ * description). Returns null if the row has no discount fields at all
+ * (so callers can cheaply early-out).
+ *
+ * IMPORTANT: for a long-form entity row (a quote or quote_line), the
+ * discount label is `discount_description`. We must NOT fall back to
+ * the row's own `description` — that's the quote/line's prose
+ * description, not a discount. Conflating them made every quote with a
+ * description (and no real discount) render a bogus $0 discount row
+ * showing that prose on the quote doc / OC page / generated PDF. Only
+ * the short-form discount object (no `discount_*` keys) carries a bare
+ * `.description` that legitimately means the discount label.
  */
 export function readDiscountFromRow(row) {
   if (!row) return null;
   const amount = row.discount_amount ?? row.amount ?? null;
   const pct = row.discount_pct ?? row.pct ?? null;
-  const description = row.discount_description ?? row.description ?? null;
+  const hasLongFormKeys =
+    'discount_amount' in row ||
+    'discount_pct' in row ||
+    'discount_is_phantom' in row ||
+    'discount_description' in row;
+  const description = hasLongFormKeys
+    ? (row.discount_description ?? null)
+    : (row.description ?? null);
   const isPhantom = !!(row.discount_is_phantom ?? row.isPhantom ?? 0);
   if (amount == null && pct == null && !description && !isPhantom) return null;
   return { amount, pct, description, isPhantom };
