@@ -81,7 +81,8 @@ export async function onRequestGet(context) {
             ou.display_name AS owner_name,
             a.name AS account_name, a.alias AS account_alias,
             a.parent_group AS account_parent_group,
-            a.id AS account_id
+            a.id AS account_id,
+            (SELECT COUNT(*) FROM quotes q WHERE q.opportunity_id = o.id) AS quote_count
        FROM opportunities o
        LEFT JOIN accounts a ON a.id = o.account_id
        LEFT JOIN users ou ON ou.id = o.owner_user_id
@@ -146,6 +147,7 @@ export async function onRequestGet(context) {
     { key: 'rfq_due',      label: 'RFQ due',      sort: 'date',   filter: 'text',   default: false },
     { key: 'rfi_due',      label: 'RFI due',      sort: 'date',   filter: 'text',   default: false },
     { key: 'quoted',       label: 'Quoted',       sort: 'date',   filter: 'text',   default: false },
+    { key: 'quotes',       label: 'Quotes',       sort: 'number', filter: 'text',   default: true },
   ];
 
   // Shape rows once so each <tr> knows its sort/filter values and the
@@ -185,6 +187,7 @@ export async function onRequestGet(context) {
     rfq_due: r.rfq_due_date ?? '',
     rfi_due: r.rfi_due_date ?? '',
     quoted: r.quoted_date ?? '',
+    quotes: r.quote_count ?? 0,
   });
   });
 
@@ -293,7 +296,8 @@ export async function onRequestGet(context) {
                         data-rfq_due="${escape(r.rfq_due)}"
                         data-rfi_due="${escape(r.rfi_due)}"
                         data-quoted="${escape(r.quoted)}"
-                        data-source="${escape(r.source)}">
+                        data-source="${escape(r.source)}"
+                        data-quotes="${escape(String(r.quotes))}">
                       <td class="col-number" data-col="number"><a href="/opportunities/${escape(r.id)}"><code>${escape(r.number)}</code></a></td>
                       <td class="col-title" data-col="title">
                         ${ieText('title', r.title)}
@@ -334,6 +338,7 @@ export async function onRequestGet(context) {
                       <td class="col-quoted" data-col="quoted">
                         ${ieText('quoted_date', r.quoted, { inputType: 'date' })}
                       </td>
+                      <td class="col-quotes num" data-col="quotes">${r.quotes}</td>
                     </tr>`
                 )}
               </tbody>
