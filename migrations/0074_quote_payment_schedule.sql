@@ -1,0 +1,34 @@
+-- =====================================================================
+-- Migration 0074 — per-quote structured payment schedule.
+--
+-- Step 3 of the incremental Katana rebuild. Each quote gets its own
+-- milestone schedule (variable count, % + literal weeks + label) that
+-- drives the Katana push. The schedule lives as JSON on the quote
+-- row; existing quotes have NULL here and continue to use the site-
+-- wide milestone map for push (Step 2 behavior).
+--
+-- Shape (validated by lib/quote-payment-schedule.js):
+--   {
+--     "rows": [
+--       { "percent": 10, "weeks": 0,  "label": "Due at order confirmation",
+--         "katana_variant_id": 40099667, "katana_sku": "MS-1ST-10%-OC" },
+--       { "percent": 15, "weeks": 4,  "label": "Due upon long lead order",
+--         "katana_variant_id": 40099669, "katana_sku": "MS-2ND-15%-OLL&SCH" },
+--       ...
+--     ]
+--   }
+--
+--   percent           — number in (0, 100]. All rows sum to 100.
+--   weeks             — literal number of weeks after order confirmation.
+--                       Optional; 0/null = "immediate" (not time-based).
+--   label             — milestone description, customer-facing.
+--   katana_variant_id — cached Katana variant id (resolved by the push
+--                       route; may auto-create the variant on the fly).
+--   katana_sku        — cached Katana SKU for display.
+--
+-- Per-quote-type defaults (TBD) live elsewhere — at quote creation
+-- the editor starts empty and the admin can either "Copy from site
+-- default" (one click) or add rows manually.
+-- =====================================================================
+
+ALTER TABLE quotes ADD COLUMN payment_schedule TEXT;

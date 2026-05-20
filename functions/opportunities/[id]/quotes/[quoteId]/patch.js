@@ -9,6 +9,7 @@ import { one, stmt, batch } from '../../../../lib/db.js';
 import { auditStmt, diff } from '../../../../lib/audit.js';
 import { now } from '../../../../lib/ids.js';
 import { quoteTotalsRecomputeStmt } from '../../../../lib/pricing.js';
+import { normalizeSchedule, scheduleToString } from '../../../../lib/quote-payment-schedule.js';
 
 const READ_ONLY_STATUSES = new Set([
   'issued', 'revision_issued', 'accepted', 'rejected', 'expired', 'dead',
@@ -22,6 +23,19 @@ const PATCHABLE = new Set([
   'discount_amount', 'discount_pct', 'discount_description', 'discount_is_phantom',
   // Per-quote show/hide toggle for the discount UI (migration 0027)
   'show_discounts',
+  // Step 3 — per-quote structured payment schedule (drives the
+  // Katana push milestone breakdown and, eventually, the doc-
+  // template payment_terms text)
+  'payment_schedule',
+]);
+
+// Fields that admins can edit even on read-only quotes. Display-only
+// or operational fields that don't change the customer-facing record.
+const READONLY_OVERRIDE_FIELDS = new Set([
+  'show_discounts',
+  'payment_schedule', // milestone schedule for Katana push — adjustable
+                      // post-acceptance so we can fix the breakdown if
+                      // the project structure shifts before billing.
 ]);
 
 // Fields that affect the stored quote totals; changing any of them
@@ -57,9 +71,9 @@ export async function onRequestPost(context) {
     body = { [body.field]: body.value };
   }
 
-  // show_discounts is a display-only toggle — allow it on locked
-  // quotes too. Everything else is blocked for read-only statuses.
-  const onlyDisplayFields = Object.keys(body).every((k) => k === 'show_discounts');
+  // Display-only / operational fields are allowed on locked quotes;
+  // everything else is blocked for read-only statuses.
+  const onlyDisplayFields = Object.keys(body).every((k) => READONLY_OVERRIDE_FIELDS.has(k));
   if (READ_ONLY_STATUSES.has(before.status) && !onlyDisplayFields) {
     return json({ ok: false, error: `Cannot edit a ${before.status} quote` }, 400);
   }
@@ -70,17 +84,36 @@ export async function onRequestPost(context) {
 
   for (const [k, v] of Object.entries(body)) {
     if (!PATCHABLE.has(k)) continue;
-    sets.push(`${k} = ?`);
-    // Numeric coercion for the toggle so checkbox-style inputs ('on'/'off'
-    // or '1'/'0') land as 0/1 integers in D1.
     let storedVal;
     if (v === '' || v === null || v === undefined) {
       storedVal = null;
     } else if (k === 'discount_is_phantom' || k === 'show_discounts') {
+      // Numeric coercion for toggles so checkbox-style inputs ('on'/'off'
+      // or '1'/'0') land as 0/1 integers in D1.
       storedVal = (v === 1 || v === '1' || v === true || v === 'true' || v === 'on') ? 1 : 0;
+    } else if (k === 'payment_schedule') {
+      // Step 3 — payment_schedule arrives as a JSON object from the
+      // client. Validate + normalize before storing as TEXT. If it
+      // doesn't validate, reject the whole patch with a useful error.
+      try {
+        const normalized = normalizeSchedule(typeof v === 'string' ? JSON.parse(v) : v);
+        storedVal = JSON.stringify(normalized);
+        // When the schedule is set, also overwrite payment_terms with
+        // the rendered text so the customer-facing doc stays in sync.
+        // This piggybacks on the same UPDATE without forcing the
+        // client to duplicate-send.
+        if (!('payment_terms' in body)) {
+          sets.push('payment_terms = ?');
+          vals.push(scheduleToString(normalized));
+          fields.push('payment_terms');
+        }
+      } catch (err) {
+        return json({ ok: false, error: `Invalid payment_schedule: ${String(err && err.message || err)}` }, 400);
+      }
     } else {
       storedVal = v;
     }
+    sets.push(`${k} = ?`);
     vals.push(storedVal);
     fields.push(k);
   }

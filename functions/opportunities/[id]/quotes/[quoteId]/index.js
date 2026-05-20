@@ -40,6 +40,7 @@ import { templateTypeForQuote, templateManagerHtml } from '../../../../lib/templ
 import { loadQuoteTermDefaultsMap, getEffectiveValidityDays } from '../../../../lib/quote-term-defaults.js';
 import { loadEpsSchedule } from '../../../../lib/eps-schedule.js';
 import { loadMilestoneMap } from '../../../../lib/katana-milestones.js';
+import { parseQuoteSchedule } from '../../../../lib/quote-payment-schedule.js';
 
 const READ_ONLY_STATUSES = new Set([
   'issued', 'revision_issued', 'accepted', 'rejected', 'expired', 'dead',
@@ -351,16 +352,12 @@ export async function onRequestGet(context) {
   // string. Hybrid/non-EPS quotes ignore this blob.
   const epsSchedule = await loadEpsSchedule(env);
 
-  // Step 2 — Katana per-line push state. Each quote line becomes its
-  // own Katana sales order (Adam's D079 pattern). The state below
-  // drives the "Push to Katana" button + modal in the action bar:
-  //   * canPush is true iff the quote is accepted, account is
-  //     mapped, milestones are configured, and at least one line has
-  //     a usable unit_price + qty.
-  //   * The badge state ("N of M lines pushed") comes from per-line
-  //     katana_sales_order_id columns on quote_lines, not from the
-  //     dormant quotes.katana_sales_order_id (Phase 2c, single-SO).
+  // Step 2/3 — Katana per-line push state. Each quote line becomes its
+  // own Katana sales order (Adam's D079 pattern). The milestone
+  // schedule is sourced from quotes.payment_schedule (Step 3, per-quote
+  // custom) when set, else from the site-wide map (Step 2).
   const milestoneMap = await loadMilestoneMap(env);
+  const quoteSchedule = parseQuoteSchedule(quote.payment_schedule);
   const quoteTotal = Number(quote.total_price) || 0;
 
   // Pre-derive per-line push state from the already-loaded `lines`.
@@ -375,18 +372,47 @@ export async function onRequestGet(context) {
   const partiallyPushed = linePushedCount > 0 && !fullyPushed;
   const anyPushed       = linePushedCount > 0;
 
+  // Resolve which schedule will actually drive the push. quote
+  // payment_schedule wins; site map is the fallback. The resolved
+  // schedule also powers the modal's "Milestone schedule" preview.
+  const siteRows = milestoneMap?.milestones || [];
+  let resolvedScheduleRows;
+  let scheduleSource;
+  if (quoteSchedule && Array.isArray(quoteSchedule.rows) && quoteSchedule.rows.length > 0) {
+    resolvedScheduleRows = quoteSchedule.rows.map((r, i) => {
+      const fallback = siteRows[i] || {};
+      return {
+        percent: Number(r.percent) || 0,
+        label: String(r.label || ''),
+        weeks: r.weeks != null && r.weeks !== '' ? Number(r.weeks) : null,
+        katana_variant_id: r.katana_variant_id || fallback.katana_variant_id || null,
+        katana_sku: r.katana_sku || fallback.katana_sku || '',
+      };
+    });
+    scheduleSource = 'quote';
+  } else {
+    resolvedScheduleRows = siteRows.map((m) => ({
+      percent: Number(m.percent) || 0,
+      label: String(m.label || ''),
+      weeks: null,
+      katana_variant_id: m.katana_variant_id || null,
+      katana_sku: m.katana_sku || '',
+    }));
+    scheduleSource = siteRows.length > 0 ? 'site' : 'none';
+  }
+
   const katanaBlockReasons = [];
   if (!quote.katana_customer_id) katanaBlockReasons.push('Account is not mapped to a Katana customer (Settings → Katana customers)');
-  if (!milestoneMap || !milestoneMap.milestones?.length) katanaBlockReasons.push('Milestone map is not configured (Settings → Katana milestones)');
+  if (resolvedScheduleRows.length === 0) katanaBlockReasons.push('No milestone schedule (set one below, or configure the site default at Settings → Katana milestones)');
+  if (resolvedScheduleRows.some((r) => !r.katana_variant_id)) katanaBlockReasons.push('One or more milestones have no Katana variant — pick variants on the schedule editor below or extend the site default');
   if (pushableLines.length === 0) katanaBlockReasons.push('Quote has no active (non-option) lines');
   if (quoteTotal <= 0) katanaBlockReasons.push('Quote total is $0');
 
-  // Build the per-line preview that powers the modal's "Lines to push" table.
-  const milestonesForState = (milestoneMap?.milestones || []).map((m) => ({
-    percent: Number(m.percent) || 0,
-    label: String(m.label || ''),
-    katana_variant_id: m.katana_variant_id,
-    katana_sku: m.katana_sku || '',
+  const milestonesForState = resolvedScheduleRows.map((r) => ({
+    percent: r.percent,
+    label: r.label,
+    katana_variant_id: r.katana_variant_id,
+    katana_sku: r.katana_sku || '',
   }));
   const linesForState = pushableLines.map((l, i) => {
     const lineIdx = i + 1;
@@ -1322,6 +1348,67 @@ export async function onRequestGet(context) {
                   ${readOnly ? 'disabled' : ''}
                   @change="window._qPatch('notes_customer', $event.target.value)">${escape(quote.notes_customer ?? '')}</textarea>
       </label>
+
+      <!-- ─── Step 3 — per-quote payment schedule editor ─────────
+           Drives both the customer-facing Terms textarea below AND the
+           Katana push milestone breakdown. Available on every quote
+           type, every status (allowed on read-only via the patch
+           route's READONLY_OVERRIDE_FIELDS). -->
+      <div x-data="paymentScheduleEditor()" style="margin-top:1rem;padding:.6rem .75rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-elev)">
+        <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+          <strong>Payment schedule</strong>
+          <span class="muted" style="font-size:.8em">— milestone rows (% + weeks ARO + label). Saving rewrites the Terms text below and the Katana push milestones.</span>
+        </div>
+
+        <table class="meta-table" style="width:100%;font-size:.85rem;margin-top:.4rem">
+          <thead>
+            <tr>
+              <th style="text-align:right;width:5rem">%</th>
+              <th style="text-align:right;width:6rem">Weeks ARO</th>
+              <th style="text-align:left">Label</th>
+              <th style="width:5rem"></th>
+              <th style="width:2.5rem"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(row, idx) in rows" :key="idx">
+              <tr>
+                <td><input type="number" min="0.01" max="100" step="0.01" x-model.number="row.percent" style="width:100%;text-align:right" ${readOnly ? 'disabled' : ''}></td>
+                <td><input type="number" min="0" step="1" x-model="row.weeks" style="width:100%;text-align:right" placeholder="—" ${readOnly ? 'disabled' : ''}></td>
+                <td><input type="text" x-model="row.label" placeholder="e.g. Due upon order confirmation" style="width:100%" ${readOnly ? 'disabled' : ''}></td>
+                <td style="text-align:center;white-space:nowrap">
+                  <button type="button" class="btn-tiny" @click="moveUp(idx)"   :disabled="idx === 0" title="Move up" ${readOnly ? 'disabled' : ''}>&uarr;</button>
+                  <button type="button" class="btn-tiny" @click="moveDown(idx)" :disabled="idx === rows.length - 1" title="Move down" ${readOnly ? 'disabled' : ''}>&darr;</button>
+                </td>
+                <td style="text-align:center">
+                  <button type="button" class="btn-tiny" @click="removeRow(idx)" title="Remove row" ${readOnly ? 'disabled' : ''}>&times;</button>
+                </td>
+              </tr>
+            </template>
+            <tr x-show="rows.length === 0">
+              <td colspan="5" class="muted" style="text-align:center;padding:.5rem;font-style:italic">No schedule set — push falls back to the site-default milestones at Settings &rarr; Katana milestones.</td>
+            </tr>
+            <tr x-show="rows.length > 0">
+              <td style="text-align:right" :style="sumOk ? 'color:#1a7f37' : 'color:#b3261e'">
+                <strong x-text="totalPct + '%'"></strong>
+              </td>
+              <td colspan="4" class="muted" style="font-size:.8em">
+                <span x-show="sumOk">Sum = 100% ✓</span>
+                <span x-show="!sumOk" style="color:#b3261e">Must equal 100%</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="margin-top:.4rem;display:flex;gap:.4rem;flex-wrap:wrap">
+          <button type="button" class="btn-tiny" @click="addRow()" ${readOnly ? 'disabled' : ''}>+ Add row</button>
+          <button type="button" class="btn-tiny" @click="copyFromSiteDefault()" :disabled="siteRows.length === 0" ${readOnly ? 'disabled' : ''} title="Replace the current rows with the site-wide milestone map">Copy from site default</button>
+          <button type="button" class="btn primary small" @click="save()" :disabled="saving || (rows.length > 0 && !isValid)" x-text="saveLabel" ${readOnly ? 'disabled' : ''}></button>
+          <button type="button" class="btn-tiny" @click="discard()" :disabled="!dirty || saving" ${readOnly ? 'disabled' : ''}>Discard changes</button>
+          <button type="button" class="btn-tiny" @click="clearAll()" x-show="rows.length > 0" ${readOnly ? 'disabled' : ''}>Clear schedule</button>
+        </div>
+      </div>
+
       ${quote.quote_type === 'eps'
         ? html`
           <div x-data="epsTerms()" style="margin-top:0.75rem">
@@ -1658,6 +1745,14 @@ export async function onRequestGet(context) {
       var _initDeliveryMatch = (${raw(JSON.stringify(quote.delivery_estimate || ''))}).match(/^(\\d+)\\s*week/);
       if (_initDeliveryMatch) _deliveryWeeks = parseInt(_initDeliveryMatch[1], 10);
 
+      // Step 3 — bootstrap for the per-quote paymentScheduleEditor.
+      // _initialPaymentSchedule is the saved JSON from quotes.payment_schedule
+      // (null if never set). _siteMilestoneRows is the current site-wide
+      // milestone map, used by the "Copy from site default" button on the
+      // editor.
+      var _initialPaymentSchedule = ${raw(JSON.stringify(quoteSchedule || null))};
+      var _siteMilestoneRows = ${raw(JSON.stringify(milestoneMap?.milestones || []))};
+
       // Admin-editable schedule from migration 0040. Mirrors the
       // server-side epsScheduleToString() renderer so draft quotes
       // stay in sync after admins change the schedule.
@@ -1749,6 +1844,144 @@ export async function onRequestGet(context) {
             _deliveryWeeks = parsed === '' ? null : parsed;
             this.weeksVal = parsed === '' ? '' : String(parsed);
             document.dispatchEvent(new CustomEvent('delivery-changed', { detail: { weeks: _deliveryWeeks } }));
+          },
+        };
+      });
+
+      // Step 3 — per-quote structured payment schedule editor.
+      // Saves to quotes.payment_schedule (JSON). The patch route also
+      // re-renders the schedule into quotes.payment_terms so the
+      // customer-facing textarea below stays in sync with the rows.
+      Alpine.data('paymentScheduleEditor', function() {
+        function rowsFrom(src) {
+          if (!src || !Array.isArray(src.rows)) return [];
+          return src.rows.map(function(r) {
+            return {
+              percent: r.percent != null ? Number(r.percent) : 0,
+              weeks: (r.weeks == null || r.weeks === '') ? '' : Number(r.weeks),
+              label: String(r.label || ''),
+              katana_variant_id: r.katana_variant_id != null ? Number(r.katana_variant_id) : '',
+              katana_sku: String(r.katana_sku || ''),
+            };
+          });
+        }
+        var _baseline = JSON.stringify(_initialPaymentSchedule || null);
+        return {
+          rows: rowsFrom(_initialPaymentSchedule),
+          siteRows: (_siteMilestoneRows || []).map(function(m) { return {
+            percent: Number(m.percent) || 0, label: String(m.label || ''),
+            weeks: '',
+            katana_variant_id: Number(m.katana_variant_id) || '',
+            katana_sku: String(m.katana_sku || ''),
+          }; }),
+          saving: false,
+          saveLabel: 'Save schedule',
+          get totalPct() {
+            var s = 0;
+            for (var i = 0; i < this.rows.length; i++) {
+              var n = Number(this.rows[i].percent);
+              if (Number.isFinite(n)) s += n;
+            }
+            return Math.round(s * 100) / 100;
+          },
+          get sumOk() {
+            return Math.abs(this.totalPct - 100) < 0.01;
+          },
+          get isValid() {
+            if (this.rows.length === 0) return false;
+            if (!this.sumOk) return false;
+            for (var i = 0; i < this.rows.length; i++) {
+              var r = this.rows[i];
+              var p = Number(r.percent);
+              if (!Number.isFinite(p) || p <= 0 || p > 100) return false;
+              if (!r.label || !String(r.label).trim()) return false;
+            }
+            return true;
+          },
+          get dirty() {
+            return JSON.stringify(this._serialize()) !== _baseline;
+          },
+          _serialize: function() {
+            if (this.rows.length === 0) return null;
+            return {
+              rows: this.rows.map(function(r) {
+                var out = { percent: Number(r.percent), label: String(r.label).trim() };
+                if (r.weeks !== '' && r.weeks != null) {
+                  var w = Number(r.weeks);
+                  if (Number.isFinite(w) && w >= 0) out.weeks = w;
+                }
+                if (r.katana_variant_id !== '' && r.katana_variant_id != null) {
+                  var v = parseInt(r.katana_variant_id, 10);
+                  if (Number.isFinite(v) && v > 0) out.katana_variant_id = v;
+                }
+                if (r.katana_sku) out.katana_sku = String(r.katana_sku).trim();
+                return out;
+              }),
+            };
+          },
+          addRow: function() {
+            this.rows.push({ percent: 0, weeks: '', label: '', katana_variant_id: '', katana_sku: '' });
+          },
+          removeRow: function(idx) {
+            this.rows.splice(idx, 1);
+          },
+          moveUp: function(idx) {
+            if (idx <= 0) return;
+            var tmp = this.rows[idx - 1];
+            this.rows[idx - 1] = this.rows[idx];
+            this.rows[idx] = tmp;
+          },
+          moveDown: function(idx) {
+            if (idx >= this.rows.length - 1) return;
+            var tmp = this.rows[idx + 1];
+            this.rows[idx + 1] = this.rows[idx];
+            this.rows[idx] = tmp;
+          },
+          copyFromSiteDefault: function() {
+            if (this.rows.length > 0 && !confirm('Replace the current ' + this.rows.length + ' row(s) with the site default?')) return;
+            this.rows = this.siteRows.map(function(m) {
+              return {
+                percent: m.percent, weeks: '', label: m.label,
+                katana_variant_id: m.katana_variant_id, katana_sku: m.katana_sku,
+              };
+            });
+          },
+          clearAll: function() {
+            if (!confirm('Clear the entire schedule? The Katana push will fall back to the site default.')) return;
+            this.rows = [];
+            this.save(); // immediately persists null
+          },
+          discard: function() {
+            this.rows = rowsFrom(_initialPaymentSchedule);
+          },
+          save: function() {
+            var self = this;
+            if (this.rows.length > 0 && !this.isValid) {
+              alert('Schedule must have at least one row, every row needs a label and a percent > 0, and the percentages must sum to 100. Current sum: ' + this.totalPct);
+              return;
+            }
+            self.saving = true;
+            self.saveLabel = 'Saving…';
+            var payload = this._serialize();
+            fetch('${raw(patchUrl)}', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ payment_schedule: payload }),
+            }).then(function(r) { return r.json(); }).then(function(d) {
+              self.saving = false;
+              if (!d.ok) {
+                self.saveLabel = 'Save schedule';
+                alert('Save failed: ' + (d.error || 'unknown error'));
+                return;
+              }
+              _baseline = JSON.stringify(payload);
+              self.saveLabel = 'Saved ✓';
+              setTimeout(function() { self.saveLabel = 'Save schedule'; }, 1500);
+            }).catch(function(err) {
+              self.saving = false;
+              self.saveLabel = 'Save schedule';
+              alert('Save failed: ' + (err && err.message ? err.message : 'unknown error'));
+            });
           },
         };
       });

@@ -45,6 +45,7 @@ import { auditStmt } from '../../../../lib/audit.js';
 import { hasRole } from '../../../../lib/auth.js';
 import { apiPost } from '../../../../lib/katana-client.js';
 import { loadMilestoneMap } from '../../../../lib/katana-milestones.js';
+import { parseQuoteSchedule } from '../../../../lib/quote-payment-schedule.js';
 
 // Hardcoded for v1. Both confirmed via the Katana probe (single
 // location, single "No tax" rate). Step 6 will surface these as
@@ -68,6 +69,7 @@ export async function onRequestPost(context) {
   // 1. Load quote + opp + account.
   const ctx = await one(env.DB,
     `SELECT q.id AS quote_id, q.number AS quote_number, q.total_price,
+            q.payment_schedule,
             q.opportunity_id,
             o.account_id,
             a.name AS account_name,
@@ -96,11 +98,55 @@ export async function onRequestPost(context) {
     [quoteId]);
   if (!lines.length) return jsonError(400, 'quote has no active (non-option) lines to push');
 
-  // 3. Load milestone map.
-  const map = await loadMilestoneMap(env);
-  if (!map || !Array.isArray(map.milestones) || map.milestones.length === 0) {
-    return jsonError(400, 'Katana milestone map is not configured. Set it at /settings/katana-milestones first.');
+  // 3. Resolve the milestone schedule for this push. Order of pref:
+  //   (a) quotes.payment_schedule — per-quote custom (Step 3)
+  //   (b) site_prefs.katana_milestone_map — site-wide default (Step 2)
+  // Each schedule row needs a Katana variant_id. The per-quote shape
+  // may have one cached on the row; if missing we backfill from the
+  // site map by ordinal position (Nth row -> Nth site variant). Auto-
+  // create on demand (Step 5) is a future enhancement.
+  const siteMap = await loadMilestoneMap(env);
+  const quoteSchedule = parseQuoteSchedule(ctx.payment_schedule);
+
+  let scheduleRows;
+  if (quoteSchedule && Array.isArray(quoteSchedule.rows) && quoteSchedule.rows.length > 0) {
+    const siteRows = siteMap?.milestones || [];
+    scheduleRows = quoteSchedule.rows.map((r, i) => {
+      let variantId = r.katana_variant_id != null ? Number(r.katana_variant_id) : null;
+      let sku       = r.katana_sku ? String(r.katana_sku) : '';
+      if (!variantId && siteRows[i]) {
+        // Ordinal fallback — Nth quote milestone uses Nth site variant.
+        variantId = Number(siteRows[i].katana_variant_id) || null;
+        sku       = String(siteRows[i].katana_sku || sku);
+      }
+      return {
+        percent: Number(r.percent) || 0,
+        label:   String(r.label || ''),
+        katana_variant_id: variantId,
+        katana_sku:        sku,
+      };
+    });
+  } else if (siteMap && Array.isArray(siteMap.milestones) && siteMap.milestones.length > 0) {
+    scheduleRows = siteMap.milestones.map((m) => ({
+      percent: Number(m.percent) || 0,
+      label:   String(m.label || ''),
+      katana_variant_id: Number(m.katana_variant_id) || null,
+      katana_sku:        String(m.katana_sku || ''),
+    }));
+  } else {
+    return jsonError(400, 'No milestone schedule available. Set a per-quote schedule below the line items, or configure the site default at /settings/katana-milestones.');
   }
+
+  // Final guard: every row needs a usable variant_id before we hit Katana.
+  for (let i = 0; i < scheduleRows.length; i++) {
+    if (!scheduleRows[i].katana_variant_id) {
+      return jsonError(400,
+        `milestone ${i + 1} ("${scheduleRows[i].label}") has no Katana variant. ` +
+        `Pick one on the per-quote schedule editor, or add the milestone to the site map at /settings/katana-milestones.`);
+    }
+  }
+  // Adapter so the rest of the function reads the same shape as before.
+  const map = { milestones: scheduleRows };
 
   // 4. Shared fields from body (apply to every per-line SO).
   const baseOrderNo = String(body?.order_no || ctx.quote_number || '').trim().slice(0, 60);
