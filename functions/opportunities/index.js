@@ -45,16 +45,9 @@ export async function onRequestGet(context) {
   // (won, completed, lost, abandoned, closed_died — every
   // stage_definitions row with is_terminal = 1). The "Show all" toggle
   // (?all=1) drops the filter so closed / won / completed opps show too.
-  const showAll = url.searchParams.get('all') === '1';
-  const whereConds = [];
-  if (!showAll) {
-    whereConds.push(
-      `o.stage NOT IN (SELECT stage_key FROM stage_definitions WHERE is_terminal = 1)`
-    );
-  }
-  const activeWhere = whereConds.length
-    ? `WHERE ${whereConds.join(' AND ')}`
-    : '';
+  // Load all opps — active/terminal filtering is now client-side via
+  // the Stage column's quickFilter presets so the user can toggle
+  // without losing their other filter selections.
 
   const rows = await all(
     env.DB,
@@ -73,7 +66,6 @@ export async function onRequestGet(context) {
        FROM opportunities o
        LEFT JOIN accounts a ON a.id = o.account_id
        LEFT JOIN users ou ON ou.id = o.owner_user_id
-      ${activeWhere}
       ORDER BY o.updated_at DESC
       LIMIT 500`
   );
@@ -96,19 +88,28 @@ export async function onRequestGet(context) {
   // types, deduped by label). Drives the Stage column's filter
   // dropdown so it reads lead → RFQ → quote → … → completed instead
   // of alphabetical.
-  const stageOrder = (() => {
-    const defs = [];
-    for (const arr of catalog.values()) {
-      for (const s of arr) defs.push(s);
+  const allDefs = [];
+  for (const arr of catalog.values()) {
+    for (const s of arr) allDefs.push(s);
+  }
+  allDefs.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+  const stageOrder = [];
+  const activeStageLabels = [];
+  const terminalStageLabels = [];
+  {
+    const seenAll = new Set();
+    const seenTerminal = new Set();
+    for (const s of allDefs) {
+      if (!s.label || seenAll.has(s.label)) continue;
+      seenAll.add(s.label);
+      stageOrder.push(s.label);
+      if (s.is_terminal) {
+        if (!seenTerminal.has(s.label)) { seenTerminal.add(s.label); terminalStageLabels.push(s.label); }
+      } else {
+        activeStageLabels.push(s.label);
+      }
     }
-    defs.sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-    const seen = new Set();
-    const out = [];
-    for (const s of defs) {
-      if (s.label && !seen.has(s.label)) { seen.add(s.label); out.push(s.label); }
-    }
-    return out;
-  })();
+  }
 
   // Column catalog — label, key, filter type, default visibility. The
   // client-side controller lets the user toggle visibility, reorder,
@@ -120,7 +121,11 @@ export async function onRequestGet(context) {
     { key: 'title',        label: 'Title',        sort: 'text',   filter: 'text',   default: true },
     { key: 'account_name', label: 'Account',      sort: 'text',   filter: 'text',   default: true },
     { key: 'type_label',   label: 'Type',         sort: 'text',   filter: 'select', default: true },
-    { key: 'stage_label',  label: 'Stage',        sort: 'text',   filter: 'select', default: true, optionOrder: stageOrder },
+    { key: 'stage_label',  label: 'Stage',        sort: 'text',   filter: 'select', default: true, optionOrder: stageOrder,
+      quickFilters: [
+        { label: 'Active only', values: activeStageLabels },
+        { label: 'All stages',  values: stageOrder },
+      ] },
     { key: 'owner',        label: 'Owner',        sort: 'text',   filter: 'select', default: true },
     { key: 'value',        label: 'Value',        sort: 'number', filter: 'range',  default: true },
     { key: 'close',        label: 'Close',        sort: 'date',   filter: 'text',   default: true },
@@ -326,8 +331,6 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Opportunities</h1>
-        <a class="btn btn-xs" href="${showAll ? '/opportunities' : '/opportunities?all=1'}"
-           title="${showAll ? 'Show only active opportunities' : 'Include won, lost, closed, abandoned, completed'}">${showAll ? 'Active only' : 'Show all'}</a>
         ${listToolbar({ id: 'opp', count: rows.length, columns, newOnClick: "window.Pipeline.openWizard('opportunity', {})", newLabel: 'New opportunity' })}
       </div>
 
@@ -407,7 +410,9 @@ export async function onRequestGet(context) {
               </tbody>
             </table>
           </div>
-          <script>${raw(listScript('pipeline.oppList.v1'))}</script>
+          <script>${raw(listScript('pipeline.oppList.v1', 'updated', 'desc', {
+            stage_label: { values: activeStageLabels },
+          }))}</script>
           <script>${raw(listInlineEditScript('/opportunities/:id/patch', {
             // Column keys → patch field names differ here, so tell the
             // client which data-<attr> to update after each save.
