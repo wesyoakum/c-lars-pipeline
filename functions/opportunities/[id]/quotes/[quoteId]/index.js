@@ -1292,6 +1292,11 @@ export async function onRequestGet(context) {
           <strong>Payment schedule</strong>
           <span class="muted" style="font-size:.8em">— milestone rows (% + weeks ARO + label). Saving rewrites the Terms text below and the Katana push milestones.</span>
         </div>
+        <div class="muted" style="font-size:.75em;margin-top:.2rem">
+          Use <code>{percent}</code> and <code>{weeks}</code> inside the label to substitute the row's values in the customer-facing text
+          (e.g. <code>Due {percent}% upon order confirmation</code> &rarr; <em>Due 10% upon order confirmation</em>).
+          Labels without tokens get a legacy <code>N% &lt;label&gt;</code> prefix.
+        </div>
 
         <table class="meta-table" style="width:100%;font-size:.85rem;margin-top:.4rem">
           <thead>
@@ -1309,7 +1314,7 @@ export async function onRequestGet(context) {
               <tr>
                 <td><input type="number" min="0.01" max="100" step="0.01" x-model.number="row.percent" style="width:100%;text-align:right" ${readOnly ? 'disabled' : ''}></td>
                 <td><input type="number" min="0" step="1" x-model="row.weeks" style="width:100%;text-align:right" placeholder="—" ${readOnly ? 'disabled' : ''}></td>
-                <td><input type="text" x-model="row.label" placeholder="e.g. Due upon order confirmation" style="width:100%" ${readOnly ? 'disabled' : ''}></td>
+                <td><input type="text" x-model="row.label" placeholder="e.g. Due {percent}% upon order confirmation, {weeks} weeks ARO" style="width:100%" ${readOnly ? 'disabled' : ''}></td>
                 <td>
                   <select x-model.number="row.katana_variant_id" @change="syncSku(row)" style="width:100%;font-size:.85em" ${readOnly ? 'disabled' : ''}>
                     <option value="">— ordinal fallback (#<span x-text="idx + 1"></span>) —</option>

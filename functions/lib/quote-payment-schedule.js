@@ -111,33 +111,51 @@ export function normalizeSchedule(schedule) {
 
 /**
  * Render the schedule to a multi-line string suitable for the
- * payment_terms textarea + customer-facing quote doc. Mirrors the
- * eps_schedule string format so existing doc templates render
- * consistently.
+ * payment_terms textarea + customer-facing quote doc.
  *
- * Output example:
- *   10% Due at order confirmation.
- *   15% Due upon long lead order placed. 4 weeks after Order Confirmation.
- *   30% Due upon completion of purchasing. 12 weeks after Order Confirmation.
- *   ...
+ * Two label modes, picked per-row:
  *
- * Labels with a "{weeks}" token get the row's literal weeks value
- * substituted (e.g. "Due {weeks} weeks ARO" with weeks=8 -> "Due 8
- * weeks ARO"). Labels without {weeks} get the weeks appended only if
- * a weeks value is set (so customers see when payments are expected).
+ *  1. Token mode — label contains {percent} and/or {weeks} tokens.
+ *     The tokens are substituted in place; nothing is prepended.
+ *
+ *       label: "Due {percent}% upon order confirmation"
+ *       weeks: 0          -> "Due 10% upon order confirmation"
+ *
+ *       label: "{percent}% payable {weeks} weeks ARO"
+ *       weeks: 8          -> "15% payable 8 weeks ARO"
+ *
+ *     This is the preferred form going forward — gives the user
+ *     full control over the prose around the numbers.
+ *
+ *  2. Legacy mode — label has neither token. We prepend the
+ *     percent ("10% <label>") and, if a weeks value is set and
+ *     the label doesn't already mention "week", append "N week(s)
+ *     after Order Confirmation." Preserves compat with labels
+ *     imported from the old eps_schedule shape and from Katana
+ *     auto-discover.
  */
 export function scheduleToString(schedule) {
   const rows = Array.isArray(schedule?.rows) ? schedule.rows : [];
   return rows.map((r) => {
     const pct = formatPercent(r.percent);
-    let label = String(r.label || '').trim();
     const w = r.weeks != null && r.weeks !== '' ? Number(r.weeks) : null;
-    if (label.includes('{weeks}')) {
-      label = label.replace(/\{weeks\}/g, Number.isFinite(w) ? String(w) : '');
-    } else if (Number.isFinite(w) && w > 0) {
-      label += ` ${w} week${w === 1 ? '' : 's'} after Order Confirmation.`;
+    const wStr = Number.isFinite(w) ? String(w) : '';
+    const label = String(r.label || '').trim();
+
+    const hasPercentToken = label.includes('{percent}');
+    const hasWeeksToken   = label.includes('{weeks}');
+
+    if (hasPercentToken || hasWeeksToken) {
+      // Token mode — substitute and emit exactly what the user wrote.
+      return label.replace(/\{percent\}/g, pct).replace(/\{weeks\}/g, wStr);
     }
-    return `${pct}% ${label}`;
+
+    // Legacy mode — prepend percent; optionally append weeks suffix.
+    let out = `${pct}% ${label}`;
+    if (Number.isFinite(w) && w > 0 && !/week/i.test(label)) {
+      out += ` ${w} week${w === 1 ? '' : 's'} after Order Confirmation.`;
+    }
+    return out;
   }).join('\n');
 }
 
