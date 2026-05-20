@@ -166,6 +166,9 @@ export async function onRequestPost(context) {
       value.payment_terms = await getQuoteTermDefault(env, 'spares', 'payment_terms', '');
     } else if (hasService) {
       value.payment_terms = await getQuoteTermDefault(env, 'service', 'payment_terms', '');
+    } else if (hasRefurb) {
+      const refurbType = parts.find(p => p.startsWith('refurb_')) ?? 'refurb_baseline';
+      value.payment_terms = await getQuoteTermDefault(env, refurbType, 'payment_terms', '');
     }
     // EPS terms are computed client-side from delivery_estimate — don't seed here.
   }

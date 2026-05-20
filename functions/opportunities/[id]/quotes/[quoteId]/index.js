@@ -1151,7 +1151,7 @@ export async function onRequestGet(context) {
               </span>
             </div>
           </div>`
-        : (quote.quote_type === 'spares' || quote.quote_type === 'service')
+        : (quote.quote_type === 'spares' || quote.quote_type === 'service' || (quote.quote_type ?? '').startsWith('refurb_'))
           ? html`
             <div x-data="flatTerms()" style="margin-top:0.75rem">
               <strong>Terms</strong>
@@ -1163,14 +1163,14 @@ export async function onRequestGet(context) {
               <div class="terms-below-row">
                 <label class="terms-default-check">
                   <input type="checkbox" x-model="useDefault" ${readOnly ? 'disabled' : ''}>
-                  Default ${quote.quote_type === 'spares' ? 'Spares' : 'Service'} Terms
+                  Default ${escape(quoteTypeDisplayLabel(quote.quote_type))} Terms
                 </label>
                 ${!readOnly ? html`
                   <button type="button" class="btn-tiny"
                           @click="saveAsDefault()"
                           :disabled="saving"
                           x-text="saveLabel"
-                          title="Save the current text as the default for ${quote.quote_type === 'spares' ? 'Spares' : 'Service'} quotes"></button>
+                          title="Save the current text as the default for ${escape(quoteTypeDisplayLabel(quote.quote_type))} quotes"></button>
                 ` : ''}
               </div>
             </div>`
