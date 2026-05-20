@@ -10,6 +10,7 @@ import { uuid, now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 import { fmtDollar } from '../../lib/pricing.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
+import { ieText, ieSelect, listInlineEditScript } from '../../lib/list-inline-edit.js';
 import { librarySubNav } from '../../lib/library-subnav.js';
 
 export async function onRequestGet(context) {
@@ -75,14 +76,33 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
               <tbody data-role="rows">
                 ${rowData.map(r => html`
                   <tr data-row-id="${escape(r.id)}"
+                      data-row-href="/library/items/${escape(r.id)}"
                       ${raw(rowDataAttrs(columns, r))}
                       ${!r.active ? 'class="inactive"' : ''}>
-                    <td class="col-name" data-col="name"><a href="/library/items/${escape(r.id)}">${escape(r.name)}</a></td>
-                    <td class="col-description" data-col="description">${escape(r.description)}</td>
-                    <td class="col-category" data-col="category">${escape(r.category)}</td>
-                    <td class="col-default_unit" data-col="default_unit">${escape(r.default_unit)}</td>
-                    <td class="col-default_price num" data-col="default_price">${escape(r.default_price_display)}</td>
-                    <td class="col-status" data-col="status">${r.active ? 'Active' : html`<span class="muted">Inactive</span>`}</td>
+                    <td class="col-name" data-col="name">
+                      ${ieText('name', r.name)}
+                    </td>
+                    <td class="col-description" data-col="description">
+                      ${ieText('description', r.description)}
+                    </td>
+                    <td class="col-category" data-col="category">
+                      ${ieText('category', r.category)}
+                    </td>
+                    <td class="col-default_unit" data-col="default_unit">
+                      ${ieText('default_unit', r.default_unit)}
+                    </td>
+                    <td class="col-default_price num" data-col="default_price">
+                      ${ieText('default_price', r.default_price === 0 ? '' : String(r.default_price), {
+                        inputType: 'number',
+                        displayText: r.default_price_display,
+                      })}
+                    </td>
+                    <td class="col-status" data-col="status">
+                      ${ieSelect('active', r.active ? '1' : '0', [
+                        { value: '1', label: 'Active' },
+                        { value: '0', label: 'Inactive' },
+                      ])}
+                    </td>
                   </tr>
                 `)}
               </tbody>
@@ -92,6 +112,9 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
             </table>
           </div>
           <script>${raw(listScript('pipeline.libItems.v1', 'name', 'asc'))}</script>
+          <script>${raw(listInlineEditScript('/library/items/:id/patch', {
+            fieldAttrMap: { active: 'status' },
+          }))}</script>
         `}
 
       <h2 class="section-h">Add item</h2>
