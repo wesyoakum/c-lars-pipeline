@@ -207,33 +207,86 @@ export async function onRequestGet(context) {
   for (var i = 0; i < STAGE_ORDER.length; i++) stageOrderIndex[STAGE_ORDER[i]] = i;
   function orderIndex(s){ return s in stageOrderIndex ? stageOrderIndex[s] : 9999; }
   function esc(x){ return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  // Compact dollar formatter — $1.2K, $34M, $5.1B.
+  function fmt$(n){
+    n = Number(n) || 0;
+    if (n >= 1e9) return '$' + (n/1e9).toFixed(n >= 1e10 ? 0 : 1).replace(/\\.0$/,'') + 'B';
+    if (n >= 1e6) return '$' + (n/1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\\.0$/,'') + 'M';
+    if (n >= 1e3) return '$' + (n/1e3).toFixed(n >= 1e4 ? 0 : 1).replace(/\\.0$/,'') + 'K';
+    return '$' + Math.round(n);
+  }
+
+  // Mode toggle — "count" or "value". Persists across reloads under
+  // a stable key so navigating away + back doesn't reset the choice.
+  var STORAGE_KEY = 'pipeline.oppStageChart.mode.v1';
+  var mode = 'count';
+  try { var saved = localStorage.getItem(STORAGE_KEY); if (saved === 'value' || saved === 'count') mode = saved; } catch(e) {}
+  var modeBtns = chart.querySelectorAll('[data-role="stage-chart-mode"] button');
+  function setMode(next){
+    mode = next;
+    try { localStorage.setItem(STORAGE_KEY, mode); } catch(e) {}
+    for (var i = 0; i < modeBtns.length; i++){
+      modeBtns[i].classList.toggle('osc-mode-active', modeBtns[i].getAttribute('data-mode') === mode);
+    }
+    render();
+  }
+  for (var i = 0; i < modeBtns.length; i++){
+    (function(btn){
+      btn.classList.toggle('osc-mode-active', btn.getAttribute('data-mode') === mode);
+      btn.addEventListener('click', function(){ setMode(btn.getAttribute('data-mode')); });
+    })(modeBtns[i]);
+  }
+
   function render(){
     if (!host || !bodyEl){ chart.hidden = true; return; }
     var trs = host.querySelectorAll('tbody[data-role="rows"] tr[data-row-id]');
-    var counts = {}, order = [], total = 0;
+    var counts = {}, values = {}, order = [], total = 0;
     for (var i=0;i<trs.length;i++){
       var tr = trs[i];
       if (tr.style.display === 'none') continue;
       var s = (tr.getAttribute('data-stage_label') || '').trim() || '—';
-      if (!(s in counts)){ counts[s] = 0; order.push(s); }
-      counts[s]++; total++;
+      var v = parseFloat(tr.getAttribute('data-value'));
+      if (!isFinite(v)) v = 0;
+      if (!(s in counts)){ counts[s] = 0; values[s] = 0; order.push(s); }
+      counts[s]++;
+      values[s] += v;
+      total++;
     }
     if (total === 0){ chart.hidden = true; bodyEl.innerHTML = ''; return; }
-    var max = 0; for (var k in counts){ if (counts[k] > max) max = counts[k]; }
-    // Scale so 100% width = the next multiple of 50 at/above the max
-    // stage count (e.g. max 84 -> axis 100; max 26 -> axis 50).
-    var axis = Math.max(50, Math.ceil(max / 50) * 50);
+    // Pick the metric for this render pass.
+    var metric = mode === 'value' ? values : counts;
+    var max = 0; for (var k in metric){ if (metric[k] > max) max = metric[k]; }
+    // Axis scaling: counts round to the next multiple of 50; value
+    // mode rounds to a power-of-10 head-room so the bars don't always
+    // hit 100% for the leading stage.
+    var axis;
+    if (mode === 'value') {
+      if (max <= 0) axis = 1;
+      else {
+        var exp = Math.floor(Math.log10(max));
+        var step = Math.pow(10, exp);
+        axis = Math.ceil(max / step) * step;
+        if (axis === max) axis = max + step; // padding so the longest bar isn't 100%
+      }
+    } else {
+      axis = Math.max(50, Math.ceil(max / 50) * 50);
+    }
     var palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#e11d48'];
     order.sort(function(a,b){
       var di = orderIndex(a) - orderIndex(b);
       return di !== 0 ? di : a.localeCompare(b);
     });
     bodyEl.innerHTML = order.map(function(s,idx){
-      var pct = Math.round(counts[s]/axis*100);
+      var v = metric[s];
+      var pct = Math.round(v / axis * 100);
       var color = palette[idx % palette.length];
-      return '<div class="osc-row"><span class="osc-label" title="'+esc(s)+'">'+esc(s)+'</span>'+
+      var rightLabel = mode === 'value' ? fmt$(v) : String(v);
+      // Tooltip always carries both numbers so the user can compare
+      // without flipping modes.
+      var tip = esc(s) + ' — ' + counts[s] + ' opps · ' + fmt$(values[s]);
+      return '<div class="osc-row" title="'+tip+'"><span class="osc-label" title="'+esc(s)+'">'+esc(s)+'</span>'+
              '<span class="osc-track"><span class="osc-bar" style="width:'+pct+'%;background:'+color+'"></span></span>'+
-             '<span class="osc-count">'+counts[s]+'</span></div>';
+             '<span class="osc-count">'+rightLabel+'</span></div>';
     }).join('');
     chart.hidden = false;
   }
@@ -247,15 +300,27 @@ export async function onRequestGet(context) {
     <style>
       .opp-stage-chart{margin:.4rem 0 .6rem;padding:.5rem .7rem;background:var(--bg-alt,#f5f5f7);border-radius:var(--radius,6px)}
       .opp-stage-chart[hidden]{display:none}
-      .opp-stage-chart h2{margin:0 0 .35rem;font-size:.72rem;font-weight:600;color:var(--muted,#666);text-transform:uppercase;letter-spacing:.04em}
-      .osc-row{display:grid;grid-template-columns:150px 1fr 34px;align-items:center;gap:.5rem;margin:.1rem 0;font-size:.8rem}
+      .opp-stage-chart h2{margin:0;font-size:.72rem;font-weight:600;color:var(--muted,#666);text-transform:uppercase;letter-spacing:.04em}
+      .opp-stage-chart-head{display:flex;align-items:center;gap:.5rem;margin-bottom:.35rem}
+      .osc-mode-toggle{display:inline-flex;border:1px solid var(--border,#d8d8d8);border-radius:4px;overflow:hidden;background:#fff}
+      .osc-mode-toggle button{background:transparent;border:0;padding:.1rem .55rem;cursor:pointer;font-size:.7rem;color:var(--muted,#666);line-height:1.4}
+      .osc-mode-toggle button + button{border-left:1px solid var(--border,#d8d8d8)}
+      .osc-mode-toggle button.osc-mode-active{background:#eef2ff;color:#1d4ed8;font-weight:600}
+      .osc-row{display:grid;grid-template-columns:150px 1fr 60px;align-items:center;gap:.5rem;margin:.1rem 0;font-size:.8rem}
       .osc-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text,#222)}
       .osc-track{display:block;width:100%;background:#e5e7eb;border-radius:3px;height:11px;overflow:hidden}
       .osc-bar{display:block;height:100%;background:#3b82f6;border-radius:3px;min-width:2px;transition:width .15s}
       .osc-count{text-align:right;color:var(--muted,#666);font-variant-numeric:tabular-nums}
     </style>
     <div class="opp-stage-chart" data-role="stage-chart" hidden>
-      <h2>Opportunities by stage</h2>
+      <div class="opp-stage-chart-head">
+        <h2>Opportunities by stage</h2>
+        <span style="flex:1"></span>
+        <div class="osc-mode-toggle" data-role="stage-chart-mode" role="group" aria-label="Chart metric">
+          <button type="button" data-mode="count" title="Show opportunity count per stage">Count</button>
+          <button type="button" data-mode="value" title="Show total estimated pipeline value per stage">Value ($)</button>
+        </div>
+      </div>
       <div data-role="stage-chart-body"></div>
     </div>
     <section class="card">
