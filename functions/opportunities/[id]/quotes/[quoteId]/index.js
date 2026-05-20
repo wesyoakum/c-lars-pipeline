@@ -1307,12 +1307,6 @@ export async function onRequestGet(context) {
             Labels without tokens get a legacy <code>N% &lt;label&gt;</code> prefix.
           </div>
 
-          <!-- Step 6 — wrapper text BEFORE the schedule output. -->
-          <label style="display:block;margin-top:.5rem;font-size:.75em" class="muted">Text before schedule</label>
-          <textarea x-model="beforeText" rows="2"
-                    placeholder="optional &mdash; appears above the milestone rows in the customer doc"
-                    style="width:100%;border:1px solid #e5e5e5;border-radius:3px;padding:.25rem .35rem;font-size:.85rem"
-                    ${readOnly ? 'disabled' : ''}></textarea>
 
         <!-- Inline styles scoped to this table — keeps the editor's
              visual chrome lighter than the rest of the quote page. -->
@@ -1409,12 +1403,6 @@ export async function onRequestGet(context) {
           </tbody>
         </table>
 
-        <!-- Step 6 — wrapper text AFTER the schedule output. -->
-        <label style="display:block;margin-top:.5rem;font-size:.75em" class="muted">Text after schedule</label>
-        <textarea x-model="afterText" rows="2"
-                  placeholder="optional &mdash; appears below the milestone rows in the customer doc"
-                  style="width:100%;border:1px solid #e5e5e5;border-radius:3px;padding:.25rem .35rem;font-size:.85rem"
-                  ${readOnly ? 'disabled' : ''}></textarea>
 
         <div style="margin-top:.4rem;display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">
           <button type="button" class="btn-tiny" @click="addRow()" ${readOnly ? 'disabled' : ''}>+ Add row</button>
@@ -1445,6 +1433,79 @@ export async function onRequestGet(context) {
         </div><!-- /x-show !collapsed -->
       </div>
 
+      <!-- Step 6 — Fused 3-part Terms view. Visible when the payment
+           schedule has rows; the legacy textarea takes over when it
+           doesn't. The three segments (before, schedule readonly,
+           after) persist independently — editing one never touches
+           the others. Visually glued together so it reads as one
+           cohesive block. -->
+      <style>
+        .terms-fused {
+          border: 1px solid #d8d8d8;
+          border-radius: 4px;
+          overflow: hidden;
+          background: var(--bg, white);
+          margin-top: .3rem;
+        }
+        .terms-fused-seg {
+          display: block;
+          width: 100%;
+          box-sizing: border-box;
+          border: none;
+          outline: none;
+          padding: 0.45rem 0.6rem;
+          font-family: inherit;
+          font-size: 0.92rem;
+          line-height: 1.45;
+          background: transparent;
+          margin: 0;
+          color: inherit;
+          resize: vertical;
+        }
+        .terms-fused-seg:focus { background: #fafafa; }
+        .terms-fused-schedule {
+          background: #f6f7f9;
+          color: #444;
+          border-top: 1px dashed #d8d8d8;
+          border-bottom: 1px dashed #d8d8d8;
+          white-space: pre-wrap;
+          word-break: break-word;
+          user-select: text;
+          cursor: text;
+        }
+        .terms-fused-schedule:empty::before {
+          content: '(no milestones — edit the Payment schedule above)';
+          color: #999;
+          font-style: italic;
+        }
+      </style>
+      <div x-data="scheduledTerms()"
+           x-show="$store.paymentSchedule && $store.paymentSchedule.hasRows"
+           x-cloak
+           style="margin-top:0.75rem">
+        <strong>Terms</strong>
+        <span class="muted" style="font-size:0.75em">— editable before/after, schedule middle is auto from the editor above</span>
+        <div class="terms-fused">
+          <textarea class="terms-fused-seg"
+                    x-model="beforeText"
+                    @change="saveBefore()"
+                    placeholder="Type here for text BEFORE the milestone list. Leave blank if none."
+                    rows="2"
+                    ${readOnly ? 'disabled' : ''}></textarea>
+          <pre class="terms-fused-seg terms-fused-schedule"
+               x-text="$store.paymentSchedule.scheduleText"></pre>
+          <textarea class="terms-fused-seg"
+                    x-model="afterText"
+                    @change="saveAfter()"
+                    placeholder="Type here for text AFTER the milestone list. Leave blank if none."
+                    rows="2"
+                    ${readOnly ? 'disabled' : ''}></textarea>
+        </div>
+      </div>
+
+      <!-- Legacy Terms view — shown only when no schedule rows.
+           Wrapped in an x-data so x-show reacts to the store. -->
+      <div x-data x-show="!$store.paymentSchedule || !$store.paymentSchedule.hasRows" x-cloak>
       ${quote.quote_type === 'eps'
         ? html`
           <div x-data="epsTerms()" style="margin-top:0.75rem">
@@ -1511,6 +1572,8 @@ export async function onRequestGet(context) {
                 </div>
               ` : ''}
             </div>`}
+      </div><!-- /legacy Terms x-show -->
+
       <div x-data="plainTerms('delivery_terms')" style="margin-top:0.75rem">
         <strong>Delivery terms</strong>
         <textarea class="desc-textarea" placeholder="EXW, FCA, FOB, DAP..."
@@ -1672,6 +1735,16 @@ export async function onRequestGet(context) {
     // human-readable string the text input shows; daysVal is the select's
     // current preset (or '' when the date doesn't match a preset).
     document.addEventListener('alpine:init', function() {
+      // Step 6 — global store the schedule editor populates with
+      // its current state. The fused Terms component (scheduledTerms)
+      // reads { hasRows, scheduleText } to decide whether to render
+      // its 3-part view vs hide in favor of the legacy textarea, and
+      // to show the schedule preview in its middle band.
+      Alpine.store('paymentSchedule', {
+        hasRows: ${raw(JSON.stringify((quoteSchedule?.rows?.length || 0) > 0))},
+        scheduleText: '', // schedule editor's broadcastRendered() fills this on init
+      });
+
       var _expPresets = [7, 14, 21, 30, 45, 60, 90, 120];
       var _parseISODate = function(s) {
         if (!s || !/^\\d{4}-\\d{2}-\\d{2}$/.test(s)) return null;
@@ -1908,15 +1981,9 @@ export async function onRequestGet(context) {
             };
           });
         }
-        var _baseline = JSON.stringify({
-          schedule: _initialPaymentSchedule || null,
-          before: _initialPaymentTermsBefore || '',
-          after:  _initialPaymentTermsAfter  || '',
-        });
+        var _baseline = JSON.stringify(_initialPaymentSchedule || null);
         return {
           rows: rowsFrom(_initialPaymentSchedule),
-          beforeText: _initialPaymentTermsBefore || '',
-          afterText:  _initialPaymentTermsAfter  || '',
           siteRows: (_siteMilestoneRows || []).map(function(m) { return {
             percent: Number(m.percent) || 0, label: String(m.label || ''),
             weeks: '',
@@ -1932,22 +1999,21 @@ export async function onRequestGet(context) {
           setDefaultLabel: 'Set as default',
           init: function() {
             var self = this;
-            // Live-sync the Terms textarea below as the user edits the
-            // schedule or the wrapper text. Mirrors lib/quote-payment-
-            // schedule.js scheduleToString() so what you see here is
-            // what lands in the doc.
-            this.$watch('rows',       function() { self.broadcastRendered(); }, { deep: true });
-            this.$watch('beforeText', function() { self.broadcastRendered(); });
-            this.$watch('afterText',  function() { self.broadcastRendered(); });
+            // Live-sync the schedule preview shown in the Terms area
+            // (the scheduledTerms component below) as the user edits.
+            // Mirrors lib/quote-payment-schedule.js scheduleToString().
+            this.$watch('rows', function() { self.broadcastRendered(); }, { deep: true });
             this.broadcastRendered();
           },
           broadcastRendered: function() {
-            document.dispatchEvent(new CustomEvent('payment-schedule-rendered', {
-              detail: {
-                hasSchedule: this.rows.length > 0 || !!String(this.beforeText || '').trim() || !!String(this.afterText || '').trim(),
-                text: this.renderedText,
-              },
-            }));
+            // Update the global store so the Terms area's middle band
+            // reflects schedule edits live. Schedule changes here do
+            // NOT touch the user's before/after text — those live in
+            // the scheduledTerms component, persisted separately.
+            if (window.Alpine && Alpine.store && Alpine.store('paymentSchedule')) {
+              Alpine.store('paymentSchedule').hasRows      = this.rows.length > 0;
+              Alpine.store('paymentSchedule').scheduleText = this.scheduleText;
+            }
           },
           get scheduleText() {
             function fmt(p) {
@@ -1973,19 +2039,6 @@ export async function onRequestGet(context) {
               return out;
             }).join('\\n');
           },
-          get renderedText() {
-            // before + schedule + after, with trim-end / trim-start
-            // so we don't double-space empty wrappers. Mirrors the
-            // server-side concatenation in patch.js.
-            var before = String(this.beforeText || '');
-            var after  = String(this.afterText  || '');
-            var sched  = this.scheduleText;
-            var parts  = [];
-            if (before.trim()) parts.push(before.replace(/\\s+$/, ''));
-            if (sched) parts.push(sched);
-            if (after.trim()) parts.push(after.replace(/^\\s+/, ''));
-            return parts.join('\\n');
-          },
           get totalPct() {
             var s = 0;
             for (var i = 0; i < this.rows.length; i++) {
@@ -2009,7 +2062,7 @@ export async function onRequestGet(context) {
             return true;
           },
           get dirty() {
-            return JSON.stringify(this._serializeAll()) !== _baseline;
+            return JSON.stringify(this._serialize()) !== _baseline;
           },
           _serializeSchedule: function() {
             if (this.rows.length === 0) return null;
@@ -2029,17 +2082,8 @@ export async function onRequestGet(context) {
               }),
             };
           },
-          // Kept under the old name so setAsTypeDefault() (which sends
-          // just the schedule, not the wrapper text) still works.
+          // Alias kept so callers can use either name.
           _serialize: function() { return this._serializeSchedule(); },
-          // Combined payload for save/dirty — schedule + wrapper text.
-          _serializeAll: function() {
-            return {
-              schedule: this._serializeSchedule(),
-              before: String(this.beforeText || ''),
-              after:  String(this.afterText  || ''),
-            };
-          },
           addRow: function() {
             this.rows.push({ percent: 0, weeks: '', label: '', katana_variant_id: '', katana_sku: '' });
           },
@@ -2153,17 +2197,16 @@ export async function onRequestGet(context) {
             }
             self.saving = true;
             self.saveLabel = 'Saving…';
-            var combined = this._serializeAll();
-            // Schedule + wrapper text go up in one PATCH so payment_terms
-            // gets recomputed from all three on the server side.
+            var payload = this._serialize();
+            // Schedule-only save. Before/after live in scheduledTerms
+            // and persist via their own onChange handlers. Server-side
+            // patch.js still recomputes payment_terms from whichever
+            // pieces are in the request body, falling back to stored
+            // values for the others.
             fetch('${raw(patchUrl)}', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                payment_schedule:      combined.schedule,
-                payment_terms_before:  combined.before,
-                payment_terms_after:   combined.after,
-              }),
+              body: JSON.stringify({ payment_schedule: payload }),
             }).then(function(r) { return r.json(); }).then(function(d) {
               self.saving = false;
               if (!d.ok) {
@@ -2171,7 +2214,7 @@ export async function onRequestGet(context) {
                 alert('Save failed: ' + (d.error || 'unknown error'));
                 return;
               }
-              _baseline = JSON.stringify(combined);
+              _baseline = JSON.stringify(payload);
               self.saveLabel = 'Saved ✓';
               setTimeout(function() { self.saveLabel = 'Save schedule'; }, 1500);
             }).catch(function(err) {
@@ -2179,6 +2222,30 @@ export async function onRequestGet(context) {
               self.saveLabel = 'Save schedule';
               alert('Save failed: ' + (err && err.message ? err.message : 'unknown error'));
             });
+          },
+        };
+      });
+
+      // Step 6 — fused 3-part Terms editor used when the payment
+      // schedule has rows. Before/after persist independently from
+      // each other and from the schedule. The schedule preview in
+      // the middle is read-only here; edit it in the Payment
+      // schedule card above.
+      Alpine.data('scheduledTerms', function() {
+        return {
+          beforeText: _initialPaymentTermsBefore || '',
+          afterText:  _initialPaymentTermsAfter  || '',
+          _beforeBaseline: _initialPaymentTermsBefore || '',
+          _afterBaseline:  _initialPaymentTermsAfter  || '',
+          saveBefore: function() {
+            if (this.beforeText === this._beforeBaseline) return;
+            this._beforeBaseline = this.beforeText;
+            window._qPatch('payment_terms_before', this.beforeText);
+          },
+          saveAfter: function() {
+            if (this.afterText === this._afterBaseline) return;
+            this._afterBaseline = this.afterText;
+            window._qPatch('payment_terms_after', this.afterText);
           },
         };
       });

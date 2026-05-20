@@ -137,6 +137,37 @@ export async function onRequestPost(context) {
     fields.push(k);
   }
 
+  // Step 6 — when before/after is updated WITHOUT payment_schedule
+  // also in the body, re-render payment_terms from the row's stored
+  // schedule + the incoming before/after. Without this, editing the
+  // wrapper text alone wouldn't update what the customer sees on the
+  // doc until the next time the schedule was saved.
+  const hasBefore = fields.includes('payment_terms_before');
+  const hasAfter  = fields.includes('payment_terms_after');
+  const hasSchedule = fields.includes('payment_schedule');
+  const hasExplicitTerms = fields.includes('payment_terms');
+  if ((hasBefore || hasAfter) && !hasSchedule && !hasExplicitTerms && before.payment_schedule) {
+    try {
+      const savedSchedule = JSON.parse(before.payment_schedule);
+      const scheduleText  = scheduleToString(savedSchedule);
+      const beforeRaw = hasBefore
+        ? String(vals[fields.indexOf('payment_terms_before')] || '')
+        : String(before.payment_terms_before || '');
+      const afterRaw  = hasAfter
+        ? String(vals[fields.indexOf('payment_terms_after')]  || '')
+        : String(before.payment_terms_after  || '');
+      const parts = [];
+      if (beforeRaw.trim()) parts.push(beforeRaw.trimEnd());
+      if (scheduleText) parts.push(scheduleText);
+      if (afterRaw.trim()) parts.push(afterRaw.trimStart());
+      sets.push('payment_terms = ?');
+      vals.push(parts.join('\n'));
+      fields.push('payment_terms');
+    } catch (_) {
+      // saved schedule failed to parse — leave payment_terms alone
+    }
+  }
+
   if (sets.length === 0) return json({ ok: true });
 
   const ts = now();
