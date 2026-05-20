@@ -1302,9 +1302,7 @@ export async function onRequestGet(context) {
         </div>
         <div x-show="!collapsed" x-cloak>
           <div class="muted" style="font-size:.75em;margin-top:.2rem">
-            Use <code>{percent}</code> and <code>{weeks}</code> inside the label to substitute the row's values in the customer-facing text
-            (e.g. <code>Due {percent}% upon order confirmation</code> &rarr; <em>Due 10% upon order confirmation</em>).
-            Labels without tokens get a legacy <code>N% &lt;label&gt;</code> prefix.
+            Use <code>{percent}</code> and <code>{weeks}</code>
           </div>
 
 
