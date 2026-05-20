@@ -1409,17 +1409,15 @@ export async function onRequestGet(context) {
           <button type="button" class="btn-tiny"
                   @click="copyFromTypeDefault()"
                   :disabled="!typeDefaultRows || typeDefaultRows.length === 0"
-                  :title="(typeDefaultRows && typeDefaultRows.length > 0) ? ('Replace the current rows with the saved ' + typeLabel + ' default (' + typeDefaultRows.length + ' rows)') : ('No ' + typeLabel + ' default saved yet. Build a schedule, then "Set as default for this type" to seed one.')"
+                  :title="(typeDefaultRows && typeDefaultRows.length > 0) ? ('Replace the current rows with the saved ' + typeLabel + ' default (' + typeDefaultRows.length + ' rows)') : ('No ' + typeLabel + ' default saved yet. Build a schedule, then "Set as default" to seed one.')"
                   ${readOnly ? 'disabled' : ''}
                   x-text="(typeDefaultRows && typeDefaultRows.length > 0) ? ('Copy from ' + typeLabel + ' default') : ('No ' + typeLabel + ' default yet')"></button>
           <button type="button" class="btn-tiny"
                   @click="copyFromSiteDefault()"
                   :disabled="siteRows.length === 0"
                   ${readOnly ? 'disabled' : ''}
-                  title="Replace the current rows with the site-wide milestone map (Settings → Katana milestones)">Copy from site map</button>
+                  title="Copy the raw milestone variants from Settings → Katana milestones. Useful as a starting point when no per-type default exists yet.">Copy from site map</button>
           <button type="button" class="btn primary small" @click="save()" :disabled="saving || (rows.length > 0 && !isValid)" x-text="saveLabel" ${readOnly ? 'disabled' : ''}></button>
-          <button type="button" class="btn-tiny" @click="discard()" :disabled="!dirty || saving" ${readOnly ? 'disabled' : ''}>Discard changes</button>
-          <button type="button" class="btn-tiny" @click="clearAll()" x-show="rows.length > 0" ${readOnly ? 'disabled' : ''}>Clear schedule</button>
           <!-- Admin only — saves current rows as the type's default. -->
           <span style="flex:1"></span>
           <button type="button" class="btn-tiny"
@@ -1908,7 +1906,7 @@ export async function onRequestGet(context) {
           collapsed: false,
           saving: false,
           saveLabel: 'Save schedule',
-          setDefaultLabel: 'Set as default for this type',
+          setDefaultLabel: 'Set as default',
           init: function() {
             var self = this;
             // Live-sync the Terms textarea below as the user edits the
@@ -2063,7 +2061,7 @@ export async function onRequestGet(context) {
             }).then(function(r) { return r.json(); }).then(function(d) {
               self.saving = false;
               if (!d.ok) {
-                self.setDefaultLabel = 'Set as default for this type';
+                self.setDefaultLabel = 'Set as default';
                 alert('Could not save default: ' + (d.error || 'unknown error'));
                 return;
               }
@@ -2083,7 +2081,7 @@ export async function onRequestGet(context) {
               setTimeout(function() { self.setDefaultLabel = 'Set as default for this type'; }, 1800);
             }).catch(function(err) {
               self.saving = false;
-              self.setDefaultLabel = 'Set as default for this type';
+              self.setDefaultLabel = 'Set as default';
               alert('Could not save default: ' + (err && err.message ? err.message : 'unknown error'));
             });
           },
