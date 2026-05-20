@@ -1307,6 +1307,13 @@ export async function onRequestGet(context) {
             Labels without tokens get a legacy <code>N% &lt;label&gt;</code> prefix.
           </div>
 
+          <!-- Step 6 — wrapper text BEFORE the schedule output. -->
+          <label style="display:block;margin-top:.5rem;font-size:.75em" class="muted">Text before schedule</label>
+          <textarea x-model="beforeText" rows="2"
+                    placeholder="optional &mdash; appears above the milestone rows in the customer doc"
+                    style="width:100%;border:1px solid #e5e5e5;border-radius:3px;padding:.25rem .35rem;font-size:.85rem"
+                    ${readOnly ? 'disabled' : ''}></textarea>
+
         <!-- Inline styles scoped to this table — keeps the editor's
              visual chrome lighter than the rest of the quote page. -->
         <style>
@@ -1401,6 +1408,13 @@ export async function onRequestGet(context) {
             </tr>
           </tbody>
         </table>
+
+        <!-- Step 6 — wrapper text AFTER the schedule output. -->
+        <label style="display:block;margin-top:.5rem;font-size:.75em" class="muted">Text after schedule</label>
+        <textarea x-model="afterText" rows="2"
+                  placeholder="optional &mdash; appears below the milestone rows in the customer doc"
+                  style="width:100%;border:1px solid #e5e5e5;border-radius:3px;padding:.25rem .35rem;font-size:.85rem"
+                  ${readOnly ? 'disabled' : ''}></textarea>
 
         <div style="margin-top:.4rem;display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">
           <button type="button" class="btn-tiny" @click="addRow()" ${readOnly ? 'disabled' : ''}>+ Add row</button>
@@ -1778,6 +1792,9 @@ export async function onRequestGet(context) {
       var _typeDefaultSchedule = ${raw(JSON.stringify(typeDefaultSchedule || null))};
       var _typeLabel = ${raw(JSON.stringify(quote.quote_type || ''))};
       var _isAdminForDefaults = ${raw(JSON.stringify(user?.role === 'admin'))};
+      // Step 6 — wrapper text around the schedule.
+      var _initialPaymentTermsBefore = ${raw(JSON.stringify(quote.payment_terms_before || ''))};
+      var _initialPaymentTermsAfter  = ${raw(JSON.stringify(quote.payment_terms_after  || ''))};
 
       // Admin-editable schedule from migration 0040. Mirrors the
       // server-side epsScheduleToString() renderer so draft quotes
@@ -1891,9 +1908,15 @@ export async function onRequestGet(context) {
             };
           });
         }
-        var _baseline = JSON.stringify(_initialPaymentSchedule || null);
+        var _baseline = JSON.stringify({
+          schedule: _initialPaymentSchedule || null,
+          before: _initialPaymentTermsBefore || '',
+          after:  _initialPaymentTermsAfter  || '',
+        });
         return {
           rows: rowsFrom(_initialPaymentSchedule),
+          beforeText: _initialPaymentTermsBefore || '',
+          afterText:  _initialPaymentTermsAfter  || '',
           siteRows: (_siteMilestoneRows || []).map(function(m) { return {
             percent: Number(m.percent) || 0, label: String(m.label || ''),
             weeks: '',
@@ -1910,18 +1933,23 @@ export async function onRequestGet(context) {
           init: function() {
             var self = this;
             // Live-sync the Terms textarea below as the user edits the
-            // schedule. Mirrors the server-side scheduleToString()
-            // renderer (lib/quote-payment-schedule.js) so what you see
-            // here is what lands in the doc.
-            this.$watch('rows', function() { self.broadcastRendered(); }, { deep: true });
+            // schedule or the wrapper text. Mirrors lib/quote-payment-
+            // schedule.js scheduleToString() so what you see here is
+            // what lands in the doc.
+            this.$watch('rows',       function() { self.broadcastRendered(); }, { deep: true });
+            this.$watch('beforeText', function() { self.broadcastRendered(); });
+            this.$watch('afterText',  function() { self.broadcastRendered(); });
             this.broadcastRendered();
           },
           broadcastRendered: function() {
             document.dispatchEvent(new CustomEvent('payment-schedule-rendered', {
-              detail: { hasSchedule: this.rows.length > 0, text: this.renderedText },
+              detail: {
+                hasSchedule: this.rows.length > 0 || !!String(this.beforeText || '').trim() || !!String(this.afterText || '').trim(),
+                text: this.renderedText,
+              },
             }));
           },
-          get renderedText() {
+          get scheduleText() {
             function fmt(p) {
               var n = Number(p);
               if (!isFinite(n)) return '0';
@@ -1944,6 +1972,19 @@ export async function onRequestGet(context) {
               }
               return out;
             }).join('\\n');
+          },
+          get renderedText() {
+            // before + schedule + after, with trim-end / trim-start
+            // so we don't double-space empty wrappers. Mirrors the
+            // server-side concatenation in patch.js.
+            var before = String(this.beforeText || '');
+            var after  = String(this.afterText  || '');
+            var sched  = this.scheduleText;
+            var parts  = [];
+            if (before.trim()) parts.push(before.replace(/\\s+$/, ''));
+            if (sched) parts.push(sched);
+            if (after.trim()) parts.push(after.replace(/^\\s+/, ''));
+            return parts.join('\\n');
           },
           get totalPct() {
             var s = 0;
@@ -1968,9 +2009,9 @@ export async function onRequestGet(context) {
             return true;
           },
           get dirty() {
-            return JSON.stringify(this._serialize()) !== _baseline;
+            return JSON.stringify(this._serializeAll()) !== _baseline;
           },
-          _serialize: function() {
+          _serializeSchedule: function() {
             if (this.rows.length === 0) return null;
             return {
               rows: this.rows.map(function(r) {
@@ -1986,6 +2027,17 @@ export async function onRequestGet(context) {
                 if (r.katana_sku) out.katana_sku = String(r.katana_sku).trim();
                 return out;
               }),
+            };
+          },
+          // Kept under the old name so setAsTypeDefault() (which sends
+          // just the schedule, not the wrapper text) still works.
+          _serialize: function() { return this._serializeSchedule(); },
+          // Combined payload for save/dirty — schedule + wrapper text.
+          _serializeAll: function() {
+            return {
+              schedule: this._serializeSchedule(),
+              before: String(this.beforeText || ''),
+              after:  String(this.afterText  || ''),
             };
           },
           addRow: function() {
@@ -2078,7 +2130,7 @@ export async function onRequestGet(context) {
                 };
               }) : null;
               self.setDefaultLabel = 'Saved as default ✓';
-              setTimeout(function() { self.setDefaultLabel = 'Set as default for this type'; }, 1800);
+              setTimeout(function() { self.setDefaultLabel = 'Set as default'; }, 1800);
             }).catch(function(err) {
               self.saving = false;
               self.setDefaultLabel = 'Set as default';
@@ -2101,11 +2153,17 @@ export async function onRequestGet(context) {
             }
             self.saving = true;
             self.saveLabel = 'Saving…';
-            var payload = this._serialize();
+            var combined = this._serializeAll();
+            // Schedule + wrapper text go up in one PATCH so payment_terms
+            // gets recomputed from all three on the server side.
             fetch('${raw(patchUrl)}', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ payment_schedule: payload }),
+              body: JSON.stringify({
+                payment_schedule:      combined.schedule,
+                payment_terms_before:  combined.before,
+                payment_terms_after:   combined.after,
+              }),
             }).then(function(r) { return r.json(); }).then(function(d) {
               self.saving = false;
               if (!d.ok) {
@@ -2113,7 +2171,7 @@ export async function onRequestGet(context) {
                 alert('Save failed: ' + (d.error || 'unknown error'));
                 return;
               }
-              _baseline = JSON.stringify(payload);
+              _baseline = JSON.stringify(combined);
               self.saveLabel = 'Saved ✓';
               setTimeout(function() { self.saveLabel = 'Save schedule'; }, 1500);
             }).catch(function(err) {

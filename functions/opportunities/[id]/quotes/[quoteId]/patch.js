@@ -27,6 +27,11 @@ const PATCHABLE = new Set([
   // Katana push milestone breakdown and, eventually, the doc-
   // template payment_terms text)
   'payment_schedule',
+  // Step 6 — wrapper text around the schedule output (migration 0076).
+  // When the user has the "Default <type> Terms" checkbox checked,
+  // payment_terms is rendered as before + schedule + after.
+  'payment_terms_before',
+  'payment_terms_after',
 ]);
 
 // Fields that admins can edit even on read-only quotes. Display-only
@@ -36,6 +41,8 @@ const READONLY_OVERRIDE_FIELDS = new Set([
   'payment_schedule', // milestone schedule for Katana push — adjustable
                       // post-acceptance so we can fix the breakdown if
                       // the project structure shifts before billing.
+  'payment_terms_before',
+  'payment_terms_after',
 ]);
 
 // Fields that affect the stored quote totals; changing any of them
@@ -99,12 +106,24 @@ export async function onRequestPost(context) {
         const normalized = normalizeSchedule(typeof v === 'string' ? JSON.parse(v) : v);
         storedVal = JSON.stringify(normalized);
         // When the schedule is set, also overwrite payment_terms with
-        // the rendered text so the customer-facing doc stays in sync.
-        // This piggybacks on the same UPDATE without forcing the
-        // client to duplicate-send.
+        // before + schedule rendered + after so the customer-facing
+        // doc stays in sync. before/after come from the same body
+        // (preferred — the editor sends all three together) or fall
+        // back to the saved row.
         if (!('payment_terms' in body)) {
+          const beforeRaw = ('payment_terms_before' in body)
+            ? (body.payment_terms_before == null ? '' : String(body.payment_terms_before))
+            : (before.payment_terms_before == null ? '' : String(before.payment_terms_before));
+          const afterRaw = ('payment_terms_after' in body)
+            ? (body.payment_terms_after == null ? '' : String(body.payment_terms_after))
+            : (before.payment_terms_after == null ? '' : String(before.payment_terms_after));
+          const scheduleText = scheduleToString(normalized);
+          const parts = [];
+          if (beforeRaw.trim()) parts.push(beforeRaw.trimEnd());
+          parts.push(scheduleText);
+          if (afterRaw.trim()) parts.push(afterRaw.trimStart());
           sets.push('payment_terms = ?');
-          vals.push(scheduleToString(normalized));
+          vals.push(parts.join('\n'));
           fields.push('payment_terms');
         }
       } catch (err) {
