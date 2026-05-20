@@ -909,64 +909,7 @@ export async function onRequestGet(context) {
         : html`<p class="muted">No attachments yet.</p>`}
     </section>
 
-    <section class="card opp-notes">
-      <div class="card-header"><h2>Notes${noteRows.length > 0 ? ` (${noteRows.length})` : ''}</h2></div>
-      <form method="post" action="/opportunities/${escape(opp.id)}/notes"
-            enctype="multipart/form-data" class="opp-note-form"
-            x-data="noteForm()" style="margin-bottom:1rem;">
-        <textarea name="body" x-model="body" rows="2"
-                  placeholder="Add a note..."
-                  style="width:100%; font-size:0.9em; field-sizing:content; min-height:2.5rem; resize:vertical"></textarea>
-        <div style="display:flex; gap:0.5rem; align-items:center; margin-top:0.4rem;">
-          <label class="btn btn-sm" style="cursor:pointer">
-            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="14" height="12" rx="1"/><circle cx="8" cy="9" r="1.5"/><path d="m3 14 4-4 4 4 3-3 3 3"/></svg>
-            <span x-text="fileName || 'Attach image'"></span>
-            <input type="file" name="file" accept="image/*" hidden @change="fileName = $event.target.files[0]?.name || ''">
-          </label>
-          <span style="flex:1"></span>
-          <button type="submit" class="btn btn-sm primary" :disabled="!body.trim() && !fileName">Post note</button>
-        </div>
-      </form>
-
-      ${noteRows.length === 0
-        ? html`<p class="muted">No notes yet.</p>`
-        : html`
-          <ul class="note-list" style="list-style:none; padding:0; margin:0;">
-            ${noteRows.map((n) => {
-              const who = n.author_name ?? n.author_email ?? 'Unknown';
-              const when = formatTimestamp(n.created_at);
-              return html`
-                <li class="note-item" style="border-top:1px solid var(--border,#e5e7eb); padding:0.75rem 0;">
-                  <div class="note-head" style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.35rem;">
-                    <strong>${escape(who)}</strong>
-                    <small class="muted">${escape(when)}</small>
-                    <span style="flex:1"></span>
-                    <form method="post" action="/activities/${escape(n.id)}/delete" style="display:inline"
-                          onsubmit="return confirm('Delete this note?');">
-                      <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}">
-                      <button type="submit" class="btn small danger" title="Delete note">Delete</button>
-                    </form>
-                  </div>
-                  ${n.body
-                    ? html`<div class="note-body" style="white-space:pre-wrap; margin-bottom:0.4rem;">${escape(n.body)}</div>`
-                    : ''}
-                  ${n.images && n.images.length > 0
-                    ? html`
-                      <div class="note-images" style="display:flex; flex-wrap:wrap; gap:0.5rem;">
-                        ${n.images.map((img) => html`
-                          <a href="/documents/${escape(img.id)}/download" target="_blank" rel="noopener"
-                             title="${escape(img.title)}">
-                            <img src="/documents/${escape(img.id)}/download"
-                                 alt="${escape(img.title)}"
-                                 style="max-width:260px; max-height:200px; border-radius:var(--radius); border:1px solid var(--border,#e5e7eb);">
-                          </a>
-                        `)}
-                      </div>`
-                    : ''}
-                </li>`;
-            })}
-          </ul>`}
-    </section>
+    <!-- Notes moved to Tasks & Activities tab -->
   `;
 
   // ---- Price builds tab --------------------------------------------------

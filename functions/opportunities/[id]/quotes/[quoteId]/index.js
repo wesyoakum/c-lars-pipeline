@@ -1125,7 +1125,7 @@ export async function onRequestGet(context) {
 
   // ── 5. Footer card ─────────────────────────────────────────────────
   const footerSection = html`
-    <section class="card quote-doc-card quote-doc-last">
+    <section class="card quote-doc-card quote-doc-last" x-data>
       <label>
         <strong>Quote notes</strong>
         <textarea class="desc-textarea" placeholder="Notes to the customer"
