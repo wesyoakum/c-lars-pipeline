@@ -11,9 +11,10 @@
     "db:console": "wrangler d1 execute c-lars-pms-db --remote --command",
     "import:wfm:dry": "node scripts/wfm-import.mjs --dry-run",
     "import:wfm:commit": "node scripts/wfm-import.mjs --commit",
-    "prepare": "husky"
+    "prepare": "husky || true"
   },
   "devDependencies": {
+    "husky": "^9.1.7",
     "wrangler": "^4.87.0"
   },
   "dependencies": {
