@@ -491,29 +491,38 @@ export async function onRequestGet(context) {
               <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/start-oc" class="inline-form">
                 <button class="btn primary" type="submit" title="Create (or jump to) the job for this opportunity and open the Issue OC form">Start Order Confirmation</button>
               </form>
-              <template x-if="$store.katanaPush && $store.katanaPush.alreadyPushed">
-                <span class="katana-pushed-badge" :title="'Pushed ' + ($store.katanaPush.pushedAt || '')">
-                  &check; Pushed to Katana: SO #<span x-text="$store.katanaPush.salesOrderId"></span>
-                  <button type="button" class="katana-pushed-unlink" @click="$store.katanaPush.unlink()" :disabled="$store.katanaPush.busy" title="Unlink (Katana sales order is left in place)">&times;</button>
-                </span>
-              </template>
-              <template x-if="$store.katanaPush && !$store.katanaPush.alreadyPushed">
-                <button type="button" class="btn"
-                        @click="$store.katanaPush.openModal()"
-                        :disabled="!$store.katanaPush.canPush"
-                        :title="$store.katanaPush.canPush ? 'Push this quote to Katana as a sales order' : ('Cannot push: ' + $store.katanaPush.blockReason)">
-                  Push to Katana
-                </button>
-              </template>
-              <!-- Step 1 diagnostic: minimal test push. Disabled only
-                   while a test is in flight or the account has no
-                   Katana mapping. Available regardless of "already
-                   pushed" state — re-runnable any time. -->
-              <button type="button" class="btn btn-xs"
-                      @click="$store.katanaPush.testPush()"
-                      :disabled="$store.katanaPush.testBusy || !$store.katanaPush.katanaCustomerId"
-                      :title="$store.katanaPush.katanaCustomerId ? 'Diagnostic: fires a minimal Katana sales order (TEST-{timestamp}) with one $0.01 row using the 1st milestone variant. Does NOT touch Pipeline state. Delete from Katana when done.' : 'No Katana customer mapping on this account.'"
-                      x-text="$store.katanaPush.testBusy ? 'Pushing test…' : 'Test push (minimal SO)'"></button>
+              <!-- Empty x-data so Alpine processes the directives + templates
+                   below. Alpine 3 only walks descendants of x-data roots;
+                   without this wrapper the <template x-if> blocks never
+                   clone their content into the DOM and the test button's
+                   x-text never evaluates. display:contents keeps these
+                   elements direct flex children of .header-actions so
+                   button spacing is identical to the rest of the bar. -->
+              <div x-data style="display:contents">
+                <template x-if="$store.katanaPush && $store.katanaPush.alreadyPushed">
+                  <span class="katana-pushed-badge" :title="'Pushed ' + ($store.katanaPush.pushedAt || '')">
+                    &check; Pushed to Katana: SO #<span x-text="$store.katanaPush.salesOrderId"></span>
+                    <button type="button" class="katana-pushed-unlink" @click="$store.katanaPush.unlink()" :disabled="$store.katanaPush.busy" title="Unlink (Katana sales order is left in place)">&times;</button>
+                  </span>
+                </template>
+                <template x-if="$store.katanaPush && !$store.katanaPush.alreadyPushed">
+                  <button type="button" class="btn"
+                          @click="$store.katanaPush.openModal()"
+                          :disabled="!$store.katanaPush.canPush"
+                          :title="$store.katanaPush.canPush ? 'Push this quote to Katana as a sales order' : ('Cannot push: ' + $store.katanaPush.blockReason)">
+                    Push to Katana
+                  </button>
+                </template>
+                <!-- Step 1 diagnostic: minimal test push. Disabled only
+                     while a test is in flight or the account has no
+                     Katana mapping. Available regardless of "already
+                     pushed" state — re-runnable any time. -->
+                <button type="button" class="btn btn-xs"
+                        @click="$store.katanaPush.testPush()"
+                        :disabled="$store.katanaPush.testBusy || !$store.katanaPush.katanaCustomerId"
+                        :title="$store.katanaPush.katanaCustomerId ? 'Diagnostic: fires a minimal Katana sales order (TEST-{timestamp}) with one $0.01 row using the 1st milestone variant. Does NOT touch Pipeline state. Delete from Katana when done.' : 'No Katana customer mapping on this account.'"
+                        x-text="$store.katanaPush.testBusy ? 'Pushing test…' : 'Test push (minimal SO)'"></button>
+              </div>
             ` : ''}
             ${quote.status === 'accepted' || quote.status === 'rejected' || quote.status === 'expired' ? html`
               <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/revise" class="inline-form">
@@ -565,9 +574,13 @@ export async function onRequestGet(context) {
       </div>
 
       <!-- Step 1 — Katana test-push response viewer. Shows up under
-           the action bar after a test fires. Collapses on page reload. -->
+           the action bar after a test fires. Collapses on page reload.
+           x-data on the outer wrapper so Alpine processes the x-show
+           / x-text / template x-if directives inside (same reason as
+           the action-bar wrapper above). -->
       ${quote.status === 'accepted' ? html`
-        <div x-show="$store.katanaPush && $store.katanaPush.testOpen"
+        <div x-data
+             x-show="$store.katanaPush && $store.katanaPush.testOpen"
              x-cloak
              style="padding:0.5rem 1rem;border-top:1px solid var(--border);background:var(--bg-elev)">
           <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
@@ -2137,7 +2150,8 @@ export async function onRequestGet(context) {
   // this modal.
   const katanaPushModal = katanaState.showSection
     ? html`
-      <div x-show="$store.katanaPush.modalOpen" x-cloak
+      <div x-data
+           x-show="$store.katanaPush.modalOpen" x-cloak
            class="katana-push-modal-backdrop"
            @click.self="$store.katanaPush.closeModal()">
         <div class="katana-push-modal-panel" role="dialog" aria-labelledby="katana-push-title">
