@@ -109,13 +109,6 @@ document.addEventListener('alpine:init', function () {
     // Last push summary returned from the server (pushed_count, errors, etc.).
     // Surfaced inline after a push so the user knows what landed in Katana.
     lastPushResult: null,
-    // Step 1 diagnostic — see push-to-katana-test.js. Decoupled state
-    // from the real push above (testBusy, testResponse, testError)
-    // so an in-flight diagnostic never blocks the real Push button.
-    testBusy: false,
-    testOpen: false,
-    testResponse: null,
-    testError: null,
     // Count of lines that haven't been pushed yet — the number of new
     // Katana sales orders the next click will create.
     get pendingLineCount() {
@@ -228,41 +221,6 @@ document.addEventListener('alpine:init', function () {
       }).catch(function (err) {
         self.busy = false;
         alert('Unlink failed: ' + (err && err.message ? err.message : 'unknown error'));
-      });
-    },
-    // Step 1 — minimal "test push" diagnostic. Fires a deliberately
-    // skeletal sales order (only customer_id flows from Pipeline;
-    // order_no, the single row, and price are all placeholders) and
-    // dumps Katana's response into an inline <details> block so the
-    // admin can eyeball the real response shape before we use it in
-    // Step 2's per-line × per-milestone push. Writes no Pipeline state.
-    testPush: function () {
-      var self = this;
-      self.testBusy = true;
-      self.testOpen = true;
-      self.testError = null;
-      self.testResponse = null;
-      fetch('/opportunities/' + encodeURIComponent(self.oppId) + '/quotes/' + encodeURIComponent(self.quoteId) + '/push-to-katana-test', {
-        method: 'POST',
-        credentials: 'same-origin',
-      }).then(function (r) {
-        // The route always returns HTTP 200 on a Katana round-trip —
-        // success vs. error is encoded in body.ok. The only way to
-        // hit !r.ok here is a Pipeline-side gate (no admin / no
-        // customer mapping / no milestone configured / etc.).
-        if (!r.ok) {
-          return r.json().then(function (d) { throw new Error(d && d.error || ('HTTP ' + r.status)); });
-        }
-        return r.json();
-      }).then(function (data) {
-        self.testResponse = data;
-        self.testBusy = false;
-        if (!data.ok) {
-          self.testError = 'Katana returned ' + data.status + ' — see details below';
-        }
-      }).catch(function (err) {
-        self.testError = err && err.message ? err.message : 'unknown error';
-        self.testBusy = false;
       });
     },
   });
@@ -630,15 +588,6 @@ export async function onRequestGet(context) {
                         :title="($store.katanaPush && $store.katanaPush.canPush) ? ('Push ' + ($store.katanaPush.pendingLineCount || 0) + ' line(s) to Katana, one sales order per line') : ('Cannot push: ' + ($store.katanaPush && $store.katanaPush.blockReason || 'Katana not ready'))">
                   <span x-text="($store.katanaPush && $store.katanaPush.partiallyPushed) ? 'Push remaining lines' : 'Push to Katana'">Push to Katana</span>
                 </button>
-                <!-- Step 1 diagnostic: minimal test push. Default text content
-                     is the steady-state label so the button is readable even
-                     if Alpine never evaluates x-text. Alpine overrides on
-                     state change (testBusy true => "Pushing test…"). -->
-                <button type="button" class="btn btn-xs"
-                        @click="$store.katanaPush && $store.katanaPush.testPush()"
-                        :disabled="($store.katanaPush && $store.katanaPush.testBusy) || !($store.katanaPush && $store.katanaPush.katanaCustomerId)"
-                        :title="($store.katanaPush && $store.katanaPush.katanaCustomerId) ? 'Diagnostic: fires a minimal Katana sales order (TEST-{timestamp}) with one $0.01 row using the 1st milestone variant. Does NOT touch Pipeline state. Delete from Katana when done.' : 'No Katana customer mapping on this account.'"
-                        x-text="($store.katanaPush && $store.katanaPush.testBusy) ? 'Pushing test…' : 'Test push (minimal SO)'">Test push (minimal SO)</button>
               </div>
             ` : ''}
             ${quote.status === 'accepted' || quote.status === 'rejected' || quote.status === 'expired' ? html`
@@ -689,44 +638,6 @@ export async function onRequestGet(context) {
           </div>
         </div>
       </div>
-
-      <!-- Step 1 — Katana test-push response viewer. Shows up under
-           the action bar after a test fires. Collapses on page reload.
-           x-data on the outer wrapper so Alpine processes the x-show
-           / x-text / template x-if directives inside (same reason as
-           the action-bar wrapper above). -->
-      ${quote.status === 'accepted' ? html`
-        <div x-data
-             x-show="$store.katanaPush && $store.katanaPush.testOpen"
-             x-cloak
-             style="padding:0.5rem 1rem;border-top:1px solid var(--border);background:var(--bg-elev)">
-          <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap">
-            <strong style="font-size:0.85rem">Test push response</strong>
-            <template x-if="$store.katanaPush.testBusy">
-              <span class="muted" style="font-size:0.8em">Pushing&hellip;</span>
-            </template>
-            <template x-if="!$store.katanaPush.testBusy && $store.katanaPush.testResponse && $store.katanaPush.testResponse.ok">
-              <span style="color:#1a7f37;font-size:0.85em">
-                &check; Katana <span x-text="$store.katanaPush.testResponse.status"></span>
-                <span class="muted">in <span x-text="$store.katanaPush.testResponse.duration_ms"></span> ms &mdash;
-                  Katana SO #<span x-text="$store.katanaPush.testResponse.katana_response && $store.katanaPush.testResponse.katana_response.id"></span>
-                </span>
-              </span>
-            </template>
-            <template x-if="!$store.katanaPush.testBusy && $store.katanaPush.testError">
-              <span style="color:#b3261e;font-size:0.85em" x-text="'Error: ' + $store.katanaPush.testError"></span>
-            </template>
-            <button type="button"
-                    style="margin-left:auto;border:0;background:transparent;cursor:pointer;font-size:0.85em;color:var(--fg-muted)"
-                    @click="$store.katanaPush.testOpen = false"
-                    title="Close (refresh will also hide it)">Hide</button>
-          </div>
-          <template x-if="!$store.katanaPush.testBusy && $store.katanaPush.testResponse">
-            <pre style="margin:0.4rem 0 0;max-height:24rem;overflow:auto;font-size:0.72rem;line-height:1.4;background:var(--bg);padding:0.5rem;border-radius:3px;white-space:pre-wrap;word-break:break-word"
-                 x-text="JSON.stringify($store.katanaPush.testResponse, null, 2)"></pre>
-          </template>
-        </div>
-      ` : ''}
 
       ${revisionHistory.length > 1
         ? html`
