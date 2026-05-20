@@ -44,6 +44,8 @@ export async function onRequestGet(context) {
   const conditions = [];
   const params = [];
 
+  conditions.push('a.deleted_at IS NULL');
+
   if (filter === 'mine' && user?.id) {
     conditions.push('a.assigned_user_id = ?');
     params.push(user.id);

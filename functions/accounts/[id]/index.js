@@ -166,7 +166,8 @@ export async function onRequestGet(context) {
     `SELECT a.*, u.display_name AS owner_name, u.email AS owner_email
        FROM accounts a
        LEFT JOIN users u ON u.id = a.owner_user_id
-      WHERE a.id = ?`,
+      WHERE a.id = ?
+        AND a.deleted_at IS NULL`,
     [accountId]
   );
   if (!account) return notFound(context);
@@ -176,6 +177,7 @@ export async function onRequestGet(context) {
     `SELECT id, first_name, last_name, title, email, phone, mobile, is_primary
        FROM contacts
       WHERE account_id = ?
+        AND deleted_at IS NULL
       ORDER BY is_primary DESC, last_name, first_name`,
     [accountId]
   );
@@ -250,6 +252,7 @@ export async function onRequestGet(context) {
               estimated_value_usd, owner_user_id, updated_at, created_at
          FROM opportunities
         WHERE account_id = ?
+          AND deleted_at IS NULL
         ORDER BY updated_at DESC
         LIMIT 100`,
       [accountId]
@@ -263,6 +266,7 @@ export async function onRequestGet(context) {
          FROM quotes q
          JOIN opportunities o ON o.id = q.opportunity_id
         WHERE o.account_id = ?
+          AND q.deleted_at IS NULL
         ORDER BY q.updated_at DESC
         LIMIT 100`,
       [accountId]
@@ -284,6 +288,7 @@ export async function onRequestGet(context) {
                               WHERE o2.account_id = ?))
           AND d.activity_id IS NULL
           AND d.superseded_at IS NULL
+          AND d.deleted_at IS NULL
         ORDER BY d.uploaded_at DESC
         LIMIT 100`,
       [accountId, accountId, accountId]
@@ -298,11 +303,12 @@ export async function onRequestGet(context) {
          FROM activities a
          LEFT JOIN opportunities o ON o.id = a.opportunity_id
          LEFT JOIN users u ON u.id = a.assigned_user_id
-        WHERE a.account_id = ?
+        WHERE (a.account_id = ?
            OR a.opportunity_id IN (SELECT id FROM opportunities WHERE account_id = ?)
            OR a.quote_id IN (SELECT q3.id FROM quotes q3
                               JOIN opportunities o3 ON o3.id = q3.opportunity_id
-                             WHERE o3.account_id = ?)
+                             WHERE o3.account_id = ?))
+          AND a.deleted_at IS NULL
         ORDER BY
           CASE WHEN a.status = 'pending' THEN 0 ELSE 1 END,
           CASE WHEN a.due_at IS NOT NULL THEN 0 ELSE 1 END,

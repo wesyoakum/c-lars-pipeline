@@ -1,25 +1,17 @@
 // functions/jobs/[id]/delete.js
 //
-// POST /jobs/:id/delete — delete a job.
+// POST /jobs/:id/delete — Soft-delete a job.
 //
-// FK chain:
-//   change_orders  → REFERENCES jobs(id)              (RESTRICT — explicit delete needed)
-//   activities     → REFERENCES jobs(id) ON DELETE CASCADE
-//   documents      → REFERENCES jobs(id) ON DELETE CASCADE
-//   cost_builds    → REFERENCES jobs(id) ON DELETE CASCADE
+// Cascade children (all soft-deleted at the same timestamp):
+//   change_orders (job_id), activities (job_id), documents (job_id),
+//   cost_builds (job_id).
 //
-// So we explicitly delete the job's change_orders first (RESTRICT),
-// then the job itself; cascading handles activities / documents /
-// cost_builds. Audits are written BEFORE the delete so the trail
-// survives the cascade.
-//
-// Without `?cascade=1` the route refuses to delete a job with any
-// children and returns a 409 + child-count summary so the shared
-// `Pipeline.confirmCascadeDelete()` modal can list them. Same shape
-// as accounts/[id]/delete.js and opportunities/[id]/delete.js.
+// Without ?cascade=1, refuses if any children exist (409 + summary).
 
-import { one, all, stmt, batch } from '../../lib/db.js';
+import { one, all, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
+import { softDeleteStmt, softDeleteChildrenStmt } from '../../lib/soft-delete.js';
+import { now } from '../../lib/ids.js';
 import { redirectWithFlash } from '../../lib/http.js';
 
 function wantsJson(request) {
@@ -44,7 +36,7 @@ export async function onRequestPost(context) {
 
   const job = await one(
     env.DB,
-    `SELECT id, number, title FROM jobs WHERE id = ?`,
+    `SELECT id, number, title FROM jobs WHERE id = ? AND deleted_at IS NULL`,
     [jobId]
   );
   if (!job) {
@@ -53,23 +45,19 @@ export async function onRequestPost(context) {
     return redirectWithFlash('/jobs', msg, 'error');
   }
 
-  // Children that block the delete unless cascade=1:
-  //   change_orders (RESTRICT)
-  //   activities    (CASCADE — but listed in preview so user knows)
-  //   documents     (CASCADE — same)
-  //   cost_builds   (CASCADE — same)
+  // Children that block the delete unless cascade=1
   const [changeOrders, activities, documents, costBuilds] = await Promise.all([
     all(env.DB,
-      `SELECT id, number, title FROM change_orders WHERE job_id = ?`,
+      `SELECT id, number, title FROM change_orders WHERE job_id = ? AND deleted_at IS NULL`,
       [jobId]),
     all(env.DB,
-      `SELECT id, type, subject FROM activities WHERE job_id = ?`,
+      `SELECT id, type, subject FROM activities WHERE job_id = ? AND deleted_at IS NULL`,
       [jobId]),
     all(env.DB,
-      `SELECT id, title FROM documents WHERE job_id = ?`,
+      `SELECT id, title FROM documents WHERE job_id = ? AND deleted_at IS NULL`,
       [jobId]),
     all(env.DB,
-      `SELECT id, label FROM cost_builds WHERE job_id = ?`,
+      `SELECT id, label FROM cost_builds WHERE job_id = ? AND deleted_at IS NULL`,
       [jobId]),
   ]);
 
@@ -88,20 +76,20 @@ export async function onRequestPost(context) {
     return redirectWithFlash(`/jobs/${jobId}`, msg, 'error');
   }
 
-  // Pre-write audits so the tombstones survive the cascade.
+  const ts = now();
   const statements = [];
+
   if (cascade) {
+    // Audit each child type
     for (const co of changeOrders) {
       statements.push(auditStmt(env.DB, {
         entityType: 'change_order',
         entityId: co.id,
         eventType: 'deleted',
         user,
-        summary: `Change order "${co.number || ''} · ${co.title || ''}" removed (parent job cascade-deleted)`,
+        summary: `Change order "${co.number || ''} \u00b7 ${co.title || ''}" removed (parent job cascade-deleted)`,
       }));
     }
-    // activities / documents / cost_builds get CASCADE'd by FK; we
-    // still write a per-row audit so the history page surfaces them.
     for (const a of activities) {
       const label = (a.subject || a.type || '(activity)').slice(0, 80);
       statements.push(auditStmt(env.DB, {
@@ -130,10 +118,12 @@ export async function onRequestPost(context) {
         summary: `Cost build "${cb.label || '(untitled)'}" removed (parent job cascade-deleted)`,
       }));
     }
-    // Explicit delete of change_orders FIRST — FK is RESTRICT.
-    for (const co of changeOrders) {
-      statements.push(stmt(env.DB, `DELETE FROM change_orders WHERE id = ?`, [co.id]));
-    }
+
+    // Soft-delete children
+    statements.push(softDeleteChildrenStmt(env.DB, 'change_orders', 'job_id', jobId, ts));
+    statements.push(softDeleteChildrenStmt(env.DB, 'activities', 'job_id', jobId, ts));
+    statements.push(softDeleteChildrenStmt(env.DB, 'documents', 'job_id', jobId, ts));
+    statements.push(softDeleteChildrenStmt(env.DB, 'cost_builds', 'job_id', jobId, ts));
   }
 
   statements.push(
@@ -143,16 +133,14 @@ export async function onRequestPost(context) {
       eventType: 'deleted',
       user,
       summary: cascade && totalChildren > 0
-        ? `Deleted job "${job.number || ''} · ${job.title || ''}" (cascade: ${totalChildren} child record(s))`
-        : `Deleted job "${job.number || ''} · ${job.title || ''}"`,
+        ? `Deleted job "${job.number || ''} \u00b7 ${job.title || ''}" (cascade: ${totalChildren} child record(s))`
+        : `Deleted job "${job.number || ''} \u00b7 ${job.title || ''}"`,
     })
   );
-  statements.push(
-    stmt(env.DB, `DELETE FROM jobs WHERE id = ?`, [jobId])
-  );
+  statements.push(softDeleteStmt(env.DB, 'jobs', jobId, ts));
 
   await batch(env.DB, statements);
 
   if (json) return jsonResponse({ ok: true, id: jobId });
-  return redirectWithFlash('/jobs', `Deleted job "${job.number || ''} · ${job.title || ''}".`);
+  return redirectWithFlash('/jobs', `Deleted job "${job.number || ''} \u00b7 ${job.title || ''}".`, 'success', { undo: `/jobs/${jobId}/restore` });
 }

@@ -1,10 +1,11 @@
 // functions/opportunities/[id]/quotes/[quoteId]/lines/[lineId]/delete.js
 //
 // POST /opportunities/:id/quotes/:quoteId/lines/:lineId/delete
-// Removes a line item and recomputes the quote totals.
+// Soft-deletes a line item and recomputes the quote totals.
 
 import { one, stmt, batch } from '../../../../../../lib/db.js';
 import { auditStmt } from '../../../../../../lib/audit.js';
+import { softDeleteStmt } from '../../../../../../lib/soft-delete.js';
 import { now } from '../../../../../../lib/ids.js';
 import { redirectWithFlash } from '../../../../../../lib/http.js';
 import { quoteTotalsRecomputeStmt } from '../../../../../../lib/pricing.js';
@@ -41,7 +42,7 @@ export async function onRequestPost(context) {
 
   const line = await one(
     env.DB,
-    'SELECT id, description FROM quote_lines WHERE id = ? AND quote_id = ?',
+    'SELECT id, description FROM quote_lines WHERE id = ? AND quote_id = ? AND deleted_at IS NULL',
     [lineId, quoteId]
   );
   if (!line) {
@@ -51,22 +52,13 @@ export async function onRequestPost(context) {
   const ts = now();
 
   await batch(env.DB, [
-    // Detach any price build linked to this line first. cost_builds
-    // has a RESTRICT-style FK on quote_line_id (no ON DELETE action
-    // declared in migration 0008), so D1 refuses to delete the line
-    // while a build still points at it. Setting quote_line_id = NULL
-    // preserves the cost_build for later reference; it just stops
-    // showing up under this line.
+    // Detach any price build linked to this line first.
     stmt(
       env.DB,
       'UPDATE cost_builds SET quote_line_id = NULL WHERE quote_line_id = ?',
       [lineId]
     ),
-    stmt(
-      env.DB,
-      'DELETE FROM quote_lines WHERE id = ? AND quote_id = ?',
-      [lineId, quoteId]
-    ),
+    softDeleteStmt(env.DB, 'quote_lines', lineId, ts),
     quoteTotalsRecomputeStmt(env.DB, quoteId, ts),
     auditStmt(env.DB, {
       entityType: 'quote_line',
@@ -79,6 +71,8 @@ export async function onRequestPost(context) {
 
   return redirectWithFlash(
     `/opportunities/${oppId}/quotes/${quoteId}`,
-    'Line deleted.'
+    'Line deleted.',
+    'success',
+    { undo: `/opportunities/${oppId}/quotes/${quoteId}/lines/${lineId}/restore` }
   );
 }

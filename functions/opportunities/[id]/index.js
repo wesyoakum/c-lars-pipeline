@@ -168,7 +168,8 @@ export async function onRequestGet(context) {
        LEFT JOIN contacts  auth ON auth.id = o.bant_authority_contact_id
        LEFT JOIN users     ou   ON ou.id   = o.owner_user_id
        LEFT JOIN users     sp   ON sp.id   = o.salesperson_user_id
-      WHERE o.id = ?`,
+      WHERE o.id = ?
+        AND o.deleted_at IS NULL`,
     [oppId]
   );
   if (!opp) return notFound(context);
@@ -179,11 +180,11 @@ export async function onRequestGet(context) {
   const deleteCounts = await one(
     env.DB,
     `SELECT
-       (SELECT COUNT(*) FROM quotes       WHERE opportunity_id = ?) AS quotes,
-       (SELECT COUNT(*) FROM cost_builds  WHERE opportunity_id = ?) AS cost_builds,
-       (SELECT COUNT(*) FROM activities   WHERE opportunity_id = ?) AS activities,
-       (SELECT COUNT(*) FROM documents    WHERE opportunity_id = ? AND superseded_at IS NULL) AS documents,
-       (SELECT COUNT(*) FROM jobs         WHERE opportunity_id = ?) AS jobs`,
+       (SELECT COUNT(*) FROM quotes       WHERE opportunity_id = ? AND deleted_at IS NULL) AS quotes,
+       (SELECT COUNT(*) FROM cost_builds  WHERE opportunity_id = ? AND deleted_at IS NULL) AS cost_builds,
+       (SELECT COUNT(*) FROM activities   WHERE opportunity_id = ? AND deleted_at IS NULL) AS activities,
+       (SELECT COUNT(*) FROM documents    WHERE opportunity_id = ? AND superseded_at IS NULL AND deleted_at IS NULL) AS documents,
+       (SELECT COUNT(*) FROM jobs         WHERE opportunity_id = ? AND deleted_at IS NULL) AS jobs`,
     [oppId, oppId, oppId, oppId, oppId]
   );
 
@@ -197,7 +198,7 @@ export async function onRequestGet(context) {
   const contacts = await all(
     env.DB,
     `SELECT id, first_name, last_name, title, email, phone, is_primary
-       FROM contacts WHERE account_id = ? ORDER BY is_primary DESC, last_name, first_name`,
+       FROM contacts WHERE account_id = ? AND deleted_at IS NULL ORDER BY is_primary DESC, last_name, first_name`,
     [opp.account_id]
   );
 
@@ -212,7 +213,7 @@ export async function onRequestGet(context) {
   // without re-querying.
   const accounts = await all(
     env.DB,
-    'SELECT id, name, alias, parent_group FROM accounts ORDER BY name'
+    'SELECT id, name, alias, parent_group FROM accounts WHERE deleted_at IS NULL ORDER BY name'
   );
 
   // Price builds
@@ -227,7 +228,7 @@ export async function onRequestGet(context) {
          FROM cost_builds cb
          JOIN quote_lines ql ON ql.id = cb.quote_line_id
          JOIN quotes q ON q.id = ql.quote_id
-        WHERE q.opportunity_id = ?
+        WHERE q.opportunity_id = ? AND cb.deleted_at IS NULL
         ORDER BY q.created_at DESC, ql.sort_order`,
       [oppId]
     );
@@ -250,7 +251,7 @@ export async function onRequestGet(context) {
       env.DB,
       `SELECT id, number, revision, quote_type, status, title, total_price,
               valid_until, submitted_at, updated_at, supersedes_quote_id
-         FROM quotes WHERE opportunity_id = ? ORDER BY created_at DESC`,
+         FROM quotes WHERE opportunity_id = ? AND deleted_at IS NULL ORDER BY created_at DESC`,
       [oppId]
     );
     quoteBadgeCount = rows.length;
@@ -267,6 +268,7 @@ export async function onRequestGet(context) {
        FROM jobs j
        LEFT JOIN quotes q ON q.id = j.quote_id
       WHERE j.opportunity_id = ?
+        AND j.deleted_at IS NULL
       ORDER BY j.created_at DESC`,
     [oppId]
   );
@@ -285,6 +287,7 @@ export async function onRequestGet(context) {
          LEFT JOIN users u ON u.id = a.assigned_user_id
          LEFT JOIN users cu ON cu.id = a.created_by_user_id
         WHERE a.opportunity_id = ?
+          AND a.deleted_at IS NULL
         ORDER BY
           CASE WHEN a.status = 'pending' THEN 0 ELSE 1 END,
           CASE WHEN a.due_at IS NOT NULL THEN 0 ELSE 1 END,
@@ -309,6 +312,7 @@ export async function onRequestGet(context) {
          LEFT JOIN users u ON u.id = d.uploaded_by_user_id
         WHERE d.opportunity_id = ?
           AND d.superseded_at IS NULL
+          AND d.deleted_at IS NULL
         ORDER BY d.uploaded_at DESC`,
       [oppId]
     );
@@ -330,6 +334,7 @@ export async function onRequestGet(context) {
          FROM activities a
          LEFT JOIN users u ON u.id = a.created_by_user_id
         WHERE a.opportunity_id = ? AND a.type = 'note'
+          AND a.deleted_at IS NULL
         ORDER BY a.created_at DESC
         LIMIT 200`,
       [oppId]
@@ -343,6 +348,7 @@ export async function onRequestGet(context) {
         `SELECT id, activity_id, title, original_filename, mime_type, size_bytes
            FROM documents
           WHERE activity_id IN (${placeholders}) AND kind = 'note_image'
+            AND deleted_at IS NULL
           ORDER BY uploaded_at ASC`,
         noteIds
       );

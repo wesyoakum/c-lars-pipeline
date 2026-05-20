@@ -50,10 +50,11 @@ export async function formBody(request) {
  * banner. No cookies = no middleware parsing. Meant for "Created X",
  * "Saved", "Deleted Y" style notifications after a mutation.
  */
-export function redirectWithFlash(location, message, kind = 'success') {
+export function redirectWithFlash(location, message, kind = 'success', opts = {}) {
   const url = new URL(location, 'https://dummy.local');
   url.searchParams.set('flash', message);
   url.searchParams.set('flash_kind', kind);
+  if (opts.undo) url.searchParams.set('flash_undo', opts.undo);
   // Strip the dummy origin so we return a relative location.
   return redirect(url.pathname + url.search);
 }
@@ -68,6 +69,7 @@ export function readFlash(url) {
   return {
     message,
     kind: url.searchParams.get('flash_kind') || 'info',
+    undo: url.searchParams.get('flash_undo') || null,
   };
 }
 

@@ -1,20 +1,22 @@
 // functions/accounts/[id]/delete.js
 //
-// POST /accounts/:id/delete — delete an account.
+// POST /accounts/:id/delete — Soft-delete an account.
 //
-// Contacts cascade via FK (ON DELETE CASCADE). We write:
-//   - one `deleted` audit event for the account itself
-//   - one `deleted` audit event per contact being removed
-// so the activity history survives the cascade.
+// Cascade children (all soft-deleted at the same timestamp):
+//   contacts (account_id), opportunities (account_id), and
+//   transitively: quotes + quote_lines, activities, documents,
+//   cost_builds, jobs + change_orders under those opps/jobs.
 //
-// In P0 we don't stop deletion if opportunities reference the account —
-// the FK is set up with ON DELETE CASCADE on opportunities-accounts? Let me
-// double check: no, opportunities references accounts WITHOUT cascade, so
-// trying to delete an account that has opportunities will fail at the DB
-// level. That's correct behavior; we just surface the error cleanly.
+// Junction tables (cost_build_dm_selections, cost_build_labor_selections,
+// cost_build_labor) don't have deleted_at — they stay in place so restore
+// works cleanly.
+//
+// Without ?cascade=1, refuses if opportunities exist (409 + summary).
 
-import { one, all, stmt, batch } from '../../lib/db.js';
+import { one, all, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
+import { softDeleteStmt, softDeleteChildrenStmt } from '../../lib/soft-delete.js';
+import { now } from '../../lib/ids.js';
 import { layout, htmlResponse } from '../../lib/layout.js';
 import { redirectWithFlash } from '../../lib/http.js';
 
@@ -36,15 +38,11 @@ export async function onRequestPost(context) {
   const accountId = params.id;
   const json = wantsJson(request);
   const url = new URL(request.url);
-  // Cascade flag: also delete this account's opportunities (and their
-  // jobs, quotes, cost_builds, activities, documents). Without it
-  // the delete refuses with 409 + a child-count summary so the
-  // cascade-delete modal can warn the user.
   const cascade = url.searchParams.get('cascade') === '1';
 
   const account = await one(
     env.DB,
-    `SELECT id, name FROM accounts WHERE id = ?`,
+    `SELECT id, name FROM accounts WHERE id = ? AND deleted_at IS NULL`,
     [accountId]
   );
   if (!account) {
@@ -61,7 +59,7 @@ export async function onRequestPost(context) {
 
   const opps = await all(
     env.DB,
-    `SELECT id, number, title FROM opportunities WHERE account_id = ?`,
+    `SELECT id, number, title FROM opportunities WHERE account_id = ? AND deleted_at IS NULL`,
     [accountId]
   );
   if (opps.length > 0 && !cascade) {
@@ -70,27 +68,66 @@ export async function onRequestPost(context) {
     return redirectWithFlash(`/accounts/${accountId}`, msg, 'error');
   }
 
+  const ts = now();
+  const statements = [];
+
+  // Cascade: soft-delete all jobs under this account's opps, then
+  // the opps themselves, plus all their children.
+  if (cascade && opps.length > 0) {
+    const jobs = await all(env.DB,
+      `SELECT j.id, j.number, j.title FROM jobs j
+         JOIN opportunities o ON o.id = j.opportunity_id
+        WHERE o.account_id = ? AND j.deleted_at IS NULL`,
+      [accountId]);
+
+    for (const j of jobs) {
+      statements.push(auditStmt(env.DB, {
+        entityType: 'job',
+        entityId: j.id,
+        eventType: 'deleted',
+        user,
+        summary: `Job "${j.number || ''} \u00b7 ${j.title || ''}" removed (parent account cascade-deleted)`,
+      }));
+      // Job children
+      statements.push(softDeleteChildrenStmt(env.DB, 'change_orders', 'job_id', j.id, ts));
+      statements.push(softDeleteChildrenStmt(env.DB, 'activities', 'job_id', j.id, ts));
+      statements.push(softDeleteChildrenStmt(env.DB, 'documents', 'job_id', j.id, ts));
+      statements.push(softDeleteChildrenStmt(env.DB, 'cost_builds', 'job_id', j.id, ts));
+      statements.push(softDeleteStmt(env.DB, 'jobs', j.id, ts));
+    }
+
+    for (const o of opps) {
+      statements.push(auditStmt(env.DB, {
+        entityType: 'opportunity',
+        entityId: o.id,
+        eventType: 'deleted',
+        user,
+        summary: `Opportunity "${o.number || ''} \u00b7 ${o.title || ''}" removed (parent account cascade-deleted)`,
+      }));
+      // Quote_lines via their parent quotes (no opportunity_id FK on quote_lines)
+      const quotes = await all(
+        env.DB,
+        'SELECT id FROM quotes WHERE opportunity_id = ? AND deleted_at IS NULL',
+        [o.id]
+      );
+      for (const q of quotes) {
+        statements.push(softDeleteChildrenStmt(env.DB, 'quote_lines', 'quote_id', q.id, ts));
+      }
+      // Opp children
+      statements.push(softDeleteChildrenStmt(env.DB, 'quotes', 'opportunity_id', o.id, ts));
+      statements.push(softDeleteChildrenStmt(env.DB, 'activities', 'opportunity_id', o.id, ts));
+      statements.push(softDeleteChildrenStmt(env.DB, 'documents', 'opportunity_id', o.id, ts));
+      statements.push(softDeleteChildrenStmt(env.DB, 'cost_builds', 'opportunity_id', o.id, ts));
+      statements.push(softDeleteStmt(env.DB, 'opportunities', o.id, ts));
+    }
+  }
+
+  // Contacts — always cascade (they belong to the account)
   const contacts = await all(
     env.DB,
-    `SELECT id, first_name, last_name FROM contacts WHERE account_id = ?`,
+    `SELECT id, first_name, last_name FROM contacts WHERE account_id = ? AND deleted_at IS NULL`,
     [accountId]
   );
-
-  // Cascade case: load all jobs under this account's opps so we can
-  // delete them explicitly (opp→job FK is RESTRICT, doesn't cascade).
-  // Quotes, cost_builds, activities, documents all CASCADE via FK
-  // when their parent opp / job goes away — no manual delete needed.
-  const jobs = cascade && opps.length > 0
-    ? await all(env.DB,
-        `SELECT j.id, j.number, j.title FROM jobs j
-           JOIN opportunities o ON o.id = j.opportunity_id
-          WHERE o.account_id = ?`,
-        [accountId])
-    : [];
-
-  // Write audits BEFORE the delete so FK cascades don't orphan them
-  // (audit_events has no FK back to the entities — deliberate).
-  const statements = [];
   for (const c of contacts) {
     const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
     statements.push(
@@ -103,35 +140,8 @@ export async function onRequestPost(context) {
       })
     );
   }
-  if (cascade) {
-    for (const j of jobs) {
-      statements.push(auditStmt(env.DB, {
-        entityType: 'job',
-        entityId: j.id,
-        eventType: 'deleted',
-        user,
-        summary: `Job "${j.number || ''} · ${j.title || ''}" removed (parent account cascade-deleted)`,
-      }));
-    }
-    for (const o of opps) {
-      statements.push(auditStmt(env.DB, {
-        entityType: 'opportunity',
-        entityId: o.id,
-        eventType: 'deleted',
-        user,
-        summary: `Opportunity "${o.number || ''} · ${o.title || ''}" removed (parent account cascade-deleted)`,
-      }));
-    }
-    // Delete jobs first (FK RESTRICT on opp→job), then opps (FK
-    // RESTRICT on account→opp), then the account (cascades the
-    // remaining children automatically).
-    for (const j of jobs) {
-      statements.push(stmt(env.DB, `DELETE FROM jobs WHERE id = ?`, [j.id]));
-    }
-    for (const o of opps) {
-      statements.push(stmt(env.DB, `DELETE FROM opportunities WHERE id = ?`, [o.id]));
-    }
-  }
+  statements.push(softDeleteChildrenStmt(env.DB, 'contacts', 'account_id', accountId, ts));
+
   statements.push(
     auditStmt(env.DB, {
       entityType: 'account',
@@ -139,16 +149,14 @@ export async function onRequestPost(context) {
       eventType: 'deleted',
       user,
       summary: cascade && opps.length > 0
-        ? `Deleted account "${account.name}" (cascade: ${opps.length} opp(s), ${jobs.length} job(s))`
+        ? `Deleted account "${account.name}" (cascade: ${opps.length} opp(s))`
         : `Deleted account "${account.name}"`,
     })
   );
-  statements.push(
-    stmt(env.DB, `DELETE FROM accounts WHERE id = ?`, [accountId])
-  );
+  statements.push(softDeleteStmt(env.DB, 'accounts', accountId, ts));
 
   await batch(env.DB, statements);
 
   if (json) return jsonResponse({ ok: true, id: accountId });
-  return redirectWithFlash(`/accounts`, `Deleted account "${account.name}".`);
+  return redirectWithFlash(`/accounts`, `Deleted account "${account.name}".`, 'success', { undo: `/accounts/${accountId}/restore` });
 }

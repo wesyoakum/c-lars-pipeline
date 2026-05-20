@@ -32,6 +32,7 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
     env.DB,
     `SELECT id, description, updated_at
        FROM labor_items
+      WHERE deleted_at IS NULL
       ORDER BY description`
   );
 

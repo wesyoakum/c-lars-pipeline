@@ -27,7 +27,7 @@ async function renderList(context, { values = {}, errors = {} } = {}) {
 
   const rows = await all(
     env.DB,
-    `SELECT * FROM builds_library ORDER BY name`
+    `SELECT * FROM builds_library WHERE deleted_at IS NULL ORDER BY name`
   );
 
   // Compute quote price for each build using the pricing engine.

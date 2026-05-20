@@ -42,6 +42,7 @@ export async function onRequestGet(context) {
     `SELECT r.*, u.display_name AS uploaded_by_name, u.email AS uploaded_by_email
        FROM resources r
        LEFT JOIN users u ON u.id = r.uploaded_by_user_id
+      WHERE r.deleted_at IS NULL
       ORDER BY r.title`
   );
 

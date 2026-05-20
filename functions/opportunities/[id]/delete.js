@@ -1,17 +1,21 @@
 // POST /opportunities/:id/delete
 //
-// Hard-delete an opportunity and its cascading children (quotes,
-// cost_builds, activities, documents, external_artifacts). Refuses
-// when any job still references the opp — jobs represent execution
-// handoff to Engineering/Ops, and we keep that history immutable.
-// The user has to cancel or explicitly close out jobs first.
+// Soft-delete an opportunity and its cascading children. Refuses when
+// any job still references the opp without ?cascade=1 — jobs represent
+// execution handoff to Engineering/Ops.
 //
-// Writes a final audit_events row BEFORE the DELETE so the tombstone
-// survives in the log after the opp row is gone. (audit_events has
-// no FK from entity_id, so this works.)
+// Cascade children (all soft-deleted at the same timestamp):
+//   quotes + their quote_lines, activities, documents, cost_builds,
+//   and (with cascade=1) jobs + their change_orders/activities/docs/builds.
+//
+// Junction tables (cost_build_dm_selections, cost_build_labor_selections,
+// cost_build_labor) don't have deleted_at — they stay in place so restore
+// works cleanly.
 
-import { one, all, stmt, batch } from '../../lib/db.js';
+import { one, all, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
+import { softDeleteStmt, softDeleteChildrenStmt } from '../../lib/soft-delete.js';
+import { now } from '../../lib/ids.js';
 import { redirectWithFlash } from '../../lib/http.js';
 
 function isAjaxRequest(request) {
@@ -37,14 +41,11 @@ export async function onRequestPost(context) {
   const oppId = params.id;
   const ajax = isAjaxRequest(request);
   const url = new URL(request.url);
-  // cascade=1 also deletes attached jobs (and their change_orders,
-  // documents, activities — all of which CASCADE via FK once the
-  // jobs row goes away).
   const cascade = url.searchParams.get('cascade') === '1';
 
   const opp = await one(
     env.DB,
-    'SELECT id, number, title FROM opportunities WHERE id = ?',
+    'SELECT id, number, title FROM opportunities WHERE id = ? AND deleted_at IS NULL',
     [oppId]
   );
   if (!opp) {
@@ -52,23 +53,23 @@ export async function onRequestPost(context) {
     return new Response('Not found', { status: 404 });
   }
 
-  // Job gate — jobs don't cascade on opportunity delete, so we'd hit
-  // an FK error anyway. Without cascade=1, refuse with a helpful
-  // summary; with it, we delete the jobs explicitly first.
+  // Job gate
   const jobs = await all(
     env.DB,
-    'SELECT id, number, title, status FROM jobs WHERE opportunity_id = ?',
+    'SELECT id, number, title, status FROM jobs WHERE opportunity_id = ? AND deleted_at IS NULL',
     [oppId]
   );
   if (jobs.length > 0 && !cascade) {
     const summary = jobs.map(j => `${j.number} (${j.status})`).join(', ');
-    const msg = `Cannot delete ${opp.number}: ${jobs.length} job${jobs.length === 1 ? '' : 's'} still attached — ${summary}. Use cascade=1 to delete them too.`;
+    const msg = `Cannot delete ${opp.number}: ${jobs.length} job${jobs.length === 1 ? '' : 's'} still attached \u2014 ${summary}. Use cascade=1 to delete them too.`;
     if (ajax) return jsonResponse({ ok: false, error: msg, blockers: jobs }, 409);
     return redirectWithFlash(`/opportunities/${oppId}`, msg, 'error');
   }
 
-  // Pre-write deletion audit events so they survive past the rows.
+  const ts = now();
   const statements = [];
+
+  // Cascade: soft-delete jobs and their children first
   if (cascade) {
     for (const j of jobs) {
       statements.push(auditStmt(env.DB, {
@@ -78,11 +79,16 @@ export async function onRequestPost(context) {
         user,
         summary: `Job ${j.number || ''} removed (parent opportunity cascade-deleted)`,
       }));
-    }
-    for (const j of jobs) {
-      statements.push(stmt(env.DB, 'DELETE FROM jobs WHERE id = ?', [j.id]));
+      // Job children
+      statements.push(softDeleteChildrenStmt(env.DB, 'change_orders', 'job_id', j.id, ts));
+      statements.push(softDeleteChildrenStmt(env.DB, 'activities', 'job_id', j.id, ts));
+      statements.push(softDeleteChildrenStmt(env.DB, 'documents', 'job_id', j.id, ts));
+      statements.push(softDeleteChildrenStmt(env.DB, 'cost_builds', 'job_id', j.id, ts));
+      statements.push(softDeleteStmt(env.DB, 'jobs', j.id, ts));
     }
   }
+
+  // Opportunity direct children
   statements.push(auditStmt(env.DB, {
     entityType: 'opportunity',
     entityId: oppId,
@@ -92,17 +98,32 @@ export async function onRequestPost(context) {
       ? `Deleted opportunity ${opp.number} (cascade: ${jobs.length} job(s))`
       : `Deleted opportunity ${opp.number} (${opp.title || 'no title'})`,
   }));
-  // Cascade does the rest: quotes + quote_lines, cost_builds +
-  // cost_lines, activities, documents, external_artifacts,
-  // opp_contacts. Supporting tables with their own ON DELETE
-  // CASCADE chains trickle further from there.
-  statements.push(stmt(env.DB, 'DELETE FROM opportunities WHERE id = ?', [oppId]));
+
+  // Soft-delete quote_lines via their parent quotes (quote_lines has
+  // quote_id, not opportunity_id).
+  const quotes = await all(
+    env.DB,
+    'SELECT id FROM quotes WHERE opportunity_id = ? AND deleted_at IS NULL',
+    [oppId]
+  );
+  for (const q of quotes) {
+    statements.push(softDeleteChildrenStmt(env.DB, 'quote_lines', 'quote_id', q.id, ts));
+  }
+
+  // Soft-delete opp's own children
+  statements.push(softDeleteChildrenStmt(env.DB, 'quotes', 'opportunity_id', oppId, ts));
+  statements.push(softDeleteChildrenStmt(env.DB, 'activities', 'opportunity_id', oppId, ts));
+  statements.push(softDeleteChildrenStmt(env.DB, 'documents', 'opportunity_id', oppId, ts));
+  statements.push(softDeleteChildrenStmt(env.DB, 'cost_builds', 'opportunity_id', oppId, ts));
+  statements.push(softDeleteStmt(env.DB, 'opportunities', oppId, ts));
 
   await batch(env.DB, statements);
 
   if (ajax) return jsonResponse({ ok: true, id: oppId });
   return redirectWithFlash(
     '/opportunities',
-    `Deleted ${opp.number} (${opp.title || 'no title'}).`
+    `Deleted ${opp.number} (${opp.title || 'no title'}).`,
+    'success',
+    { undo: `/opportunities/${oppId}/restore` }
   );
 }

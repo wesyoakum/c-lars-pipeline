@@ -79,10 +79,10 @@ export async function onRequestGet(context) {
     env.DB,
     `SELECT a.id, a.name, a.alias, a.parent_group, a.segment, a.phone, a.website, a.updated_at,
             a.is_active, a.external_source,
-            (SELECT COUNT(*) FROM contacts c WHERE c.account_id = a.id) AS contact_count,
-            (SELECT COUNT(*) FROM opportunities o WHERE o.account_id = a.id) AS opp_count
+            (SELECT COUNT(*) FROM contacts c WHERE c.account_id = a.id AND c.deleted_at IS NULL) AS contact_count,
+            (SELECT COUNT(*) FROM opportunities o WHERE o.account_id = a.id AND o.deleted_at IS NULL) AS opp_count
        FROM accounts a
-      ${activeWhere}
+      ${activeWhere ? activeWhere + ' AND a.deleted_at IS NULL' : 'WHERE a.deleted_at IS NULL'}
       ORDER BY ${orderBy}
       LIMIT 500`
   );

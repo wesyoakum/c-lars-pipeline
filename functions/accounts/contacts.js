@@ -64,7 +64,7 @@ export async function onRequestGet(context) {
             a.name AS account_name
        FROM contacts c
        LEFT JOIN accounts a ON a.id = c.account_id
-      ${activeWhere}
+      ${activeWhere ? activeWhere + ' AND c.deleted_at IS NULL' : 'WHERE c.deleted_at IS NULL'}
       ORDER BY COALESCE(c.last_name, c.first_name, '') COLLATE NOCASE, c.first_name COLLATE NOCASE
       LIMIT 2000`
   );

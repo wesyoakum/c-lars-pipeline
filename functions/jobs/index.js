@@ -77,7 +77,7 @@ export async function onRequestGet(context) {
        FROM jobs j
        LEFT JOIN opportunities o ON o.id = j.opportunity_id
        LEFT JOIN accounts a ON a.id = o.account_id
-      ${activeWhere}
+      ${activeWhere ? activeWhere + ' AND j.deleted_at IS NULL' : 'WHERE j.deleted_at IS NULL'}
       ORDER BY j.updated_at DESC
       LIMIT 500`
   );

@@ -1,24 +1,16 @@
 // POST /opportunities/:id/quotes/:quoteId/delete
 //
-// Remove a quote. Terminal / customer-facing statuses are locked —
-// they represent historical facts. Only draft revisions can be
-// removed outright. ON DELETE CASCADE on quote_lines cleans up the
-// child rows automatically.
-//
-// Two response modes (same pattern as the other wizard-era endpoints):
-//   - Classic form submit → redirect-with-flash
-//   - AJAX (x-requested-with / JSON accept / source=bulk) → JSON
-//     { ok, id } / { ok: false, error } so the bulk-edit driver on
-//     the /quotes list can fan out deletes and aggregate errors.
+// Soft-delete a quote. Terminal / customer-facing statuses are locked —
+// they represent historical facts. Only draft revisions can be removed.
+// Child quote_lines are cascade-soft-deleted at the same timestamp.
 
-import { one, stmt, batch } from '../../../../lib/db.js';
+import { one, batch } from '../../../../lib/db.js';
 import { auditStmt } from '../../../../lib/audit.js';
+import { softDeleteStmt, softDeleteChildrenStmt } from '../../../../lib/soft-delete.js';
+import { now } from '../../../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../../../lib/http.js';
 
-// Quote statuses we refuse to delete. All of them represent either
-// customer-facing history (issued, accepted, rejected, expired),
-// supersede chains (dead), or post-job terminal state (completed).
-// Draft + revision_draft are the only deletable states.
+// Quote statuses we refuse to delete.
 const LOCKED_FOR_DELETE = new Set([
   'issued',
   'revision_issued',
@@ -58,7 +50,7 @@ export async function onRequestPost(context) {
 
   const quote = await one(
     env.DB,
-    'SELECT id, number, revision, status, opportunity_id FROM quotes WHERE id = ?',
+    'SELECT id, number, revision, status, opportunity_id FROM quotes WHERE id = ? AND deleted_at IS NULL',
     [quoteId]
   );
   if (!quote || quote.opportunity_id !== oppId) {
@@ -75,8 +67,8 @@ export async function onRequestPost(context) {
     );
   }
 
+  const ts = now();
   await batch(env.DB, [
-    stmt(env.DB, 'DELETE FROM quotes WHERE id = ?', [quoteId]),
     auditStmt(env.DB, {
       entityType: 'quote',
       entityId: quoteId,
@@ -84,6 +76,8 @@ export async function onRequestPost(context) {
       user,
       summary: `Deleted ${quote.number} Rev ${quote.revision}`,
     }),
+    softDeleteChildrenStmt(env.DB, 'quote_lines', 'quote_id', quoteId, ts),
+    softDeleteStmt(env.DB, 'quotes', quoteId, ts),
   ]);
 
   if (ajax) {
@@ -91,6 +85,8 @@ export async function onRequestPost(context) {
   }
   return redirectWithFlash(
     `/opportunities/${oppId}?tab=quotes`,
-    `Deleted ${quote.number} Rev ${quote.revision}.`
+    `Deleted ${quote.number} Rev ${quote.revision}.`,
+    'success',
+    { undo: `/opportunities/${oppId}/quotes/${quoteId}/restore` }
   );
 }

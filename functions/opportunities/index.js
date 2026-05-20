@@ -62,10 +62,11 @@ export async function onRequestGet(context) {
             a.name AS account_name, a.alias AS account_alias,
             a.parent_group AS account_parent_group,
             a.id AS account_id,
-            (SELECT COUNT(*) FROM quotes q WHERE q.opportunity_id = o.id) AS quote_count
+            (SELECT COUNT(*) FROM quotes q WHERE q.opportunity_id = o.id AND q.deleted_at IS NULL) AS quote_count
        FROM opportunities o
        LEFT JOIN accounts a ON a.id = o.account_id
        LEFT JOIN users ou ON ou.id = o.owner_user_id
+      WHERE o.deleted_at IS NULL
       ORDER BY o.updated_at DESC
       LIMIT 500`
   );

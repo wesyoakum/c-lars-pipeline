@@ -1665,7 +1665,7 @@ export function layout(title, body, opts = {}) {
   ${CASCADE_DELETE_MODAL_MARKUP}
   ${user._sitePrefs?.messaging_enabled ? BOARD_LEFT_MARKUP : ''}
   ${BOARD_RIGHT_MARKUP}` : ''}
-  ${flash ? `<div class="flash flash-${escape(flash.kind ?? 'info')}" data-flash-kind="${escape(flash.kind ?? 'info')}" role="status" aria-live="polite">${escape(flash.message)}<button type="button" class="flash-close" aria-label="Dismiss">&times;</button></div>` : ''}
+  ${flash ? `<div class="flash flash-${escape(flash.kind ?? 'info')}" data-flash-kind="${escape(flash.kind ?? 'info')}" role="status" aria-live="polite">${escape(flash.message)}${flash.undo ? ` <form method="post" action="${escape(flash.undo)}" style="display:inline"><button type="submit" class="flash-undo">Undo</button></form>` : ''}<button type="button" class="flash-close" aria-label="Dismiss">&times;</button></div>` : ''}
   ${user ? `<script>${displayPrefsBootScript(user)}</script>` : ''}
   <main class="site-main">
 ${breadcrumbHtml}

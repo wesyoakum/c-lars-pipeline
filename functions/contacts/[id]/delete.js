@@ -4,6 +4,8 @@
 
 import { one, stmt, batch } from '../../lib/db.js';
 import { auditStmt } from '../../lib/audit.js';
+import { softDeleteStmt } from '../../lib/soft-delete.js';
+import { now } from '../../lib/ids.js';
 import { redirectWithFlash } from '../../lib/http.js';
 import { layout, htmlResponse } from '../../lib/layout.js';
 
@@ -42,6 +44,7 @@ export async function onRequestPost(context) {
 
   const displayName = [contact.first_name, contact.last_name].filter(Boolean).join(' ') || '(no name)';
 
+  const ts = now();
   await batch(env.DB, [
     auditStmt(env.DB, {
       entityType: 'contact',
@@ -50,12 +53,14 @@ export async function onRequestPost(context) {
       user,
       summary: `Deleted contact "${displayName}"`,
     }),
-    stmt(env.DB, `DELETE FROM contacts WHERE id = ?`, [contactId]),
+    softDeleteStmt(env.DB, 'contacts', contactId, ts),
   ]);
 
   if (json) return jsonResponse({ ok: true, id: contactId });
   return redirectWithFlash(
     `/accounts/${contact.account_id}?tab=contacts`,
-    `Contact "${displayName}" deleted.`
+    `Contact "${displayName}" deleted.`,
+    'success',
+    { undo: `/contacts/${contactId}/restore` }
   );
 }

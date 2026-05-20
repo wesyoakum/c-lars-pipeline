@@ -26,6 +26,7 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
     env.DB,
     `SELECT id, name, description, category, default_unit, default_price, active, updated_at
        FROM items_library
+      WHERE deleted_at IS NULL
       ORDER BY active DESC, name`
   );
 

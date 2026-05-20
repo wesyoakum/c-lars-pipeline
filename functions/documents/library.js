@@ -64,6 +64,7 @@ export async function onRequestGet(context) {
        LEFT JOIN jobs j         ON j.id = d.job_id
        LEFT JOIN accounts a     ON a.id = d.account_id
       WHERE d.superseded_at IS NULL
+        AND d.deleted_at IS NULL
       ORDER BY d.uploaded_at DESC
       LIMIT 1000`
   );
