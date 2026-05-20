@@ -188,5 +188,5 @@ export const ROLE_DISPLAY_NAMES = {
   member: 'Technician',
   viewer: 'Observer',
   service: 'MAGI',
-  ai: 'Dummy Plug',
+  ai: 'Robot',
 };
