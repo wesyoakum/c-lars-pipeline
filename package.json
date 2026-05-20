@@ -1,6 +1,6 @@
 {
   "name": "c-lars-pipeline",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "private": true,
   "description": "C-LARS Pipeline — custom CRM built on Cloudflare Pages + D1 + R2 + Access",
   "scripts": {

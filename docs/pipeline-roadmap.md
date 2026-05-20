@@ -13,6 +13,12 @@
 
 ---
 
+## 1.0 milestone (shipped 2026-05-20)
+
+Pipeline is the system of record for all new business. Every new opportunity, quote, order confirmation, and job is created in Pipeline. WorkflowMax is archive-only — the historical WFM import continues toward full decommission. Subsequent 1.x releases will complete the WFM data migration, finish the full quote lifecycle, and harden multi-user onboarding.
+
+---
+
 ## Identity
 
 **What Pipeline is for**: tracking the lifecycle of a deal from first
@@ -161,4 +167,4 @@ transitions, and inbound document/email ingestion.
 
 This file is the single source of truth for "where Pipeline is and what's next." Updated on every meaningful ship-step. Distinct from the AI roadmap note in Claude Code memory (stale) and from Claudia's own roadmap ([`claudia-roadmap.md`](./claudia-roadmap.md)).
 
-**Last updated:** initial draft, v0.641 — written same day as Claudia roadmap.
+**Last updated:** v1.0.0, 2026-05-20.
