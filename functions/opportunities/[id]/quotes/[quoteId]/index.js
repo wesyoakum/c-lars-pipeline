@@ -1298,14 +1298,48 @@ export async function onRequestGet(context) {
           Labels without tokens get a legacy <code>N% &lt;label&gt;</code> prefix.
         </div>
 
-        <table class="meta-table" style="width:100%;font-size:.85rem;margin-top:.4rem">
+        <!-- Inline styles scoped to this table — keeps the editor's
+             visual chrome lighter than the rest of the quote page. -->
+        <style>
+          .ps-editor input[type="number"], .ps-editor input[type="text"] {
+            border: 1px solid #e5e5e5;
+            border-radius: 3px;
+            padding: 0.25rem 0.35rem;
+          }
+          .ps-editor input:focus { border-color: #b8b8b8; outline: none; }
+          .ps-editor .ps-variant-select {
+            background: transparent;
+            border: none;
+            border-bottom: 1px dashed #d8d8d8;
+            border-radius: 0;
+            color: var(--fg-muted);
+            font-size: 0.78em;
+            padding: 0.05rem 0.15rem;
+            flex: 1;
+            min-width: 0;
+          }
+          .ps-editor .ps-variant-select:hover { color: var(--fg); border-bottom-style: solid; }
+          .ps-editor .ps-row-btn {
+            border: none;
+            background: transparent;
+            color: #b0b0b0;
+            cursor: pointer;
+            padding: 0 0.2rem;
+            font-size: 0.9em;
+            line-height: 1;
+          }
+          .ps-editor .ps-row-btn:hover:not(:disabled) { color: var(--fg); }
+          .ps-editor .ps-row-btn:disabled { color: #e0e0e0; cursor: default; }
+          .ps-editor td { vertical-align: top; padding: 0.25rem 0.3rem; }
+        </style>
+        <table class="ps-editor" style="width:100%;font-size:.85rem;margin-top:.4rem;border-collapse:collapse">
           <thead>
             <tr>
-              <th style="text-align:right;width:5rem">%</th>
-              <th style="text-align:right;width:6rem">Weeks ARO</th>
+              <th style="text-align:center;width:5rem">%</th>
+              <th style="text-align:center;width:6rem">Weeks ARO</th>
               <th style="text-align:left">Label &amp; Katana variant</th>
-              <th style="width:5rem"></th>
-              <th style="width:2.5rem"></th>
+              <th style="width:3.5rem"></th>
+              <th style="width:1.75rem"></th>
             </tr>
           </thead>
           <tbody>
@@ -1317,32 +1351,30 @@ export async function onRequestGet(context) {
                   <input type="text" x-model="row.label"
                          placeholder="e.g. Due {percent}% upon order confirmation, {weeks} weeks ARO"
                          style="width:100%" ${readOnly ? 'disabled' : ''}>
-                  <div style="display:flex;align-items:center;gap:.4rem;margin-top:.2rem">
-                    <span class="muted" style="font-size:.7em;flex-shrink:0">Katana variant:</span>
+                  <div style="display:flex;align-items:center;gap:.3rem;margin-top:.15rem">
+                    <span class="muted" style="font-size:.7em;flex-shrink:0">Katana:</span>
                     <select x-model.number="row.katana_variant_id"
                             @change="syncSku(row)"
-                            style="flex:1;font-size:.8em;padding:.05rem .25rem"
+                            class="ps-variant-select"
                             ${readOnly ? 'disabled' : ''}>
-                      <option value="">— ordinal fallback —</option>
+                      <option value="">— fallback —</option>
                       <template x-for="v in siteRows" :key="v.katana_variant_id">
                         <option :value="v.katana_variant_id" x-text="(v.katana_sku || ('#' + v.katana_variant_id)) + ' — ' + v.label"></option>
                       </template>
                     </select>
-                    <!-- Tiny status indicator: green check when an explicit variant is set,
-                         amber dot when relying on fallback, red dot when no fallback exists. -->
-                    <span x-show="row.katana_variant_id" style="color:#1a7f37;font-size:.85em" title="Variant locked">&check;</span>
-                    <span x-show="!row.katana_variant_id && idx < siteRows.length" class="muted" style="font-size:.7em"
-                          :title="'Will use site default at push: ' + (siteRows[idx] ? siteRows[idx].katana_sku : '?')">fallback</span>
-                    <span x-show="!row.katana_variant_id && idx >= siteRows.length" style="color:#b3261e;font-size:.7em"
+                    <!-- Subtle status chip — no green check; only surfaces
+                         info when there's a fallback issue worth seeing. -->
+                    <span x-show="!row.katana_variant_id && idx >= siteRows.length"
+                          style="color:#b3261e;font-size:.7em;white-space:nowrap"
                           title="No fallback for this row position — push will block until you pick a variant.">&#9888; no fallback</span>
                   </div>
                 </td>
                 <td style="text-align:center;white-space:nowrap">
-                  <button type="button" class="btn-tiny" @click="moveUp(idx)"   :disabled="idx === 0" title="Move up" ${readOnly ? 'disabled' : ''}>&uarr;</button>
-                  <button type="button" class="btn-tiny" @click="moveDown(idx)" :disabled="idx === rows.length - 1" title="Move down" ${readOnly ? 'disabled' : ''}>&darr;</button>
+                  <button type="button" class="ps-row-btn" @click="moveUp(idx)"   :disabled="idx === 0" title="Move up" ${readOnly ? 'disabled' : ''}>&uarr;</button>
+                  <button type="button" class="ps-row-btn" @click="moveDown(idx)" :disabled="idx === rows.length - 1" title="Move down" ${readOnly ? 'disabled' : ''}>&darr;</button>
                 </td>
                 <td style="text-align:center">
-                  <button type="button" class="btn-tiny" @click="removeRow(idx)" title="Remove row" ${readOnly ? 'disabled' : ''}>&times;</button>
+                  <button type="button" class="ps-row-btn" @click="removeRow(idx)" title="Remove row" ${readOnly ? 'disabled' : ''}>&times;</button>
                 </td>
               </tr>
             </template>
@@ -1350,7 +1382,7 @@ export async function onRequestGet(context) {
               <td colspan="5" class="muted" style="text-align:center;padding:.5rem;font-style:italic">No schedule set — push falls back to the site-default milestones at Settings &rarr; Katana milestones.</td>
             </tr>
             <tr x-show="rows.length > 0">
-              <td style="text-align:right" :style="sumOk ? 'color:#1a7f37' : 'color:#b3261e'">
+              <td style="text-align:center" :style="sumOk ? 'color:#1a7f37' : 'color:#b3261e'">
                 <strong x-text="totalPct + '%'"></strong>
               </td>
               <td colspan="4" class="muted" style="font-size:.8em">
