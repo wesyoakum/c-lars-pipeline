@@ -5961,3 +5961,96 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   text-decoration: underline;
 }
 
+/* ---------- Universal search (header) ---------- */
+.universal-search {
+  position: relative;
+}
+.universal-search-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+}
+.universal-search-icon {
+  opacity: 0.6;
+  flex-shrink: 0;
+}
+.universal-search-input {
+  background: transparent;
+  border: none;
+  outline: none;
+  color: inherit;
+  font-size: 0.85rem;
+  width: 11rem;
+  transition: width 0.15s ease;
+}
+.universal-search-input:focus {
+  width: 18rem;
+}
+.universal-search-input::placeholder {
+  color: rgba(255,255,255,0.5);
+}
+.universal-search-results {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  width: 22rem;
+  max-height: 24rem;
+  overflow-y: auto;
+  background: var(--bg, #fff);
+  color: var(--fg, #111);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+  z-index: 999;
+  padding: 0.25rem 0;
+}
+.universal-search-result {
+  display: block;
+  padding: 0.45rem 0.75rem;
+  text-decoration: none;
+  color: inherit;
+  border-bottom: 1px solid var(--border-light, #f0f0f0);
+  cursor: pointer;
+}
+.universal-search-result:hover {
+  background: var(--bg-alt, #f5f5f7);
+}
+.universal-search-type {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-muted, #666);
+  background: var(--bg-alt, #f0f0f0);
+  border-radius: 3px;
+  padding: 0.1rem 0.35rem;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+.universal-search-title {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+.universal-search-sub {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--fg-muted, #666);
+  margin-top: 0.1rem;
+}
+.universal-search-empty {
+  padding: 0.75rem;
+  text-align: center;
+  color: var(--fg-muted, #666);
+  font-size: 0.85rem;
+}
+@media (max-width: 800px) {
+  .universal-search-input { width: 8rem; }
+  .universal-search-input:focus { width: 12rem; }
+  .universal-search-results { width: 18rem; }
+}
+

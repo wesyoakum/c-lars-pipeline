@@ -1465,6 +1465,57 @@ const BOARD_LEFT_MARKUP = (
 // notification bell. Only visible when the board has been hidden via
 // the X (or any other reason `isCollapsed` is true). Clicking it
 // expands both sidebars in one shot.
+// Universal search bar in the site header. Client-side Alpine component
+// fetches /api/search?q=<term> on input (debounced) and renders a
+// dropdown of results grouped by type.
+const UNIVERSAL_SEARCH_HTML = `
+<div class="universal-search" x-data="universalSearch()" @click.outside="results = null" @keydown.escape.window="results = null">
+  <div class="universal-search-input-wrap">
+    <svg class="universal-search-icon" width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="8.5" cy="8.5" r="5.5"/><line x1="13" y1="13" x2="18" y2="18"/></svg>
+    <input type="search" class="universal-search-input" placeholder="Search..."
+           x-model="query" @input.debounce.250ms="doSearch()" @focus="if(results) results = results"
+           @keydown.enter.prevent="doSearch()">
+  </div>
+  <div class="universal-search-results" x-show="results && results.length > 0" x-cloak>
+    <template x-for="r in results" :key="r.type + r.id">
+      <a :href="r.url" class="universal-search-result" @mousedown.prevent="window.location.href = r.url">
+        <span class="universal-search-type" x-text="r.type"></span>
+        <span class="universal-search-title" x-text="r.title"></span>
+        <span class="universal-search-sub" x-show="r.subtitle" x-text="r.subtitle"></span>
+      </a>
+    </template>
+  </div>
+  <div class="universal-search-results" x-show="results && results.length === 0 && query.length >= 2" x-cloak>
+    <div class="universal-search-empty">No results</div>
+  </div>
+</div>
+`;
+
+const UNIVERSAL_SEARCH_SCRIPT = (
+  "function universalSearch() {\n" +
+  "  return {\n" +
+  "    query: '',\n" +
+  "    results: null,\n" +
+  "    _abort: null,\n" +
+  "    async doSearch() {\n" +
+  "      var q = (this.query || '').trim();\n" +
+  "      if (q.length < 2) { this.results = null; return; }\n" +
+  "      if (this._abort) { try { this._abort.abort(); } catch(_) {} }\n" +
+  "      this._abort = new AbortController();\n" +
+  "      try {\n" +
+  "        var res = await fetch('/api/search?q=' + encodeURIComponent(q), {\n" +
+  "          signal: this._abort.signal,\n" +
+  "        });\n" +
+  "        var d = await res.json();\n" +
+  "        if (d.ok) this.results = d.results;\n" +
+  "      } catch(e) {\n" +
+  "        if (e.name !== 'AbortError') console.error('search failed', e);\n" +
+  "      }\n" +
+  "    },\n" +
+  "  };\n" +
+  "}\n"
+);
+
 const BOARD_RESTORE_HEADER_BTN = (
   '<button type="button" class="board-restore-btn" x-data x-cloak ' +
     'x-show="$store.board && $store.board.isCollapsed" ' +
@@ -1586,6 +1637,7 @@ export function layout(title, body, opts = {}) {
       ${user && user.email === 'wes.yoakum@c-lars.com' ? navLink('/sandbox', 'Sandbox', activeNav) : ''}
     </nav>
     <div class="header-right">
+      ${user ? UNIVERSAL_SEARCH_HTML : ''}
       ${user ? BOARD_RESTORE_HEADER_BTN : ''}
       ${user ? `<a href="/notifications" class="notification-bell" aria-label="Notifications" x-data>
         <svg class="notification-bell-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
@@ -1631,6 +1683,7 @@ ${body}
   ${flash ? `<script>${FLASH_AUTODISMISS_SCRIPT}</script>` : ''}
   ${user ? `<script>${NOTIFICATION_STORE_SCRIPT}</script>` : ''}
   ${user ? `<script>${BLOCKER_MODAL_STORE_SCRIPT}</script>` : ''}
+  ${user ? `<script>${UNIVERSAL_SEARCH_SCRIPT}</script>` : ''}
 </body>
 </html>`;
 }
