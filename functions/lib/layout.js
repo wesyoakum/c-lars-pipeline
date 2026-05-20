@@ -1648,7 +1648,7 @@ export function layout(title, body, opts = {}) {
       </a>` : ''}
       <div class="user-badge">
         ${user ? `<span class="user-name">${escape(user.display_name ?? user.email)}</span>
-                   <span class="user-role">${escape(user.email ?? '')} · ${escape(ROLE_DISPLAY_NAMES[user.role] ?? user.role)}</span>` : '<span>Not signed in</span>'}
+                   <span class="user-role" title="${escape(user.role)}">${escape(user.email ?? '')} · ${escape(ROLE_DISPLAY_NAMES[user.role] ?? user.role)}</span>` : '<span>Not signed in</span>'}
       </div>
     </div>
   </header>

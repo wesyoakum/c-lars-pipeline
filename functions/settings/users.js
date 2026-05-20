@@ -104,7 +104,7 @@ export async function onRequestGet(context) {
                       ${!r.active ? raw('class="inactive"') : ''}>
                     <td class="col-email" data-col="email">${escape(r.email)}</td>
                     <td class="col-display_name" data-col="display_name">${escape(r.display_name)}</td>
-                    <td class="col-role" data-col="role">
+                    <td class="col-role" data-col="role" title="${escape(r.role)}">
                       ${ieSelect('role', r.role, ROLE_OPTIONS)}
                     </td>
                     <td class="col-status" data-col="status">
