@@ -25,6 +25,7 @@ const ROLE_OPTIONS = [
   { value: 'member',  label: 'Technician' },
   { value: 'service', label: 'MAGI' },
   { value: 'viewer',  label: 'Observer' },
+  { value: 'ai',      label: 'Robot' },
 ];
 
 const ACTIVE_OPTIONS = [
