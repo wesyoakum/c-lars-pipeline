@@ -1287,16 +1287,25 @@ export async function onRequestGet(context) {
            Katana push milestone breakdown. Available on every quote
            type, every status (allowed on read-only via the patch
            route's READONLY_OVERRIDE_FIELDS). -->
-      <div x-data="paymentScheduleEditor()" style="margin-top:1rem;padding:.6rem .75rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-elev)">
-        <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">
+      <div x-data="paymentScheduleEditor()" x-init="init()" style="margin-top:1rem;padding:.6rem .75rem;border:1px solid var(--border);border-radius:4px;background:var(--bg-elev)">
+        <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;cursor:pointer;user-select:none"
+             @click="collapsed = !collapsed"
+             :title="collapsed ? 'Expand the payment schedule editor' : 'Collapse the payment schedule editor'">
+          <span style="font-size:.75em;color:var(--fg-muted);width:1rem;display:inline-block;text-align:center"
+                x-text="collapsed ? '▶' : '▼'"></span>
           <strong>Payment schedule</strong>
-          <span class="muted" style="font-size:.8em">— milestone rows (% + weeks ARO + label). Saving rewrites the Terms text below and the Katana push milestones.</span>
+          <span class="muted" style="font-size:.8em" x-show="!collapsed">— milestone rows (% + weeks ARO + label). Saving rewrites the Terms text below and the Katana push milestones.</span>
+          <span class="muted" style="font-size:.8em" x-show="collapsed" x-cloak>
+            <span x-show="rows.length > 0" x-text="rows.length + ' row(s), ' + totalPct + '%'"></span>
+            <span x-show="rows.length === 0">(empty — push falls back to site default)</span>
+          </span>
         </div>
-        <div class="muted" style="font-size:.75em;margin-top:.2rem">
-          Use <code>{percent}</code> and <code>{weeks}</code> inside the label to substitute the row's values in the customer-facing text
-          (e.g. <code>Due {percent}% upon order confirmation</code> &rarr; <em>Due 10% upon order confirmation</em>).
-          Labels without tokens get a legacy <code>N% &lt;label&gt;</code> prefix.
-        </div>
+        <div x-show="!collapsed" x-cloak>
+          <div class="muted" style="font-size:.75em;margin-top:.2rem">
+            Use <code>{percent}</code> and <code>{weeks}</code> inside the label to substitute the row's values in the customer-facing text
+            (e.g. <code>Due {percent}% upon order confirmation</code> &rarr; <em>Due 10% upon order confirmation</em>).
+            Labels without tokens get a legacy <code>N% &lt;label&gt;</code> prefix.
+          </div>
 
         <!-- Inline styles scoped to this table — keeps the editor's
              visual chrome lighter than the rest of the quote page. -->
@@ -1421,6 +1430,7 @@ export async function onRequestGet(context) {
                   x-text="setDefaultLabel"
                   ${readOnly ? 'disabled' : ''}></button>
         </div>
+        </div><!-- /x-show !collapsed -->
       </div>
 
       ${quote.quote_type === 'eps'
@@ -1895,9 +1905,48 @@ export async function onRequestGet(context) {
           typeLabel: _typeLabel || '',
           isAdmin: !!_isAdminForDefaults,
           typeDefaultRows: _typeDefaultSchedule ? rowsFrom(_typeDefaultSchedule) : null,
+          collapsed: false,
           saving: false,
           saveLabel: 'Save schedule',
           setDefaultLabel: 'Set as default for this type',
+          init: function() {
+            var self = this;
+            // Live-sync the Terms textarea below as the user edits the
+            // schedule. Mirrors the server-side scheduleToString()
+            // renderer (lib/quote-payment-schedule.js) so what you see
+            // here is what lands in the doc.
+            this.$watch('rows', function() { self.broadcastRendered(); }, { deep: true });
+            this.broadcastRendered();
+          },
+          broadcastRendered: function() {
+            document.dispatchEvent(new CustomEvent('payment-schedule-rendered', {
+              detail: { hasSchedule: this.rows.length > 0, text: this.renderedText },
+            }));
+          },
+          get renderedText() {
+            function fmt(p) {
+              var n = Number(p);
+              if (!isFinite(n)) return '0';
+              if (n === Math.floor(n)) return String(n);
+              return n.toFixed(2).replace(/\\.?0+$/, '');
+            }
+            return this.rows.map(function(r) {
+              var pct = fmt(r.percent);
+              var w   = (r.weeks === '' || r.weeks == null) ? null : Number(r.weeks);
+              var wStr = w == null ? '' : String(w);
+              var label = String(r.label || '').trim();
+              var hasP = label.indexOf('{percent}') >= 0;
+              var hasW = label.indexOf('{weeks}') >= 0;
+              if (hasP || hasW) {
+                return label.replace(/\\{percent\\}/g, pct).replace(/\\{weeks\\}/g, wStr);
+              }
+              var out = pct + '% ' + label;
+              if (w != null && w > 0 && !/week/i.test(label)) {
+                out += ' ' + w + (w === 1 ? ' week' : ' weeks') + ' after Order Confirmation.';
+              }
+              return out;
+            }).join('\\n');
+          },
           get totalPct() {
             var s = 0;
             for (var i = 0; i < this.rows.length; i++) {
@@ -2105,6 +2154,17 @@ export async function onRequestGet(context) {
             document.addEventListener('delivery-changed', function(e) {
               if (self.useDefault && e.detail.weeks) self.applyDefault();
             });
+            // Step 3 — when the per-quote payment schedule editor
+            // above broadcasts an update, mirror it into this
+            // textarea so the user sees the doc-rendered text live.
+            document.addEventListener('payment-schedule-rendered', function(e) {
+              if (e.detail && e.detail.hasSchedule) {
+                self._skipWatch = true;
+                self.useDefault = false;
+                self._skipWatch = false;
+                self.termsVal = e.detail.text;
+              }
+            });
           },
           applyDefault: function() {
             if (!_deliveryWeeks) return;
@@ -2153,6 +2213,15 @@ export async function onRequestGet(context) {
             this.$watch('useDefault', function(val) {
               if (self._skipWatch) return;
               if (val) self.applyDefault();
+            });
+            // Step 3 — sync from the per-quote payment schedule editor.
+            document.addEventListener('payment-schedule-rendered', function(e) {
+              if (e.detail && e.detail.hasSchedule) {
+                self._skipWatch = true;
+                self.useDefault = false;
+                self._skipWatch = false;
+                self.termsVal = e.detail.text;
+              }
             });
           },
           applyDefault: function() {
@@ -2242,6 +2311,18 @@ export async function onRequestGet(context) {
               if (self._skipWatch) return;
               if (val) self.applyDefault();
             });
+            // Step 3 — only payment_terms mirrors the schedule editor.
+            // delivery_terms stays free-text.
+            if (this.field === 'payment_terms') {
+              document.addEventListener('payment-schedule-rendered', function(e) {
+                if (e.detail && e.detail.hasSchedule) {
+                  self._skipWatch = true;
+                  self.useDefault = false;
+                  self._skipWatch = false;
+                  self.val = e.detail.text;
+                }
+              });
+            }
           },
           applyDefault: function() {
             var deflt = _defaultFor(_quoteType, this.field);
