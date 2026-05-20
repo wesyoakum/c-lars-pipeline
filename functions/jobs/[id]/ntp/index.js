@@ -131,11 +131,12 @@ export async function onRequestGet(context) {
               </form>
             ` : ''}
             ${canGenerate ? html`
-              <form method="post" action="/jobs/${escape(jobId)}/generate-ntp-pdf" class="inline-form" target="_blank" rel="noopener">
-                <button class="btn btn-icon" type="submit" title="Generate NTP PDF (opens in a new tab)" aria-label="Generate NTP PDF">
-                  ${raw(ICON_PDF)}
-                </button>
-              </form>
+              <button class="btn btn-icon" type="button" disabled
+                      title="PDF generation is being upgraded — use the Word (.docx) download for now"
+                      aria-label="PDF temporarily unavailable"
+                      style="opacity:0.4;cursor:not-allowed">
+                ${raw(ICON_PDF)}
+              </button>
               <form method="post" action="/jobs/${escape(jobId)}/generate-ntp-docx" class="inline-form" target="_blank" rel="noopener">
                 <button class="btn btn-icon" type="submit" title="Download NTP Word document (opens in a new tab)" aria-label="Download NTP Word">
                   ${raw(ICON_DOCX)}

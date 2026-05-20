@@ -479,11 +479,12 @@ export async function onRequestGet(context) {
                 <button class="btn danger" type="submit">Delete</button>
               </form>
             ` : ''}
-            <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/generate-pdf" class="inline-form" target="_blank" rel="noopener">
-              <button class="btn btn-icon" type="submit" title="Generate PDF (opens in a new tab)" aria-label="Generate PDF">
-                ${raw(ICON_PDF)}
-              </button>
-            </form>
+            <button class="btn btn-icon" type="button" disabled
+                    title="PDF generation is being upgraded — use the Word (.docx) download for now"
+                    aria-label="PDF temporarily unavailable"
+                    style="opacity:0.4;cursor:not-allowed">
+              ${raw(ICON_PDF)}
+            </button>
             <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/generate-docx" class="inline-form" target="_blank" rel="noopener">
               <button class="btn btn-icon" type="submit" title="Download Word document (opens in a new tab)" aria-label="Download Word">
                 ${raw(ICON_DOCX)}
