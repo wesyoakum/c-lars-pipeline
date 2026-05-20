@@ -1303,8 +1303,7 @@ export async function onRequestGet(context) {
             <tr>
               <th style="text-align:right;width:5rem">%</th>
               <th style="text-align:right;width:6rem">Weeks ARO</th>
-              <th style="text-align:left">Label</th>
-              <th style="text-align:left;width:18rem">Katana variant</th>
+              <th style="text-align:left">Label &amp; Katana variant</th>
               <th style="width:5rem"></th>
               <th style="width:2.5rem"></th>
             </tr>
@@ -1314,20 +1313,28 @@ export async function onRequestGet(context) {
               <tr>
                 <td><input type="number" min="0.01" max="100" step="0.01" x-model.number="row.percent" style="width:100%;text-align:right" ${readOnly ? 'disabled' : ''}></td>
                 <td><input type="number" min="0" step="1" x-model="row.weeks" style="width:100%;text-align:right" placeholder="—" ${readOnly ? 'disabled' : ''}></td>
-                <td><input type="text" x-model="row.label" placeholder="e.g. Due {percent}% upon order confirmation, {weeks} weeks ARO" style="width:100%" ${readOnly ? 'disabled' : ''}></td>
                 <td>
-                  <select x-model.number="row.katana_variant_id" @change="syncSku(row)" style="width:100%;font-size:.85em" ${readOnly ? 'disabled' : ''}>
-                    <option value="">— ordinal fallback (#<span x-text="idx + 1"></span>) —</option>
-                    <template x-for="v in siteRows" :key="v.katana_variant_id">
-                      <option :value="v.katana_variant_id" x-text="(v.katana_sku || ('#' + v.katana_variant_id)) + ' — ' + v.label"></option>
-                    </template>
-                  </select>
-                  <div class="muted" style="font-size:.7em;margin-top:.1rem" x-show="row.katana_variant_id">
-                    SKU <code x-text="row.katana_sku || '—'"></code> &middot; id <code x-text="row.katana_variant_id"></code>
-                  </div>
-                  <div class="muted" style="font-size:.7em;margin-top:.1rem;color:#9a6700" x-show="!row.katana_variant_id">
-                    <span x-show="idx < siteRows.length">Will use Nth site default at push (<code x-text="siteRows[idx] ? siteRows[idx].katana_sku : '?'"></code>).</span>
-                    <span x-show="idx >= siteRows.length">&#9888; No fallback for row <span x-text="idx + 1"></span> — push will block until you pick a variant or extend the site map.</span>
+                  <input type="text" x-model="row.label"
+                         placeholder="e.g. Due {percent}% upon order confirmation, {weeks} weeks ARO"
+                         style="width:100%" ${readOnly ? 'disabled' : ''}>
+                  <div style="display:flex;align-items:center;gap:.4rem;margin-top:.2rem">
+                    <span class="muted" style="font-size:.7em;flex-shrink:0">Katana variant:</span>
+                    <select x-model.number="row.katana_variant_id"
+                            @change="syncSku(row)"
+                            style="flex:1;font-size:.8em;padding:.05rem .25rem"
+                            ${readOnly ? 'disabled' : ''}>
+                      <option value="">— ordinal fallback —</option>
+                      <template x-for="v in siteRows" :key="v.katana_variant_id">
+                        <option :value="v.katana_variant_id" x-text="(v.katana_sku || ('#' + v.katana_variant_id)) + ' — ' + v.label"></option>
+                      </template>
+                    </select>
+                    <!-- Tiny status indicator: green check when an explicit variant is set,
+                         amber dot when relying on fallback, red dot when no fallback exists. -->
+                    <span x-show="row.katana_variant_id" style="color:#1a7f37;font-size:.85em" title="Variant locked">&check;</span>
+                    <span x-show="!row.katana_variant_id && idx < siteRows.length" class="muted" style="font-size:.7em"
+                          :title="'Will use site default at push: ' + (siteRows[idx] ? siteRows[idx].katana_sku : '?')">fallback</span>
+                    <span x-show="!row.katana_variant_id && idx >= siteRows.length" style="color:#b3261e;font-size:.7em"
+                          title="No fallback for this row position — push will block until you pick a variant.">&#9888; no fallback</span>
                   </div>
                 </td>
                 <td style="text-align:center;white-space:nowrap">
@@ -1340,13 +1347,13 @@ export async function onRequestGet(context) {
               </tr>
             </template>
             <tr x-show="rows.length === 0">
-              <td colspan="6" class="muted" style="text-align:center;padding:.5rem;font-style:italic">No schedule set — push falls back to the site-default milestones at Settings &rarr; Katana milestones.</td>
+              <td colspan="5" class="muted" style="text-align:center;padding:.5rem;font-style:italic">No schedule set — push falls back to the site-default milestones at Settings &rarr; Katana milestones.</td>
             </tr>
             <tr x-show="rows.length > 0">
               <td style="text-align:right" :style="sumOk ? 'color:#1a7f37' : 'color:#b3261e'">
                 <strong x-text="totalPct + '%'"></strong>
               </td>
-              <td colspan="5" class="muted" style="font-size:.8em">
+              <td colspan="4" class="muted" style="font-size:.8em">
                 <span x-show="sumOk">Sum = 100% ✓</span>
                 <span x-show="!sumOk" style="color:#b3261e">Must equal 100%</span>
               </td>
