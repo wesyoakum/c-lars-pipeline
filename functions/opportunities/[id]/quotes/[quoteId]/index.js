@@ -491,37 +491,44 @@ export async function onRequestGet(context) {
               <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/start-oc" class="inline-form">
                 <button class="btn primary" type="submit" title="Create (or jump to) the job for this opportunity and open the Issue OC form">Start Order Confirmation</button>
               </form>
-              <!-- Empty x-data so Alpine processes the directives + templates
-                   below. Alpine 3 only walks descendants of x-data roots;
-                   without this wrapper the <template x-if> blocks never
-                   clone their content into the DOM and the test button's
-                   x-text never evaluates. display:contents keeps these
-                   elements direct flex children of .header-actions so
-                   button spacing is identical to the rest of the bar. -->
+              <!-- Empty x-data so Alpine processes the directives below.
+                   display:contents keeps these elements direct flex children
+                   of .header-actions so button spacing is identical to the
+                   rest of the bar.
+                   Buttons are always rendered (not inside <template x-if>)
+                   with static fallback text/visibility, so they appear even
+                   if Alpine fails to evaluate the directives. Alpine's
+                   x-show / x-text refines the visible state when it runs. -->
               <div x-data style="display:contents">
-                <template x-if="$store.katanaPush && $store.katanaPush.alreadyPushed">
-                  <span class="katana-pushed-badge" :title="'Pushed ' + ($store.katanaPush.pushedAt || '')">
-                    &check; Pushed to Katana: SO #<span x-text="$store.katanaPush.salesOrderId"></span>
-                    <button type="button" class="katana-pushed-unlink" @click="$store.katanaPush.unlink()" :disabled="$store.katanaPush.busy" title="Unlink (Katana sales order is left in place)">&times;</button>
-                  </span>
-                </template>
-                <template x-if="$store.katanaPush && !$store.katanaPush.alreadyPushed">
-                  <button type="button" class="btn"
-                          @click="$store.katanaPush.openModal()"
-                          :disabled="!$store.katanaPush.canPush"
-                          :title="$store.katanaPush.canPush ? 'Push this quote to Katana as a sales order' : ('Cannot push: ' + $store.katanaPush.blockReason)">
-                    Push to Katana
-                  </button>
-                </template>
-                <!-- Step 1 diagnostic: minimal test push. Disabled only
-                     while a test is in flight or the account has no
-                     Katana mapping. Available regardless of "already
-                     pushed" state — re-runnable any time. -->
+                <!-- Already-pushed badge. Hidden by default via x-cloak;
+                     Alpine reveals it only when alreadyPushed is true. -->
+                <span x-cloak x-show="$store.katanaPush && $store.katanaPush.alreadyPushed"
+                      class="katana-pushed-badge"
+                      :title="'Pushed ' + ($store.katanaPush && $store.katanaPush.pushedAt || '')">
+                  &check; Pushed to Katana: SO #<span x-text="$store.katanaPush && $store.katanaPush.salesOrderId"></span>
+                  <button type="button" class="katana-pushed-unlink"
+                          @click="$store.katanaPush.unlink()"
+                          :disabled="$store.katanaPush && $store.katanaPush.busy"
+                          title="Unlink (Katana sales order is left in place)">&times;</button>
+                </span>
+                <!-- Push to Katana button. Always rendered; Alpine hides it
+                     when alreadyPushed, and disables it when canPush is false. -->
+                <button type="button" class="btn"
+                        x-show="!($store.katanaPush && $store.katanaPush.alreadyPushed)"
+                        @click="$store.katanaPush && $store.katanaPush.openModal()"
+                        :disabled="!($store.katanaPush && $store.katanaPush.canPush)"
+                        :title="($store.katanaPush && $store.katanaPush.canPush) ? 'Push this quote to Katana as a sales order' : ('Cannot push: ' + ($store.katanaPush && $store.katanaPush.blockReason || 'Katana not ready'))">
+                  Push to Katana
+                </button>
+                <!-- Step 1 diagnostic: minimal test push. Default text content
+                     is the steady-state label so the button is readable even
+                     if Alpine never evaluates x-text. Alpine overrides on
+                     state change (testBusy true => "Pushing test…"). -->
                 <button type="button" class="btn btn-xs"
-                        @click="$store.katanaPush.testPush()"
-                        :disabled="$store.katanaPush.testBusy || !$store.katanaPush.katanaCustomerId"
-                        :title="$store.katanaPush.katanaCustomerId ? 'Diagnostic: fires a minimal Katana sales order (TEST-{timestamp}) with one $0.01 row using the 1st milestone variant. Does NOT touch Pipeline state. Delete from Katana when done.' : 'No Katana customer mapping on this account.'"
-                        x-text="$store.katanaPush.testBusy ? 'Pushing test…' : 'Test push (minimal SO)'"></button>
+                        @click="$store.katanaPush && $store.katanaPush.testPush()"
+                        :disabled="($store.katanaPush && $store.katanaPush.testBusy) || !($store.katanaPush && $store.katanaPush.katanaCustomerId)"
+                        :title="($store.katanaPush && $store.katanaPush.katanaCustomerId) ? 'Diagnostic: fires a minimal Katana sales order (TEST-{timestamp}) with one $0.01 row using the 1st milestone variant. Does NOT touch Pipeline state. Delete from Katana when done.' : 'No Katana customer mapping on this account.'"
+                        x-text="($store.katanaPush && $store.katanaPush.testBusy) ? 'Pushing test…' : 'Test push (minimal SO)'">Test push (minimal SO)</button>
               </div>
             ` : ''}
             ${quote.status === 'accepted' || quote.status === 'rejected' || quote.status === 'expired' ? html`
