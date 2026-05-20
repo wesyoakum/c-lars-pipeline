@@ -74,8 +74,9 @@ export function iconAddButton({ onClick, href, label = 'New', extraClass = '' } 
  * and up/down reorder buttons for each column. Pass `null`/omit to
  * suppress the columns menu entirely.
  */
-export function listToolbar({ id, count, columns = null, newHref, newOnClick, newLabel = 'New' } = {}) {
+export function listToolbar({ id, count, columns = null, newHref, newOnClick, newLabel = 'New', compact = false } = {}) {
   const showMenu = Array.isArray(columns) && columns.length > 0;
+  const menuColumns = showMenu ? columns.filter(c => c.hideable !== false) : [];
   return html`
     <div class="toolbar-right">
       <div class="search-expand">
@@ -95,7 +96,7 @@ export function listToolbar({ id, count, columns = null, newHref, newOnClick, ne
           <line x1="3" y1="17" x2="17" y2="3"/>
         </svg>
       </button>
-      <!-- Table / Card view toggle. Default is table; client persists
+      ${compact ? '' : html`<!-- Table / Card view toggle. Default is table; client persists
            the choice per-list-page in localStorage and applies via a
            data-view-mode attribute on .opp-list. CSS does the rest. -->
       <div class="opp-list-view-toggle" data-role="view-toggle" role="group" aria-label="View mode">
@@ -112,14 +113,14 @@ export function listToolbar({ id, count, columns = null, newHref, newOnClick, ne
             <rect x="3" y="11" width="14" height="6" rx="1"/>
           </svg>
         </button>
-      </div>
+      </div>`}
       ${showMenu ? html`
         <details class="opp-list-columns" data-role="columns-menu" style="display:inline-block">
           <summary class="icon-btn" title="Columns">
             <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="3" x2="4" y2="17"/><line x1="10" y1="3" x2="10" y2="17"/><line x1="16" y1="3" x2="16" y2="17"/></svg>
           </summary>
           <div class="opp-list-columns-menu" data-role="columns-list">
-            ${columns.map(c => html`
+            ${menuColumns.map(c => html`
               <div class="opp-list-column-row" data-column-row="${c.key}" draggable="true">
                 <span class="opp-list-column-grip" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
                 <label class="checkbox">
@@ -202,12 +203,16 @@ export function rowDataAttrs(columns, row) {
  *                                 persists to localStorage alongside sort /
  *                                 column visibility / order / widths.
  */
-export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDir = 'desc', defaultFilters = {}) {
+export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDir = 'desc', defaultFilters = {}, opts = {}) {
+  const listId = opts.listId || '';
+  const hostSelector = listId
+    ? `.opp-list[data-list-id="${listId}"]`
+    : '.opp-list';
   return `
 (function() {
   try {
     var STORAGE_KEY = '${storageKey}';
-    var host = document.querySelector('.opp-list');
+    var host = document.querySelector('${hostSelector}');
     if (!host) return;
 
     var columns = [];
@@ -218,12 +223,12 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     if (!tbody) return;
     var allRows = Array.prototype.slice.call(tbody.querySelectorAll('tr[data-row-id]'));
     var totalRows = allRows.length;
-    var countEl = document.querySelector('[data-role="count"]');
-    var quickSearchInput = document.querySelector('[data-role="quicksearch"]');
-    var clearFiltersBtn = document.querySelector('[data-role="clear-filters"]');
     // Columns-menu elements live in the toolbar (a sibling of .opp-list),
-    // not inside it, so queries go through document instead of host.
+    // not inside it, so queries go through the nearest card, not host.
     var menuScope = host.closest('.card') || document;
+    var countEl = menuScope.querySelector('[data-role="count"]');
+    var quickSearchInput = menuScope.querySelector('[data-role="quicksearch"]');
+    var clearFiltersBtn = menuScope.querySelector('[data-role="clear-filters"]');
 
     // -- State -----------------------------------------------------------
 
@@ -237,7 +242,13 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       // visibility based on data-view-mode on the .opp-list host.
       viewMode: 'table',
     };
-    columns.forEach(function(c) { state.visible[c.key] = c.default !== false; });
+    columns.forEach(function(c) {
+      state.visible[c.key] = c.default !== false;
+    });
+    // Force non-hideable columns visible regardless of saved state.
+    function enforceNonHideable() {
+      columns.forEach(function(c) { if (c.hideable === false) state.visible[c.key] = true; });
+    }
 
     // Populated from localStorage (or the site-wide fallback) inside the
     // merge block below; applied to filterState once it's declared
@@ -288,6 +299,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         }
       }
     } catch (e) {}
+    enforceNonHideable();
 
     function save() {
       try {

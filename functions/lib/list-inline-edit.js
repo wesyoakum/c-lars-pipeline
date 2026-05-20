@@ -131,13 +131,17 @@ export function ieTextarea(field, value, opts = {}) {
  */
 export function listInlineEditScript(patchUrlTemplate, opts = {}) {
   const fieldAttrMap = opts.fieldAttrMap ?? {};
+  const listId = opts.listId || '';
+  const hostSelector = listId
+    ? `.opp-list[data-list-id="${listId}"]`
+    : '.opp-list';
   return `
 (function() {
   try {
     var PATCH_URL_TEMPLATE = ${JSON.stringify(patchUrlTemplate)};
     var FIELD_ATTR_MAP = ${JSON.stringify(fieldAttrMap)};
 
-    var host = document.querySelector('.opp-list');
+    var host = document.querySelector('${hostSelector}');
     if (!host) return;
     var tbody = host.querySelector('[data-role="rows"]');
     if (!tbody) return;

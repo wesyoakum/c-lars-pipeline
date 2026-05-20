@@ -15,6 +15,8 @@ import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
 import { loadStageCatalog } from '../../lib/stages.js';
 import { buildAccountPickerItems } from '../../lib/account-groups.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
+import { ieText, ieSelect, listInlineEditScript } from '../../lib/list-inline-edit.js';
 import {
   loadPricingSettings,
   loadCostBuildBundle,
@@ -968,34 +970,70 @@ export async function onRequestGet(context) {
   `;
 
   // ---- Price builds tab --------------------------------------------------
+  const pbCols = [
+    { key: 'label',   label: 'Label',   sort: 'text',   filter: 'text',   default: true },
+    { key: 'quote',   label: 'Quote',   sort: 'text',   filter: 'text',   default: true },
+    { key: 'line',    label: 'Line',    sort: 'text',   filter: 'text',   default: true },
+    { key: 'status',  label: 'Status',  sort: 'text',   filter: 'select', default: true },
+    { key: 'cost',    label: 'Cost',    sort: 'number', filter: null,     default: true },
+    { key: 'price',   label: 'Price',   sort: 'number', filter: null,     default: true },
+    { key: 'margin',  label: 'Margin',  sort: 'number', filter: null,     default: true },
+    { key: 'actions', label: '',        sort: null,      filter: null,     default: true, hideable: false },
+  ];
+  const pbData = priceBuildRows.map(({ row, result }) => {
+    const marg = result.pricing.margin;
+    return {
+      id: row.id,
+      label: row.label || '(unlabeled)',
+      quote: `${row.quote_number} Rev ${row.quote_revision}`,
+      quote_id: row.quote_id,
+      quote_line_id: row.quote_line_id,
+      line: row.line_description || '',
+      status: row.status ?? '',
+      cost: result.pricing.effective.totalCost ?? '',
+      cost_display: fmtDollar(result.pricing.effective.totalCost),
+      price: result.pricing.effective.quote ?? '',
+      price_display: fmtDollar(result.pricing.effective.quote),
+      margin: marg.amount ?? '',
+      margin_display: marg.amount !== null ? `${fmtDollar(marg.amount)} (${fmtPct(marg.pct)})` : '\u2014',
+      margin_status: marg.status,
+      actions: '',
+    };
+  });
   const costTab = html`
     <section class="card">
-      <div class="card-header"><h2>Price builds</h2></div>
+      <div class="card-header">
+        <h2>Price builds</h2>
+        ${listToolbar({ id: 'opp-cost', count: priceBuildRows.length, columns: pbCols, compact: true })}
+      </div>
       <p class="muted">Price builds are per line item on each quote. This tab shows a rollup across all quotes.</p>
       ${priceBuildRows.length === 0
         ? html`<p class="muted">No price builds yet.</p>`
         : html`
-          <table class="data">
-            <thead><tr><th>Label</th><th>Quote</th><th>Line</th><th>Status</th><th class="num">Cost</th><th class="num">Price</th><th class="num">Margin</th><th></th></tr></thead>
-            <tbody>
-              ${priceBuildRows.map(({ row, result }) => {
-                const marg = result.pricing.margin;
-                const pillClass = marg.status === 'good' ? 'pill pill-success' : marg.status === 'low' ? 'pill pill-warn' : 'pill';
-                const marginCell = marg.amount !== null ? html`<span class="${pillClass}">${fmtDollar(marg.amount)} (${fmtPct(marg.pct)})</span>` : '\u2014';
-                const pbUrl = `/opportunities/${opp.id}/quotes/${row.quote_id}/lines/${row.quote_line_id}/price-build`;
-                return html`<tr>
-                  <td><a href="${pbUrl}">${escape(row.label || '(unlabeled)')}</a></td>
-                  <td><a href="/opportunities/${escape(opp.id)}/quotes/${escape(row.quote_id)}">${escape(row.quote_number)} Rev ${escape(row.quote_revision)}</a></td>
-                  <td>${escape(row.line_description || '')}</td>
-                  <td><span class="pill ${row.status === 'locked' ? 'pill-locked' : ''}">${escape(row.status)}</span></td>
-                  <td class="num">${fmtDollar(result.pricing.effective.totalCost)}</td>
-                  <td class="num">${fmtDollar(result.pricing.effective.quote)}</td>
-                  <td class="num">${marginCell}</td>
-                  <td class="row-actions"><a class="btn small" href="${pbUrl}">${row.status === 'locked' ? 'View' : 'Edit'}</a></td>
-                </tr>`;
-              })}
-            </tbody>
-          </table>`}
+          <div class="opp-list" data-list-id="opp-cost" data-columns="${escape(JSON.stringify(pbCols))}">
+            <table class="data opp-list-table">
+              ${listTableHead(pbCols)}
+              <tbody data-role="rows">
+                ${pbData.map(r => {
+                  const pbUrl = `/opportunities/${opp.id}/quotes/${r.quote_id}/lines/${r.quote_line_id}/price-build`;
+                  const pillClass = r.margin_status === 'good' ? 'pill pill-success' : r.margin_status === 'low' ? 'pill pill-warn' : 'pill';
+                  return html`<tr data-row-id="${escape(r.id)}"
+                      data-row-href="${escape(pbUrl)}"
+                      ${raw(rowDataAttrs(pbCols, r))}>
+                    <td class="col-label" data-col="label"><a href="${pbUrl}">${escape(r.label)}</a></td>
+                    <td class="col-quote" data-col="quote"><a href="/opportunities/${escape(opp.id)}/quotes/${escape(r.quote_id)}">${escape(r.quote)}</a></td>
+                    <td class="col-line" data-col="line">${escape(r.line)}</td>
+                    <td class="col-status" data-col="status"><span class="pill ${r.status === 'locked' ? 'pill-locked' : ''}">${escape(r.status)}</span></td>
+                    <td class="col-cost num" data-col="cost">${escape(r.cost_display)}</td>
+                    <td class="col-price num" data-col="price">${escape(r.price_display)}</td>
+                    <td class="col-margin num" data-col="margin"><span class="${pillClass}">${escape(r.margin_display)}</span></td>
+                    <td class="col-actions" data-col="actions" data-row-no-nav><a class="btn small" href="${pbUrl}">${r.status === 'locked' ? 'View' : 'Edit'}</a></td>
+                  </tr>`;
+                })}
+              </tbody>
+            </table>
+          </div>
+          <script>${raw(listScript('pipeline.opp.cost.v1', 'label', 'asc', {}, { listId: 'opp-cost' }))}</script>`}
     </section>`;
 
   // ---- Quotes tab --------------------------------------------------------
@@ -1030,33 +1068,59 @@ export async function onRequestGet(context) {
             </div>
           </form>
         </details>`;
+  const qtCols = [
+    { key: 'number',     label: 'Number',      sort: 'text',   filter: 'text',   default: true },
+    { key: 'revision',   label: 'Rev',          sort: 'text',   filter: 'text',   default: true },
+    { key: 'type_label', label: 'Type',         sort: 'text',   filter: 'select', default: true },
+    { key: 'title',      label: 'Title',        sort: 'text',   filter: 'text',   default: true },
+    { key: 'status',     label: 'Status',       sort: 'text',   filter: 'select', default: true },
+    { key: 'total',      label: 'Total',        sort: 'number', filter: null,     default: true },
+    { key: 'valid',      label: 'Valid until',  sort: 'date',   filter: 'text',   default: true },
+    { key: 'actions',    label: '',             sort: null,      filter: null,     default: true, hideable: false },
+  ];
+  const qtRows = quoteRows.map(q => ({
+    id: q.id,
+    number: q.number ?? '',
+    revision: q.revision ?? '',
+    type_label: quoteTypeDisplayLabel(q.quote_type),
+    title: q.title || '(no title)',
+    status: QUOTE_STATUS_LABELS[q.status] ?? q.status,
+    status_class: quoteStatusPillClass(q.status),
+    total: q.total_price != null ? Number(q.total_price) : '',
+    total_display: fmtDollar(q.total_price),
+    valid: q.valid_until ?? '',
+    actions: '',
+  }));
   const quotesTab = html`
     <section class="card">
       <div class="card-header">
         <h2>Quotes</h2>
+        ${listToolbar({ id: 'opp-quotes', count: quoteRows.length, columns: qtCols, compact: true })}
         ${quoteCreateForm}
       </div>
       ${quoteRows.length === 0
         ? html`<p class="muted">No quotes yet.</p>`
         : html`
-          <table class="data quotes-table">
-            <thead><tr><th>Number</th><th>Rev</th><th>Type</th><th>Title</th><th>Status</th><th class="num">Total</th><th>Valid until</th><th></th></tr></thead>
-            <tbody>
-              ${quoteRows.map(q => {
-                const statusClass = quoteStatusPillClass(q.status);
-                return html`<tr>
-                  <td style="white-space:nowrap"><code>${escape(q.number)}</code></td>
-                  <td style="white-space:nowrap">${escape(q.revision)}</td>
-                  <td style="white-space:nowrap">${escape(quoteTypeDisplayLabel(q.quote_type))}</td>
-                  <td><a href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">${escape(q.title || '(no title)')}</a></td>
-                  <td style="white-space:nowrap"><span class="pill ${statusClass}">${escape(QUOTE_STATUS_LABELS[q.status] ?? q.status)}</span></td>
-                  <td class="num" style="white-space:nowrap">${fmtDollar(q.total_price)}</td>
-                  <td style="white-space:nowrap"><small class="muted">${escape(q.valid_until ?? '—')}</small></td>
-                  <td class="row-actions" style="white-space:nowrap"><a class="btn small" href="/opportunities/${escape(opp.id)}/quotes/${escape(q.id)}">Open</a></td>
-                </tr>`;
-              })}
-            </tbody>
-          </table>`}
+          <div class="opp-list" data-list-id="opp-quotes" data-columns="${escape(JSON.stringify(qtCols))}">
+            <table class="data opp-list-table">
+              ${listTableHead(qtCols)}
+              <tbody data-role="rows">
+                ${qtRows.map(r => html`<tr data-row-id="${escape(r.id)}"
+                    data-row-href="/opportunities/${escape(opp.id)}/quotes/${escape(r.id)}"
+                    ${raw(rowDataAttrs(qtCols, r))}>
+                  <td class="col-number" data-col="number" style="white-space:nowrap"><code>${escape(r.number)}</code></td>
+                  <td class="col-revision" data-col="revision" style="white-space:nowrap">${escape(r.revision)}</td>
+                  <td class="col-type_label" data-col="type_label" style="white-space:nowrap">${escape(r.type_label)}</td>
+                  <td class="col-title" data-col="title"><a href="/opportunities/${escape(opp.id)}/quotes/${escape(r.id)}">${escape(r.title)}</a></td>
+                  <td class="col-status" data-col="status" style="white-space:nowrap"><span class="pill ${r.status_class}">${escape(r.status)}</span></td>
+                  <td class="col-total num" data-col="total" style="white-space:nowrap">${escape(r.total_display)}</td>
+                  <td class="col-valid" data-col="valid" style="white-space:nowrap"><small class="muted">${escape(r.valid || '—')}</small></td>
+                  <td class="col-actions" data-col="actions" data-row-no-nav style="white-space:nowrap"><a class="btn small" href="/opportunities/${escape(opp.id)}/quotes/${escape(r.id)}">Open</a></td>
+                </tr>`)}
+              </tbody>
+            </table>
+          </div>
+          <script>${raw(listScript('pipeline.opp.quotes.v1', 'number', 'asc', {}, { listId: 'opp-quotes' }))}</script>`}
     </section>`;
 
   // ---- Tasks tab ---------------------------------------------------------
@@ -1065,41 +1129,93 @@ export async function onRequestGet(context) {
     opportunity_id: opp.id,
     link_label: `${opp.number} — ${opp.title ?? ''}`.trim(),
   });
+  const tkCols = [
+    { key: 'check',    label: '',          sort: null,     filter: null,     default: true, hideable: false },
+    { key: 'subject',  label: 'Subject',   sort: 'text',   filter: 'text',   default: true },
+    { key: 'type',     label: 'Type',      sort: 'text',   filter: 'select', default: true },
+    { key: 'assigned', label: 'Assigned',  sort: 'text',   filter: 'text',   default: true },
+    { key: 'due',      label: 'Due',       sort: 'date',   filter: 'text',   default: true },
+    { key: 'status',   label: 'Status',    sort: 'text',   filter: 'select', default: true },
+  ];
+  const tkData = taskRows.map(a => {
+    const isOverdue = a.status === 'pending' && a.due_at && a.due_at < new Date().toISOString().slice(0, 10);
+    return {
+      id: a.id,
+      check: '',
+      subject: a.subject || '(no subject)',
+      body_preview: a.body ? (a.body.length > 60 ? a.body.slice(0, 60) + '...' : a.body) : '',
+      type: TASK_TYPE_LABELS[a.type] ?? a.type,
+      type_raw: a.type,
+      assigned: a.assigned_name ?? a.assigned_email ?? '',
+      due: a.due_at ? a.due_at.slice(0, 10) : '',
+      status: a.status ?? '',
+      is_completed: a.status === 'completed',
+      is_overdue: isOverdue,
+    };
+  });
   const tasksTab = html`
     <section class="card">
       <div class="card-header">
         <h2>Tasks & Activities</h2>
+        ${listToolbar({ id: 'opp-tasks', count: taskRows.length, columns: tkCols, compact: true })}
         <button class="btn btn-sm primary" type="button"
                 onclick="window.Pipeline && window.Pipeline.openTaskModal(${escape(tasksTabPrefill)})">+ Add task</button>
       </div>
       ${taskRows.length === 0
         ? html`<p class="muted">No tasks or activities yet.</p>`
         : html`
-          <table class="data compact">
-            <thead><tr><th style="width:2rem"></th><th>Subject</th><th>Type</th><th>Assigned</th><th>Due</th><th>Status</th></tr></thead>
-            <tbody>
-              ${taskRows.map(a => {
-                const isOverdue = a.status === 'pending' && a.due_at && a.due_at < new Date().toISOString().slice(0, 10);
-                return html`<tr class="${a.status === 'completed' ? 'row-muted' : ''} ${isOverdue ? 'row-overdue' : ''}">
-                  <td>${a.status === 'pending'
-                    ? html`<form method="post" action="/activities/${escape(a.id)}/complete" style="display:inline"><button type="submit" class="check-btn" title="Mark complete"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/></svg></button></form>`
-                    : html`<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--green,#1a7f37)" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="M5 8l2 2 4-4"/></svg>`}</td>
-                  <td><a href="/activities/${escape(a.id)}"><strong class="${a.status === 'completed' ? 'completed-text' : ''}">${escape(a.subject || '(no subject)')}</strong></a>
-                    ${a.body ? html`<br><small class="muted">${escape(a.body.length > 60 ? a.body.slice(0, 60) + '...' : a.body)}</small>` : ''}</td>
-                  <td><span class="pill pill-${a.type}">${escape(TASK_TYPE_LABELS[a.type] ?? a.type)}</span></td>
-                  <td>${escape(a.assigned_name ?? a.assigned_email ?? '—')}</td>
-                  <td class="${isOverdue ? 'overdue-text' : ''}">${a.due_at ? escape(a.due_at.slice(0, 10)) : html`<span class="muted">—</span>`}</td>
-                  <td><span class="pill ${a.status === 'completed' ? 'pill-success' : ''}">${escape(a.status ?? '—')}</span></td>
-                </tr>`;
-              })}
-            </tbody>
-          </table>`}
+          <div class="opp-list" data-list-id="opp-tasks" data-columns="${escape(JSON.stringify(tkCols))}">
+            <table class="data opp-list-table compact">
+              ${listTableHead(tkCols)}
+              <tbody data-role="rows">
+                ${tkData.map(r => html`<tr data-row-id="${escape(r.id)}"
+                    data-row-href="/activities/${escape(r.id)}"
+                    ${raw(rowDataAttrs(tkCols, r))}
+                    class="${r.is_completed ? 'row-muted' : ''} ${r.is_overdue ? 'row-overdue' : ''}">
+                  <td class="col-check" data-col="check" data-row-no-nav style="width:2rem">${r.is_completed
+                    ? html`<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--green,#1a7f37)" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="M5 8l2 2 4-4"/></svg>`
+                    : html`<form method="post" action="/activities/${escape(r.id)}/complete" style="display:inline"><button type="submit" class="check-btn" title="Mark complete"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/></svg></button></form>`}</td>
+                  <td class="col-subject" data-col="subject"><a href="/activities/${escape(r.id)}"><strong class="${r.is_completed ? 'completed-text' : ''}">${escape(r.subject)}</strong></a>
+                    ${r.body_preview ? html`<br><small class="muted">${escape(r.body_preview)}</small>` : ''}</td>
+                  <td class="col-type" data-col="type"><span class="pill pill-${r.type_raw}">${escape(r.type)}</span></td>
+                  <td class="col-assigned" data-col="assigned">${escape(r.assigned || '—')}</td>
+                  <td class="col-due" data-col="due" class="${r.is_overdue ? 'overdue-text' : ''}">${r.due ? escape(r.due) : html`<span class="muted">—</span>`}</td>
+                  <td class="col-status" data-col="status"><span class="pill ${r.is_completed ? 'pill-success' : ''}">${escape(r.status || '—')}</span></td>
+                </tr>`)}
+              </tbody>
+            </table>
+          </div>
+          <script>${raw(listScript('pipeline.opp.tasks.v1', 'due', 'asc', {}, { listId: 'opp-tasks' }))}</script>`}
     </section>`;
 
   // ---- Docs tab ----------------------------------------------------------
+  const docKindOptions = Object.entries(DOC_KIND_LABELS).map(([v, l]) => ({ value: v, label: l }));
+  const dcCols = [
+    { key: 'name',       label: 'Title',     sort: 'text',   filter: 'text',   default: true },
+    { key: 'kind_label', label: 'Kind',      sort: 'text',   filter: 'select', default: true },
+    { key: 'size',       label: 'Size',      sort: 'number', filter: null,     default: true },
+    { key: 'uploaded',   label: 'Uploaded',  sort: 'date',   filter: 'text',   default: true },
+    { key: 'by',         label: 'By',        sort: 'text',   filter: 'text',   default: true },
+    { key: 'actions',    label: '',          sort: null,      filter: null,     default: true, hideable: false },
+  ];
+  const dcData = docRows.map(d => ({
+    id: d.id,
+    name: d.title || d.original_filename || 'Untitled',
+    original_filename: d.original_filename || '',
+    kind: d.kind || 'other',
+    kind_label: DOC_KIND_LABELS[d.kind] ?? d.kind ?? '',
+    size: d.size_bytes || 0,
+    size_display: fmtSize(d.size_bytes),
+    uploaded: (d.uploaded_at ?? '').slice(0, 16).replace('T', ' '),
+    by: d.uploaded_by_name ?? d.uploaded_by_email ?? '',
+    actions: '',
+  }));
   const docsTab = html`
     <section class="card">
-      <div class="card-header"><h2>Documents</h2></div>
+      <div class="card-header">
+        <h2>Documents</h2>
+        ${listToolbar({ id: 'opp-docs', count: docRows.length, columns: dcCols, compact: true })}
+      </div>
       <div x-data="dropUpload()" style="margin-bottom:1rem;">
         <form method="post" action="/documents" enctype="multipart/form-data" x-ref="uploadForm">
           <input type="hidden" name="opportunity_id" value="${escape(opp.id)}">
@@ -1127,42 +1243,44 @@ export async function onRequestGet(context) {
       ${docRows.length === 0
         ? html`<p class="muted">No documents yet.</p>`
         : html`
-          <table class="data compact">
-            <thead><tr><th>Title</th><th>Kind</th><th>Size</th><th>Uploaded</th><th>By</th><th></th></tr></thead>
-            <tbody>
-              ${docRows.map(d => {
-                const kindOpts = JSON.stringify(Object.entries(DOC_KIND_LABELS).map(([k, v]) => ({ value: k, label: v })));
-                return html`<tr x-data="docInline('${escape(d.id)}')">
-                <td>
-                  <span class="ie" data-field="title" data-type="text" @click="activate($el)">
-                    <span class="ie-display"><strong>${escape(d.title)}</strong></span>
-                  </span>
-                  ${d.original_filename ? html`<br><small class="muted">${escape(d.original_filename)}</small>` : ''}
-                </td>
-                <td>
-                  <span class="ie" data-field="kind" data-type="select" data-options='${escape(kindOpts)}' @click="activate($el)">
-                    <span class="ie-display"><span class="pill">${escape(DOC_KIND_LABELS[d.kind] ?? d.kind)}</span></span>
-                    <span class="ie-raw" hidden>${escape(d.kind)}</span>
-                  </span>
-                </td>
-                <td><small>${escape(fmtSize(d.size_bytes))}</small></td>
-                <td><small class="muted">${escape((d.uploaded_at ?? '').slice(0, 16).replace('T', ' '))}</small></td>
-                <td><small>${escape(d.uploaded_by_name ?? d.uploaded_by_email ?? '—')}</small></td>
-                <td class="row-actions">
-                  <a class="btn small" href="/documents/${escape(d.id)}/download" target="_blank" rel="noopener" title="Open in a new tab">Open</a>
-                  <a class="btn small" href="/documents/${escape(d.id)}/download?download=1" title="Force download">Download</a>
-                  <form method="post" action="/documents/${escape(d.id)}/replace" style="display:inline" enctype="multipart/form-data">
-                    <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}?tab=docs">
-                    <label class="btn small" style="cursor:pointer">Replace<input type="file" name="file" hidden onchange="this.form.submit()"></label>
-                  </form>
-                  <form method="post" action="/documents/${escape(d.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this document?')">
-                    <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}?tab=docs">
-                    <button class="btn small danger" type="submit">Delete</button>
-                  </form>
-                </td>
-              </tr>`; })
-            }</tbody>
-          </table>`}
+          <div class="opp-list" data-list-id="opp-docs" data-columns="${escape(JSON.stringify(dcCols))}">
+            <table class="data opp-list-table compact">
+              ${listTableHead(dcCols)}
+              <tbody data-role="rows">
+                ${dcData.map(r => html`<tr data-row-id="${escape(r.id)}"
+                    ${raw(rowDataAttrs(dcCols, r))}>
+                  <td class="col-name" data-col="name">
+                    ${ieText('title', r.name)}
+                    ${r.original_filename && r.original_filename !== r.name
+                      ? html`<br><small class="muted">${escape(r.original_filename)}</small>` : ''}
+                  </td>
+                  <td class="col-kind_label" data-col="kind_label">
+                    ${ieSelect('kind', r.kind, docKindOptions)}
+                  </td>
+                  <td class="col-size" data-col="size"><small>${escape(r.size_display)}</small></td>
+                  <td class="col-uploaded" data-col="uploaded"><small class="muted">${escape(r.uploaded || '—')}</small></td>
+                  <td class="col-by" data-col="by"><small>${escape(r.by || '—')}</small></td>
+                  <td class="col-actions" data-col="actions" data-row-no-nav>
+                    <a class="btn small" href="/documents/${escape(r.id)}/download" target="_blank" rel="noopener" title="Open in a new tab">Open</a>
+                    <a class="btn small" href="/documents/${escape(r.id)}/download?download=1" title="Force download">Download</a>
+                    <form method="post" action="/documents/${escape(r.id)}/replace" style="display:inline" enctype="multipart/form-data">
+                      <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}?tab=docs">
+                      <label class="btn small" style="cursor:pointer">Replace<input type="file" name="file" hidden onchange="this.form.submit()"></label>
+                    </form>
+                    <form method="post" action="/documents/${escape(r.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this document?')">
+                      <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}?tab=docs">
+                      <button class="btn small danger" type="submit">Delete</button>
+                    </form>
+                  </td>
+                </tr>`)}
+              </tbody>
+            </table>
+          </div>
+          <script>${raw(listScript('pipeline.opp.docs.v1', 'uploaded', 'desc', {}, { listId: 'opp-docs' }))}</script>
+          <script>${raw(listInlineEditScript('/documents/:id/patch', {
+            listId: 'opp-docs',
+            fieldAttrMap: { title: 'name', kind: 'kind_label' },
+          }))}</script>`}
     </section>`;
 
   // ---- History tab (audit events) ----------------------------------------
@@ -1746,95 +1864,6 @@ function noteForm() {
   return {
     body: '',
     fileName: '',
-  };
-}
-
-// Per-row inline-edit for documents
-function docInline(docId) {
-  const patchUrl = '/documents/' + docId + '/patch';
-  return {
-    activate(el) {
-      if (el.querySelector('.ie-input')) return;
-      const field = el.dataset.field;
-      const type = el.dataset.type;
-      const display = el.querySelector('.ie-display');
-      const rawEl = el.querySelector('.ie-raw');
-      const currentValue = rawEl ? rawEl.textContent : display.textContent.trim();
-
-      let input;
-      if (type === 'select') {
-        input = document.createElement('select');
-        input.className = 'ie-input';
-        const options = JSON.parse(el.dataset.options || '[]');
-        options.forEach(o => {
-          const opt = document.createElement('option');
-          opt.value = o.value;
-          opt.textContent = o.label;
-          if (o.value === (currentValue || '')) opt.selected = true;
-          input.appendChild(opt);
-        });
-        input.addEventListener('change', () => this.save(el, input));
-        input.addEventListener('blur', () => this.deactivate(el, input));
-      } else {
-        input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'ie-input';
-        input.value = currentValue;
-        input.addEventListener('blur', () => this.save(el, input));
-        input.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') { e.preventDefault(); this.save(el, input); }
-          if (e.key === 'Escape') { this.deactivate(el, input); }
-        });
-      }
-
-      display.style.display = 'none';
-      el.appendChild(input);
-      input.focus();
-      if (input.select) input.select();
-    },
-    async save(el, input) {
-      const field = el.dataset.field;
-      const value = input.value;
-      this.deactivate(el, input);
-      el.classList.add('ie-saving');
-      try {
-        const res = await fetch(patchUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ field, value }),
-        });
-        const data = await res.json();
-        if (!data.ok) {
-          el.classList.add('ie-error');
-          setTimeout(() => el.classList.remove('ie-error'), 2000);
-          return;
-        }
-        const display = el.querySelector('.ie-display');
-        const rawEl = el.querySelector('.ie-raw');
-        if (el.dataset.type === 'select') {
-          const options = JSON.parse(el.dataset.options || '[]');
-          const opt = options.find(o => o.value === (data.value || ''));
-          const pill = display.querySelector('.pill') || display;
-          pill.textContent = opt ? opt.label : (data.value || '—');
-        } else {
-          const strong = display.querySelector('strong') || display;
-          strong.textContent = data.value || '—';
-        }
-        if (rawEl) rawEl.textContent = data.value ?? '';
-        el.classList.add('ie-saved');
-        setTimeout(() => el.classList.remove('ie-saved'), 1200);
-      } catch (err) {
-        el.classList.add('ie-error');
-        setTimeout(() => el.classList.remove('ie-error'), 2000);
-      } finally {
-        el.classList.remove('ie-saving');
-      }
-    },
-    deactivate(el, input) {
-      if (input && input.parentNode === el) el.removeChild(input);
-      const display = el.querySelector('.ie-display');
-      if (display) display.style.display = '';
-    },
   };
 }
 
