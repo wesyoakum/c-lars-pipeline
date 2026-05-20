@@ -123,7 +123,14 @@ document.addEventListener('alpine:init', function () {
     },
     openModal: function () {
       if (!this.canPush) {
-        alert('Cannot push: ' + (this.blockReason || 'unknown reason'));
+        // Multiple block reasons are joined with '; ' on the server.
+        // Split into one-per-line so the alert reads as an actionable
+        // checklist instead of a wall of text.
+        var reasons = String(this.blockReason || 'unknown reason')
+          .split('; ').filter(Boolean)
+          .map(function(r, i) { return (i + 1) + '. ' + r; })
+          .join('\\n');
+        alert('Cannot push to Katana:\\n\\n' + reasons);
         return;
       }
       this.modalOpen = true;
@@ -578,16 +585,27 @@ export async function onRequestGet(context) {
                           :disabled="$store.katanaPush && $store.katanaPush.busy"
                           title="Unlink all (Katana sales orders are left in place)">&times;</button>
                 </span>
-                <!-- Push to Katana button. Always rendered. Visible when
-                     not fully pushed (so partial-pushed quotes can re-push
-                     the remaining lines). Disabled when canPush is false. -->
+                <!-- Push to Katana button. Always rendered + always
+                     clickable. When canPush is false the click handler
+                     surfaces the block reason via an alert (browsers
+                     suppress @click on :disabled buttons, which made
+                     blocked clicks look broken). -->
                 <button type="button" class="btn"
                         x-show="!($store.katanaPush && $store.katanaPush.fullyPushed)"
                         @click="$store.katanaPush && $store.katanaPush.openModal()"
-                        :disabled="!($store.katanaPush && $store.katanaPush.canPush)"
-                        :title="($store.katanaPush && $store.katanaPush.canPush) ? ('Push ' + ($store.katanaPush.pendingLineCount || 0) + ' line(s) to Katana, one sales order per line') : ('Cannot push: ' + ($store.katanaPush && $store.katanaPush.blockReason || 'Katana not ready'))">
+                        :title="($store.katanaPush && $store.katanaPush.canPush) ? ('Push ' + ($store.katanaPush.pendingLineCount || 0) + ' line(s) to Katana, one sales order per line') : ('Blocked: ' + ($store.katanaPush && $store.katanaPush.blockReason || 'Katana not ready') + '. Click for details.')">
                   <span x-text="($store.katanaPush && $store.katanaPush.partiallyPushed) ? 'Push remaining lines' : 'Push to Katana'">Push to Katana</span>
                 </button>
+                <!-- Inline block-reason chip. Visible whenever the push
+                     would be blocked but the button is still showing
+                     (i.e. not fully-pushed). Surfaces the reason
+                     without requiring a hover or a click. -->
+                <span x-cloak
+                      x-show="$store.katanaPush && !$store.katanaPush.fullyPushed && !$store.katanaPush.canPush"
+                      style="display:inline-flex;align-items:center;gap:.25rem;padding:.15rem .4rem;background:#fff8e1;border:1px solid #e0c97a;border-radius:3px;color:#9a6700;font-size:.75em;max-width:24rem;line-height:1.2"
+                      :title="$store.katanaPush && $store.katanaPush.blockReason">
+                  &#9888; <span x-text="$store.katanaPush && $store.katanaPush.blockReason"></span>
+                </span>
               </div>
             ` : ''}
             ${quote.status === 'accepted' || quote.status === 'rejected' || quote.status === 'expired' ? html`
