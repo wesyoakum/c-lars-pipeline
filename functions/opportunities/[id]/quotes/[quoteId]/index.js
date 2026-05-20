@@ -39,6 +39,7 @@ import {
 import { templateTypeForQuote, templateManagerHtml } from '../../../../lib/template-catalog.js';
 import { loadQuoteTermDefaultsMap, getEffectiveValidityDays } from '../../../../lib/quote-term-defaults.js';
 import { loadEpsSchedule } from '../../../../lib/eps-schedule.js';
+import { loadPaymentSchedules, renderScheduleText } from '../../../../lib/payment-schedules.js';
 import { loadMilestoneMap } from '../../../../lib/katana-milestones.js';
 import { parseQuoteSchedule, loadDefaultScheduleForType } from '../../../../lib/quote-payment-schedule.js';
 
@@ -316,6 +317,18 @@ export async function onRequestGet(context) {
   // the configured rows instead of the old hardcoded 25/25/25/15/10
   // string. Hybrid/non-EPS quotes ignore this blob.
   const epsSchedule = await loadEpsSchedule(env);
+  const paymentSchedules = await loadPaymentSchedules(env);
+
+  // Override the static payment_terms defaults with the rendered schedule
+  // text so flatTerms/plainTerms checkboxes use the admin-configured
+  // milestone rows instead of the legacy free-text defaults.
+  for (const [qt, sched] of Object.entries(paymentSchedules)) {
+    const rendered = renderScheduleText(sched);
+    if (rendered) {
+      if (!termDefaults[qt]) termDefaults[qt] = {};
+      termDefaults[qt].payment_terms = rendered;
+    }
+  }
 
   // Step 2/3 — Katana per-line push state. Each quote line becomes its
   // own Katana sales order (Adam's D079 pattern). The milestone

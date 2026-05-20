@@ -20,6 +20,7 @@ import { readFlash } from '../lib/http.js';
 import { hasRole } from '../lib/auth.js';
 import { VALIDITY_DAYS_TYPES, getQuoteValidityDays } from '../lib/quote-term-defaults.js';
 import { loadEpsSchedule, DEFAULT_EPS_SCHEDULE } from '../lib/eps-schedule.js';
+import { loadPaymentSchedules, DEFAULT_SCHEDULES, SCHEDULE_TYPES, SCHEDULE_TYPE_LABELS } from '../lib/payment-schedules.js';
 import { QUOTE_TYPE_LABELS } from '../lib/validators.js';
 import { settingsSubNav } from '../lib/settings-subnav.js';
 
@@ -65,6 +66,8 @@ export async function onRequestGet(context) {
     }
     // Current EPS default payment schedule (migration 0040).
     epsSchedule = await loadEpsSchedule(env);
+    // Non-EPS payment schedules (migration 0094).
+    var paymentSchedules = await loadPaymentSchedules(env);
     // Site-wide messaging kill-switch (migration 0049).
     const sp = await one(env.DB, 'SELECT messaging_enabled FROM site_prefs WHERE id = 1');
     messagingEnabled = sp?.messaging_enabled ? 1 : 0;
@@ -302,6 +305,60 @@ export async function onRequestGet(context) {
           <code x-text="preview"></code>
         </p>
       </section>
+
+      ${SCHEDULE_TYPES.map(qt => {
+        const sched = paymentSchedules?.[qt] || DEFAULT_SCHEDULES[qt] || { rows: [] };
+        const defaults = DEFAULT_SCHEDULES[qt] || { rows: [] };
+        return html`
+      <section class="card" x-data="paymentScheduleEditor('${qt}', ${JSON.stringify(sched)}, ${JSON.stringify(defaults)})">
+        <h2>${SCHEDULE_TYPE_LABELS[qt] || qt} default payment schedule</h2>
+        <p class="muted">
+          Fixed-percentage milestone rows for ${SCHEDULE_TYPE_LABELS[qt] || qt} quotes.
+          Percentages must sum to exactly 100.
+        </p>
+        <table class="meta-table" style="width:100%">
+          <thead>
+            <tr>
+              <th style="text-align:right;width:5rem">%</th>
+              <th style="text-align:left">Label</th>
+              <th style="width:3rem"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <template x-for="(row, i) in rows" :key="i">
+              <tr>
+                <td style="text-align:right">
+                  <input type="number" min="0" max="100" step="0.01"
+                         x-model.number="row.percent"
+                         style="width:4.5rem;text-align:right">
+                </td>
+                <td>
+                  <input type="text" x-model="row.label"
+                         placeholder="Due upon …"
+                         style="width:100%">
+                </td>
+                <td style="text-align:center">
+                  <button type="button" class="btn btn-xs" @click="removeRow(i)" title="Remove row">&times;</button>
+                </td>
+              </tr>
+            </template>
+            <tr>
+              <td style="text-align:right"><strong x-text="totalPct"></strong></td>
+              <td class="muted" x-text="totalLabel"></td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="settings-actions" style="margin-top:0.75rem">
+          <button type="button" class="btn" @click="addRow()">+ Add row</button>
+          <button type="button" class="btn primary" :disabled="busy || !isValid" @click="save()" x-text="saveLabel"></button>
+          <button type="button" class="btn" :disabled="busy" @click="resetToDefault()">Reset to default</button>
+        </div>
+        <p class="muted" style="margin-top:0.5rem;font-size:0.85em">
+          Preview: <code x-text="preview"></code>
+        </p>
+      </section>`;
+      })}
 
     ` : ''}
 
@@ -583,6 +640,86 @@ document.addEventListener('alpine:init', function () {
       },
       resetToDefault: function () {
         if (!confirm('Reset the EPS schedule to the built-in default (10/15/30/20/20/5 — six milestones aligned with Katana billing)? This does not save until you click "Save EPS schedule".')) return;
+        this.rows = cloneRows(this.siteDefault);
+      },
+    };
+  });
+
+  // Non-EPS payment schedule editor (spares, service, refurb). Same
+  // pattern as EPS but simpler — no weeks columns, just percent + label.
+  Alpine.data('paymentScheduleEditor', function (quoteType, initial, siteDefault) {
+    function cloneRows(src) {
+      return (src.rows || []).map(function (r) {
+        return { percent: r.percent == null ? '' : Number(r.percent), label: r.label || '' };
+      });
+    }
+    return {
+      quoteType: quoteType,
+      rows: cloneRows(initial),
+      siteDefault: siteDefault,
+      busy: false,
+      saveLabel: 'Save schedule',
+      get totalPct() {
+        var sum = 0;
+        this.rows.forEach(function (r) {
+          var n = Number(r.percent);
+          if (Number.isFinite(n)) sum += n;
+        });
+        return Math.round(sum * 100) / 100;
+      },
+      get totalLabel() {
+        var t = this.totalPct;
+        if (Math.abs(t - 100) <= 0.01) return 'Total: 100% \u2713';
+        return 'Total: ' + t + '% (must equal 100)';
+      },
+      get isValid() {
+        if (this.rows.length === 0) return false;
+        if (Math.abs(this.totalPct - 100) > 0.01) return false;
+        for (var i = 0; i < this.rows.length; i++) {
+          var r = this.rows[i];
+          var p = Number(r.percent);
+          if (!Number.isFinite(p) || p <= 0 || p > 100) return false;
+          if (!r.label || !String(r.label).trim()) return false;
+        }
+        return true;
+      },
+      get preview() {
+        return this.rows.map(function (r) {
+          return r.percent + '% ' + (r.label || '');
+        }).join(' \u2022 ');
+      },
+      addRow: function () { this.rows.push({ percent: 0, label: '' }); },
+      removeRow: function (i) { this.rows.splice(i, 1); },
+      save: function () {
+        var self = this;
+        if (!self.isValid) return;
+        self.busy = true;
+        self.saveLabel = 'Saving\u2026';
+        var payload = {
+          rows: self.rows.map(function (r) {
+            return { percent: Number(r.percent), label: String(r.label).trim() };
+          }),
+        };
+        fetch('/settings/payment-schedule', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ quote_type: self.quoteType, schedule: payload }),
+        }).then(function (r) {
+          if (!r.ok) return r.json().then(function (d) { throw new Error(d && d.error || ('HTTP ' + r.status)); });
+          return r.json();
+        }).then(function () {
+          self.saveLabel = 'Saved \u2713';
+          self.busy = false;
+          setTimeout(function () { self.saveLabel = 'Save schedule'; }, 1500);
+        }).catch(function (err) {
+          self.busy = false;
+          self.saveLabel = 'Save schedule';
+          alert('Could not save: ' + (err && err.message ? err.message : 'unknown error'));
+        });
+      },
+      resetToDefault: function () {
+        if (!confirm('Reset this schedule to the built-in default?')) return;
         this.rows = cloneRows(this.siteDefault);
       },
     };

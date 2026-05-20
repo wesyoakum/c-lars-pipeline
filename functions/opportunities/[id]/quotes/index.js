@@ -21,6 +21,7 @@ import {
   quoteTypeCategory,
 } from '../../../lib/validators.js';
 import { getQuoteTermDefault } from '../../../lib/quote-term-defaults.js';
+import { loadPaymentSchedules, renderScheduleText } from '../../../lib/payment-schedules.js';
 import { formBody } from '../../../lib/http.js';
 import { changeOppStage } from '../../../lib/stage-transitions.js';
 
@@ -162,13 +163,19 @@ export async function onRequestPost(context) {
   // locks the final date as `submitted_at + N` at issuance. N is editable
   // per type in Settings.
   if (!value.payment_terms) {
-    if (hasSpares) {
-      value.payment_terms = await getQuoteTermDefault(env, 'spares', 'payment_terms', '');
-    } else if (hasService) {
-      value.payment_terms = await getQuoteTermDefault(env, 'service', 'payment_terms', '');
-    } else if (hasRefurb) {
-      const refurbType = parts.find(p => p.startsWith('refurb_')) ?? 'refurb_baseline';
-      value.payment_terms = await getQuoteTermDefault(env, refurbType, 'payment_terms', '');
+    // Seed from the admin-configured payment schedule if one exists;
+    // fall back to the legacy static default in quote_term_defaults.
+    const schedules = await loadPaymentSchedules(env);
+    const seedType = hasSpares ? 'spares'
+      : hasService ? 'service'
+      : hasRefurb ? (parts.find(p => p.startsWith('refurb_')) ?? 'refurb_baseline')
+      : null;
+    if (seedType && schedules[seedType]) {
+      const rendered = renderScheduleText(schedules[seedType]);
+      if (rendered) value.payment_terms = rendered;
+    }
+    if (!value.payment_terms && seedType) {
+      value.payment_terms = await getQuoteTermDefault(env, seedType, 'payment_terms', '');
     }
     // EPS terms are computed client-side from delivery_estimate — don't seed here.
   }
