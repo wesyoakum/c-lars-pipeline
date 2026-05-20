@@ -26,7 +26,7 @@ export async function onRequestGet(context) {
 
   // Gather the 10-chart portfolio via the shared helper.
   const dashboard = await gatherDashboardCharts(env.DB);
-  const { stageLabels, totals, charts, chartsJson } = dashboard;
+  const { stageLabels, stageSortOrder, totals, charts, chartsJson } = dashboard;
 
   // ---- Activity-tab queries --------------------------------------------
   //
@@ -153,10 +153,13 @@ export async function onRequestGet(context) {
         WHERE o.stage NOT IN ('won', 'lost', 'abandoned')
         GROUP BY o.owner_user_id ORDER BY total_value DESC`),
     all(env.DB,
+      // Sort happens client-side below using the stage catalog's
+      // sort_order so the table reads earliest -> latest, matching
+      // the dropdown menus + the chart above it.
       `SELECT stage, COUNT(*) AS n, COALESCE(SUM(estimated_value_usd), 0) AS total_value
          FROM opportunities
         WHERE stage NOT IN ('won', 'lost', 'abandoned')
-        GROUP BY stage ORDER BY n DESC`),
+        GROUP BY stage`),
     one(env.DB,
       `SELECT COUNT(*) AS total,
               SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) AS accepted,
@@ -182,6 +185,11 @@ export async function onRequestGet(context) {
         WHERE stage = 'won'
           AND COALESCE(actual_close_date, updated_at) >= date('now', 'start of month')`),
   ]);
+
+  // Sort the "Pipeline detail by stage" table earliest -> latest
+  // using the same catalog ordering the chart above uses.
+  pipelineByStage.sort((a, b) =>
+    (stageSortOrder.get(a.stage) ?? 999) - (stageSortOrder.get(b.stage) ?? 999));
 
   // Slide index → catalog entry (for titles, captions)
   function slideByKey(key) { return CHART_SLIDES.find(s => s.key === key); }

@@ -79,6 +79,15 @@ export const CHART_SLIDES = [
  *                       aging, bookings, forecast, bottleneck, heatmap }
  *   - chartsJson      same but each entry pre-serialized for raw() use
  */
+/**
+ * @returns {{
+ *   stageLabels: Map<string,string>,
+ *   stageSortOrder: Map<string,number>,
+ *   totals: object,
+ *   charts: object,
+ *   chartsJson: object,
+ * }}
+ */
 export async function gatherDashboardCharts(db) {
   const catalog = await loadStageCatalog(db);
   const stageLabels = new Map();
@@ -307,6 +316,7 @@ export async function gatherDashboardCharts(db) {
 
   return {
     stageLabels,
+    stageSortOrder,
     totals: { pipeline: totalPipeline, opps: totalOppCount },
     charts,
     chartsJson,
@@ -442,7 +452,14 @@ export function buildChartInitScript(prefix, chartsJson) {
               legend: { display: false },
               tooltip: { callbacks: { label: function(ctx) { return fmt$(ctx.parsed.x) + ' · ' + stage.counts[ctx.dataIndex] + ' opps'; } } }
             },
-            scales: { x: { ticks: { callback: function(v) { return fmt$(v); } } } }
+            // Data is sorted earliest -> latest stage. Chart.js v3 horizontal-
+            // bar default puts the first label at the BOTTOM; reverse to
+            // match the dropdown menus + the chart's own caption
+            // ("earliest stages on top").
+            scales: {
+              x: { ticks: { callback: function(v) { return fmt$(v); } } },
+              y: { reverse: true }
+            }
           }
         });
       });
