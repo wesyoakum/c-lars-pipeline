@@ -162,15 +162,31 @@ function emailToName(email) {
 }
 
 /**
- * Require a given role (or better). Admin > sales > viewer, service is sideways.
- * Returns true if allowed.
+ * Require a given role (or better). Admin > sales > member > viewer,
+ * service is sideways. Returns true if allowed.
+ *
+ * Hierarchy:
+ *   admin   (rank 4) — Commander    — full access
+ *   sales   (rank 3) — Pilot        — issue quotes, generate .docx
+ *   member  (rank 2) — Technician   — create/edit, PDF only (no .docx, no issue)
+ *   viewer  (rank 1) — Observer     — read-only
+ *   ai      (rank 0) — (Claudia)    — no rank-based permissions
  */
 export function hasRole(user, minRole) {
   if (!user) return false;
-  // 'ai' sits below viewer — no rank-based permissions for Claudia.
-  // She mutates Pipeline only through her own code path
-  // (functions/lib/claudia-writes.js), which has its own table allowlist.
-  const rank = { ai: 0, viewer: 1, sales: 2, admin: 3 };
+  const rank = { ai: 0, viewer: 1, member: 2, sales: 3, admin: 4 };
   if (minRole === 'service') return user.role === 'service' || user.role === 'admin';
   return (rank[user.role] ?? 0) >= (rank[minRole] ?? 0);
 }
+
+/**
+ * Map DB role keys to fun display names (Evangelion theme).
+ */
+export const ROLE_DISPLAY_NAMES = {
+  admin: 'Commander',
+  sales: 'Pilot',
+  member: 'Technician',
+  viewer: 'Observer',
+  service: 'MAGI',
+  ai: 'Dummy Plug',
+};

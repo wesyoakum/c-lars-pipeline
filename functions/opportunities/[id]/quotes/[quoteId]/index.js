@@ -15,6 +15,7 @@
 
 import { one, all, stmt, batch } from '../../../../lib/db.js';
 import { auditStmt, diff } from '../../../../lib/audit.js';
+import { hasRole } from '../../../../lib/auth.js';
 import { now } from '../../../../lib/ids.js';
 import { layout, htmlResponse, html, raw, escape } from '../../../../lib/layout.js';
 import { redirectWithFlash, formBody, readFlash } from '../../../../lib/http.js';
@@ -560,7 +561,7 @@ export async function onRequestGet(context) {
                     onclick="window.PipelineAICapture && window.PipelineAICapture.open({ refType: 'quote', refId: '${escape(quote.id)}', refLabel: '${escape(quote.number)} \u2014 ${escape((quote.title || '').slice(0, 60))}' })">
               <span class="aii-page-capture-icon">${raw(ICON_MIC)}</span>
             </button>` : ''}
-            ${isDraft ? html`
+            ${isDraft && hasRole(user, 'sales') ? html`
               <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/submit" class="inline-form">
                 <button class="btn primary" type="submit">Issue</button>
               </form>
@@ -645,11 +646,12 @@ export async function onRequestGet(context) {
                 ${raw(ICON_PDF)}
               </button>
             </form>
+            ${hasRole(user, 'sales') ? html`
             <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/generate-docx" class="inline-form" target="_blank" rel="noopener">
               <button class="btn btn-icon" type="submit" title="Download Word document (opens in a new tab)" aria-label="Download Word">
                 ${raw(ICON_DOCX)}
               </button>
-            </form>
+            </form>` : ''}
             <div class="quote-settings" x-data="quoteSettings(${showDiscounts ? 'true' : 'false'})" @click.outside="open = false">
               <button type="button" class="quote-settings-btn" @click="open = !open" aria-label="Quote settings" title="Quote settings">
                 <svg class="quote-settings-icon" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">

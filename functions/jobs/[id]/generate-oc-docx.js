@@ -17,10 +17,14 @@ import {
   getFilenameTemplate,
   renderFilenameTemplate,
 } from '../../lib/filename-templates.js';
+import { hasRole } from '../../lib/auth.js';
 
 export async function onRequestPost(context) {
   const { env, data, params } = context;
   const user = data?.user;
+  if (!hasRole(user, 'sales')) {
+    return new Response('You do not have permission to download Word documents.', { status: 403 });
+  }
   const jobId = params.id;
   const returnTo = `/jobs/${jobId}/oc`;
 

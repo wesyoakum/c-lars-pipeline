@@ -20,10 +20,11 @@ import { settingsSubNav } from '../lib/settings-subnav.js';
 // handler can accept them verbatim. `active`/`inactive` round-trip to
 // the 0/1 integer in the DB.
 const ROLE_OPTIONS = [
-  { value: 'admin',   label: 'Admin' },
-  { value: 'sales',   label: 'Sales' },
-  { value: 'service', label: 'Service' },
-  { value: 'viewer',  label: 'Viewer' },
+  { value: 'admin',   label: 'Commander (Admin)' },
+  { value: 'sales',   label: 'Pilot (Sales)' },
+  { value: 'member',  label: 'Technician (Member)' },
+  { value: 'service', label: 'MAGI (Service)' },
+  { value: 'viewer',  label: 'Observer (Viewer)' },
 ];
 
 const ACTIVE_OPTIONS = [

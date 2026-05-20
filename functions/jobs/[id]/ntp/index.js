@@ -18,6 +18,7 @@ import { all, one } from '../../../lib/db.js';
 import { layout, htmlResponse, html, raw, escape } from '../../../lib/layout.js';
 import { redirectWithFlash, readFlash } from '../../../lib/http.js';
 import { ICON_PDF, ICON_DOCX } from '../../../lib/icons.js';
+import { hasRole } from '../../../lib/auth.js';
 import { templateManagerHtml } from '../../../lib/template-catalog.js';
 import { getOcDocData } from '../../../lib/doc-generate.js';
 import { renderJobTabs } from '../../../lib/job-tabs.js';
@@ -136,11 +137,12 @@ export async function onRequestGet(context) {
                   ${raw(ICON_PDF)}
                 </button>
               </form>
+              ${hasRole(data?.user, 'sales') ? html`
               <form method="post" action="/jobs/${escape(jobId)}/generate-ntp-docx" class="inline-form" target="_blank" rel="noopener">
                 <button class="btn btn-icon" type="submit" title="Download NTP Word document (opens in a new tab)" aria-label="Download NTP Word">
                   ${raw(ICON_DOCX)}
                 </button>
-              </form>
+              </form>` : ''}
             ` : ''}
           </div>
         </div>

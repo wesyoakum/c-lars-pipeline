@@ -82,6 +82,7 @@ function renderValue(value) {
 }
 
 import { VERSION } from './version.js';
+import { ROLE_DISPLAY_NAMES } from './auth.js';
 import { ICON_CAMERA, ICON_PAPERCLIP, ICON_DROPZONE } from './icons.js';
 
 // T4.2 Phase 1 — in-app notifications.
@@ -1647,7 +1648,7 @@ export function layout(title, body, opts = {}) {
       </a>` : ''}
       <div class="user-badge">
         ${user ? `<span class="user-name">${escape(user.display_name ?? user.email)}</span>
-                   <span class="user-role">${escape(user.email ?? '')} · ${escape(user.role)}</span>` : '<span>Not signed in</span>'}
+                   <span class="user-role">${escape(user.email ?? '')} · ${escape(ROLE_DISPLAY_NAMES[user.role] ?? user.role)}</span>` : '<span>Not signed in</span>'}
       </div>
     </div>
   </header>

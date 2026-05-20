@@ -23,10 +23,14 @@ import {
 import { fireEvent, reportError } from '../../../../lib/auto-tasks.js';
 import { getEffectiveValidityDays } from '../../../../lib/quote-term-defaults.js';
 import { notifyQuoteStatusChange } from '../../../../lib/notify-external.js';
+import { hasRole } from '../../../../lib/auth.js';
 
 export async function onRequestPost(context) {
   const { env, data, params } = context;
   const user = data?.user;
+  if (!hasRole(user, 'sales')) {
+    return new Response('You do not have permission to issue quotes.', { status: 403 });
+  }
   const oppId = params.id;
   const quoteId = params.quoteId;
 
