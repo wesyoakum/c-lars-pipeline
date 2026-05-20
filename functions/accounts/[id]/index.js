@@ -743,7 +743,13 @@ export async function onRequestGet(context) {
                     : html`<small class="muted">${escape(d.linkedTo)}</small>`}</td>
                   <td class="col-size num" data-col="size"><small class="muted">${escape(d.size)}</small></td>
                   <td class="col-uploaded" data-col="uploaded"><small class="muted">${escape(d.uploaded)}</small></td>
-                  <td class="col-actions" data-col="actions" data-row-no-nav><a class="btn btn-sm" href="/documents/${escape(d.id)}/download?download=1" title="Force download">Download</a></td>
+                  <td class="col-actions" data-col="actions" data-row-no-nav style="white-space:nowrap">
+                    <a class="btn btn-sm" href="/documents/${escape(d.id)}/download?download=1" title="Force download">Download</a>
+                    <form method="post" action="/documents/${escape(d.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this document?')">
+                      <input type="hidden" name="return_to" value="/accounts/${escape(account.id)}?tab=docs">
+                      <button class="btn btn-sm danger" type="submit">Delete</button>
+                    </form>
+                  </td>
                 </tr>`)}
               </tbody>
             </table>

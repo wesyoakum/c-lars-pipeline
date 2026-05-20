@@ -754,7 +754,7 @@ export async function onRequestGet(context) {
         <section class="card">
           <div class="card-header">
             <h2>Contacts on ${escape(opp.account_name ?? 'this account')}</h2>
-            <a class="btn btn-sm" href="/accounts/${escape(opp.account_id)}/contacts/new">Add contact</a>
+            <button type="button" class="btn btn-sm" onclick="window.open('/accounts/${escape(opp.account_id)}/contacts/new?popup=1', 'pipeline-new-contact', 'width=720,height=780,resizable=yes,scrollbars=yes')">Add contact</button>
           </div>
           <table class="data compact">
             <thead><tr><th>Name</th><th>Title</th><th>Email</th><th>Phone</th><th></th></tr></thead>
@@ -793,6 +793,21 @@ export async function onRequestGet(context) {
           </table>
         </section>`
       : ''}
+
+    ${opp.stage === 'rfq_received' && quoteRows.length === 0 ? html`
+      <section class="card" style="border-left:4px solid var(--primary,#3b82f6);background:var(--bg-alt,#f5f5f7)">
+        <div style="display:flex;align-items:center;gap:0.75rem;padding:0.5rem 0.25rem">
+          <span style="font-size:1.8rem;line-height:1">&#10145;</span>
+          <div>
+            <strong>Ready to quote?</strong>
+            <div class="muted" style="font-size:0.88em;margin-top:0.15rem">
+              Create your first quote on the
+              <a href="/opportunities/${escape(opp.id)}?tab=quotes" style="font-weight:600">Quotes tab</a>.
+            </div>
+          </div>
+        </div>
+      </section>
+    ` : ''}
 
     ${quoteRows.length > 0
       ? html`
@@ -900,8 +915,12 @@ export async function onRequestGet(context) {
                 <td><span class="pill">${escape(DOC_KIND_LABELS[d.kind] ?? d.kind)}</span></td>
                 <td><small>${escape(fmtSize(d.size_bytes))}</small></td>
                 <td><small class="muted">${escape((d.uploaded_at ?? '').slice(0, 16).replace('T', ' '))}</small></td>
-                <td class="row-actions">
+                <td class="row-actions" style="white-space:nowrap">
                   <a class="btn small" href="/documents/${escape(d.id)}/download?download=1" title="Force download">Download</a>
+                  <form method="post" action="/documents/${escape(d.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this document?')">
+                    <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}">
+                    <button class="btn small danger" type="submit">Delete</button>
+                  </form>
                 </td>
               </tr>`)}
             </tbody>
@@ -1837,5 +1856,33 @@ function oppTypePicker(initial, oppId) {
     },
   };
 }
+
+// Hot-update contacts table when a contact is created via popup.
+window.addEventListener('message', function(ev) {
+  if (!ev.data || ev.data.type !== 'pipeline.contact.created' || !ev.data.contact) return;
+  var c = ev.data.contact;
+  var tbody = document.querySelector('.card .data.compact tbody');
+  if (!tbody) return;
+  // Find the contacts table by checking header text
+  var tables = document.querySelectorAll('table.data.compact');
+  var contactTbody = null;
+  for (var i = 0; i < tables.length; i++) {
+    var th = tables[i].querySelector('thead th');
+    if (th && th.textContent.trim() === 'Name') { contactTbody = tables[i].querySelector('tbody'); break; }
+  }
+  if (!contactTbody) return;
+  var name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
+  var emailCell = c.email
+    ? '<a href="mailto:' + c.email + '">' + c.email + '</a>'
+    : '<span class="muted">\\u2014</span>';
+  var tr = document.createElement('tr');
+  tr.innerHTML =
+    '<td><strong>' + (c.first_name || '') + '</strong> <strong>' + (c.last_name || '') + '</strong></td>' +
+    '<td>' + (c.title || '<span class="muted">\\u2014</span>') + '</td>' +
+    '<td>' + emailCell + '</td>' +
+    '<td>' + (c.phone || '<span class="muted">\\u2014</span>') + '</td>' +
+    '<td></td>';
+  contactTbody.appendChild(tr);
+});
 `;
 }

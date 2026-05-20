@@ -148,6 +148,8 @@ export async function onRequestPost(context) {
         first_name: value.first_name,
         last_name: value.last_name,
         title: value.title,
+        email: value.email,
+        phone: value.phone,
       },
     });
   }
