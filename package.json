@@ -10,7 +10,8 @@
     "migrate:remote": "wrangler d1 migrations apply c-lars-pms-db --remote",
     "db:console": "wrangler d1 execute c-lars-pms-db --remote --command",
     "import:wfm:dry": "node scripts/wfm-import.mjs --dry-run",
-    "import:wfm:commit": "node scripts/wfm-import.mjs --commit"
+    "import:wfm:commit": "node scripts/wfm-import.mjs --commit",
+    "prepare": "husky"
   },
   "devDependencies": {
     "wrangler": "^4.87.0"

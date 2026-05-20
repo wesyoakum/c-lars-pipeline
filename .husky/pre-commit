@@ -1,0 +1,29 @@
+#!/bin/sh
+# Auto-bump patch version (semver) on every commit.
+# Reads MAJOR.MINOR.PATCH from functions/lib/version.js,
+# increments PATCH, writes it back, and stages the file.
+
+VERSION_FILE="functions/lib/version.js"
+
+if [ ! -f "$VERSION_FILE" ]; then
+  exit 0
+fi
+
+# Extract the current version string (e.g. '1.1.0')
+CURRENT=$(grep -oP "VERSION = '\K[0-9]+\.[0-9]+\.[0-9]+" "$VERSION_FILE")
+if [ -z "$CURRENT" ]; then
+  exit 0
+fi
+
+MAJOR=$(echo "$CURRENT" | cut -d. -f1)
+MINOR=$(echo "$CURRENT" | cut -d. -f2)
+PATCH=$(echo "$CURRENT" | cut -d. -f3)
+
+NEXT_PATCH=$((PATCH + 1))
+NEXT="${MAJOR}.${MINOR}.${NEXT_PATCH}"
+
+# Write the updated version
+sed -i "s/VERSION = '${CURRENT}'/VERSION = '${NEXT}'/" "$VERSION_FILE"
+
+# Stage the change so it's included in this commit
+git add "$VERSION_FILE"
