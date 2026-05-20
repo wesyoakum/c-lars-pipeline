@@ -29,6 +29,7 @@ import {
   buildAddressStatements,
 } from '../../lib/address_editor.js';
 import { slugifyGroup, loadSiblingAccounts, listGroupLabels } from '../../lib/account-groups.js';
+import { apiGetAll } from '../../lib/katana-client.js';
 import { loadStageCatalog } from '../../lib/stages.js';
 import { fmtDollar } from '../../lib/pricing.js';
 import { INACTIVE_OPPORTUNITY_STAGES } from '../../lib/activeness.js';
@@ -207,6 +208,31 @@ export async function onRequestGet(context) {
     { value: '', label: '— None —' },
     ...users.map(u => ({ value: u.id, label: u.display_name ?? u.email })),
   ];
+
+  // Pull every Katana customer for the in-page mapping picker. If the
+  // API call fails (key missing, network blip), the picker shows the
+  // current mapping (if any) and an inline error chip — the row never
+  // breaks the page.
+  let katanaCustomers = [];
+  let katanaError = null;
+  try {
+    katanaCustomers = await apiGetAll(env, '/customers', {});
+  } catch (err) {
+    katanaError = String(err && err.message || err);
+  }
+  const katanaPickerState = {
+    accountId: account.id,
+    accountName: account.name || '',
+    accountAlias: account.alias || '',
+    katanaCustomerId:   account.katana_customer_id   || null,
+    katanaCustomerName: account.katana_customer_name || '',
+    katanaError,
+    customers: katanaCustomers
+      .map((kc) => ({ id: kc.id, name: (kc.name || '').trim() }))
+      .filter((kc) => kc.name)
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  };
+  const katanaPickerStateJson = JSON.stringify(katanaPickerState).replace(/</g, '\\u003c');
 
   // Related-records sections: opportunities, quotes, documents, and
   // tasks/activities for this account. Quotes reach the account via
@@ -441,6 +467,34 @@ export async function onRequestGet(context) {
         <div class="detail-pair">
           <span class="detail-label">Owner</span>
           <span class="detail-value">${inlineSelect('owner_user_id', account.owner_user_id, ownerOptions)}</span>
+        </div>
+        <div class="detail-pair" x-data="accountKatanaPicker()" x-init="init()">
+          <span class="detail-label">Katana customer</span>
+          <span class="detail-value">
+            <!-- Mapped state -->
+            <template x-if="katanaCustomerId">
+              <span style="display:inline-flex;align-items:center;gap:.4rem;padding:.1rem .5rem;background:#e6f4ea;border:1px solid #9bcfa6;border-radius:3px;color:#1a7f37;font-size:.9em">
+                <strong x-text="katanaCustomerName || ('#' + katanaCustomerId)"></strong>
+                <span class="muted" style="font-size:.8em">#<span x-text="katanaCustomerId"></span></span>
+                <button type="button" @click="unlink()" :disabled="busy" title="Unlink (Katana customer record stays)" style="border:0;background:transparent;cursor:pointer;font-size:1rem;line-height:1;padding:0;color:inherit">&times;</button>
+              </span>
+            </template>
+
+            <!-- Unmapped state — picker + create -->
+            <template x-if="!katanaCustomerId">
+              <span style="display:inline-flex;align-items:center;gap:.4rem;flex-wrap:wrap">
+                <select x-model="pickId" :disabled="busy || customers.length === 0" style="font-size:.85em;max-width:14rem">
+                  <option value="">— pick from Katana —</option>
+                  <template x-for="kc in customers" :key="kc.id">
+                    <option :value="kc.id" x-text="kc.name"></option>
+                  </template>
+                </select>
+                <button type="button" class="btn btn-xs" @click="link()" :disabled="busy || !pickId">Link</button>
+                <button type="button" class="btn btn-xs" @click="createInKatana()" :disabled="busy" title="Create a new Katana customer using this account's name">+ Create in Katana</button>
+                <span x-show="katanaError" x-cloak class="muted" style="font-size:.75em;color:#b3261e" :title="katanaError">&#9888; Katana unreachable</span>
+              </span>
+            </template>
+          </span>
         </div>
       </div>
 
@@ -967,6 +1021,108 @@ export async function onRequestGet(context) {
     }
 
     ${raw(addressEditorScript())}
+
+    // Katana customer picker — inline mapper on the account detail
+    // page. Reuses the existing /settings/katana-customer-map/{link,
+    // unlink, create} routes so saves are audit-logged the same way.
+    window.__ACCOUNT_KATANA_STATE__ = ${raw(katanaPickerStateJson)};
+    document.addEventListener('alpine:init', function () {
+      Alpine.data('accountKatanaPicker', function () {
+        var s = window.__ACCOUNT_KATANA_STATE__ || {};
+        return {
+          accountId: s.accountId,
+          accountName: s.accountName || '',
+          accountAlias: s.accountAlias || '',
+          katanaCustomerId: s.katanaCustomerId || null,
+          katanaCustomerName: s.katanaCustomerName || '',
+          customers: s.customers || [],
+          katanaError: s.katanaError || null,
+          pickId: '',
+          busy: false,
+          init: function () {},
+          link: function () {
+            if (!this.pickId) return;
+            var picked = this.customers.find(function (kc) { return String(kc.id) === String(this.pickId); }, this);
+            if (!picked) return;
+            var self = this;
+            self.busy = true;
+            fetch('/settings/katana-customer-map/link', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                account_id: self.accountId,
+                katana_customer_id: picked.id,
+                katana_customer_name: picked.name,
+              }),
+            }).then(function (r) {
+              if (!r.ok) return r.json().then(function (d) { throw new Error(d && d.error || ('HTTP ' + r.status)); });
+              return r.json();
+            }).then(function () {
+              self.katanaCustomerId = picked.id;
+              self.katanaCustomerName = picked.name;
+              self.pickId = '';
+              self.busy = false;
+            }).catch(function (err) {
+              self.busy = false;
+              alert('Could not link: ' + (err && err.message ? err.message : 'unknown error'));
+            });
+          },
+          unlink: function () {
+            if (!confirm('Unlink ' + this.accountName + ' from Katana customer "' + (this.katanaCustomerName || this.katanaCustomerId) + '"?')) return;
+            var self = this;
+            self.busy = true;
+            fetch('/settings/katana-customer-map/unlink', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ account_id: self.accountId }),
+            }).then(function (r) {
+              if (!r.ok) return r.json().then(function (d) { throw new Error(d && d.error || ('HTTP ' + r.status)); });
+              return r.json();
+            }).then(function () {
+              self.katanaCustomerId = null;
+              self.katanaCustomerName = '';
+              self.busy = false;
+            }).catch(function (err) {
+              self.busy = false;
+              alert('Could not unlink: ' + (err && err.message ? err.message : 'unknown error'));
+            });
+          },
+          createInKatana: function () {
+            var seed = (this.accountAlias || this.accountName || '').trim();
+            if (!seed) { alert('Account has no name to use.'); return; }
+            var defaultName = seed.length > 60 ? seed.slice(0, 60) : seed;
+            var katanaName = prompt('Create a new Katana customer with this name?', defaultName);
+            if (!katanaName) return;
+            katanaName = katanaName.trim();
+            if (!katanaName) return;
+            var self = this;
+            self.busy = true;
+            fetch('/settings/katana-customer-map/create', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ account_id: self.accountId, katana_name: katanaName }),
+            }).then(function (r) {
+              if (!r.ok) return r.json().then(function (d) { throw new Error(d && d.error || ('HTTP ' + r.status)); });
+              return r.json();
+            }).then(function (data) {
+              self.katanaCustomerId = data.katana_customer_id;
+              self.katanaCustomerName = data.katana_customer_name;
+              if (data.katana_customer_id && !self.customers.some(function (kc) { return kc.id === data.katana_customer_id; })) {
+                self.customers.push({ id: data.katana_customer_id, name: data.katana_customer_name });
+                self.customers.sort(function (a, b) { return a.name.localeCompare(b.name); });
+              }
+              self.busy = false;
+            }).catch(function (err) {
+              self.busy = false;
+              alert('Could not create in Katana: ' + (err && err.message ? err.message : 'unknown error'));
+            });
+          },
+        };
+      });
+    });
 
     </script>
   `;
