@@ -2,48 +2,53 @@
 //
 // POST /opportunities/:id/quotes/:quoteId/push-to-katana
 //
-// Phase 2c. Creates a Katana sales order from a Pipeline quote.
+// Step 2 of the incremental Katana rebuild. Creates ONE Katana sales
+// order per Pipeline quote line — Adam's D079 pattern. Each line's
+// SO has N rows (one per milestone in the saved milestone map), with
+// price_per_unit = line.unit_price × milestone_pct / 100 and quantity
+// from the line.
 //
 // Body (JSON):
 //   {
-//     order_no:      string,                 // default = quote.number
-//     customer_ref:  string,                 // optional, free text
-//     delivery_date: string ('YYYY-MM-DD'),  // optional, ISO date
-//     additional_info: string,               // optional, free text
-//     milestones: [                          // edited per-row $$ from the modal
-//       { percent, label, katana_variant_id, amount },
-//       ...
-//     ]
+//     order_no:        string,                // base name; per-line
+//                                             // SOs append "-01", "-02"
+//     customer_ref:    string,                // optional, free text
+//                                             // (same on every SO)
+//     delivery_date:   'YYYY-MM-DD',          // optional
+//                                             // (same on every SO)
+//     additional_info: string,                // optional
+//                                             // (line title prepended per SO)
 //   }
 //
-// All milestones-array fields except `amount` are advisory — the
-// server re-validates against the saved milestone map and re-derives
-// percent/label/variant_id from there. `amount` is the only thing the
-// client controls, and only because the user might want to nudge a
-// milestone $ up or down. The amounts must sum to quote.total_price
-// (within 0.01 tolerance).
+// The milestones array the modal used to send is ignored — Step 2 uses
+// the saved milestone map percentages directly. Step 3 will add per-
+// quote payment-terms editing.
 //
-// Validations (in order):
-//   1. account_id of opp has katana_customer_id set
-//   2. quote.total_price > 0
-//   3. quote.katana_sales_order_id IS NULL (idempotency)
-//   4. site_prefs.katana_milestone_map is set
-//   5. body.milestones length matches the saved map length
-//   6. body.milestones amounts sum to quote.total_price
+// Validations:
+//   1. Account has katana_customer_id
+//   2. Quote has at least one active line
+//   3. Milestone map is configured
+//   4. order_no base name is non-empty
+// Per-line behavior:
+//   * Lines with an existing katana_sales_order_id are SKIPPED (not
+//     re-pushed). Idempotent: re-clicking Push only pushes remaining
+//     lines.
+//   * Lines with unit_price === 0 are skipped (no billing to split).
+//   * Per-line errors don't abort the run — other lines still push,
+//     errors get stored on quote_lines.katana_push_error and surfaced
+//     in the response.
 //
-// On success: stores the new Katana sales-order id on the quote row
-// + audit log entry. Returns { ok, katana_sales_order_id, order_no }.
+// Returns { ok, pushed, skipped, errors, line_count } summary.
 
-import { one, batch, stmt } from '../../../../lib/db.js';
+import { all, one, run, batch, stmt } from '../../../../lib/db.js';
 import { auditStmt } from '../../../../lib/audit.js';
 import { hasRole } from '../../../../lib/auth.js';
 import { apiPost } from '../../../../lib/katana-client.js';
 import { loadMilestoneMap } from '../../../../lib/katana-milestones.js';
 
 // Hardcoded for v1. Both confirmed via the Katana probe (single
-// location, single "No tax" rate). When Adam's tenant grows multi-
-// location or multi-tax-rate we'll surface these as defaults on the
-// /settings/katana-milestones page.
+// location, single "No tax" rate). Step 6 will surface these as
+// per-quote-type defaults on the /settings/katana-milestones page.
 const DEFAULT_LOCATION_ID = 182262;
 const DEFAULT_TAX_RATE_ID = 475753;
 
@@ -58,13 +63,11 @@ export async function onRequestPost(context) {
 
   let body;
   try { body = await request.json(); }
-  catch { return jsonError(400, 'invalid JSON body'); }
+  catch { body = {}; }
 
-  // 1. Load quote + opp + account in one shot.
+  // 1. Load quote + opp + account.
   const ctx = await one(env.DB,
     `SELECT q.id AS quote_id, q.number AS quote_number, q.total_price,
-            q.status AS quote_status,
-            q.katana_sales_order_id, q.katana_sales_order_pushed_at,
             q.opportunity_id,
             o.account_id,
             a.name AS account_name,
@@ -76,124 +79,195 @@ export async function onRequestPost(context) {
     [quoteId, oppId]);
 
   if (!ctx) return jsonError(404, 'quote not found');
-  if (ctx.katana_sales_order_id) {
-    return jsonError(409, `already pushed (Katana SO #${ctx.katana_sales_order_id} on ${ctx.katana_sales_order_pushed_at}). Unlink first if you want to re-push.`);
-  }
   if (!ctx.katana_customer_id) {
     return jsonError(400, `account "${ctx.account_name}" has no Katana customer mapping. Set it at /settings/katana-customer-map first.`);
   }
-  const total = Number(ctx.total_price);
-  if (!Number.isFinite(total) || total <= 0) {
-    return jsonError(400, `quote total ($${total}) must be greater than zero`);
-  }
 
-  // 2. Load + validate milestone map.
+  // 2. Load active quote lines.
+  const lines = await all(env.DB,
+    `SELECT id, sort_order, title, description, part_number,
+            quantity, unit_price, extended_price,
+            katana_sales_order_id, katana_sales_order_pushed_at
+       FROM quote_lines
+      WHERE quote_id = ?
+        AND COALESCE(is_active, 1) = 1
+        AND COALESCE(is_option, 0) = 0
+      ORDER BY sort_order, id`,
+    [quoteId]);
+  if (!lines.length) return jsonError(400, 'quote has no active (non-option) lines to push');
+
+  // 3. Load milestone map.
   const map = await loadMilestoneMap(env);
   if (!map || !Array.isArray(map.milestones) || map.milestones.length === 0) {
     return jsonError(400, 'Katana milestone map is not configured. Set it at /settings/katana-milestones first.');
   }
 
-  // 3. Cross-check the body's amounts.
-  const submitted = Array.isArray(body?.milestones) ? body.milestones : [];
-  if (submitted.length !== map.milestones.length) {
-    return jsonError(400, `expected ${map.milestones.length} milestone amounts, got ${submitted.length}`);
+  // 4. Shared fields from body (apply to every per-line SO).
+  const baseOrderNo = String(body?.order_no || ctx.quote_number || '').trim().slice(0, 60);
+  if (!baseOrderNo) return jsonError(400, 'order_no base name is required');
+
+  const customerRef = String(body?.customer_ref || '').trim().slice(0, 200);
+  const additionalInfoBase = String(body?.additional_info || '').trim();
+
+  const rawDeliveryDate = String(body?.delivery_date || '').trim();
+  let deliveryDateIso = null;
+  if (rawDeliveryDate) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(rawDeliveryDate);
+    if (m) deliveryDateIso = `${rawDeliveryDate}T17:00:00.000Z`;
+    else   deliveryDateIso = rawDeliveryDate;
   }
-  let sum = 0;
-  const rowsToBuild = [];
-  for (let i = 0; i < map.milestones.length; i++) {
-    const m = map.milestones[i];
-    const a = Number(submitted[i]?.amount);
-    if (!Number.isFinite(a) || a < 0) {
-      return jsonError(400, `milestone ${i + 1} (${m.label}): amount must be a non-negative number`);
+
+  // 5. Push per line.
+  const results = { pushed: [], skipped: [], errors: [] };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lineIdx = i + 1; // 1-based for human-readable order_no suffixes
+    const lineLabel = (line.title || line.description || '').toString().trim().slice(0, 80) || `Line ${lineIdx}`;
+
+    // Idempotency: skip lines already linked to a Katana SO.
+    if (line.katana_sales_order_id) {
+      results.skipped.push({
+        line_id: line.id,
+        line_idx: lineIdx,
+        title: lineLabel,
+        reason: `already pushed as SO #${line.katana_sales_order_id}`,
+        katana_sales_order_id: line.katana_sales_order_id,
+      });
+      continue;
     }
-    sum += a;
-    rowsToBuild.push({
-      variant_id:   m.katana_variant_id,
-      quantity:     1,
-      price_per_unit: a,
-      tax_rate_id:  DEFAULT_TAX_RATE_ID,
+
+    const unitPrice = Number(line.unit_price) || 0;
+    const qty = Number(line.quantity) || 0;
+    if (unitPrice <= 0 || qty <= 0) {
+      results.skipped.push({
+        line_id: line.id,
+        line_idx: lineIdx,
+        title: lineLabel,
+        reason: 'zero quantity or zero unit price',
+      });
+      continue;
+    }
+
+    // Build per-milestone rows: each row prices the line's unit by
+    // the milestone's percentage. Quantity stays as the line's qty
+    // so Katana's row totals reflect the real billing structure.
+    let rolling = 0;
+    const salesOrderRows = map.milestones.map((m, mi) => {
+      const raw = unitPrice * (Number(m.percent) || 0) / 100;
+      let pricePerUnit = Math.round(raw * 100) / 100;
+      rolling += pricePerUnit;
+      // Last row absorbs any 1-cent rounding drift so the per-line
+      // total in Katana matches Pipeline's extended_price exactly.
+      if (mi === map.milestones.length - 1) {
+        const linePriceTarget = Math.round(unitPrice * 100) / 100;
+        const drift = linePriceTarget - rolling;
+        if (Math.abs(drift) > 0.001) {
+          pricePerUnit = Math.round((pricePerUnit + drift) * 100) / 100;
+        }
+      }
+      return {
+        variant_id:     m.katana_variant_id,
+        quantity:       qty,
+        price_per_unit: pricePerUnit,
+        tax_rate_id:    DEFAULT_TAX_RATE_ID,
+      };
     });
-  }
-  // Allow 1-cent rounding tolerance for the user-edited amounts.
-  if (Math.abs(sum - total) > 0.01) {
-    return jsonError(400, `milestone amounts ($${sum.toFixed(2)}) must sum to quote total ($${total.toFixed(2)})`);
-  }
 
-  // 4. Build the sales-order body.
-  const orderNo = String(body?.order_no || ctx.quote_number || '').trim().slice(0, 80);
-  if (!orderNo) return jsonError(400, 'order_no is required');
+    const orderNo = `${baseOrderNo}-${String(lineIdx).padStart(2, '0')}`.slice(0, 80);
 
-  const katanaBody = {
-    order_no: orderNo,
-    customer_id: ctx.katana_customer_id,
-    location_id: DEFAULT_LOCATION_ID,
-    sales_order_rows: rowsToBuild,
-  };
-  const customerRef = String(body?.customer_ref || '').trim();
-  if (customerRef) katanaBody.customer_ref = customerRef.slice(0, 200);
-  const deliveryDate = String(body?.delivery_date || '').trim();
-  if (deliveryDate) {
-    // Accept YYYY-MM-DD; turn into ISO with end-of-day so Katana
-    // doesn't interpret midnight UTC as the previous day.
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(deliveryDate);
-    if (m) katanaBody.delivery_date = `${deliveryDate}T17:00:00.000Z`;
-    else   katanaBody.delivery_date = deliveryDate;
-  }
-  const addInfo = String(body?.additional_info || '').trim();
-  if (addInfo) katanaBody.additional_info = addInfo.slice(0, 2000);
+    // Build per-line additional_info: line label + part# + any
+    // user-provided notes from the modal.
+    const noteParts = [];
+    noteParts.push(lineLabel);
+    if (line.part_number) noteParts.push(`P/N ${line.part_number}`);
+    if (additionalInfoBase) noteParts.push(additionalInfoBase);
+    const lineAdditionalInfo = noteParts.join(' — ').slice(0, 2000);
 
-  // 5. Push.
-  let created;
-  try {
-    const r = await apiPost(env, '/sales_orders', katanaBody);
-    if (!r.ok) {
-      return jsonError(502, `Katana rejected sales-order create: ${r.status} ${typeof r.body === 'string' ? r.body.slice(0, 400) : JSON.stringify(r.body).slice(0, 400)}`);
+    const katanaBody = {
+      order_no:        orderNo,
+      customer_id:     ctx.katana_customer_id,
+      location_id:     DEFAULT_LOCATION_ID,
+      sales_order_rows: salesOrderRows,
+      additional_info: lineAdditionalInfo,
+    };
+    if (customerRef)    katanaBody.customer_ref  = customerRef;
+    if (deliveryDateIso) katanaBody.delivery_date = deliveryDateIso;
+
+    // Push this one.
+    let newId = null;
+    let pushError = null;
+    try {
+      const r = await apiPost(env, '/sales_orders', katanaBody);
+      if (!r.ok) {
+        pushError = `Katana ${r.status}: ${typeof r.body === 'string' ? r.body.slice(0, 300) : JSON.stringify(r.body).slice(0, 300)}`;
+      } else {
+        const id = parseInt(r.body?.id, 10);
+        if (Number.isFinite(id) && id > 0) newId = id;
+        else pushError = `Katana returned no usable id: ${JSON.stringify(r.body).slice(0, 200)}`;
+      }
+    } catch (err) {
+      pushError = `Katana request failed: ${String(err && err.message || err)}`;
     }
-    created = r.body;
-  } catch (err) {
-    return jsonError(502, `Katana sales-order create failed: ${String(err && err.message || err)}`);
-  }
-  const newId = parseInt(created?.id, 10);
-  if (!Number.isFinite(newId) || newId <= 0) {
-    return jsonError(502, `Katana create returned no usable id (got ${JSON.stringify(created).slice(0, 200)})`);
+
+    if (newId) {
+      const nowIso = new Date().toISOString();
+      await batch(env.DB, [
+        stmt(env.DB,
+          `UPDATE quote_lines
+              SET katana_sales_order_id        = ?,
+                  katana_sales_order_pushed_at = ?,
+                  katana_push_error            = NULL,
+                  updated_at                   = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            WHERE id = ?`,
+          [newId, nowIso, line.id]),
+        auditStmt(env.DB, {
+          entityType: 'quote_line',
+          entityId:   line.id,
+          eventType:  'updated',
+          user,
+          summary:    `Pushed quote line "${lineLabel}" to Katana as SO "${orderNo}" (#${newId}, $${(unitPrice * qty).toFixed(2)})`,
+          changes: { katana_sales_order_id: { from: null, to: newId } },
+        }),
+      ]);
+      results.pushed.push({
+        line_id: line.id,
+        line_idx: lineIdx,
+        title: lineLabel,
+        katana_sales_order_id: newId,
+        order_no: orderNo,
+        amount: Math.round(unitPrice * qty * 100) / 100,
+      });
+    } else {
+      await run(env.DB,
+        `UPDATE quote_lines
+            SET katana_push_error = ?,
+                updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+          WHERE id = ?`,
+        [pushError, line.id]);
+      results.errors.push({
+        line_id: line.id,
+        line_idx: lineIdx,
+        title: lineLabel,
+        order_no: orderNo,
+        error: pushError,
+      });
+    }
   }
 
-  // 6. Persist + audit.
-  const nowIso = new Date().toISOString();
-  await batch(env.DB, [
-    stmt(env.DB,
-      `UPDATE quotes
-          SET katana_sales_order_id        = ?,
-              katana_sales_order_pushed_at = ?,
-              updated_at                   = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-        WHERE id = ?`,
-      [newId, nowIso, quoteId]),
-    auditStmt(env.DB, {
-      entityType: 'quote',
-      entityId: quoteId,
-      eventType: 'updated',
-      user,
-      summary: `Pushed to Katana as sales order "${orderNo}" (#${newId}, $${total.toFixed(2)})`,
-      changes: {
-        katana_sales_order_id:        { from: null, to: newId },
-        katana_sales_order_pushed_at: { from: null, to: nowIso },
-      },
-    }),
-  ]);
-
-  return jsonOk({
-    katana_sales_order_id: newId,
-    katana_sales_order_pushed_at: nowIso,
-    order_no: orderNo,
-  });
+  // Roll up. ok = true only when nothing errored. The UI uses
+  // pushed_count / line_count to drive the "N of M lines pushed" badge.
+  return new Response(JSON.stringify({
+    ok: results.errors.length === 0,
+    line_count:    lines.length,
+    pushed_count:  results.pushed.length,
+    skipped_count: results.skipped.length,
+    error_count:   results.errors.length,
+    pushed:        results.pushed,
+    skipped:       results.skipped,
+    errors:        results.errors,
+  }), { status: 200, headers: { 'content-type': 'application/json' } });
 }
 
-function jsonOk(obj) {
-  return new Response(JSON.stringify({ ok: true, ...obj }), {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  });
-}
 function jsonError(status, message) {
   return new Response(JSON.stringify({ ok: false, error: message }), {
     status,

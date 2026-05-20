@@ -2,14 +2,17 @@
 //
 // POST /opportunities/:id/quotes/:quoteId/katana-unlink
 //
-// Clears quotes.katana_sales_order_id + katana_sales_order_pushed_at
-// without touching Katana. Pipeline simply forgets which Katana sales
-// order it pushed; the SO in Katana is left alone (still useful for
-// historical billing). The "Push to Katana" button reappears so the
-// user can push again (e.g. if they accidentally deleted the SO in
-// Katana directly).
+// Clears the per-line Katana sales-order linkage on every quote line
+// for this quote, without touching Katana. Pipeline forgets which
+// Katana SOs it pushed; the SOs themselves stay in place (useful for
+// historical billing). The "Push to Katana" button reappears and
+// only the unlinked lines are pushed again on the next click —
+// idempotent.
+//
+// Also clears the legacy quotes.katana_sales_order_id column (from
+// Phase 2c, single-SO model) for forward compatibility.
 
-import { one, batch, stmt } from '../../../../lib/db.js';
+import { all, batch, stmt, run } from '../../../../lib/db.js';
 import { auditStmt } from '../../../../lib/audit.js';
 import { hasRole } from '../../../../lib/auth.js';
 
@@ -22,43 +25,63 @@ export async function onRequestPost(context) {
   const oppId = params.id;
   const quoteId = params.quoteId;
 
-  const existing = await one(env.DB,
-    `SELECT id, number, katana_sales_order_id, katana_sales_order_pushed_at
-       FROM quotes
-      WHERE id = ? AND opportunity_id = ?`,
+  // Find every line that has a Katana linkage to clear.
+  const linkedLines = await all(env.DB,
+    `SELECT ql.id, ql.title, ql.katana_sales_order_id, ql.katana_sales_order_pushed_at
+       FROM quote_lines ql
+       JOIN quotes q ON q.id = ql.quote_id
+      WHERE ql.quote_id = ?
+        AND q.opportunity_id = ?
+        AND ql.katana_sales_order_id IS NOT NULL`,
     [quoteId, oppId]);
-  if (!existing) return jsonError(404, 'quote not found');
 
-  if (!existing.katana_sales_order_id) {
-    // Already unlinked — return success so the UI stays consistent.
-    return jsonOk({ quote_id: quoteId });
-  }
-
-  const oldId = existing.katana_sales_order_id;
-  const oldAt = existing.katana_sales_order_pushed_at;
-
-  await batch(env.DB, [
-    stmt(env.DB,
+  // If nothing linked at line level, still clear the legacy quote-level
+  // column (if set) so the UI is consistent regardless of which push
+  // model created the link.
+  if (linkedLines.length === 0) {
+    await run(env.DB,
       `UPDATE quotes
           SET katana_sales_order_id        = NULL,
               katana_sales_order_pushed_at = NULL,
               updated_at                   = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-        WHERE id = ?`,
-      [quoteId]),
-    auditStmt(env.DB, {
-      entityType: 'quote',
-      entityId: quoteId,
-      eventType: 'updated',
-      user,
-      summary: `Unlinked Katana sales order #${oldId} (Katana record left in place)`,
-      changes: {
-        katana_sales_order_id:        { from: oldId, to: null },
-        katana_sales_order_pushed_at: { from: oldAt, to: null },
-      },
-    }),
-  ]);
+        WHERE id = ? AND opportunity_id = ?`,
+      [quoteId, oppId]);
+    return jsonOk({ quote_id: quoteId, unlinked_count: 0 });
+  }
 
-  return jsonOk({ quote_id: quoteId });
+  const statements = [];
+  for (const ln of linkedLines) {
+    statements.push(stmt(env.DB,
+      `UPDATE quote_lines
+          SET katana_sales_order_id        = NULL,
+              katana_sales_order_pushed_at = NULL,
+              katana_push_error            = NULL,
+              updated_at                   = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+        WHERE id = ?`,
+      [ln.id]));
+    statements.push(auditStmt(env.DB, {
+      entityType: 'quote_line',
+      entityId:   ln.id,
+      eventType:  'updated',
+      user,
+      summary:    `Unlinked Katana sales order #${ln.katana_sales_order_id} from line "${ln.title || ln.id}" (Katana record left in place)`,
+      changes: {
+        katana_sales_order_id: { from: ln.katana_sales_order_id, to: null },
+      },
+    }));
+  }
+  // Also clear the legacy quote-level column for consistency.
+  statements.push(stmt(env.DB,
+    `UPDATE quotes
+        SET katana_sales_order_id        = NULL,
+            katana_sales_order_pushed_at = NULL,
+            updated_at                   = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE id = ?`,
+    [quoteId]));
+
+  await batch(env.DB, statements);
+
+  return jsonOk({ quote_id: quoteId, unlinked_count: linkedLines.length });
 }
 
 function jsonOk(obj) {

@@ -61,24 +61,42 @@ document.addEventListener('alpine:init', function () {
   var s = window.__KATANA_PUSH_STATE__ || {};
   Alpine.store('katanaPush', {
     showSection: !!s.showSection,
-    alreadyPushed: !!s.alreadyPushed,
+    fullyPushed: !!s.fullyPushed,
+    partiallyPushed: !!s.partiallyPushed,
+    anyPushed: !!s.anyPushed,
     canPush: !!s.canPush,
     blockReason: s.blockReason || '',
-    salesOrderId: s.salesOrderId || null,
-    pushedAt: s.pushedAt || null,
     katanaCustomerId: s.katanaCustomerId || null,
     katanaCustomerName: s.katanaCustomerName || '',
     quoteNumber: s.quoteNumber || '',
     quoteTotal: Number(s.quoteTotal) || 0,
     oppId: s.oppId,
     quoteId: s.quoteId,
+    lineCount: Number(s.lineCount) || 0,
+    linePushedCount: Number(s.linePushedCount) || 0,
+    lineErrorCount: Number(s.lineErrorCount) || 0,
+    lines: Array.isArray(s.lines) ? s.lines.map(function (l) {
+      return {
+        line_id: l.line_id,
+        idx: Number(l.idx) || 0,
+        title: String(l.title || ''),
+        part_number: String(l.part_number || ''),
+        quantity: Number(l.quantity) || 0,
+        unit_price: Number(l.unit_price) || 0,
+        extended_price: Number(l.extended_price) || 0,
+        already_pushed: !!l.already_pushed,
+        katana_sales_order_id: l.katana_sales_order_id || null,
+        pushed_at: l.pushed_at || null,
+        push_error: l.push_error || null,
+        preview_order_no: String(l.preview_order_no || ''),
+      };
+    }) : [],
     milestones: (s.milestones || []).map(function (m) {
       return {
         percent: Number(m.percent) || 0,
         label: String(m.label || ''),
         katana_variant_id: Number(m.katana_variant_id) || 0,
         katana_sku: String(m.katana_sku || ''),
-        amount: Number(m.amount) || 0,
       };
     }),
     modalOpen: false,
@@ -87,6 +105,9 @@ document.addEventListener('alpine:init', function () {
     customerRef: '',
     deliveryDate: '',
     additionalInfo: '',
+    // Last push summary returned from the server (pushed_count, errors, etc.).
+    // Surfaced inline after a push so the user knows what landed in Katana.
+    lastPushResult: null,
     // Step 1 diagnostic — see push-to-katana-test.js. Decoupled state
     // from the real push above (testBusy, testResponse, testError)
     // so an in-flight diagnostic never blocks the real Push button.
@@ -94,16 +115,17 @@ document.addEventListener('alpine:init', function () {
     testOpen: false,
     testResponse: null,
     testError: null,
-    get amountsSum() {
-      var sum = 0;
-      for (var i = 0; i < this.milestones.length; i++) {
-        var n = Number(this.milestones[i].amount);
-        if (Number.isFinite(n)) sum += n;
-      }
-      return Math.round(sum * 100) / 100;
+    // Count of lines that haven't been pushed yet — the number of new
+    // Katana sales orders the next click will create.
+    get pendingLineCount() {
+      var n = 0;
+      for (var i = 0; i < this.lines.length; i++) if (!this.lines[i].already_pushed) n++;
+      return n;
     },
-    get amountsMatch() {
-      return Math.abs(this.amountsSum - this.quoteTotal) < 0.01;
+    get badgeText() {
+      if (this.fullyPushed) return '✓ All ' + this.lineCount + ' lines pushed to Katana';
+      if (this.partiallyPushed) return '✓ ' + this.linePushedCount + ' of ' + this.lineCount + ' lines pushed';
+      return '';
     },
     openModal: function () {
       if (!this.canPush) {
@@ -117,8 +139,11 @@ document.addEventListener('alpine:init', function () {
       this.modalOpen = false;
     },
     push: function () {
-      if (!this.amountsMatch) return;
       var self = this;
+      if (self.pendingLineCount === 0) {
+        alert('Nothing to push — every line already has a Katana sales order.');
+        return;
+      }
       self.busy = true;
       fetch('/opportunities/' + encodeURIComponent(self.oppId) + '/quotes/' + encodeURIComponent(self.quoteId) + '/push-to-katana', {
         method: 'POST',
@@ -129,28 +154,53 @@ document.addEventListener('alpine:init', function () {
           customer_ref: self.customerRef,
           delivery_date: self.deliveryDate,
           additional_info: self.additionalInfo,
-          milestones: self.milestones.map(function (m) {
-            return { amount: Number(m.amount) || 0 };
-          }),
         }),
       }).then(function (r) {
         if (!r.ok) return r.json().then(function (d) { throw new Error(d && d.error || ('HTTP ' + r.status)); });
         return r.json();
       }).then(function (data) {
-        self.salesOrderId = data.katana_sales_order_id;
-        self.pushedAt = data.katana_sales_order_pushed_at;
-        self.alreadyPushed = true;
-        self.canPush = false;
-        self.modalOpen = false;
+        self.lastPushResult = data;
+        // Merge per-line results back into the local lines array so the
+        // modal/badge update without a page reload.
+        var idMap = {};
+        (data.pushed || []).forEach(function (p) { idMap[p.line_id] = p; });
+        var errMap = {};
+        (data.errors || []).forEach(function (e) { errMap[e.line_id] = e; });
+        for (var i = 0; i < self.lines.length; i++) {
+          var ln = self.lines[i];
+          if (idMap[ln.line_id]) {
+            ln.already_pushed = true;
+            ln.katana_sales_order_id = idMap[ln.line_id].katana_sales_order_id;
+            ln.push_error = null;
+          } else if (errMap[ln.line_id]) {
+            ln.push_error = errMap[ln.line_id].error;
+          }
+        }
+        self.linePushedCount = self.lines.filter(function (l) { return l.already_pushed; }).length;
+        self.lineErrorCount  = self.lines.filter(function (l) { return l.push_error; }).length;
+        self.fullyPushed     = self.lineCount > 0 && self.linePushedCount === self.lineCount;
+        self.partiallyPushed = self.linePushedCount > 0 && !self.fullyPushed;
+        self.anyPushed       = self.linePushedCount > 0;
+        // Keep canPush true if there are still pending lines (re-push
+        // covers the unpushed ones).
+        self.canPush = self.canPush && self.pendingLineCount > 0;
         self.busy = false;
-        // No reload — the badge updates in place.
+        // Close modal if everything pushed; keep it open so the user
+        // can see partial / error state.
+        if (self.lineErrorCount === 0 && self.fullyPushed) {
+          self.modalOpen = false;
+        }
       }).catch(function (err) {
         self.busy = false;
         alert('Push failed: ' + (err && err.message ? err.message : 'unknown error'));
       });
     },
     unlink: function () {
-      if (!confirm('Unlink Katana sales order #' + this.salesOrderId + '? The Katana record stays in place; Pipeline just forgets the link, and the "Push" button reappears.')) return;
+      var msg = this.fullyPushed
+        ? 'Unlink all ' + this.linePushedCount + ' Katana sales orders for this quote?'
+        : 'Unlink the ' + this.linePushedCount + ' Katana sales orders pushed so far?';
+      msg += '\\n\\nThe Katana records stay in place; Pipeline just forgets the links.';
+      if (!confirm(msg)) return;
       var self = this;
       self.busy = true;
       fetch('/opportunities/' + encodeURIComponent(self.oppId) + '/quotes/' + encodeURIComponent(self.quoteId) + '/katana-unlink', {
@@ -160,10 +210,19 @@ document.addEventListener('alpine:init', function () {
         if (!r.ok) return r.json().then(function (d) { throw new Error(d && d.error || ('HTTP ' + r.status)); });
         return r.json();
       }).then(function () {
-        self.salesOrderId = null;
-        self.pushedAt = null;
-        self.alreadyPushed = false;
-        self.canPush = self.blockReason ? false : true;
+        for (var i = 0; i < self.lines.length; i++) {
+          self.lines[i].already_pushed = false;
+          self.lines[i].katana_sales_order_id = null;
+          self.lines[i].pushed_at = null;
+          self.lines[i].push_error = null;
+        }
+        self.linePushedCount = 0;
+        self.lineErrorCount  = 0;
+        self.fullyPushed     = false;
+        self.partiallyPushed = false;
+        self.anyPushed       = false;
+        self.canPush         = !self.blockReason;
+        self.lastPushResult  = null;
         self.busy = false;
       }).catch(function (err) {
         self.busy = false;
@@ -292,57 +351,84 @@ export async function onRequestGet(context) {
   // string. Hybrid/non-EPS quotes ignore this blob.
   const epsSchedule = await loadEpsSchedule(env);
 
-  // Phase 2c — Katana push state. Used by the "Push to Katana"
-  // button + modal injected into the action bar. The button only
-  // appears when status === 'accepted'; what it does is gated on the
-  // four prerequisites below (account mapped, milestones configured,
-  // total > 0, not already pushed).
+  // Step 2 — Katana per-line push state. Each quote line becomes its
+  // own Katana sales order (Adam's D079 pattern). The state below
+  // drives the "Push to Katana" button + modal in the action bar:
+  //   * canPush is true iff the quote is accepted, account is
+  //     mapped, milestones are configured, and at least one line has
+  //     a usable unit_price + qty.
+  //   * The badge state ("N of M lines pushed") comes from per-line
+  //     katana_sales_order_id columns on quote_lines, not from the
+  //     dormant quotes.katana_sales_order_id (Phase 2c, single-SO).
   const milestoneMap = await loadMilestoneMap(env);
   const quoteTotal = Number(quote.total_price) || 0;
+
+  // Pre-derive per-line push state from the already-loaded `lines`.
+  const pushableLines = lines.filter((l) => {
+    const active = (l.is_active == null ? 1 : l.is_active) ? true : false;
+    const isOption = (l.is_option == null ? 0 : l.is_option) ? true : false;
+    return active && !isOption;
+  });
+  const linePushedCount = pushableLines.filter((l) => l.katana_sales_order_id).length;
+  const lineErrorCount  = pushableLines.filter((l) => l.katana_push_error).length;
+  const fullyPushed     = pushableLines.length > 0 && linePushedCount === pushableLines.length;
+  const partiallyPushed = linePushedCount > 0 && !fullyPushed;
+  const anyPushed       = linePushedCount > 0;
+
   const katanaBlockReasons = [];
   if (!quote.katana_customer_id) katanaBlockReasons.push('Account is not mapped to a Katana customer (Settings → Katana customers)');
   if (!milestoneMap || !milestoneMap.milestones?.length) katanaBlockReasons.push('Milestone map is not configured (Settings → Katana milestones)');
+  if (pushableLines.length === 0) katanaBlockReasons.push('Quote has no active (non-option) lines');
   if (quoteTotal <= 0) katanaBlockReasons.push('Quote total is $0');
-  // "already pushed" is handled separately as a different UI state, not a block.
+
+  // Build the per-line preview that powers the modal's "Lines to push" table.
+  const milestonesForState = (milestoneMap?.milestones || []).map((m) => ({
+    percent: Number(m.percent) || 0,
+    label: String(m.label || ''),
+    katana_variant_id: m.katana_variant_id,
+    katana_sku: m.katana_sku || '',
+  }));
+  const linesForState = pushableLines.map((l, i) => {
+    const lineIdx = i + 1;
+    const linePadded = String(lineIdx).padStart(2, '0');
+    const linePrice = Number(l.unit_price) || 0;
+    const lineQty   = Number(l.quantity) || 0;
+    return {
+      line_id: l.id,
+      idx: lineIdx,
+      title: (l.title || l.description || '').toString().slice(0, 120) || `Line ${lineIdx}`,
+      part_number: l.part_number || '',
+      quantity: lineQty,
+      unit_price: linePrice,
+      extended_price: Math.round(linePrice * lineQty * 100) / 100,
+      already_pushed: !!l.katana_sales_order_id,
+      katana_sales_order_id: l.katana_sales_order_id || null,
+      pushed_at: l.katana_sales_order_pushed_at || null,
+      push_error: l.katana_push_error || null,
+      // Per-SO name preview; the route also computes this server-side.
+      preview_order_no: `${quote.number}-${linePadded}`,
+    };
+  });
+
   const katanaState = {
     showSection: quote.status === 'accepted',
-    alreadyPushed: !!quote.katana_sales_order_id,
-    canPush: quote.status === 'accepted' && !quote.katana_sales_order_id && katanaBlockReasons.length === 0,
+    fullyPushed,
+    partiallyPushed,
+    anyPushed,
+    canPush: quote.status === 'accepted' && !fullyPushed && katanaBlockReasons.length === 0,
     blockReason: katanaBlockReasons.join('; '),
-    salesOrderId: quote.katana_sales_order_id || null,
-    pushedAt: quote.katana_sales_order_pushed_at || null,
     katanaCustomerId: quote.katana_customer_id || null,
     katanaCustomerName: quote.katana_customer_name || '',
     quoteNumber: quote.number,
     quoteTotal,
     oppId,
     quoteId,
-    milestones: (milestoneMap?.milestones || []).map((m) => ({
-      percent: m.percent,
-      label: m.label,
-      katana_variant_id: m.katana_variant_id,
-      katana_sku: m.katana_sku,
-      amount: 0, // filled below so per-milestone defaults sum exactly to quoteTotal
-    })),
+    lineCount: pushableLines.length,
+    linePushedCount,
+    lineErrorCount,
+    lines: linesForState,
+    milestones: milestonesForState,
   };
-  // Compute default per-milestone amounts that sum exactly to quoteTotal.
-  // Each row = round(total * pct / 100, 2). Whatever 1-cent rounding
-  // drift is left over goes onto the last row so the post body sums
-  // cleanly past the route handler's tolerance check.
-  if (katanaState.milestones.length > 0 && quoteTotal > 0) {
-    let rolling = 0;
-    for (let i = 0; i < katanaState.milestones.length; i++) {
-      const m = katanaState.milestones[i];
-      const raw = quoteTotal * (Number(m.percent) || 0) / 100;
-      m.amount = Math.round(raw * 100) / 100;
-      rolling += m.amount;
-    }
-    const drift = quoteTotal - rolling;
-    if (Math.abs(drift) > 0.001) {
-      const last = katanaState.milestones[katanaState.milestones.length - 1];
-      last.amount = Math.round((last.amount + drift) * 100) / 100;
-    }
-  }
   const katanaStateJson = JSON.stringify(katanaState).replace(/</g, '\\u003c');
 
   // Expiration display (Batch 6, migration 0038):
@@ -494,31 +580,29 @@ export async function onRequestGet(context) {
               <!-- Empty x-data so Alpine processes the directives below.
                    display:contents keeps these elements direct flex children
                    of .header-actions so button spacing is identical to the
-                   rest of the bar.
-                   Buttons are always rendered (not inside <template x-if>)
-                   with static fallback text/visibility, so they appear even
-                   if Alpine fails to evaluate the directives. Alpine's
-                   x-show / x-text refines the visible state when it runs. -->
+                   rest of the bar. -->
               <div x-data style="display:contents">
                 <!-- Already-pushed badge. Hidden by default via x-cloak;
-                     Alpine reveals it only when alreadyPushed is true. -->
-                <span x-cloak x-show="$store.katanaPush && $store.katanaPush.alreadyPushed"
+                     shows when ANY line is pushed (full or partial).
+                     Text is "All N lines pushed" or "X of N lines pushed". -->
+                <span x-cloak x-show="$store.katanaPush && $store.katanaPush.anyPushed"
                       class="katana-pushed-badge"
-                      :title="'Pushed ' + ($store.katanaPush && $store.katanaPush.pushedAt || '')">
-                  &check; Pushed to Katana: SO #<span x-text="$store.katanaPush && $store.katanaPush.salesOrderId"></span>
+                      :title="($store.katanaPush && $store.katanaPush.lineErrorCount) ? ($store.katanaPush.lineErrorCount + ' line error(s) — see modal') : 'Click to manage'">
+                  <span x-text="$store.katanaPush && $store.katanaPush.badgeText"></span>
                   <button type="button" class="katana-pushed-unlink"
                           @click="$store.katanaPush.unlink()"
                           :disabled="$store.katanaPush && $store.katanaPush.busy"
-                          title="Unlink (Katana sales order is left in place)">&times;</button>
+                          title="Unlink all (Katana sales orders are left in place)">&times;</button>
                 </span>
-                <!-- Push to Katana button. Always rendered; Alpine hides it
-                     when alreadyPushed, and disables it when canPush is false. -->
+                <!-- Push to Katana button. Always rendered. Visible when
+                     not fully pushed (so partial-pushed quotes can re-push
+                     the remaining lines). Disabled when canPush is false. -->
                 <button type="button" class="btn"
-                        x-show="!($store.katanaPush && $store.katanaPush.alreadyPushed)"
+                        x-show="!($store.katanaPush && $store.katanaPush.fullyPushed)"
                         @click="$store.katanaPush && $store.katanaPush.openModal()"
                         :disabled="!($store.katanaPush && $store.katanaPush.canPush)"
-                        :title="($store.katanaPush && $store.katanaPush.canPush) ? 'Push this quote to Katana as a sales order' : ('Cannot push: ' + ($store.katanaPush && $store.katanaPush.blockReason || 'Katana not ready'))">
-                  Push to Katana
+                        :title="($store.katanaPush && $store.katanaPush.canPush) ? ('Push ' + ($store.katanaPush.pendingLineCount || 0) + ' line(s) to Katana, one sales order per line') : ('Cannot push: ' + ($store.katanaPush && $store.katanaPush.blockReason || 'Katana not ready'))">
+                  <span x-text="($store.katanaPush && $store.katanaPush.partiallyPushed) ? 'Push remaining lines' : 'Push to Katana'">Push to Katana</span>
                 </button>
                 <!-- Step 1 diagnostic: minimal test push. Default text content
                      is the steady-state label so the button is readable even
@@ -2168,10 +2252,11 @@ export async function onRequestGet(context) {
           </div>
           <div class="katana-push-modal-body">
             <p class="muted" style="margin:0 0 .75rem">
-              Creates one Katana sales order with one row per milestone.
-              Adjust amounts inline if the standard split needs tweaking
-              for this project &mdash; the total must match the quote total
-              ($<span x-text="$store.katanaPush.quoteTotal.toFixed(2)"></span>).
+              Creates <strong x-text="$store.katanaPush.pendingLineCount"></strong>
+              Katana sales order(s), one per active quote line. Each SO
+              has <strong x-text="$store.katanaPush.milestones.length"></strong>
+              milestone rows (priced as the line's unit price &times; each
+              milestone's percentage). Lines already pushed are skipped.
             </p>
 
             <table class="meta-table" style="width:100%;font-size:.9rem">
@@ -2184,32 +2269,83 @@ export async function onRequestGet(context) {
                   </td>
                 </tr>
                 <tr>
-                  <td><strong>Order #</strong></td>
-                  <td><input type="text" x-model="$store.katanaPush.orderNo" maxlength="80" style="width:100%"></td>
+                  <td><strong>Order # base</strong></td>
+                  <td>
+                    <input type="text" x-model="$store.katanaPush.orderNo" maxlength="60" style="width:100%">
+                    <span class="muted" style="font-size:.75em">Per-line SOs append <code>-01</code>, <code>-02</code>, &hellip;</span>
+                  </td>
                 </tr>
                 <tr>
                   <td><strong>Customer ref</strong></td>
-                  <td><input type="text" x-model="$store.katanaPush.customerRef" maxlength="200" placeholder="optional &mdash; e.g. PO number" style="width:100%"></td>
+                  <td><input type="text" x-model="$store.katanaPush.customerRef" maxlength="200" placeholder="optional &mdash; e.g. PO number (applied to every SO)" style="width:100%"></td>
                 </tr>
                 <tr>
                   <td><strong>Delivery date</strong></td>
-                  <td><input type="date" x-model="$store.katanaPush.deliveryDate" style="width:auto"></td>
+                  <td>
+                    <input type="date" x-model="$store.katanaPush.deliveryDate" style="width:auto">
+                    <span class="muted" style="font-size:.75em">Optional &mdash; Katana defaults to +14 days when blank.</span>
+                  </td>
                 </tr>
                 <tr>
                   <td style="vertical-align:top"><strong>Notes</strong></td>
-                  <td><textarea x-model="$store.katanaPush.additionalInfo" rows="2" maxlength="2000" placeholder="optional &mdash; appears in Katana's additional_info" style="width:100%"></textarea></td>
+                  <td><textarea x-model="$store.katanaPush.additionalInfo" rows="2" maxlength="2000" placeholder="optional &mdash; appended after the line label in Katana's additional_info" style="width:100%"></textarea></td>
                 </tr>
               </tbody>
             </table>
 
-            <h3 style="margin:1rem 0 .25rem">Milestones</h3>
-            <table class="meta-table" style="width:100%;font-size:.9rem">
+            <!-- Lines preview — one row per quote line showing what will land in Katana. -->
+            <h3 style="margin:1rem 0 .25rem">Lines (<span x-text="$store.katanaPush.lineCount"></span>)</h3>
+            <table class="meta-table" style="width:100%;font-size:.85rem">
+              <thead>
+                <tr>
+                  <th style="text-align:left;width:2.5rem">#</th>
+                  <th style="text-align:left">Line</th>
+                  <th style="text-align:right;width:4rem">Qty</th>
+                  <th style="text-align:right;width:7rem">Unit $</th>
+                  <th style="text-align:right;width:8rem">Total $</th>
+                  <th style="text-align:left;width:14rem">Katana SO</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="(line, idx) in $store.katanaPush.lines" :key="line.line_id">
+                  <tr :style="line.already_pushed ? 'color:#1a7f37' : (line.push_error ? 'color:#b3261e' : '')">
+                    <td x-text="line.idx"></td>
+                    <td>
+                      <span x-text="line.title"></span>
+                      <span class="muted" style="font-size:.75em" x-show="line.part_number" x-text="' &mdash; P/N ' + line.part_number"></span>
+                    </td>
+                    <td style="text-align:right" x-text="line.quantity"></td>
+                    <td style="text-align:right" x-text="'$' + line.unit_price.toFixed(2)"></td>
+                    <td style="text-align:right" x-text="'$' + line.extended_price.toFixed(2)"></td>
+                    <td>
+                      <template x-if="line.already_pushed">
+                        <span>&check; SO #<span x-text="line.katana_sales_order_id"></span></span>
+                      </template>
+                      <template x-if="!line.already_pushed && !line.push_error">
+                        <span class="muted">&rarr; <code style="font-size:.75em" x-text="($store.katanaPush.orderNo || '') + '-' + String(line.idx).padStart(2, '0')"></code></span>
+                      </template>
+                      <template x-if="line.push_error">
+                        <span x-text="line.push_error"></span>
+                      </template>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+
+            <!-- Milestone schedule — read-only display of the percentages
+                 that will be applied per line. -->
+            <h3 style="margin:1rem 0 .25rem">Milestone schedule (per line)</h3>
+            <p class="muted" style="margin:0 0 .25rem;font-size:.85em">
+              The same schedule is applied to every line. Edit at
+              <a href="/settings/katana-milestones" target="_blank">Settings &rarr; Katana milestones</a>.
+            </p>
+            <table class="meta-table" style="width:100%;font-size:.85rem">
               <thead>
                 <tr>
                   <th style="text-align:right;width:4rem">%</th>
                   <th style="text-align:left">Label</th>
-                  <th style="text-align:left;width:12rem">Katana variant</th>
-                  <th style="text-align:right;width:9rem">Amount ($)</th>
+                  <th style="text-align:left;width:14rem">Katana variant</th>
                 </tr>
               </thead>
               <tbody>
@@ -2221,33 +2357,33 @@ export async function onRequestGet(context) {
                       <code style="font-size:.8em" x-text="m.katana_sku"></code>
                       <span class="muted" style="font-size:.75em">#<span x-text="m.katana_variant_id"></span></span>
                     </td>
-                    <td style="text-align:right">
-                      <input type="number" min="0" step="0.01" x-model.number="m.amount" style="width:7.5rem;text-align:right">
-                    </td>
                   </tr>
                 </template>
-                <tr>
-                  <td colspan="3" style="text-align:right"><strong>Total:</strong></td>
-                  <td style="text-align:right">
-                    <strong x-text="'$' + $store.katanaPush.amountsSum.toFixed(2)"
-                            :style="$store.katanaPush.amountsMatch ? 'color:#1a7f37' : 'color:#b3261e'"></strong>
-                  </td>
-                </tr>
-                <tr x-show="!$store.katanaPush.amountsMatch">
-                  <td colspan="4" style="text-align:right;font-size:.85em;color:#b3261e">
-                    Must equal $<span x-text="$store.katanaPush.quoteTotal.toFixed(2)"></span>
-                    (off by $<span x-text="Math.abs($store.katanaPush.quoteTotal - $store.katanaPush.amountsSum).toFixed(2)"></span>)
-                  </td>
-                </tr>
               </tbody>
             </table>
+
+            <!-- Last push result summary — shows up after a push so the
+                 user can see what succeeded vs. what errored without
+                 closing the modal. -->
+            <div x-show="$store.katanaPush.lastPushResult" x-cloak style="margin-top:1rem;padding:.5rem .75rem;background:var(--bg-elev);border:1px solid var(--border);border-radius:4px;font-size:.85rem">
+              <strong>Last push:</strong>
+              <span style="color:#1a7f37" x-show="$store.katanaPush.lastPushResult && $store.katanaPush.lastPushResult.pushed_count">
+                &check; <span x-text="$store.katanaPush.lastPushResult && $store.katanaPush.lastPushResult.pushed_count"></span> line(s) pushed
+              </span>
+              <span class="muted" x-show="$store.katanaPush.lastPushResult && $store.katanaPush.lastPushResult.skipped_count">
+                &middot; <span x-text="$store.katanaPush.lastPushResult && $store.katanaPush.lastPushResult.skipped_count"></span> skipped
+              </span>
+              <span style="color:#b3261e" x-show="$store.katanaPush.lastPushResult && $store.katanaPush.lastPushResult.error_count">
+                &middot; <span x-text="$store.katanaPush.lastPushResult && $store.katanaPush.lastPushResult.error_count"></span> error(s)
+              </span>
+            </div>
           </div>
           <div class="katana-push-modal-footer">
-            <button type="button" class="btn" @click="$store.katanaPush.closeModal()" :disabled="$store.katanaPush.busy">Cancel</button>
+            <button type="button" class="btn" @click="$store.katanaPush.closeModal()" :disabled="$store.katanaPush.busy">Close</button>
             <button type="button" class="btn primary"
                     @click="$store.katanaPush.push()"
-                    :disabled="$store.katanaPush.busy || !$store.katanaPush.amountsMatch"
-                    x-text="$store.katanaPush.busy ? 'Pushing…' : 'Push to Katana'"></button>
+                    :disabled="$store.katanaPush.busy || $store.katanaPush.pendingLineCount === 0"
+                    x-text="$store.katanaPush.busy ? 'Pushing…' : ('Push ' + ($store.katanaPush.pendingLineCount || 0) + ' line(s) to Katana')"></button>
           </div>
         </div>
       </div>
