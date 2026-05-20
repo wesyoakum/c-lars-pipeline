@@ -32,7 +32,8 @@ import { slugifyGroup, loadSiblingAccounts, listGroupLabels } from '../../lib/ac
 import { loadStageCatalog } from '../../lib/stages.js';
 import { fmtDollar } from '../../lib/pricing.js';
 import { INACTIVE_OPPORTUNITY_STAGES } from '../../lib/activeness.js';
-import { iconAddButton } from '../../lib/list-table.js';
+import { iconAddButton, listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
+import { ieText, ieSelect, listInlineEditScript } from '../../lib/list-inline-edit.js';
 
 const UPDATE_FIELDS = [
   'name',
@@ -489,76 +490,93 @@ export async function onRequestGet(context) {
         })}
       </div>
 
-      ${contacts.length === 0
-        ? html`<p class="muted">No contacts yet.</p>`
-        : html`
-          <table class="data">
-            <thead>
-              <tr>
-                <th>First</th>
-                <th>Last</th>
-                <th>Title</th>
-                <th>Email</th>
-                <th>Phone</th>
-                <th>Primary</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              ${contacts.map(c => {
-                const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
-                return html`<tr x-data="contactInline('${escape(c.id)}')">
-                  <td><span class="ie" data-field="first_name" data-type="text" @click="activate($el)"><span class="ie-display">${escape(c.first_name ?? '')}</span></span></td>
-                  <td><span class="ie" data-field="last_name" data-type="text" @click="activate($el)"><span class="ie-display"><strong>${escape(c.last_name ?? '')}</strong></span></span></td>
-                  <td><span class="ie" data-field="title" data-type="text" @click="activate($el)"><span class="ie-display">${escape(c.title ?? '')}</span></span></td>
-                  <td><span class="ie" data-field="email" data-type="text" @click="activate($el)"><span class="ie-display">${c.email ? html`<a href="mailto:${escape(c.email)}" @click.stop>${escape(c.email)}</a>` : html`<span class="muted">—</span>`}</span></span></td>
-                  <td><span class="ie" data-field="phone" data-type="text" @click="activate($el)"><span class="ie-display">${escape(c.phone ?? '')}</span></span></td>
-                  <td>${c.is_primary ? html`<span class="pill pill-success">primary</span>` : ''}</td>
-                  <td class="row-actions">
-                    <form method="post" action="/contacts/${escape(c.id)}/delete"
-                          onsubmit="return confirm('Delete contact ${escape(name)}?');"
-                          style="display:inline">
-                      <button type="submit" class="btn btn-sm danger">Delete</button>
-                    </form>
-                  </td>
-                </tr>`; })}
-            </tbody>
-          </table>
-        `}
+      ${(() => {
+        const ctCols = [
+          { key: 'first_name', label: 'First',    sort: 'text', filter: 'text', default: true },
+          { key: 'last_name',  label: 'Last',     sort: 'text', filter: 'text', default: true },
+          { key: 'title',      label: 'Title',    sort: 'text', filter: 'text', default: true },
+          { key: 'email',      label: 'Email',    sort: 'text', filter: 'text', default: true },
+          { key: 'phone',      label: 'Phone',    sort: 'text', filter: 'text', default: true },
+          { key: 'primary',    label: 'Primary',  sort: 'text', filter: null,   default: true },
+          { key: 'actions',    label: '',          sort: null,   filter: null,   default: true, hideable: false },
+        ];
+        const ctData = contacts.map(c => ({
+          id: c.id,
+          first_name: c.first_name ?? '',
+          last_name: c.last_name ?? '',
+          title: c.title ?? '',
+          email: c.email ?? '',
+          phone: c.phone ?? '',
+          primary: c.is_primary ? 'primary' : '',
+          actions: '',
+        }));
+        return contacts.length === 0
+          ? html`<p class="muted">No contacts yet.</p>`
+          : html`
+            <div class="opp-list" data-list-id="acct-contacts" data-columns="${escape(JSON.stringify(ctCols))}">
+              ${listToolbar({ id: 'acct-contacts', count: contacts.length, columns: ctCols, compact: true })}
+              <table class="data opp-list-table">
+                ${listTableHead(ctCols)}
+                <tbody data-role="rows">
+                  ${ctData.map((r, i) => html`<tr data-row-id="${escape(r.id)}"
+                      ${raw(rowDataAttrs(ctCols, r))}>
+                    <td class="col-first_name" data-col="first_name">${ieText('first_name', r.first_name)}</td>
+                    <td class="col-last_name" data-col="last_name">${ieText('last_name', r.last_name)}</td>
+                    <td class="col-title" data-col="title">${ieText('title', r.title)}</td>
+                    <td class="col-email" data-col="email">${ieText('email', r.email, { inputType: 'email' })}</td>
+                    <td class="col-phone" data-col="phone">${ieText('phone', r.phone, { inputType: 'tel' })}</td>
+                    <td class="col-primary" data-col="primary">${contacts[i].is_primary ? html`<span class="pill pill-success">primary</span>` : ''}</td>
+                    <td class="col-actions" data-col="actions" data-row-no-nav>
+                      <form method="post" action="/contacts/${escape(r.id)}/delete"
+                            onsubmit="return confirm('Delete this contact?');"
+                            style="display:inline">
+                        <button type="submit" class="btn btn-sm danger">Delete</button>
+                      </form>
+                    </td>
+                  </tr>`)}
+                </tbody>
+              </table>
+            </div>
+            <script>${raw(listScript('pipeline.acct.contacts.v1', 'last_name', 'asc', {}, { listId: 'acct-contacts' }))}</script>
+            <script>${raw(listInlineEditScript('/contacts/:id/patch', { listId: 'acct-contacts' }))}</script>`;
+      })()}
     </section>`;
 
-  const renderOppTable = (rows) => html`
-    <table class="data compact">
-      <thead>
-        <tr>
-          <th>Number</th>
-          <th>Title</th>
-          <th>Type</th>
-          <th>Stage</th>
-          <th class="num">Value</th>
-          <th>Owner</th>
-          <th>Updated</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows.map((o) => html`
-          <tr>
-            <td><a href="/opportunities/${escape(o.id)}"><code>${escape(o.number)}</code></a></td>
-            <td><a href="/opportunities/${escape(o.id)}">${escape(o.title || '(untitled)')}</a></td>
-            <td>${escape(o.typeLabel)}</td>
-            <td><span class="pill">${escape(o.stageLabel)}</span></td>
-            <td class="num">${escape(o.value != null ? fmtDollar(o.value) : '\u2014')}</td>
-            <td>${escape(o.owner)}</td>
-            <td><small class="muted">${escape(o.updated)}</small></td>
-          </tr>
-        `)}
-      </tbody>
-    </table>`;
+  const aoCols = [
+    { key: 'number',      label: 'Number',   sort: 'text',   filter: 'text',   default: true },
+    { key: 'title',       label: 'Title',    sort: 'text',   filter: 'text',   default: true },
+    { key: 'typeLabel',   label: 'Type',     sort: 'text',   filter: 'select', default: true },
+    { key: 'stageLabel',  label: 'Stage',    sort: 'text',   filter: 'select', default: true },
+    { key: 'value',       label: 'Value',    sort: 'number', filter: null,     default: true },
+    { key: 'owner',       label: 'Owner',    sort: 'text',   filter: 'text',   default: true },
+    { key: 'updated',     label: 'Updated',  sort: 'date',   filter: 'text',   default: true },
+  ];
+  const renderOppListTable = (rows, listId, storageKey) => html`
+    <div class="opp-list" data-list-id="${listId}" data-columns="${escape(JSON.stringify(aoCols))}">
+      <table class="data opp-list-table compact">
+        ${listTableHead(aoCols)}
+        <tbody data-role="rows">
+          ${rows.map(o => html`<tr data-row-id="${escape(o.id)}"
+              data-row-href="/opportunities/${escape(o.id)}"
+              ${raw(rowDataAttrs(aoCols, o))}>
+            <td class="col-number" data-col="number"><a href="/opportunities/${escape(o.id)}"><code>${escape(o.number)}</code></a></td>
+            <td class="col-title" data-col="title"><a href="/opportunities/${escape(o.id)}">${escape(o.title || '(untitled)')}</a></td>
+            <td class="col-typeLabel" data-col="typeLabel">${escape(o.typeLabel)}</td>
+            <td class="col-stageLabel" data-col="stageLabel"><span class="pill">${escape(o.stageLabel)}</span></td>
+            <td class="col-value num" data-col="value">${escape(o.value != null ? fmtDollar(o.value) : '\u2014')}</td>
+            <td class="col-owner" data-col="owner">${escape(o.owner)}</td>
+            <td class="col-updated" data-col="updated"><small class="muted">${escape(o.updated)}</small></td>
+          </tr>`)}
+        </tbody>
+      </table>
+    </div>
+    <script>${raw(listScript(storageKey, 'number', 'asc', {}, { listId }))}</script>`;
 
   const opportunitiesTab = html`
     <section class="card">
       <div class="card-header">
         <h2>Opportunities</h2>
+        ${listToolbar({ id: 'acct-opps', count: activeOppRows.length, columns: aoCols, compact: true })}
         ${iconAddButton({
           onClick: `window.Pipeline && window.Pipeline.openWizard('opportunity', ${acctWizardPrefill})`,
           label: 'New opportunity',
@@ -568,7 +586,7 @@ export async function onRequestGet(context) {
         ? html`<p class="muted">No opportunities yet.</p>`
         : activeOppRows.length === 0
           ? html`<p class="muted">No active opportunities. See inactive below.</p>`
-          : renderOppTable(activeOppRows)}
+          : renderOppListTable(activeOppRows, 'acct-opps', 'pipeline.acct.opps.v1')}
     </section>
     ${inactiveOppRows.length > 0 ? html`
       <section class="card">
@@ -576,121 +594,161 @@ export async function onRequestGet(context) {
           <h2>Inactive opportunities</h2>
           <span class="muted">Lost or abandoned. Kept here for history.</span>
         </div>
-        ${renderOppTable(inactiveOppRows)}
+        ${renderOppListTable(inactiveOppRows, 'acct-opps-inactive', 'pipeline.acct.opps.inactive.v1')}
       </section>
     ` : ''}`;
 
+  const aqCols = [
+    { key: 'number',      label: 'Number',       sort: 'text',   filter: 'text',   default: true },
+    { key: 'revision',    label: 'Rev',           sort: 'text',   filter: 'text',   default: true },
+    { key: 'typeLabel',   label: 'Type',          sort: 'text',   filter: 'select', default: true },
+    { key: 'title',       label: 'Title',         sort: 'text',   filter: 'text',   default: true },
+    { key: 'opp',         label: 'Opportunity',   sort: 'text',   filter: 'text',   default: true },
+    { key: 'statusLabel', label: 'Status',        sort: 'text',   filter: 'select', default: true },
+    { key: 'total',       label: 'Total',         sort: 'number', filter: null,     default: true },
+    { key: 'validUntil',  label: 'Valid until',   sort: 'date',   filter: 'text',   default: true },
+    { key: 'updated',     label: 'Updated',       sort: 'date',   filter: 'text',   default: true },
+  ];
+  const aqData = quoteRows.map(q => ({
+    ...q,
+    opp: `${q.oppNumber} ${q.oppTitle}`.trim(),
+  }));
   const quotesTab = html`
     <section class="card">
       <div class="card-header">
         <h2>Quotes</h2>
+        ${listToolbar({ id: 'acct-quotes', count: quoteRows.length, columns: aqCols, compact: true })}
       </div>
       ${quoteRows.length === 0
         ? html`<p class="muted">No quotes yet.</p>`
         : html`
-          <table class="data compact">
-            <thead>
-              <tr>
-                <th>Number</th>
-                <th>Rev</th>
-                <th>Type</th>
-                <th>Title</th>
-                <th>Opportunity</th>
-                <th>Status</th>
-                <th class="num">Total</th>
-                <th>Valid until</th>
-                <th>Updated</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${quoteRows.map((q) => html`
-                <tr>
-                  <td><a href="/opportunities/${escape(q.opportunity_id)}/quotes/${escape(q.id)}"><code>${escape(q.number)}</code></a></td>
-                  <td>${escape(q.revision)}</td>
-                  <td>${escape(q.typeLabel)}</td>
-                  <td>${escape(q.title || '(no title)')}</td>
-                  <td><a href="/opportunities/${escape(q.opportunity_id)}"><code>${escape(q.oppNumber)}</code> ${escape(q.oppTitle)}</a></td>
-                  <td><span class="pill ${quoteStatusPillClass(q.status)}">${escape(q.statusLabel)}</span></td>
-                  <td class="num">${escape(q.total != null ? fmtDollar(q.total) : '\u2014')}</td>
-                  <td><small class="muted">${escape(q.validUntil)}</small></td>
-                  <td><small class="muted">${escape(q.updated)}</small></td>
-                </tr>
-              `)}
-            </tbody>
-          </table>
+          <div class="opp-list" data-list-id="acct-quotes" data-columns="${escape(JSON.stringify(aqCols))}">
+            <table class="data opp-list-table compact">
+              ${listTableHead(aqCols)}
+              <tbody data-role="rows">
+                ${aqData.map(q => html`<tr data-row-id="${escape(q.id)}"
+                    data-row-href="/opportunities/${escape(q.opportunity_id)}/quotes/${escape(q.id)}"
+                    ${raw(rowDataAttrs(aqCols, q))}>
+                  <td class="col-number" data-col="number"><a href="/opportunities/${escape(q.opportunity_id)}/quotes/${escape(q.id)}"><code>${escape(q.number)}</code></a></td>
+                  <td class="col-revision" data-col="revision">${escape(q.revision)}</td>
+                  <td class="col-typeLabel" data-col="typeLabel">${escape(q.typeLabel)}</td>
+                  <td class="col-title" data-col="title">${escape(q.title || '(no title)')}</td>
+                  <td class="col-opp" data-col="opp"><a href="/opportunities/${escape(q.opportunity_id)}"><code>${escape(q.oppNumber)}</code> ${escape(q.oppTitle)}</a></td>
+                  <td class="col-statusLabel" data-col="statusLabel"><span class="pill ${quoteStatusPillClass(q.status)}">${escape(q.statusLabel)}</span></td>
+                  <td class="col-total num" data-col="total">${escape(q.total != null ? fmtDollar(q.total) : '\u2014')}</td>
+                  <td class="col-validUntil" data-col="validUntil"><small class="muted">${escape(q.validUntil)}</small></td>
+                  <td class="col-updated" data-col="updated"><small class="muted">${escape(q.updated)}</small></td>
+                </tr>`)}
+              </tbody>
+            </table>
+          </div>
+          <script>${raw(listScript('pipeline.acct.quotes.v1', 'number', 'desc', {}, { listId: 'acct-quotes' }))}</script>
         `}
     </section>`;
 
+  const atCols = [
+    { key: 'check',    label: '',          sort: null,     filter: null,     default: true, hideable: false },
+    { key: 'subject',  label: 'Subject',   sort: 'text',   filter: 'text',   default: true },
+    { key: 'type',     label: 'Type',      sort: 'text',   filter: 'select', default: true },
+    { key: 'linked',   label: 'Linked to', sort: 'text',   filter: 'text',   default: true },
+    { key: 'assigned', label: 'Assigned',  sort: 'text',   filter: 'text',   default: true },
+    { key: 'due',      label: 'Due',       sort: 'date',   filter: 'text',   default: true },
+    { key: 'status',   label: 'Status',    sort: 'text',   filter: 'select', default: true },
+  ];
+  const atData = taskRows.map(a => {
+    const isOverdue = a.status === 'pending' && a.due_at && a.due_at < new Date().toISOString().slice(0, 10);
+    return {
+      id: a.id,
+      check: '',
+      subject: a.subject || '(no subject)',
+      body_preview: a.body ? (a.body.length > 60 ? a.body.slice(0, 60) + '...' : a.body) : '',
+      type: TASK_TYPE_LABELS[a.type] ?? a.type,
+      type_raw: a.type,
+      linked: a.opportunity_id ? (a.opp_number ?? '') : 'Account',
+      opportunity_id: a.opportunity_id ?? '',
+      assigned: a.assigned_name ?? a.assigned_email ?? '',
+      due: a.due_at ? a.due_at.slice(0, 10) : '',
+      status: a.status ?? '',
+      is_completed: a.status === 'completed',
+      is_overdue: isOverdue,
+    };
+  });
   const tasksTab = html`
     <section class="card">
       <div class="card-header">
         <h2>Tasks &amp; Activities</h2>
+        ${listToolbar({ id: 'acct-tasks', count: taskRows.length, columns: atCols, compact: true })}
         <button class="btn btn-sm primary" type="button"
                 onclick="window.Pipeline && window.Pipeline.openTaskModal(${escape(tasksTabPrefill)})">+ Add task</button>
       </div>
       ${taskRows.length === 0
         ? html`<p class="muted">No tasks or activities yet.</p>`
         : html`
-          <table class="data compact">
-            <thead><tr><th style="width:2rem"></th><th>Subject</th><th>Type</th><th>Linked to</th><th>Assigned</th><th>Due</th><th>Status</th></tr></thead>
-            <tbody>
-              ${taskRows.map(a => {
-                const isOverdue = a.status === 'pending' && a.due_at && a.due_at < new Date().toISOString().slice(0, 10);
-                return html`<tr class="${a.status === 'completed' ? 'row-muted' : ''} ${isOverdue ? 'row-overdue' : ''}">
-                  <td>${a.status === 'pending'
-                    ? html`<form method="post" action="/activities/${escape(a.id)}/complete" style="display:inline"><button type="submit" class="check-btn" title="Mark complete"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/></svg></button></form>`
-                    : html`<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--green,#1a7f37)" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="M5 8l2 2 4-4"/></svg>`}
-                    <form method="post" action="/activities/${escape(a.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this task?')"><input type="hidden" name="return_to" value="/accounts/${escape(account.id)}"><button type="submit" class="row-delete-btn" title="Delete task" aria-label="Delete task">×</button></form></td>
-                  <td><a href="/activities/${escape(a.id)}"><strong class="${a.status === 'completed' ? 'completed-text' : ''}">${escape(a.subject || '(no subject)')}</strong></a>
-                    ${a.body ? html`<br><small class="muted">${escape(a.body.length > 60 ? a.body.slice(0, 60) + '...' : a.body)}</small>` : ''}</td>
-                  <td><span class="pill pill-${a.type}">${escape(TASK_TYPE_LABELS[a.type] ?? a.type)}</span></td>
-                  <td>${a.opportunity_id
-                    ? html`<a href="/opportunities/${escape(a.opportunity_id)}"><code>${escape(a.opp_number ?? '')}</code></a>`
+          <div class="opp-list" data-list-id="acct-tasks" data-columns="${escape(JSON.stringify(atCols))}">
+            <table class="data opp-list-table compact">
+              ${listTableHead(atCols)}
+              <tbody data-role="rows">
+                ${atData.map(r => html`<tr data-row-id="${escape(r.id)}"
+                    data-row-href="/activities/${escape(r.id)}"
+                    ${raw(rowDataAttrs(atCols, r))}
+                    class="${r.is_completed ? 'row-muted' : ''} ${r.is_overdue ? 'row-overdue' : ''}">
+                  <td class="col-check" data-col="check" data-row-no-nav style="width:2rem">${r.is_completed
+                    ? html`<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--green,#1a7f37)" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="M5 8l2 2 4-4"/></svg>`
+                    : html`<form method="post" action="/activities/${escape(r.id)}/complete" style="display:inline"><button type="submit" class="check-btn" title="Mark complete"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/></svg></button></form>`}
+                    <form method="post" action="/activities/${escape(r.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this task?')"><input type="hidden" name="return_to" value="/accounts/${escape(account.id)}"><button type="submit" class="row-delete-btn" title="Delete task" aria-label="Delete task">×</button></form></td>
+                  <td class="col-subject" data-col="subject"><a href="/activities/${escape(r.id)}"><strong class="${r.is_completed ? 'completed-text' : ''}">${escape(r.subject)}</strong></a>
+                    ${r.body_preview ? html`<br><small class="muted">${escape(r.body_preview)}</small>` : ''}</td>
+                  <td class="col-type" data-col="type"><span class="pill pill-${r.type_raw}">${escape(r.type)}</span></td>
+                  <td class="col-linked" data-col="linked">${r.opportunity_id
+                    ? html`<a href="/opportunities/${escape(r.opportunity_id)}"><code>${escape(r.linked)}</code></a>`
                     : html`<span class="muted">Account</span>`}</td>
-                  <td>${escape(a.assigned_name ?? a.assigned_email ?? '\u2014')}</td>
-                  <td class="${isOverdue ? 'overdue-text' : ''}">${a.due_at ? escape(a.due_at.slice(0, 10)) : html`<span class="muted">\u2014</span>`}</td>
-                  <td><span class="pill ${a.status === 'completed' ? 'pill-success' : ''}">${escape(a.status ?? '\u2014')}</span></td>
-                </tr>`;
-              })}
-            </tbody>
-          </table>`}
+                  <td class="col-assigned" data-col="assigned">${escape(r.assigned || '\u2014')}</td>
+                  <td class="col-due" data-col="due" class="${r.is_overdue ? 'overdue-text' : ''}">${r.due ? escape(r.due) : html`<span class="muted">\u2014</span>`}</td>
+                  <td class="col-status" data-col="status"><span class="pill ${r.is_completed ? 'pill-success' : ''}">${escape(r.status || '\u2014')}</span></td>
+                </tr>`)}
+              </tbody>
+            </table>
+          </div>
+          <script>${raw(listScript('pipeline.acct.tasks.v1', 'due', 'asc', {}, { listId: 'acct-tasks' }))}</script>`}
     </section>`;
 
+  const adCols = [
+    { key: 'kindLabel',  label: 'Kind',       sort: 'text',   filter: 'select', default: true },
+    { key: 'title',      label: 'Title',      sort: 'text',   filter: 'text',   default: true },
+    { key: 'linkedTo',   label: 'Linked to',  sort: 'text',   filter: 'text',   default: true },
+    { key: 'size',       label: 'Size',       sort: 'text',   filter: null,     default: true },
+    { key: 'uploaded',   label: 'Uploaded',   sort: 'date',   filter: 'text',   default: true },
+    { key: 'actions',    label: '',           sort: null,      filter: null,     default: true, hideable: false },
+  ];
   const docsTab = html`
     <section class="card">
       <div class="card-header">
         <h2>Documents</h2>
+        ${listToolbar({ id: 'acct-docs', count: docRows.length, columns: adCols, compact: true })}
         <a class="btn" href="/documents/library">Open library</a>
       </div>
       ${docRows.length === 0
         ? html`<p class="muted">No documents yet.</p>`
         : html`
-          <table class="data compact">
-            <thead>
-              <tr>
-                <th>Kind</th>
-                <th>Title</th>
-                <th>Linked to</th>
-                <th class="num">Size</th>
-                <th>Uploaded</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              ${docRows.map((d) => html`
-                <tr>
-                  <td><span class="pill">${escape(d.kindLabel)}</span></td>
-                  <td><a href="/documents/${escape(d.id)}/download" target="_blank" rel="noopener" title="Open in new tab">${escape(d.title)}</a></td>
-                  <td>${d.linkedHref
+          <div class="opp-list" data-list-id="acct-docs" data-columns="${escape(JSON.stringify(adCols))}">
+            <table class="data opp-list-table compact">
+              ${listTableHead(adCols)}
+              <tbody data-role="rows">
+                ${docRows.map(d => html`<tr data-row-id="${escape(d.id)}"
+                    ${raw(rowDataAttrs(adCols, d))}>
+                  <td class="col-kindLabel" data-col="kindLabel"><span class="pill">${escape(d.kindLabel)}</span></td>
+                  <td class="col-title" data-col="title"><a href="/documents/${escape(d.id)}/download" target="_blank" rel="noopener" title="Open in new tab">${escape(d.title)}</a></td>
+                  <td class="col-linkedTo" data-col="linkedTo">${d.linkedHref
                     ? html`<a href="${escape(d.linkedHref)}">${escape(d.linkedTo)}</a>`
                     : html`<small class="muted">${escape(d.linkedTo)}</small>`}</td>
-                  <td class="num"><small class="muted">${escape(d.size)}</small></td>
-                  <td><small class="muted">${escape(d.uploaded)}</small></td>
-                  <td class="row-actions"><a class="btn btn-sm" href="/documents/${escape(d.id)}/download?download=1" title="Force download">Download</a></td>
-                </tr>
-              `)}
-            </tbody>
-          </table>
+                  <td class="col-size num" data-col="size"><small class="muted">${escape(d.size)}</small></td>
+                  <td class="col-uploaded" data-col="uploaded"><small class="muted">${escape(d.uploaded)}</small></td>
+                  <td class="col-actions" data-col="actions" data-row-no-nav><a class="btn btn-sm" href="/documents/${escape(d.id)}/download?download=1" title="Force download">Download</a></td>
+                </tr>`)}
+              </tbody>
+            </table>
+          </div>
+          <script>${raw(listScript('pipeline.acct.docs.v1', 'uploaded', 'desc', {}, { listId: 'acct-docs' }))}</script>
         `}
     </section>`;
 
@@ -897,68 +955,6 @@ export async function onRequestGet(context) {
 
     ${raw(addressEditorScript())}
 
-    function contactInline(contactId) {
-      const patchUrl = '/contacts/' + contactId + '/patch';
-      return {
-        activate(el) {
-          if (el.querySelector('.ie-input')) return;
-          const field = el.dataset.field;
-          const display = el.querySelector('.ie-display');
-          const currentValue = display.textContent.trim() === '—' ? '' : display.textContent.trim();
-          const input = document.createElement('input');
-          input.type = 'text';
-          input.className = 'ie-input';
-          input.value = currentValue;
-          input.addEventListener('blur', () => this.save(el, input));
-          input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') { e.preventDefault(); this.save(el, input); }
-            if (e.key === 'Escape') { this.deactivate(el, input); }
-          });
-          display.style.display = 'none';
-          el.appendChild(input);
-          input.focus();
-          input.select();
-        },
-        async save(el, input) {
-          const field = el.dataset.field;
-          const value = input.value;
-          this.deactivate(el, input);
-          el.classList.add('ie-saving');
-          try {
-            const res = await fetch(patchUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ field, value }),
-            });
-            const data = await res.json();
-            if (!data.ok) {
-              el.classList.add('ie-error');
-              setTimeout(() => el.classList.remove('ie-error'), 2000);
-              return;
-            }
-            const display = el.querySelector('.ie-display');
-            if (field === 'email' && data.value) {
-              display.innerHTML = '<a href="mailto:' + data.value + '">' + data.value + '</a>';
-            } else {
-              display.textContent = data.value || '—';
-              display.classList.toggle('muted', !data.value);
-            }
-            el.classList.add('ie-saved');
-            setTimeout(() => el.classList.remove('ie-saved'), 1200);
-          } catch (err) {
-            el.classList.add('ie-error');
-            setTimeout(() => el.classList.remove('ie-error'), 2000);
-          } finally {
-            el.classList.remove('ie-saving');
-          }
-        },
-        deactivate(el, input) {
-          if (input && input.parentNode === el) el.removeChild(input);
-          const display = el.querySelector('.ie-display');
-          if (display) display.style.display = '';
-        },
-      };
-    }
     </script>
   `;
 
