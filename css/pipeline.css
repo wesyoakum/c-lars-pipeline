@@ -5969,10 +5969,15 @@ table.data tr.section-subtotal-row.section-unassigned .pill {
   display: flex;
   align-items: center;
   gap: 0.3rem;
-  background: rgba(255,255,255,0.12);
-  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.35);
   border-radius: 6px;
   padding: 0.25rem 0.5rem;
+}
+.universal-search-input-wrap:focus-within {
+  border-color: rgba(255,255,255,0.6);
+  background: rgba(255,255,255,0.22);
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.15);
 }
 .universal-search-icon {
   opacity: 0.6;

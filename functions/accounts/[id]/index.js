@@ -654,6 +654,7 @@ export async function onRequestGet(context) {
     { key: 'assigned', label: 'Assigned',  sort: 'text',   filter: 'text',   default: true },
     { key: 'due',      label: 'Due',       sort: 'date',   filter: 'text',   default: true },
     { key: 'status',   label: 'Status',    sort: 'text',   filter: 'select', default: true },
+    { key: 'actions',  label: '',          sort: null,     filter: null,     default: true, hideable: false },
   ];
   const atData = taskRows.map(a => {
     const isOverdue = a.status === 'pending' && a.due_at && a.due_at < new Date().toISOString().slice(0, 10);
@@ -671,6 +672,7 @@ export async function onRequestGet(context) {
       status: a.status ?? '',
       is_completed: a.status === 'completed',
       is_overdue: isOverdue,
+      actions: '',
     };
   });
   const tasksTab = html`
@@ -694,8 +696,7 @@ export async function onRequestGet(context) {
                     class="${r.is_completed ? 'row-muted' : ''} ${r.is_overdue ? 'row-overdue' : ''}">
                   <td class="col-check" data-col="check" data-row-no-nav style="width:2rem">${r.is_completed
                     ? html`<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="var(--green,#1a7f37)" stroke-width="2"><circle cx="8" cy="8" r="6"/><path d="M5 8l2 2 4-4"/></svg>`
-                    : html`<form method="post" action="/activities/${escape(r.id)}/complete" style="display:inline"><button type="submit" class="check-btn" title="Mark complete"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/></svg></button></form>`}
-                    <form method="post" action="/activities/${escape(r.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this task?')"><input type="hidden" name="return_to" value="/accounts/${escape(account.id)}"><button type="submit" class="row-delete-btn" title="Delete task" aria-label="Delete task">×</button></form></td>
+                    : html`<form method="post" action="/activities/${escape(r.id)}/complete" style="display:inline"><button type="submit" class="check-btn" title="Mark complete"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/></svg></button></form>`}</td>
                   <td class="col-subject" data-col="subject"><a href="/activities/${escape(r.id)}"><strong class="${r.is_completed ? 'completed-text' : ''}">${escape(r.subject)}</strong></a>
                     ${r.body_preview ? html`<br><small class="muted">${escape(r.body_preview)}</small>` : ''}</td>
                   <td class="col-type" data-col="type"><span class="pill pill-${r.type_raw}">${escape(r.type)}</span></td>
@@ -705,6 +706,12 @@ export async function onRequestGet(context) {
                   <td class="col-assigned" data-col="assigned">${escape(r.assigned || '\u2014')}</td>
                   <td class="col-due" data-col="due" class="${r.is_overdue ? 'overdue-text' : ''}">${r.due ? escape(r.due) : html`<span class="muted">\u2014</span>`}</td>
                   <td class="col-status" data-col="status"><span class="pill ${r.is_completed ? 'pill-success' : ''}">${escape(r.status || '\u2014')}</span></td>
+                  <td class="col-actions" data-col="actions" data-row-no-nav>
+                    <form method="post" action="/activities/${escape(r.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this task?')">
+                      <input type="hidden" name="return_to" value="/accounts/${escape(account.id)}?tab=tasks">
+                      <button type="submit" class="row-delete-btn" title="Delete task" aria-label="Delete task">&times;</button>
+                    </form>
+                  </td>
                 </tr>`)}
               </tbody>
             </table>

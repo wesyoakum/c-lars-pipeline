@@ -521,12 +521,21 @@ export async function onRequestGet(context) {
                   x-model="selected"
                   @change="onChange()">
             <option value="">\u2014 Select stage \u2014</option>
-            ${carouselStages
-              .filter(s => (s.sort_order ?? 0) > (currentStage?.sort_order ?? -1))
-              .map(s => {
+            ${(() => {
+              const cur = currentStage?.sort_order ?? -1;
+              const forward = carouselStages.filter(s => (s.sort_order ?? 0) > cur);
+              const backward = carouselStages.filter(s => (s.sort_order ?? 0) < cur);
+              const fwd = forward.map(s => {
                 const isLoss = s.stage_key === 'closed_lost' || s.stage_key === 'closed_died';
                 return html`<option value="${escape(s.stage_key)}">${s.label}${isLoss ? ' (close)' : ''}</option>`;
-              })}
+              });
+              const bwd = backward.length > 0
+                ? [html`<optgroup label="Move back">${backward.map(s =>
+                    html`<option value="${escape(s.stage_key)}">${s.label}</option>`
+                  )}</optgroup>`]
+                : [];
+              return [...fwd, ...bwd];
+            })()}
           </select>
         </div>
 
@@ -887,18 +896,11 @@ export async function onRequestGet(context) {
                @dragleave.prevent="dragging = false"
                @drop.prevent="handleDrop($event)"
                @click="$refs.fileInput.click()">
-            <input type="file" name="file" required x-ref="fileInput" hidden @change="fileSelected($event)">
+            <input type="file" name="file" required x-ref="fileInput" hidden @change="fileSelected($event); $nextTick(() => $refs.uploadForm.submit())">
             <div class="drop-zone-content">
               <span x-show="!fileName" class="muted">Drop file here or click to browse</span>
               <span x-show="fileName" x-text="fileName" style="font-weight:500"></span>
             </div>
-          </div>
-          <div style="margin-top:0.4rem; display:grid; grid-template-columns:auto 1fr 1fr auto; gap:0.5rem; align-items:end;">
-            <div><label class="field-label">Kind</label>
-              <select name="kind" style="font-size:0.85em">${Object.entries(DOC_KIND_LABELS).map(([k, v]) => html`<option value="${k}">${v}</option>`)}</select></div>
-            <div><input type="text" name="title" placeholder="Title (defaults to filename)" style="width:100%; font-size:0.85em"></div>
-            <div><input type="text" name="notes" placeholder="Notes (optional)" style="width:100%; font-size:0.85em"></div>
-            <div><button class="btn btn-sm primary" type="submit">Upload</button></div>
           </div>
         </form>
       </div>
@@ -936,7 +938,17 @@ export async function onRequestGet(context) {
                   <a href="/documents/${escape(d.id)}/download" target="_blank" rel="noopener" title="Open in new tab"><strong>${escape(d.title)}</strong></a>
                   ${d.original_filename ? html`<br><small class="muted">${escape(d.original_filename)}</small>` : ''}
                 </td>
-                <td><span class="pill">${escape(DOC_KIND_LABELS[d.kind] ?? d.kind)}</span></td>
+                <td x-data="{ editing: false, val: '${escape(d.kind || 'other')}' }">
+                  <span x-show="!editing" @click="editing = true" style="cursor:pointer">
+                    <span class="pill" style="border-bottom:1px dashed var(--border)" x-text="({${Object.entries(DOC_KIND_LABELS).map(([k, v]) => `'${k}':'${v}'`).join(',')}})[val] || val"></span>
+                  </span>
+                  <select x-show="editing" x-cloak x-model="val"
+                          @change="editing = false; fetch('/documents/${escape(d.id)}/patch', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({field:'kind',value:val}) })"
+                          @blur="editing = false"
+                          style="font-size:0.8em;padding:0.15rem 0.3rem">
+                    ${Object.entries(DOC_KIND_LABELS).map(([k, v]) => html`<option value="${escape(k)}">${escape(v)}</option>`)}
+                  </select>
+                </td>
                 <td><small>${escape(fmtSize(d.size_bytes))}</small></td>
                 <td><small class="muted">${escape((d.uploaded_at ?? '').slice(0, 16).replace('T', ' '))}</small></td>
                 <td class="row-actions" style="white-space:nowrap">
@@ -1123,6 +1135,7 @@ export async function onRequestGet(context) {
     { key: 'assigned', label: 'Assigned',  sort: 'text',   filter: 'text',   default: true },
     { key: 'due',      label: 'Due',       sort: 'date',   filter: 'text',   default: true },
     { key: 'status',   label: 'Status',    sort: 'text',   filter: 'select', default: true },
+    { key: 'actions',  label: '',          sort: null,     filter: null,     default: true, hideable: false },
   ];
   const tkData = taskRows.map(a => {
     const isOverdue = a.status === 'pending' && a.due_at && a.due_at < new Date().toISOString().slice(0, 10);
@@ -1138,6 +1151,7 @@ export async function onRequestGet(context) {
       status: a.status ?? '',
       is_completed: a.status === 'completed',
       is_overdue: isOverdue,
+      actions: '',
     };
   });
   const tasksTab = html`
@@ -1168,6 +1182,12 @@ export async function onRequestGet(context) {
                   <td class="col-assigned" data-col="assigned">${escape(r.assigned || '—')}</td>
                   <td class="col-due" data-col="due" class="${r.is_overdue ? 'overdue-text' : ''}">${r.due ? escape(r.due) : html`<span class="muted">—</span>`}</td>
                   <td class="col-status" data-col="status"><span class="pill ${r.is_completed ? 'pill-success' : ''}">${escape(r.status || '—')}</span></td>
+                  <td class="col-actions" data-col="actions" data-row-no-nav>
+                    <form method="post" action="/activities/${escape(r.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this task?')">
+                      <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}?tab=tasks">
+                      <button type="submit" class="row-delete-btn" title="Delete task" aria-label="Delete task">&times;</button>
+                    </form>
+                  </td>
                 </tr>`)}
               </tbody>
             </table>
@@ -1214,18 +1234,11 @@ export async function onRequestGet(context) {
                @dragleave.prevent="dragging = false"
                @drop.prevent="handleDrop($event)"
                @click="$refs.fileInput.click()">
-            <input type="file" name="file" required x-ref="fileInput" hidden @change="fileSelected($event)">
+            <input type="file" name="file" required x-ref="fileInput" hidden @change="fileSelected($event); $nextTick(() => $refs.uploadForm.submit())">
             <div class="drop-zone-content">
               <span x-show="!fileName" class="muted">Drop file here or click to browse</span>
               <span x-show="fileName" x-text="fileName" style="font-weight:500"></span>
             </div>
-          </div>
-          <div style="margin-top:0.4rem; display:grid; grid-template-columns:auto 1fr 1fr auto; gap:0.5rem; align-items:end;">
-            <div><label class="field-label">Kind</label>
-              <select name="kind" style="font-size:0.85em">${Object.entries(DOC_KIND_LABELS).map(([k, v]) => html`<option value="${k}">${v}</option>`)}</select></div>
-            <div><input type="text" name="title" placeholder="Title (defaults to filename)" style="width:100%; font-size:0.85em"></div>
-            <div><input type="text" name="notes" placeholder="Notes (optional)" style="width:100%; font-size:0.85em"></div>
-            <div><button class="btn btn-sm primary" type="submit">Upload</button></div>
           </div>
         </form>
       </div>

@@ -46,28 +46,15 @@ export async function onRequestGet(context) {
   // stage_definitions row with is_terminal = 1). The "Show all" toggle
   // (?all=1) drops the filter so closed / won / completed opps show too.
   const showAll = url.searchParams.get('all') === '1';
-  // "Hide WFM" toggle (?nowfm=1): exclude opportunities imported from
-  // WFM (external_source set). Composes with the active/all toggle.
-  const hideWfm = url.searchParams.get('nowfm') === '1';
   const whereConds = [];
   if (!showAll) {
     whereConds.push(
       `o.stage NOT IN (SELECT stage_key FROM stage_definitions WHERE is_terminal = 1)`
     );
   }
-  if (hideWfm) whereConds.push(`o.external_source IS NULL`);
   const activeWhere = whereConds.length
     ? `WHERE ${whereConds.join(' AND ')}`
     : '';
-
-  // Build a list URL for a given (all, nowfm) state so the two toggle
-  // buttons preserve each other's setting.
-  const listUrl = (a, nw) => {
-    const p = [];
-    if (a) p.push('all=1');
-    if (nw) p.push('nowfm=1');
-    return '/opportunities' + (p.length ? `?${p.join('&')}` : '');
-  };
 
   const rows = await all(
     env.DB,
@@ -263,10 +250,8 @@ export async function onRequestGet(context) {
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Opportunities</h1>
-        <a class="btn btn-xs" href="${listUrl(!showAll, hideWfm)}"
+        <a class="btn btn-xs" href="${showAll ? '/opportunities' : '/opportunities?all=1'}"
            title="${showAll ? 'Show only active opportunities' : 'Include won, lost, closed, abandoned, completed'}">${showAll ? 'Active only' : 'Show all'}</a>
-        <a class="btn btn-xs" href="${listUrl(showAll, !hideWfm)}"
-           title="${hideWfm ? 'Include opportunities imported from WFM' : 'Hide opportunities imported from WFM'}">${hideWfm ? 'Show WFM' : 'Hide WFM'}</a>
         ${listToolbar({ id: 'opp', count: rows.length, columns, newOnClick: "window.Pipeline.openWizard('opportunity', {})", newLabel: 'New opportunity' })}
       </div>
 
