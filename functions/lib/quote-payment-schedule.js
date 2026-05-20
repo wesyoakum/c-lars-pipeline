@@ -1,6 +1,7 @@
 // functions/lib/quote-payment-schedule.js
 //
-// Per-quote payment schedule — validation + rendering.
+// Per-quote payment schedule — validation, rendering, and per-quote-
+// type default management.
 //
 // Shape (migration 0074):
 //   {
@@ -17,6 +18,12 @@
 //     the quote's schedule; fall back to the site-wide milestone map
 //     when quotes.payment_schedule is NULL)
 //   * (future) the doc-template renderer to populate payment_terms
+//
+// Per-type defaults live in quote_payment_schedule_defaults (migration
+// 0075), one row per quote_type. Loaded by the editor's "Copy from
+// type default" button and written by the admin "Set as default" button.
+
+import { one, all, run } from './db.js';
 
 /**
  * Parse the stored TEXT column. Returns the parsed schedule object,
@@ -138,4 +145,60 @@ function formatPercent(p) {
   const n = Number(p);
   if (Number.isInteger(n)) return String(n);
   return n.toFixed(2).replace(/\.?0+$/, '');
+}
+
+// =====================================================================
+// Per-quote-type payment-schedule defaults (migration 0075).
+// =====================================================================
+
+/**
+ * Read the default schedule for the given quote_type. Returns the
+ * parsed object, or null if no default exists / it fails validation.
+ */
+export async function loadDefaultScheduleForType(env, quoteType) {
+  if (!quoteType) return null;
+  const row = await one(env.DB,
+    `SELECT schedule_json FROM quote_payment_schedule_defaults WHERE quote_type = ?`,
+    [quoteType]);
+  if (!row?.schedule_json) return null;
+  return parseQuoteSchedule(row.schedule_json);
+}
+
+/**
+ * Read every per-type default. Returns an object keyed by quote_type
+ * with each value being the parsed schedule (or null if invalid).
+ */
+export async function loadAllDefaultSchedules(env) {
+  const rows = await all(env.DB,
+    `SELECT quote_type, schedule_json, updated_at, updated_by
+       FROM quote_payment_schedule_defaults`);
+  const out = {};
+  for (const r of rows) {
+    out[r.quote_type] = {
+      schedule: parseQuoteSchedule(r.schedule_json),
+      updated_at: r.updated_at,
+      updated_by: r.updated_by,
+    };
+  }
+  return out;
+}
+
+/**
+ * Validate + upsert. Returns the normalized stored schedule.
+ */
+export async function saveDefaultScheduleForType(env, quoteType, schedule, user) {
+  if (!quoteType) throw new Error('quote_type is required');
+  const normalized = normalizeSchedule(schedule);
+  const json = JSON.stringify(normalized);
+  await run(env.DB,
+    `INSERT INTO quote_payment_schedule_defaults
+       (quote_type, schedule_json, updated_at, updated_by)
+     VALUES
+       (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), ?)
+     ON CONFLICT(quote_type) DO UPDATE SET
+       schedule_json = excluded.schedule_json,
+       updated_at    = excluded.updated_at,
+       updated_by    = excluded.updated_by`,
+    [quoteType, json, user?.id ?? null]);
+  return normalized;
 }

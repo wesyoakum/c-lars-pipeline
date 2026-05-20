@@ -40,7 +40,7 @@ import { templateTypeForQuote, templateManagerHtml } from '../../../../lib/templ
 import { loadQuoteTermDefaultsMap, getEffectiveValidityDays } from '../../../../lib/quote-term-defaults.js';
 import { loadEpsSchedule } from '../../../../lib/eps-schedule.js';
 import { loadMilestoneMap } from '../../../../lib/katana-milestones.js';
-import { parseQuoteSchedule } from '../../../../lib/quote-payment-schedule.js';
+import { parseQuoteSchedule, loadDefaultScheduleForType } from '../../../../lib/quote-payment-schedule.js';
 
 const READ_ONLY_STATUSES = new Set([
   'issued', 'revision_issued', 'accepted', 'rejected', 'expired', 'dead',
@@ -323,6 +323,10 @@ export async function onRequestGet(context) {
   // custom) when set, else from the site-wide map (Step 2).
   const milestoneMap = await loadMilestoneMap(env);
   const quoteSchedule = parseQuoteSchedule(quote.payment_schedule);
+  // Per-quote-type default schedule (migration 0075). The editor uses
+  // this for "Copy from <type> default" and shows the user when the
+  // current per-quote schedule has drifted from the type default.
+  const typeDefaultSchedule = await loadDefaultScheduleForType(env, quote.quote_type);
   const quoteTotal = Number(quote.total_price) || 0;
 
   // Pre-derive per-line push state from the already-loaded `lines`.
@@ -1345,12 +1349,33 @@ export async function onRequestGet(context) {
           </tbody>
         </table>
 
-        <div style="margin-top:.4rem;display:flex;gap:.4rem;flex-wrap:wrap">
+        <div style="margin-top:.4rem;display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">
           <button type="button" class="btn-tiny" @click="addRow()" ${readOnly ? 'disabled' : ''}>+ Add row</button>
-          <button type="button" class="btn-tiny" @click="copyFromSiteDefault()" :disabled="siteRows.length === 0" ${readOnly ? 'disabled' : ''} title="Replace the current rows with the site-wide milestone map">Copy from site default</button>
+          <!-- "Copy from <type> default" — uses the per-type default
+               (migration 0075). Disabled when no type default exists yet. -->
+          <button type="button" class="btn-tiny"
+                  @click="copyFromTypeDefault()"
+                  :disabled="!typeDefaultRows || typeDefaultRows.length === 0"
+                  :title="(typeDefaultRows && typeDefaultRows.length > 0) ? ('Replace the current rows with the saved ' + typeLabel + ' default (' + typeDefaultRows.length + ' rows)') : ('No ' + typeLabel + ' default saved yet. Build a schedule, then "Set as default for this type" to seed one.')"
+                  ${readOnly ? 'disabled' : ''}
+                  x-text="(typeDefaultRows && typeDefaultRows.length > 0) ? ('Copy from ' + typeLabel + ' default') : ('No ' + typeLabel + ' default yet')"></button>
+          <button type="button" class="btn-tiny"
+                  @click="copyFromSiteDefault()"
+                  :disabled="siteRows.length === 0"
+                  ${readOnly ? 'disabled' : ''}
+                  title="Replace the current rows with the site-wide milestone map (Settings → Katana milestones)">Copy from site map</button>
           <button type="button" class="btn primary small" @click="save()" :disabled="saving || (rows.length > 0 && !isValid)" x-text="saveLabel" ${readOnly ? 'disabled' : ''}></button>
           <button type="button" class="btn-tiny" @click="discard()" :disabled="!dirty || saving" ${readOnly ? 'disabled' : ''}>Discard changes</button>
           <button type="button" class="btn-tiny" @click="clearAll()" x-show="rows.length > 0" ${readOnly ? 'disabled' : ''}>Clear schedule</button>
+          <!-- Admin only — saves current rows as the type's default. -->
+          <span style="flex:1"></span>
+          <button type="button" class="btn-tiny"
+                  x-show="isAdmin"
+                  @click="setAsTypeDefault()"
+                  :disabled="saving || rows.length === 0 || !isValid"
+                  :title="'Save these rows as the default schedule for all new ' + typeLabel + ' quotes'"
+                  x-text="setDefaultLabel"
+                  ${readOnly ? 'disabled' : ''}></button>
         </div>
       </div>
 
@@ -1694,9 +1719,13 @@ export async function onRequestGet(context) {
       // _initialPaymentSchedule is the saved JSON from quotes.payment_schedule
       // (null if never set). _siteMilestoneRows is the current site-wide
       // milestone map, used by the "Copy from site default" button on the
-      // editor.
+      // editor. _typeDefaultSchedule is the per-quote-type default from
+      // migration 0075 (null when the type has no default yet).
       var _initialPaymentSchedule = ${raw(JSON.stringify(quoteSchedule || null))};
       var _siteMilestoneRows = ${raw(JSON.stringify(milestoneMap?.milestones || []))};
+      var _typeDefaultSchedule = ${raw(JSON.stringify(typeDefaultSchedule || null))};
+      var _typeLabel = ${raw(JSON.stringify(quote.quote_type || ''))};
+      var _isAdminForDefaults = ${raw(JSON.stringify(user?.role === 'admin'))};
 
       // Admin-editable schedule from migration 0040. Mirrors the
       // server-side epsScheduleToString() renderer so draft quotes
@@ -1819,8 +1848,12 @@ export async function onRequestGet(context) {
             katana_variant_id: Number(m.katana_variant_id) || '',
             katana_sku: String(m.katana_sku || ''),
           }; }),
+          typeLabel: _typeLabel || '',
+          isAdmin: !!_isAdminForDefaults,
+          typeDefaultRows: _typeDefaultSchedule ? rowsFrom(_typeDefaultSchedule) : null,
           saving: false,
           saveLabel: 'Save schedule',
+          setDefaultLabel: 'Set as default for this type',
           get totalPct() {
             var s = 0;
             for (var i = 0; i < this.rows.length; i++) {
@@ -1898,6 +1931,67 @@ export async function onRequestGet(context) {
                 percent: m.percent, weeks: '', label: m.label,
                 katana_variant_id: m.katana_variant_id, katana_sku: m.katana_sku,
               };
+            });
+          },
+          copyFromTypeDefault: function() {
+            if (!this.typeDefaultRows || this.typeDefaultRows.length === 0) {
+              alert('No saved default for ' + (this.typeLabel || 'this quote type') + ' yet. Build a schedule first, then click "Set as default for this type" to save it.');
+              return;
+            }
+            if (this.rows.length > 0 && !confirm('Replace the current ' + this.rows.length + ' row(s) with the saved ' + (this.typeLabel || 'type') + ' default?')) return;
+            // Deep-copy so future edits on the editor don't mutate the
+            // typeDefaultRows reference we hold in memory.
+            this.rows = this.typeDefaultRows.map(function(r) {
+              return {
+                percent: Number(r.percent) || 0,
+                weeks: r.weeks === '' || r.weeks == null ? '' : Number(r.weeks),
+                label: String(r.label || ''),
+                katana_variant_id: r.katana_variant_id === '' || r.katana_variant_id == null ? '' : Number(r.katana_variant_id),
+                katana_sku: String(r.katana_sku || ''),
+              };
+            });
+          },
+          setAsTypeDefault: function() {
+            if (!this.isAdmin) return;
+            if (!this.isValid) {
+              alert('Cannot save as default — the schedule must have at least one row and percentages must sum to 100.');
+              return;
+            }
+            if (!confirm('Save this ' + this.rows.length + '-row schedule as the default for all new ' + (this.typeLabel || 'this type of') + ' quotes?\\n\\nExisting quotes are not retroactively updated.')) return;
+            var self = this;
+            self.saving = true;
+            self.setDefaultLabel = 'Saving…';
+            var payload = this._serialize();
+            fetch('/quotes/payment-schedule-defaults', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ quote_type: self.typeLabel, schedule: payload }),
+            }).then(function(r) { return r.json(); }).then(function(d) {
+              self.saving = false;
+              if (!d.ok) {
+                self.setDefaultLabel = 'Set as default for this type';
+                alert('Could not save default: ' + (d.error || 'unknown error'));
+                return;
+              }
+              // Update the in-memory typeDefaultRows so subsequent
+              // "Copy from type default" reflects what we just saved
+              // without a page reload.
+              self.typeDefaultRows = (d.schedule && d.schedule.rows) ? d.schedule.rows.map(function(r) {
+                return {
+                  percent: Number(r.percent) || 0,
+                  weeks: r.weeks == null || r.weeks === '' ? '' : Number(r.weeks),
+                  label: String(r.label || ''),
+                  katana_variant_id: r.katana_variant_id == null || r.katana_variant_id === '' ? '' : Number(r.katana_variant_id),
+                  katana_sku: String(r.katana_sku || ''),
+                };
+              }) : null;
+              self.setDefaultLabel = 'Saved as default ✓';
+              setTimeout(function() { self.setDefaultLabel = 'Set as default for this type'; }, 1800);
+            }).catch(function(err) {
+              self.saving = false;
+              self.setDefaultLabel = 'Set as default for this type';
+              alert('Could not save default: ' + (err && err.message ? err.message : 'unknown error'));
             });
           },
           clearAll: function() {
