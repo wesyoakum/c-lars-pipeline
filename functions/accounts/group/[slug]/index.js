@@ -18,6 +18,8 @@ import { readFlash } from '../../../lib/http.js';
 import { findGroupMembers } from '../../../lib/account-groups.js';
 import { parseTransactionTypes } from '../../../lib/validators.js';
 import { loadStageCatalog } from '../../../lib/stages.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../../lib/list-table.js';
+import { ieText, ieSelect, listInlineEditScript } from '../../../lib/list-inline-edit.js';
 
 // Keep in sync with functions/accounts/index.js::SEGMENT_OPTIONS. The
 // member table on this page reuses it for inline segment editing.
@@ -127,8 +129,6 @@ export async function onRequestGet(context) {
     0
   );
 
-  const segmentOptionsJson = JSON.stringify(SEGMENT_OPTIONS);
-
   const body = html`
     <section class="card" x-data="groupInline('${escape(slug)}')">
       <div class="card-header">
@@ -175,92 +175,111 @@ export async function onRequestGet(context) {
       </div>
     </section>
 
+    ${(() => {
+      const maCols = [
+        { key: 'name',     label: 'Account',   sort: 'text',   filter: 'text',   default: true },
+        { key: 'alias',    label: 'Alias',     sort: 'text',   filter: 'text',   default: true },
+        { key: 'segment',  label: 'Segment',   sort: 'text',   filter: 'select', default: true },
+        { key: 'contacts', label: 'Contacts',  sort: 'number', filter: null,     default: true },
+        { key: 'opps',     label: 'Opps',      sort: 'number', filter: null,     default: true },
+      ];
+      const maData = group.accounts.map(a => {
+        const c = countById.get(a.id) || {};
+        return {
+          id: a.id,
+          name: a.name ?? '',
+          alias: a.alias ?? '',
+          segment: a.segment ?? '',
+          contacts: c.contact_count ?? 0,
+          opps: c.opp_count ?? 0,
+        };
+      });
+      return html`
     <section class="card">
       <div class="card-header">
         <h2>Member accounts</h2>
+        ${listToolbar({ id: 'grp-members', count: group.accounts.length, columns: maCols, compact: true })}
       </div>
-      <table class="data" style="width:100%">
-        <thead>
-          <tr>
-            <th style="text-align:left">Account</th>
-            <th style="text-align:left">Alias</th>
-            <th style="text-align:left">Segment</th>
-            <th style="text-align:right">Contacts</th>
-            <th style="text-align:right">Opps</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${group.accounts.map((a) => {
-            const c = countById.get(a.id) || {};
-            return html`
-              <tr data-acct-id="${escape(a.id)}">
-                <td>
-                  <a href="/accounts/${escape(a.id)}" style="float:right;margin-left:0.5rem">\u2197</a>
-                  <span class="ie" data-field="name" data-type="text" data-acct="${escape(a.id)}">
-                    <span class="ie-display"><strong>${escape(a.name)}</strong></span>
-                  </span>
-                </td>
-                <td>
-                  <span class="ie" data-field="alias" data-type="text" data-acct="${escape(a.id)}">
-                    <span class="ie-display ${a.alias ? '' : 'muted'}">${escape(a.alias || '\u2014')}</span>
-                  </span>
-                </td>
-                <td>
-                  <span class="ie" data-field="segment" data-type="select" data-acct="${escape(a.id)}"
-                        data-options='${escape(segmentOptionsJson)}'>
-                    <span class="ie-display ${a.segment ? '' : 'muted'}">${escape(a.segment || '\u2014')}</span>
-                  </span>
-                </td>
-                <td class="num">${c.contact_count ?? 0}</td>
-                <td class="num">${c.opp_count ?? 0}</td>
-              </tr>
-            `;
-          })}
-        </tbody>
-      </table>
-    </section>
+      <div class="opp-list" data-list-id="grp-members" data-columns="${escape(JSON.stringify(maCols))}">
+        <table class="data opp-list-table" style="width:100%">
+          ${listTableHead(maCols)}
+          <tbody data-role="rows">
+            ${maData.map(r => html`<tr data-row-id="${escape(r.id)}"
+                data-row-href="/accounts/${escape(r.id)}"
+                ${raw(rowDataAttrs(maCols, r))}>
+              <td class="col-name" data-col="name">
+                <a href="/accounts/${escape(r.id)}" style="float:right;margin-left:0.5rem">\u2197</a>
+                ${ieText('name', r.name)}
+              </td>
+              <td class="col-alias" data-col="alias">${ieText('alias', r.alias)}</td>
+              <td class="col-segment" data-col="segment">${ieSelect('segment', r.segment, SEGMENT_OPTIONS)}</td>
+              <td class="col-contacts num" data-col="contacts">${r.contacts}</td>
+              <td class="col-opps num" data-col="opps">${r.opps}</td>
+            </tr>`)}
+          </tbody>
+        </table>
+      </div>
+      <script>${raw(listScript('pipeline.grp.members.v1', 'name', 'asc', {}, { listId: 'grp-members' }))}</script>
+      <script>${raw(listInlineEditScript('/accounts/:id/patch', { listId: 'grp-members' }))}</script>
+    </section>`;
+    })()}
 
+    ${(() => {
+      const goCols = [
+        { key: 'number',  label: 'Number',       sort: 'text',   filter: 'text',   default: true },
+        { key: 'title',   label: 'Title',        sort: 'text',   filter: 'text',   default: true },
+        { key: 'account', label: 'From account',  sort: 'text',   filter: 'text',   default: true },
+        { key: 'type',    label: 'Type',          sort: 'text',   filter: 'select', default: true },
+        { key: 'stage',   label: 'Stage',         sort: 'text',   filter: 'select', default: true },
+        { key: 'value',   label: 'Value',         sort: 'number', filter: null,     default: true },
+        { key: 'updated', label: 'Updated',       sort: 'date',   filter: 'text',   default: true },
+      ];
+      const goData = opps.map(o => {
+        const types = parseTransactionTypes(o.transaction_type);
+        return {
+          id: o.id,
+          number: o.number || '',
+          title: o.title || '',
+          account: o.account_alias || o.account_name || '',
+          account_id: o.account_id,
+          type: types.map(t => TYPE_LABELS[t] ?? t).join(', ') || '\u2014',
+          stage: stageLabel(catalog, types[0] ?? 'spares', o.stage),
+          value: o.estimated_value_usd != null ? Number(o.estimated_value_usd) : '',
+          value_display: o.estimated_value_usd != null ? `$${formatMoney(o.estimated_value_usd)}` : '',
+          updated: (o.updated_at || '').slice(0, 10),
+        };
+      });
+      return html`
     <section class="card">
       <div class="card-header">
         <h2>Opportunities in this group (${opps.length})</h2>
+        ${listToolbar({ id: 'grp-opps', count: opps.length, columns: goCols, compact: true })}
       </div>
       ${opps.length === 0
         ? html`<p class="muted" style="padding:0 1rem 1rem">No opportunities yet across this group.</p>`
         : html`
-          <table class="data" style="width:100%">
-            <thead>
-              <tr>
-                <th style="text-align:left">Number</th>
-                <th style="text-align:left">Title</th>
-                <th style="text-align:left">From account</th>
-                <th style="text-align:left">Type</th>
-                <th style="text-align:left">Stage</th>
-                <th style="text-align:right">Value</th>
-                <th style="text-align:left">Updated</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${opps.map((o) => {
-                const types = parseTransactionTypes(o.transaction_type);
-                const typeText = types.map((t) => TYPE_LABELS[t] ?? t).join(', ') || '—';
-                const stage = stageLabel(catalog, types[0] ?? 'spares', o.stage);
-                const value = o.estimated_value_usd != null ? `$${formatMoney(o.estimated_value_usd)}` : '';
-                return html`
-                  <tr>
-                    <td><a href="/opportunities/${escape(o.id)}"><code>${escape(o.number || '')}</code></a></td>
-                    <td>${escape(o.title || '')}</td>
-                    <td><a href="/accounts/${escape(o.account_id)}" class="muted">${escape(o.account_alias || o.account_name || '')}</a></td>
-                    <td>${escape(typeText)}</td>
-                    <td>${escape(stage)}</td>
-                    <td class="num">${escape(value)}</td>
-                    <td class="muted"><small>${escape((o.updated_at || '').slice(0, 10))}</small></td>
-                  </tr>
-                `;
-              })}
-            </tbody>
-          </table>
+          <div class="opp-list" data-list-id="grp-opps" data-columns="${escape(JSON.stringify(goCols))}">
+            <table class="data opp-list-table" style="width:100%">
+              ${listTableHead(goCols)}
+              <tbody data-role="rows">
+                ${goData.map(r => html`<tr data-row-id="${escape(r.id)}"
+                    data-row-href="/opportunities/${escape(r.id)}"
+                    ${raw(rowDataAttrs(goCols, r))}>
+                  <td class="col-number" data-col="number"><a href="/opportunities/${escape(r.id)}"><code>${escape(r.number)}</code></a></td>
+                  <td class="col-title" data-col="title">${escape(r.title)}</td>
+                  <td class="col-account" data-col="account"><a href="/accounts/${escape(r.account_id)}" class="muted">${escape(r.account)}</a></td>
+                  <td class="col-type" data-col="type">${escape(r.type)}</td>
+                  <td class="col-stage" data-col="stage">${escape(r.stage)}</td>
+                  <td class="col-value num" data-col="value">${escape(r.value_display)}</td>
+                  <td class="col-updated" data-col="updated" class="muted"><small>${escape(r.updated)}</small></td>
+                </tr>`)}
+              </tbody>
+            </table>
+          </div>
+          <script>${raw(listScript('pipeline.grp.opps.v1', 'updated', 'desc', {}, { listId: 'grp-opps' }))}</script>
         `}
-    </section>
+    </section>`;
+    })()}
   `;
 
   const scriptBlock = html`
@@ -282,21 +301,11 @@ export async function onRequestGet(context) {
 }
 
 /**
- * Alpine component + DOM wiring for inline-edit on the group page.
- *
- * Two targets on this page:
- *   1. The group label in the H1 (data-field="label", no data-acct)
- *      → POSTs to /accounts/group/:slug/rename and, on success,
- *        navigates to the new slug URL (since slug is derived from
- *        the label).
- *   2. Member-account fields (name / alias / segment) inside the
- *      member table rows (data-field + data-acct on the <span>)
- *      → POSTs to /accounts/:id/patch, the same endpoint the
- *        /accounts list and /accounts/:id detail page use.
- *
- * Kept inline here rather than added to lib/list-inline-edit.js
- * because this page isn't a standard list-table setup — it's a
- * rollup with two different save behaviors.
+ * Alpine component for the group-label rename in the H1.
+ * Member-account inline-edit is now handled by the standard
+ * listInlineEditScript — this only covers the label rename which
+ * POSTs to /accounts/group/:slug/rename and navigates to the new
+ * slug URL on success.
  */
 function groupInlineScript() {
   return `
@@ -305,102 +314,56 @@ function groupInline(slug) {
   return {
     init: function () {
       var self = this;
-      this.$el.querySelectorAll('.ie').forEach(function (el) {
-        el.addEventListener('click', function () { self.activate(el); });
-      });
+      var el = this.$el.querySelector('.ie-group-label');
+      if (el) el.addEventListener('click', function () { self.activate(el); });
     },
     activate: function (el) {
       if (el.querySelector('.ie-input')) return;
-      var field = el.dataset.field;
-      var type = el.dataset.type;
       var display = el.querySelector('.ie-display');
-      var currentValue = display.classList.contains('muted') ? '' : display.textContent.trim();
-      if (currentValue === '\u2014') currentValue = '';
-
-      var input;
+      var currentValue = display.textContent.trim();
       var self = this;
-      if (type === 'select') {
-        input = document.createElement('select');
-        input.className = 'ie-input';
-        var options = [];
-        try { options = JSON.parse(el.dataset.options || '[]'); } catch (e) {}
-        options.forEach(function (o) {
-          var opt = document.createElement('option');
-          opt.value = o.value;
-          opt.textContent = o.label;
-          if (o.value === (currentValue || '')) opt.selected = true;
-          input.appendChild(opt);
-        });
-        input.addEventListener('change', function () { self.save(el, input); });
-        input.addEventListener('blur', function () {
-          setTimeout(function () { self.deactivate(el, input); }, 150);
-        });
-      } else {
-        input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'ie-input';
-        input.value = currentValue;
-        input.addEventListener('blur', function () { self.save(el, input); });
-        input.addEventListener('keydown', function (e) {
-          if (e.key === 'Enter') { e.preventDefault(); self.save(el, input); }
-          if (e.key === 'Escape') { self.deactivate(el, input); }
-        });
-      }
-
+      var input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'ie-input';
+      input.value = currentValue;
+      input.addEventListener('blur', function () { self.save(el, input); });
+      input.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); self.save(el, input); }
+        if (e.key === 'Escape') { self.deactivate(el, input); }
+      });
       display.style.display = 'none';
       el.appendChild(input);
       input.focus();
-      if (input.select) input.select();
+      input.select();
     },
     save: async function (el, input) {
-      var field = el.dataset.field;
-      var acctId = el.dataset.acct;
       var value = input.value;
       this.deactivate(el, input);
       el.classList.add('ie-saving');
       try {
-        if (field === 'label' && !acctId) {
-          // Group rename path.
-          var res = await fetch(renameUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ newLabel: value }),
-          });
-          var data = await res.json();
-          if (!data.ok) { this.flash(el, 'error', data.error || 'Rename failed'); return; }
-          if (data.newSlug && data.newSlug !== slug) {
-            // Slug changed — navigate to the new URL so every link /
-            // breadcrumb on the page reflects the rename.
-            window.location.href = '/accounts/group/' + encodeURIComponent(data.newSlug);
-            return;
-          }
-          var display = el.querySelector('.ie-display');
-          display.textContent = data.newLabel || value;
-          this.flash(el, 'saved');
-          return;
-        }
-        // Member-account field patch.
-        var res2 = await fetch('/accounts/' + encodeURIComponent(acctId) + '/patch', {
+        var res = await fetch(renameUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ field: field, value: value }),
+          body: JSON.stringify({ newLabel: value }),
         });
-        var data2 = await res2.json();
-        if (!data2.ok) { this.flash(el, 'error', data2.error || 'Save failed'); return; }
-        var display2 = el.querySelector('.ie-display');
-        var saved = data2.value != null ? data2.value : value;
-        if (el.dataset.type === 'select') {
-          var opts = [];
-          try { opts = JSON.parse(el.dataset.options || '[]'); } catch (e) {}
-          var match = opts.filter(function (o) { return o.value === (saved || ''); })[0];
-          display2.textContent = match ? match.label : (saved || '\u2014');
-        } else {
-          display2.textContent = saved || '\u2014';
+        var data = await res.json();
+        if (!data.ok) {
+          el.classList.add('ie-error');
+          el.title = data.error || 'Rename failed';
+          setTimeout(function () { el.classList.remove('ie-error'); el.removeAttribute('title'); }, 2500);
+          return;
         }
-        display2.classList.toggle('muted', !saved);
-        this.flash(el, 'saved');
+        if (data.newSlug && data.newSlug !== slug) {
+          window.location.href = '/accounts/group/' + encodeURIComponent(data.newSlug);
+          return;
+        }
+        var display = el.querySelector('.ie-display');
+        display.textContent = data.newLabel || value;
+        el.classList.add('ie-saved');
+        setTimeout(function () { el.classList.remove('ie-saved'); }, 1200);
       } catch (err) {
-        this.flash(el, 'error', err && err.message ? err.message : 'Save failed');
+        el.classList.add('ie-error');
+        setTimeout(function () { el.classList.remove('ie-error'); }, 2500);
       } finally {
         el.classList.remove('ie-saving');
       }
@@ -409,14 +372,6 @@ function groupInline(slug) {
       if (input && input.parentNode === el) el.removeChild(input);
       var display = el.querySelector('.ie-display');
       if (display) display.style.display = '';
-    },
-    flash: function (el, kind, msg) {
-      el.classList.add('ie-' + kind);
-      if (msg) el.title = msg;
-      setTimeout(function () {
-        el.classList.remove('ie-' + kind);
-        if (msg) el.removeAttribute('title');
-      }, kind === 'saved' ? 1200 : 2500);
     },
   };
 }
