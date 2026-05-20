@@ -902,12 +902,36 @@ export async function onRequestGet(context) {
           </div>
         </form>
       </div>
-      ${docRows.length > 0
-        ? html`
+      ${(() => {
+        const imageRows = docRows.filter(d => d.mime_type && d.mime_type.startsWith('image/'));
+        const nonImageRows = docRows.filter(d => !d.mime_type || !d.mime_type.startsWith('image/'));
+        return docRows.length > 0 ? html`
+          ${imageRows.length > 0 ? html`
+            <div class="image-album" style="display:flex;flex-wrap:wrap;gap:0.75rem;padding:0 0 1rem;margin:0">
+              ${imageRows.map(d => html`
+                <div style="position:relative;border:1px solid var(--border,#e5e7eb);border-radius:var(--radius,6px);overflow:hidden;background:var(--bg-alt,#f5f5f7)">
+                  <a href="/documents/${escape(d.id)}/download" target="_blank" rel="noopener" title="${escape(d.title)}">
+                    <img src="/documents/${escape(d.id)}/download"
+                         alt="${escape(d.title)}"
+                         loading="lazy"
+                         style="display:block;max-width:220px;max-height:160px;object-fit:cover">
+                  </a>
+                  <div style="padding:0.25rem 0.4rem;font-size:0.78em;display:flex;align-items:center;gap:0.3rem">
+                    <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escape(d.title)}">${escape(d.title)}</span>
+                    <form method="post" action="/documents/${escape(d.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this image?')">
+                      <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}">
+                      <button type="submit" class="btn small danger" style="padding:0.1rem 0.3rem;font-size:0.75em">Delete</button>
+                    </form>
+                  </div>
+                </div>
+              `)}
+            </div>
+          ` : ''}
+          ${nonImageRows.length > 0 ? html`
           <table class="data compact">
             <thead><tr><th>Title</th><th>Kind</th><th>Size</th><th>Uploaded</th><th></th></tr></thead>
             <tbody>
-              ${docRows.map(d => html`<tr>
+              ${nonImageRows.map(d => html`<tr>
                 <td>
                   <a href="/documents/${escape(d.id)}/download" target="_blank" rel="noopener" title="Open in new tab"><strong>${escape(d.title)}</strong></a>
                   ${d.original_filename ? html`<br><small class="muted">${escape(d.original_filename)}</small>` : ''}
@@ -924,8 +948,9 @@ export async function onRequestGet(context) {
                 </td>
               </tr>`)}
             </tbody>
-          </table>`
-        : html`<p class="muted">No attachments yet.</p>`}
+          </table>` : ''}
+        ` : html`<p class="muted">No attachments yet.</p>`;
+      })()}
     </section>
 
     <!-- Notes moved to Tasks & Activities tab -->
@@ -1166,12 +1191,14 @@ export async function onRequestGet(context) {
     original_filename: d.original_filename || '',
     kind: d.kind || 'other',
     kind_label: DOC_KIND_LABELS[d.kind] ?? d.kind ?? '',
+    mime_type: d.mime_type || '',
     size: d.size_bytes || 0,
     size_display: fmtSize(d.size_bytes),
     uploaded: (d.uploaded_at ?? '').slice(0, 16).replace('T', ' '),
     by: d.uploaded_by_name ?? d.uploaded_by_email ?? '',
     actions: '',
   }));
+  const dcImages = dcData.filter(d => d.mime_type.startsWith('image/'));
   const docsTab = html`
     <section class="card">
       <div class="card-header">
@@ -1202,6 +1229,27 @@ export async function onRequestGet(context) {
           </div>
         </form>
       </div>
+      ${dcImages.length > 0 ? html`
+        <div class="image-album" style="display:flex;flex-wrap:wrap;gap:0.75rem;padding:0 0 1rem;margin:0">
+          ${dcImages.map(d => html`
+            <div style="position:relative;border:1px solid var(--border,#e5e7eb);border-radius:var(--radius,6px);overflow:hidden;background:var(--bg-alt,#f5f5f7)">
+              <a href="/documents/${escape(d.id)}/download" target="_blank" rel="noopener" title="${escape(d.name)}">
+                <img src="/documents/${escape(d.id)}/download"
+                     alt="${escape(d.name)}"
+                     loading="lazy"
+                     style="display:block;max-width:220px;max-height:160px;object-fit:cover">
+              </a>
+              <div style="padding:0.25rem 0.4rem;font-size:0.78em;display:flex;align-items:center;gap:0.3rem">
+                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escape(d.name)}">${escape(d.name)}</span>
+                <form method="post" action="/documents/${escape(d.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this image?')">
+                  <input type="hidden" name="return_to" value="/opportunities/${escape(opp.id)}?tab=docs">
+                  <button type="submit" class="btn small danger" style="padding:0.1rem 0.3rem;font-size:0.75em">Delete</button>
+                </form>
+              </div>
+            </div>
+          `)}
+        </div>
+      ` : ''}
       ${docRows.length === 0
         ? html`<p class="muted">No documents yet.</p>`
         : html`
