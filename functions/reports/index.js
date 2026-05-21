@@ -381,25 +381,6 @@ export async function onRequestGet(context) {
       </section>
     </div>
 
-    ${recentWins.length > 0 ? html`
-      <section class="card" style="margin-top:1rem">
-        <h2>Recent wins</h2>
-        <table class="data compact">
-          <thead><tr><th>Number</th><th>Title</th><th>Account</th><th class="num">Value</th><th>Closed</th></tr></thead>
-          <tbody>
-            ${recentWins.map(w => html`
-              <tr>
-                <td><code>${escape(w.number)}</code></td>
-                <td>${escape(w.title)}</td>
-                <td>${escape(w.account_name ?? '—')}</td>
-                <td class="num">${w.estimated_value_usd != null ? `$${formatMoney(w.estimated_value_usd)}` : '—'}</td>
-                <td><small class="muted">${escape((w.updated_at ?? '').slice(0, 10))}</small></td>
-              </tr>
-            `)}
-          </tbody>
-        </table>
-      </section>
-    ` : ''}
   `;
 
   const salesTab = html`

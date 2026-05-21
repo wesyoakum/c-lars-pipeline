@@ -50,15 +50,6 @@ export const CHART_SLIDES = [
   { key: 'topAccounts', title: 'Top 10 accounts by pipeline',
     caption: 'Biggest single-account concentrations of open value.',
     kind: 'chart' },
-  { key: 'segment',    title: 'Win rate by customer segment',
-    caption: 'Won / lost / abandoned counts grouped by segment.',
-    kind: 'chart' },
-  { key: 'aging',      title: 'Quote aging',
-    caption: 'How long submitted-but-still-open quotes have been waiting.',
-    kind: 'chart' },
-  { key: 'bookings',   title: 'Bookings trend — last 12 months',
-    caption: 'Closed-won value by close month.',
-    kind: 'chart' },
   { key: 'forecast',   title: 'Weighted forecast — next 6 months',
     caption: 'Committed (100%) vs. probability-weighted forecast by expected close month.',
     kind: 'chart' },
@@ -458,7 +449,7 @@ export function buildChartInitScript(prefix, chartsJson) {
             // ("earliest stages on top").
             scales: {
               x: { ticks: { callback: function(v) { return fmt$(v); } } },
-              y: { reverse: true }
+              y: { reverse: false }
             }
           }
         });
@@ -504,87 +495,6 @@ export function buildChartInitScript(prefix, chartsJson) {
               tooltip: { callbacks: { label: function(ctx) { return fmt$(ctx.parsed.x) + ' · ' + topacct.counts[ctx.dataIndex] + ' opps'; } } }
             },
             scales: { x: { ticks: { callback: function(v) { return fmt$(v); } } } }
-          }
-        });
-      });
-
-      var seg = ${chartsJson.segment};
-      if (seg.labels.length) make('segment', function(canvas) {
-        new Chart(canvas, {
-          type: 'bar',
-          data: {
-            labels: seg.labels,
-            datasets: [
-              { label: 'Won', data: seg.won, backgroundColor: 'rgba(26,127,55,0.75)', borderRadius: 3 },
-              { label: 'Lost', data: seg.lost, backgroundColor: 'rgba(207,34,46,0.75)', borderRadius: 3 },
-              { label: 'Abandoned', data: seg.abandoned, backgroundColor: 'rgba(100,116,139,0.65)', borderRadius: 3 }
-            ]
-          },
-          options: {
-            responsive: true, maintainAspectRatio: false, indexAxis: 'y',
-            plugins: { legend: { position: 'bottom' } },
-            scales: { x: { stacked: true, beginAtZero: true, ticks: { precision: 0 } }, y: { stacked: true } }
-          }
-        });
-      });
-
-      var aging = ${chartsJson.aging};
-      if (aging.labels.length) make('aging', function(canvas) {
-        new Chart(canvas, {
-          type: 'bar',
-          data: {
-            labels: aging.labels,
-            datasets: [{
-              label: 'Quotes',
-              data: aging.counts,
-              backgroundColor: ['rgba(26,127,55,0.75)','rgba(26,127,55,0.55)','rgba(191,135,0,0.75)','rgba(219,112,60,0.75)','rgba(207,34,46,0.70)','rgba(207,34,46,0.95)'],
-              borderRadius: 4
-            }]
-          },
-          options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: {
-              legend: { display: false },
-              tooltip: {
-                callbacks: {
-                  label: function(ctx) {
-                    var n = ctx.parsed.y; var v = aging.values[ctx.dataIndex];
-                    return n + ' quote' + (n === 1 ? '' : 's') + ' · ' + fmt$(v);
-                  }
-                }
-              }
-            },
-            scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
-          }
-        });
-      });
-
-      var book = ${chartsJson.bookings};
-      if (book.labels.length) make('bookings', function(canvas) {
-        new Chart(canvas, {
-          type: 'line',
-          data: {
-            labels: book.labels,
-            datasets: [{
-              label: 'Closed-won $',
-              data: book.values,
-              borderColor: 'rgba(26,127,55,1)',
-              backgroundColor: 'rgba(26,127,55,0.15)',
-              tension: 0.35, fill: true, pointRadius: 4, pointHoverRadius: 6,
-              pointBackgroundColor: 'rgba(26,127,55,1)'
-            }]
-          },
-          options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: {
-              legend: { display: false },
-              tooltip: {
-                callbacks: {
-                  label: function(ctx) { return fmt$(ctx.parsed.y) + ' · ' + book.counts[ctx.dataIndex] + ' wins'; }
-                }
-              }
-            },
-            scales: { y: { beginAtZero: true, ticks: { callback: function(v) { return fmt$(v); } } } }
           }
         });
       });
