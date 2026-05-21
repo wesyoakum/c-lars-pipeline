@@ -449,7 +449,7 @@ async function upsertOpportunityFromJob(env, job, accountId, ownerUserId) {
 
   const ts = nowIso();
   const cols = {
-    title:               s(job.Name),
+    title:               job.ID ? `${s(job.ID)} - ${s(job.Name)}` : s(job.Name),
     description:         s(job.Description),
     transaction_type:    typeMap.type,
     stage,

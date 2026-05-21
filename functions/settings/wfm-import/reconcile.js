@@ -45,10 +45,13 @@ async function findDuplicateGroups(db) {
     groups.get(key).push(r);
   }
 
-  // Only keep groups with 2+ members
+  // Only keep groups with 2+ members that span different external_source
+  // values. Two jobs with the same title but different UUIDs are legit.
   const dupes = [];
   for (const [key, members] of groups) {
     if (members.length < 2) continue;
+    const sources = new Set(members.map(m => m.external_source));
+    if (sources.size < 2) continue;
     // Pick canonical: lowest source priority, then earliest created
     members.sort((a, b) => {
       const pa = SOURCE_PRIORITY[a.external_source] ?? 99;
