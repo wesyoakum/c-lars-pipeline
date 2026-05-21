@@ -105,7 +105,7 @@ const JOB_STATE_TO_JOBS_STATUS = {
 
 const QUOTE_STATE_TO_STATUS = {
   Draft:    'draft',
-  Issued:   'submitted',
+  Issued:   'issued',
   Accepted: 'accepted',
   Declined: 'rejected',
   Archived: 'expired',
@@ -486,6 +486,54 @@ async function upsertOpportunityFromJob(env, job, accountId, ownerUserId) {
        cols.estimated_value_usd, cols.actual_close_date,
        cols.wfm_category, cols.wfm_type, cols.external_url, cols.notes_internal, cols.wfm_payload,
        ts, ts, ts]);
+    return { id, number, action: 'created' };
+  }
+}
+
+// Create or update a Pipeline jobs row from a WFM Job record.
+// Called after upsertOpportunityFromJob so the opp already exists.
+async function upsertJobRow(env, job, opportunityId) {
+  const existingJob = await one(env.DB,
+    'SELECT id, number FROM jobs WHERE external_source = ? AND external_id = ?',
+    ['wfm', job.UUID]);
+
+  const ts = nowIso();
+  const jobType = (CATEGORY_NAME_TO_TYPE[job.Type] || { type: 'spares' }).type;
+  const statusMap = { PLANNED: 'created', PRODUCTION: 'handed_off', COMPLETED: 'handed_off', CANCELLED: 'cancelled' };
+  const jobStatus = statusMap[job.State] || 'created';
+
+  // Try to find the accepted quote on this opp to link via quote_id.
+  let quoteId = null;
+  if (job.ApprovedQuoteUUID) {
+    const linkedQuote = await one(env.DB,
+      'SELECT id FROM quotes WHERE external_id = ? AND deleted_at IS NULL',
+      [job.ApprovedQuoteUUID]);
+    if (linkedQuote) quoteId = linkedQuote.id;
+  }
+
+  if (existingJob) {
+    await run(env.DB,
+      `UPDATE jobs SET opportunity_id = ?, job_type = ?, status = ?, title = ?,
+              customer_po_number = ?, quote_id = ?, external_url = ?,
+              wfm_number = ?, wfm_payload = ?, updated_at = ?
+        WHERE id = ?`,
+      [opportunityId, jobType, jobStatus, s(job.Name),
+       s(job.ClientOrderNumber), quoteId, s(job.WebURL),
+       s(job.ID), JSON.stringify(job), ts,
+       existingJob.id]);
+    return { id: existingJob.id, number: existingJob.number, action: 'updated' };
+  } else {
+    const id = uuid();
+    const number = await allocateNumber(env, 'JOB-WFM');
+    await run(env.DB,
+      `INSERT INTO jobs
+         (id, number, opportunity_id, job_type, status, title,
+          customer_po_number, quote_id, external_source, external_id, external_url,
+          wfm_number, wfm_payload, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'wfm', ?, ?, ?, ?, ?, ?)`,
+      [id, number, opportunityId, jobType, jobStatus, s(job.Name),
+       s(job.ClientOrderNumber), quoteId, job.UUID, s(job.WebURL),
+       s(job.ID), JSON.stringify(job), ts, ts]);
     return { id, number, action: 'created' };
   }
 }
@@ -976,6 +1024,10 @@ async function ensureOpportunityFromJob(env, wfmJobUuid, ctx) {
   const o = await upsertOpportunityFromJob(env, job, accountId, ownerId);
   ctx.oppByWfmUuid.set(wfmJobUuid, o.id);
   ctx.counts.opportunities_cascaded++;
+
+  // Also create/update the Pipeline jobs row for this WFM job.
+  await upsertJobRow(env, job, o.id);
+
   return o.id;
 }
 
@@ -1247,6 +1299,21 @@ export async function processSamples(env, samples, options = {}) {
       }
       const r = await upsertQuote(env, q, oppId);
       counts.quotes++;
+
+      // Advance the parent opp's stage based on the quote's WFM state.
+      const quoteStatus = QUOTE_STATE_TO_STATUS[q.State] || 'draft';
+      const stageForQuote = {
+        accepted: 'won',
+        issued: 'quote_issued',
+        rejected: 'closed_lost',
+      }[quoteStatus];
+      if (stageForQuote) {
+        await run(env.DB,
+          `UPDATE opportunities SET stage = ?, updated_at = ?
+            WHERE id = ? AND deleted_at IS NULL`,
+          [stageForQuote, nowIso(), oppId]);
+      }
+
       try {
         const lineCount = await syncQuoteLines(env, r.id, q.UUID, ctx);
         counts.quote_lines += lineCount;
@@ -1275,6 +1342,7 @@ export async function processSamples(env, samples, options = {}) {
       const ownerId = job.Manager?.UUID ? userByWfmUuid.get(job.Manager.UUID) : null;
       const o = await upsertOpportunityFromJob(env, job, accountId, ownerId);
       oppByWfmUuid.set(job.UUID, o.id);
+      const jr = await upsertJobRow(env, job, o.id);
       counts.jobs++;
       links.push({ url: '/opportunities/' + o.id, label: 'Job-opp: ' + (job.Name || o.number) });
     } catch (e) { errors.push('job ' + (job?.Name || '?') + ': ' + e.message); }
