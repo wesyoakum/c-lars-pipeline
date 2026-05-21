@@ -317,10 +317,15 @@ export async function onRequestPost(context) {
       const all = recordList(r.body, 'Staff');
       results = all.filter((rec) => recordMatches(rec, kind, query, filters));
     } else {
-      // lead / quote / job — walk /list (not /current, which misses
-      // Won leads, Accepted quotes, Completed jobs, etc.)
-      const basePath = '/' + kind + '.api/list';
-      const all = await fetchAllRecords(env, basePath, cfg.primary);
+      // Try /list first (returns all states including Won/Accepted),
+      // fall back to /current if /list returns nothing (some WFM
+      // endpoints behave differently with /list).
+      let basePath = '/' + kind + '.api/list';
+      let all = await fetchAllRecords(env, basePath, cfg.primary);
+      if (all.length === 0) {
+        basePath = '/' + kind + '.api/current';
+        all = await fetchAllRecords(env, basePath, cfg.primary);
+      }
       results = all.filter((rec) => recordMatches(rec, kind, query, filters));
     }
 
