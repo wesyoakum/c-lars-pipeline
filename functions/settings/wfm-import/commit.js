@@ -407,9 +407,38 @@ async function upsertOpportunityFromLead(env, lead, accountId, contactId, ownerU
 }
 
 async function upsertOpportunityFromJob(env, job, accountId, ownerUserId) {
-  const existing = await one(env.DB,
+  // First check if this job already has its own opp row.
+  let existing = await one(env.DB,
     'SELECT id, number FROM opportunities WHERE external_source = ? AND external_id = ?',
     ['wfm-job', job.UUID]);
+
+  // Cross-source linking: try to find the parent opp via the job's
+  // accepted quote (ApprovedQuoteUUID → quote row → opportunity_id),
+  // or by matching title + account against existing wfm/wfm-lead opps.
+  // This prevents creating a separate wfm-job opp when a wfm-lead opp
+  // for the same deal already exists.
+  if (!existing) {
+    // Path 1: trace via ApprovedQuoteUUID
+    if (job.ApprovedQuoteUUID) {
+      const linkedQuote = await one(env.DB,
+        'SELECT opportunity_id FROM quotes WHERE external_id = ? AND deleted_at IS NULL',
+        [job.ApprovedQuoteUUID]);
+      if (linkedQuote?.opportunity_id) {
+        existing = await one(env.DB,
+          'SELECT id, number FROM opportunities WHERE id = ? AND deleted_at IS NULL',
+          [linkedQuote.opportunity_id]);
+      }
+    }
+    // Path 2: title + account match against wfm or wfm-lead opps
+    if (!existing && accountId && job.Name) {
+      existing = await one(env.DB,
+        `SELECT id, number FROM opportunities
+          WHERE title = ? AND account_id = ? AND deleted_at IS NULL
+            AND external_source IN ('wfm', 'wfm-lead')
+          ORDER BY created_at LIMIT 1`,
+        [s(job.Name), accountId]);
+    }
+  }
 
   const typeMap = CATEGORY_NAME_TO_TYPE[job.Type] || { type: 'spares', note: null };
   const stage   = JOB_STATE_TO_STAGE[job.State] || 'won';
@@ -850,9 +879,26 @@ async function synthesizeOpportunityFromQuote(env, q, ctx) {
   if (ctx.oppByWfmUuid.has(cacheKey)) return ctx.oppByWfmUuid.get(cacheKey);
 
   // Idempotent at the DB level too: re-keyed on (wfm-quote-orphan, q.UUID).
-  const existing = await one(env.DB,
+  let existing = await one(env.DB,
     'SELECT id, number FROM opportunities WHERE external_source = ? AND external_id = ?',
     ['wfm-quote-orphan', q.UUID]);
+
+  // Before synthesizing, check if a wfm or wfm-lead opp with the same
+  // title + account already exists. If so, link the quote there instead
+  // of creating a duplicate orphan opp.
+  if (!existing && accountId && q.Name) {
+    existing = await one(env.DB,
+      `SELECT id, number FROM opportunities
+        WHERE title = ? AND account_id = ? AND deleted_at IS NULL
+          AND external_source IN ('wfm', 'wfm-lead')
+        ORDER BY created_at LIMIT 1`,
+      [s(q.Name), accountId]);
+    if (existing) {
+      // Found a match — reuse it, don't synthesize a new opp.
+      ctx.oppByWfmUuid.set(cacheKey, existing.id);
+      return existing.id;
+    }
+  }
 
   const stage = QUOTE_STATE_TO_OPP_STAGE[q.State] || 'quote_drafted';
   const contactId = q.Contact?.UUID
