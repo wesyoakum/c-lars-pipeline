@@ -67,6 +67,7 @@ export async function onRequestGet(context) {
               COALESCE(SUM(estimated_value_usd), 0) AS total_value
          FROM opportunities
         WHERE created_at >= ${weekCutoff}
+          AND deleted_at IS NULL
         GROUP BY week
         ORDER BY week`),
     all(env.DB,
@@ -84,12 +85,14 @@ export async function onRequestGet(context) {
          FROM quotes q
         WHERE q.status IN ('issued','revision_issued','accepted','rejected','expired','completed')
           AND COALESCE(q.submitted_at, q.created_at) >= ${weekCutoff}
+          AND q.deleted_at IS NULL
           AND NOT EXISTS (
             SELECT 1 FROM quotes q2
              WHERE q2.opportunity_id = q.opportunity_id
                AND q2.quote_seq = q.quote_seq
                AND q2.status IN ('issued','revision_issued','accepted','rejected','expired','completed')
                AND COALESCE(q2.submitted_at, q2.created_at) > COALESCE(q.submitted_at, q.created_at)
+               AND q2.deleted_at IS NULL
           )
         GROUP BY week
         ORDER BY week`),
@@ -103,6 +106,7 @@ export async function onRequestGet(context) {
               COALESCE(SUM(estimated_value_usd), 0) AS total_value
          FROM opportunities
         WHERE created_at >= ${monthCutoff}
+          AND deleted_at IS NULL
         GROUP BY month
         ORDER BY month`),
     all(env.DB,
@@ -117,12 +121,14 @@ export async function onRequestGet(context) {
          FROM quotes q
         WHERE q.status IN ('issued','revision_issued','accepted','rejected','expired','completed')
           AND COALESCE(q.submitted_at, q.created_at) >= ${monthCutoff}
+          AND q.deleted_at IS NULL
           AND NOT EXISTS (
             SELECT 1 FROM quotes q2
              WHERE q2.opportunity_id = q.opportunity_id
                AND q2.quote_seq = q.quote_seq
                AND q2.status IN ('issued','revision_issued','accepted','rejected','expired','completed')
                AND COALESCE(q2.submitted_at, q2.created_at) > COALESCE(q.submitted_at, q.created_at)
+               AND q2.deleted_at IS NULL
           )
         GROUP BY month
         ORDER BY month`),
@@ -137,12 +143,14 @@ export async function onRequestGet(context) {
          FROM quotes q
         WHERE q.status IN ('issued','revision_issued','accepted','rejected','expired','completed','dead')
           AND COALESCE(q.submitted_at, q.created_at) >= ${monthCutoff}
+          AND q.deleted_at IS NULL
           AND NOT EXISTS (
             SELECT 1 FROM quotes q2
              WHERE q2.opportunity_id = q.opportunity_id
                AND q2.quote_seq = q.quote_seq
                AND q2.status IN ('issued','revision_issued','accepted','rejected','expired','completed','dead')
                AND COALESCE(q2.submitted_at, q2.created_at) > COALESCE(q.submitted_at, q.created_at)
+               AND q2.deleted_at IS NULL
           )
         ORDER BY COALESCE(q.submitted_at, q.created_at) DESC`),
     all(env.DB,
@@ -151,6 +159,7 @@ export async function onRequestGet(context) {
          FROM opportunities o
          LEFT JOIN users u ON u.id = o.owner_user_id
         WHERE o.stage NOT IN ('won', 'lost', 'abandoned')
+          AND o.deleted_at IS NULL
         GROUP BY o.owner_user_id ORDER BY total_value DESC`),
     all(env.DB,
       // Sort happens client-side below using the stage catalog's
@@ -159,6 +168,7 @@ export async function onRequestGet(context) {
       `SELECT stage, COUNT(*) AS n, COALESCE(SUM(estimated_value_usd), 0) AS total_value
          FROM opportunities
         WHERE stage NOT IN ('won', 'lost', 'abandoned')
+          AND deleted_at IS NULL
         GROUP BY stage`),
     one(env.DB,
       `SELECT COUNT(*) AS total,
@@ -166,24 +176,28 @@ export async function onRequestGet(context) {
               SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS rejected,
               SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) AS pending,
               SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS drafts
-         FROM quotes`),
+         FROM quotes
+        WHERE deleted_at IS NULL`),
     all(env.DB,
       `SELECT o.number, o.title, o.estimated_value_usd, o.updated_at,
               a.name AS account_name
          FROM opportunities o
          LEFT JOIN accounts a ON a.id = o.account_id
         WHERE o.stage = 'won'
+          AND o.deleted_at IS NULL
         ORDER BY o.updated_at DESC LIMIT 10`),
     one(env.DB,
       `SELECT COALESCE(SUM(estimated_value_usd), 0) AS value, COUNT(*) AS n
          FROM opportunities
         WHERE stage = 'won'
-          AND COALESCE(actual_close_date, updated_at) >= date('now', 'start of year')`),
+          AND COALESCE(actual_close_date, updated_at) >= date('now', 'start of year')
+          AND deleted_at IS NULL`),
     one(env.DB,
       `SELECT COALESCE(SUM(estimated_value_usd), 0) AS value, COUNT(*) AS n
          FROM opportunities
         WHERE stage = 'won'
-          AND COALESCE(actual_close_date, updated_at) >= date('now', 'start of month')`),
+          AND COALESCE(actual_close_date, updated_at) >= date('now', 'start of month')
+          AND deleted_at IS NULL`),
   ]);
 
   // Sort the "Pipeline detail by stage" table earliest -> latest

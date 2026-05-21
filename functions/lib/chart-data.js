@@ -107,11 +107,13 @@ export async function gatherDashboardCharts(db) {
       `SELECT stage, COUNT(*) AS n, COALESCE(SUM(estimated_value_usd), 0) AS total_value
          FROM opportunities
         WHERE stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
+          AND deleted_at IS NULL
         GROUP BY stage`),
     all(db,
       `SELECT transaction_type, COUNT(*) AS n, COALESCE(SUM(estimated_value_usd), 0) AS total_value
          FROM opportunities
         WHERE stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
+          AND deleted_at IS NULL
         GROUP BY transaction_type ORDER BY total_value DESC`),
     all(db,
       `SELECT COALESCE(u.display_name, u.email, 'Unassigned') AS owner_name,
@@ -119,6 +121,7 @@ export async function gatherDashboardCharts(db) {
          FROM opportunities o
          LEFT JOIN users u ON u.id = o.owner_user_id
         WHERE o.stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
+          AND o.deleted_at IS NULL
         GROUP BY o.owner_user_id ORDER BY total_value DESC`),
     all(db,
       `SELECT a.id, a.name, a.alias,
@@ -127,6 +130,7 @@ export async function gatherDashboardCharts(db) {
          FROM opportunities o
          JOIN accounts a ON a.id = o.account_id
         WHERE o.stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
+          AND o.deleted_at IS NULL
         GROUP BY a.id ORDER BY pipeline DESC LIMIT 10`),
     all(db,
       `SELECT strftime('%Y-%m', expected_close_date) AS month,
@@ -135,6 +139,7 @@ export async function gatherDashboardCharts(db) {
               COUNT(*) AS n
          FROM opportunities
         WHERE stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
+          AND deleted_at IS NULL
           AND expected_close_date IS NOT NULL
           AND expected_close_date >= date('now', 'start of month')
           AND expected_close_date < date('now', 'start of month', '+6 months')
@@ -145,6 +150,7 @@ export async function gatherDashboardCharts(db) {
               COUNT(*) AS n
          FROM opportunities
         WHERE stage = 'closed_won'
+          AND deleted_at IS NULL
           AND COALESCE(actual_close_date, updated_at) >= date('now', 'start of month', '-12 months')
         GROUP BY month ORDER BY month`),
     all(db,
@@ -155,19 +161,22 @@ export async function gatherDashboardCharts(db) {
          FROM opportunities o
          LEFT JOIN accounts a ON a.id = o.account_id
         WHERE o.stage IN ('closed_won', 'closed_lost', 'closed_abandoned')
+          AND o.deleted_at IS NULL
         GROUP BY segment ORDER BY segment`),
     all(db,
       `SELECT q.id, q.total_price,
               CAST(julianday('now') - julianday(q.submitted_at) AS INTEGER) AS days_old
          FROM quotes q
         WHERE q.status IN ('submitted', 'approved_internal', 'internal_review')
-          AND q.submitted_at IS NOT NULL`),
+          AND q.submitted_at IS NOT NULL
+          AND q.deleted_at IS NULL`),
     all(db,
       `SELECT stage,
               AVG(julianday('now') - julianday(stage_entered_at)) AS avg_days,
               COUNT(*) AS n
          FROM opportunities
         WHERE stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
+          AND deleted_at IS NULL
         GROUP BY stage`),
     all(db,
       `SELECT date(COALESCE(completed_at, created_at)) AS day, COUNT(*) AS n
