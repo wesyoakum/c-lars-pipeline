@@ -583,8 +583,8 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     // this storageKey (see savedFilters up top). Any filter mutation via
     // the popover persists the full filterState back via save().
     // Per-view filter state: table and card views have independent filters.
-    // Legacy localStorage payloads store a single `filters` object; on load
-    // we copy it to both views so existing user prefs aren't lost.
+    // Legacy localStorage payloads store a single filters object; on load
+    // we copy it to both views so existing user prefs are not lost.
     var filterState_table = JSON.parse('${JSON.stringify(defaultFilters).replace(/'/g, "\\'")}');
     var filterState_card  = JSON.parse('${JSON.stringify(defaultFilters).replace(/'/g, "\\'")}');
     if (savedFilters) {
