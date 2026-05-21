@@ -308,7 +308,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
           visible: state.visible,
           widths: state.widths,
           sort: state.sort,
-          filters: filterState,
+          filters: { _table: filterState_table, _card: filterState_card },
           viewMode: state.viewMode,
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
@@ -582,15 +582,29 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     // then overlaid with whatever the user last saved to localStorage for
     // this storageKey (see savedFilters up top). Any filter mutation via
     // the popover persists the full filterState back via save().
-    var filterState = ${JSON.stringify(defaultFilters)};
+    // Per-view filter state: table and card views have independent filters.
+    // Legacy localStorage payloads store a single `filters` object; on load
+    // we copy it to both views so existing user prefs aren't lost.
+    var filterState_table = JSON.parse('${JSON.stringify(defaultFilters).replace(/'/g, "\\'")}');
+    var filterState_card  = JSON.parse('${JSON.stringify(defaultFilters).replace(/'/g, "\\'")}');
     if (savedFilters) {
-      Object.keys(savedFilters).forEach(function(k) {
-        filterState[k] = savedFilters[k];
-      });
+      // Prefer per-view keys if present; fall back to legacy single `filters`.
+      if (savedFilters._table || savedFilters._card) {
+        if (savedFilters._table) Object.keys(savedFilters._table).forEach(function(k) { filterState_table[k] = savedFilters._table[k]; });
+        if (savedFilters._card)  Object.keys(savedFilters._card).forEach(function(k)  { filterState_card[k]  = savedFilters._card[k]; });
+      } else {
+        Object.keys(savedFilters).forEach(function(k) {
+          filterState_table[k] = savedFilters[k];
+          filterState_card[k]  = JSON.parse(JSON.stringify(savedFilters[k]));
+        });
+      }
+    }
+    function getFilterState() {
+      return state.viewMode === 'card' ? filterState_card : filterState_table;
     }
 
     function isFilterActive(key) {
-      var fs = filterState[key];
+      var fs = getFilterState()[key];
       if (!fs) return false;
       if (fs.text) return true;
       if (fs.values && fs.values.length > 0) return true;
@@ -838,7 +852,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     }
 
     function buildPopoverContent(col) {
-      var fs = filterState[col.key] || {};
+      var fs = getFilterState()[col.key] || {};
       var out = '<div class="col-filter-title">' + escHtml(col.label) + '</div>';
       if (col.filter === 'text') {
         var cur = fs.text || '';
@@ -891,7 +905,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         var textInput = popContent.querySelector('.col-filter-text');
         if (textInput) {
           textInput.addEventListener('input', function() {
-            filterState[key] = { text: textInput.value };
+            getFilterState()[key] = { text: textInput.value };
             applyFilters();
             save();
           });
@@ -903,7 +917,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         function readSelected() {
           var arr = [];
           checkboxes.forEach(function(cb) { if (cb.checked) arr.push(cb.value); });
-          filterState[key] = { values: arr };
+          getFilterState()[key] = { values: arr };
           applyFilters();
           save();
         }
@@ -941,7 +955,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         var minInput = popContent.querySelector('.col-filter-min');
         var maxInput = popContent.querySelector('.col-filter-max');
         function readRange() {
-          filterState[key] = {
+          getFilterState()[key] = {
             min: minInput ? minInput.value : '',
             max: maxInput ? maxInput.value : '',
           };
@@ -1024,7 +1038,8 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     // search box, then re-apply and persist. Distinct from the columns
     // menu "Reset" (which also resets column visibility/order/sort).
     function clearAllFilters() {
-      filterState = {};
+      if (state.viewMode === 'card') { filterState_card = {}; }
+      else { filterState_table = {}; }
       if (quickSearchInput) quickSearchInput.value = '';
       hidePopover();
       applyFilters();
@@ -1208,6 +1223,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
           if (state.viewMode === next) return;
           state.viewMode = next;
           applyViewMode();
+          applyFilters();
           save();
         });
       });
