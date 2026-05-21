@@ -528,7 +528,7 @@ async function upsertJobRow(env, job, opportunityId) {
     return { id: existingJob.id, number: existingJob.number, action: 'updated' };
   } else {
     const id = uuid();
-    const number = await allocateNumber(env, 'JOB-WFM');
+    const number = s(job.ID) || await allocateNumber(env, 'JOB-WFM');
     await run(env.DB,
       `INSERT INTO jobs
          (id, number, opportunity_id, job_type, status, title,
@@ -576,7 +576,7 @@ async function upsertQuote(env, q, opportunityId) {
     return { id: existing.id, number: existing.number, action: 'updated' };
   } else {
     const id = uuid();
-    const number = await allocateNumber(env, 'Q-WFM');
+    const number = s(q.ID) || await allocateNumber(env, 'Q-WFM');
     await run(env.DB,
       `INSERT INTO quotes
          (id, number, external_source, external_id, opportunity_id,
