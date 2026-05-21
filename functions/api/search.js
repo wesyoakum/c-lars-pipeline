@@ -27,7 +27,7 @@ export async function onRequestGet(context) {
     all(env.DB,
       `SELECT id, name, alias, segment
          FROM accounts
-        WHERE name LIKE ? OR alias LIKE ?
+        WHERE deleted_at IS NULL AND (name LIKE ? OR alias LIKE ?)
         LIMIT ?`,
       [like, like, LIMIT_PER_TYPE]),
 
@@ -36,7 +36,8 @@ export async function onRequestGet(context) {
               a.name AS account_name, a.id AS account_id
          FROM contacts c
          LEFT JOIN accounts a ON a.id = c.account_id
-        WHERE c.first_name LIKE ? OR c.last_name LIKE ? OR c.email LIKE ?
+        WHERE c.deleted_at IS NULL
+          AND (c.first_name LIKE ? OR c.last_name LIKE ? OR c.email LIKE ?)
         LIMIT ?`,
       [like, like, like, LIMIT_PER_TYPE]),
 
@@ -45,7 +46,8 @@ export async function onRequestGet(context) {
               a.name AS account_name
          FROM opportunities o
          LEFT JOIN accounts a ON a.id = o.account_id
-        WHERE o.number LIKE ? OR o.title LIKE ? OR o.description LIKE ?
+        WHERE o.deleted_at IS NULL
+          AND (o.number LIKE ? OR o.title LIKE ? OR o.description LIKE ?)
         LIMIT ?`,
       [like, like, like, LIMIT_PER_TYPE]),
 
@@ -54,7 +56,8 @@ export async function onRequestGet(context) {
               q.opportunity_id, o.number AS opp_number
          FROM quotes q
          LEFT JOIN opportunities o ON o.id = q.opportunity_id
-        WHERE q.number LIKE ? OR q.title LIKE ?
+        WHERE q.deleted_at IS NULL
+          AND (q.number LIKE ? OR q.title LIKE ?)
         LIMIT ?`,
       [like, like, LIMIT_PER_TYPE]),
 
@@ -65,7 +68,8 @@ export async function onRequestGet(context) {
          FROM quote_lines ql
          JOIN quotes q ON q.id = ql.quote_id
          JOIN opportunities o ON o.id = q.opportunity_id
-        WHERE ql.title LIKE ? OR ql.description LIKE ?
+        WHERE ql.deleted_at IS NULL
+          AND (ql.title LIKE ? OR ql.description LIKE ?)
         LIMIT ?`,
       [like, like, LIMIT_PER_TYPE]),
   ]);
