@@ -25,7 +25,9 @@ export async function onRequestGet(context) {
   const page = url.searchParams.get('page') || '1';
   const pageSize = url.searchParams.get('pageSize') || '5';
 
-  const path = `/${kind}.api/list?page=${page}&pageSize=${pageSize}`;
+  const from = url.searchParams.get('from') || '2020-01-01';
+  const to = url.searchParams.get('to') || '2027-12-31';
+  const path = `/${kind}.api/list?page=${page}&pageSize=${pageSize}&from=${from}&to=${to}`;
   const r = await apiGet(env, path);
 
   return json({
