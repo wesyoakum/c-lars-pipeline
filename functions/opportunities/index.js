@@ -117,7 +117,7 @@ export async function onRequestGet(context) {
   // under `pipeline.oppList.v1`. The table itself is server-rendered so the
   // page is useful even without JS.
   const columns = [
-    { key: 'number',       label: 'Number',       sort: 'number', filter: 'text',   default: true },
+    { key: 'number',       label: 'Number',       sort: 'text',   filter: 'text',   default: true },
     { key: 'title',        label: 'Title',        sort: 'text',   filter: 'text',   default: true },
     { key: 'account_name', label: 'Account',      sort: 'text',   filter: 'text',   default: true },
     { key: 'type_label',   label: 'Type',         sort: 'text',   filter: 'multiselect', default: true,
