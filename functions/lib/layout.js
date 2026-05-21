@@ -327,9 +327,9 @@ const NOTIFICATION_STORE_SCRIPT = (
 // Uses string concatenation (no template literals) so it drops into
 // layout()'s shell without escaping issues.
 const WIZARD_MODAL_MARKUP = (
-  '<div class="task-modal-overlay" x-data x-show="$store.wizard.open" x-cloak ' +
+  '<div class="task-modal-overlay" x-data="{ _mdSelf: false }" x-show="$store.wizard.open" x-cloak ' +
   '@keydown.escape.window="$store.wizard.closeModal()" ' +
-  '@click.self="$store.wizard.closeModal()" style="display:none">' +
+  '@mousedown.self="_mdSelf = true" @mouseup.self="if(_mdSelf) $store.wizard.closeModal(); _mdSelf = false" @mouseup="if($event.target !== $el) _mdSelf = false" style="display:none">' +
   '<div class="task-modal task-modal-wizard" @click.stop>' +
   '<div class="task-modal-header">' +
   '<h3 x-text="$store.wizard.title()"></h3>' +
