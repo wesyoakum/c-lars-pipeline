@@ -3,8 +3,7 @@
 // POST /jobs/:id/delete — Soft-delete a job.
 //
 // Cascade children (all soft-deleted at the same timestamp):
-//   change_orders (job_id), activities (job_id), documents (job_id),
-//   cost_builds (job_id).
+//   change_orders (job_id), activities (job_id), documents (job_id).
 //
 // Without ?cascade=1, refuses if any children exist (409 + summary).
 
@@ -46,7 +45,8 @@ export async function onRequestPost(context) {
   }
 
   // Children that block the delete unless cascade=1
-  const [changeOrders, activities, documents, costBuilds] = await Promise.all([
+  // cost_builds has no job_id column — it hangs off opportunity_id.
+  const [changeOrders, activities, documents] = await Promise.all([
     all(env.DB,
       `SELECT id, number, title FROM change_orders WHERE job_id = ? AND deleted_at IS NULL`,
       [jobId]),
@@ -56,22 +56,18 @@ export async function onRequestPost(context) {
     all(env.DB,
       `SELECT id, title FROM documents WHERE job_id = ? AND deleted_at IS NULL`,
       [jobId]),
-    all(env.DB,
-      `SELECT id, label FROM cost_builds WHERE job_id = ? AND deleted_at IS NULL`,
-      [jobId]),
   ]);
 
   const totalChildren =
-    changeOrders.length + activities.length + documents.length + costBuilds.length;
+    changeOrders.length + activities.length + documents.length;
 
   if (totalChildren > 0 && !cascade) {
-    const msg = `Cannot delete: this job has ${totalChildren} child record(s) (${changeOrders.length} change order(s), ${activities.length} task/note(s), ${documents.length} doc(s), ${costBuilds.length} cost build(s)). Confirm cascade-delete to remove them too.`;
+    const msg = `Cannot delete: this job has ${totalChildren} child record(s) (${changeOrders.length} change order(s), ${activities.length} task/note(s), ${documents.length} doc(s)). Confirm cascade-delete to remove them too.`;
     if (json) return jsonResponse({
       ok: false, error: msg,
       change_order_count: changeOrders.length,
       activity_count: activities.length,
       document_count: documents.length,
-      cost_build_count: costBuilds.length,
     }, 409);
     return redirectWithFlash(`/jobs/${jobId}`, msg, 'error');
   }
@@ -109,21 +105,10 @@ export async function onRequestPost(context) {
         summary: `Document "${d.title || '(untitled)'}" removed (parent job cascade-deleted)`,
       }));
     }
-    for (const cb of costBuilds) {
-      statements.push(auditStmt(env.DB, {
-        entityType: 'cost_build',
-        entityId: cb.id,
-        eventType: 'deleted',
-        user,
-        summary: `Cost build "${cb.label || '(untitled)'}" removed (parent job cascade-deleted)`,
-      }));
-    }
-
     // Soft-delete children
     statements.push(softDeleteChildrenStmt(env.DB, 'change_orders', 'job_id', jobId, ts));
     statements.push(softDeleteChildrenStmt(env.DB, 'activities', 'job_id', jobId, ts));
     statements.push(softDeleteChildrenStmt(env.DB, 'documents', 'job_id', jobId, ts));
-    statements.push(softDeleteChildrenStmt(env.DB, 'cost_builds', 'job_id', jobId, ts));
   }
 
   statements.push(
