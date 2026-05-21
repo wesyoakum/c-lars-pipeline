@@ -589,14 +589,15 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     var filterState_card  = JSON.parse('${JSON.stringify(defaultFilters).replace(/'/g, "\\'")}');
     if (savedFilters) {
       // Prefer per-view keys if present; fall back to legacy single filters key.
+      // When per-view keys exist, REPLACE defaults entirely (so clearing a
+      // filter actually sticks instead of being re-seeded by defaultFilters).
       if (savedFilters._table || savedFilters._card) {
-        if (savedFilters._table) Object.keys(savedFilters._table).forEach(function(k) { filterState_table[k] = savedFilters._table[k]; });
-        if (savedFilters._card)  Object.keys(savedFilters._card).forEach(function(k)  { filterState_card[k]  = savedFilters._card[k]; });
+        if (savedFilters._table) filterState_table = savedFilters._table;
+        if (savedFilters._card)  filterState_card  = savedFilters._card;
       } else {
-        Object.keys(savedFilters).forEach(function(k) {
-          filterState_table[k] = savedFilters[k];
-          filterState_card[k]  = JSON.parse(JSON.stringify(savedFilters[k]));
-        });
+        // Legacy single-filters format: copy to both views as a migration.
+        filterState_table = JSON.parse(JSON.stringify(savedFilters));
+        filterState_card  = JSON.parse(JSON.stringify(savedFilters));
       }
     }
     function getFilterState() {
