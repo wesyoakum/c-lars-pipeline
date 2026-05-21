@@ -41,13 +41,6 @@ const SOURCE_OPTIONS = [
   { value: 'other', label: 'Other' },
 ];
 
-const BANT_BUDGET_OPTIONS = [
-  { value: '', label: '— Unknown —' },
-  { value: 'known', label: 'Known' },
-  { value: 'estimated', label: 'Estimated' },
-  { value: 'unknown', label: 'Unknown' },
-];
-
 export async function renderEditForm(context, opts = {}) {
   const { env, data, request } = context;
   const user = data?.user;
@@ -260,46 +253,6 @@ export async function renderEditForm(context, opts = {}) {
           </label>
           <div style="flex:1"></div>
         </div>
-
-        <fieldset class="qualification-box">
-          <legend>Qualification</legend>
-          <div class="row">
-            <label style="flex:1">
-              <span>Budget</span>
-              <select name="bant_budget">
-                ${BANT_BUDGET_OPTIONS.map(
-                  (o) =>
-                    html`<option value="${o.value}" ${(opp.bant_budget ?? '') === o.value ? 'selected' : ''}>${o.label}</option>`
-                )}
-              </select>
-            </label>
-            <label style="flex:1">
-              <span>Authority (contact)</span>
-              <div class="picker-row">
-                <select name="bant_authority_contact_id" data-role="authority-select">
-                  <option value="">— None —</option>
-                  ${contacts.map((c) => {
-                    const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
-                    const titleSuffix = c.title ? ` — ${c.title}` : '';
-                    return html`<option value="${escape(c.id)}" ${opp.bant_authority_contact_id === c.id ? 'selected' : ''}>${name}${titleSuffix}</option>`;
-                  })}
-                </select>
-                <button type="button" class="btn btn-sm" data-action="new-contact" data-target="authority-select">+ New contact</button>
-              </div>
-              <input type="hidden" name="bant_authority" value="${escape(opp.bant_authority ?? '')}">
-            </label>
-          </div>
-          <div class="row">
-            <label style="flex:1">
-              <span>Need</span>
-              <input type="text" name="bant_need" value="${escape(opp.bant_need ?? '')}">
-            </label>
-            <label style="flex:1">
-              <span>Timeline</span>
-              <input type="text" name="bant_timeline" value="${escape(opp.bant_timeline ?? '')}">
-            </label>
-          </div>
-        </fieldset>
 
         <div class="form-actions">
           <button type="submit" class="btn primary">Save changes</button>

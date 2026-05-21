@@ -93,7 +93,7 @@ export const PERMISSION_GATED_ACTIONS_CATALOG = [
     action: 'update_opportunity',
     category: 'opportunities',
     label: 'Update opportunities',
-    description: 'Edit opportunity fields — title, description, value, expected close date, BANT, RFQ dates, owner, etc. Stage transitions go through change_opportunity_stage so the auto-task chain fires.',
+    description: 'Edit opportunity fields — title, description, value, expected close date, RFQ dates, owner, etc. Stage transitions go through change_opportunity_stage so the auto-task chain fires.',
   },
   {
     action: 'change_opportunity_stage',
@@ -196,7 +196,7 @@ export const PERMISSION_GATED_ACTIONS_CATALOG = [
     action: 'merge_contacts',
     category: 'merging',
     label: 'Merge duplicate contacts',
-    description: 'Consolidate two contact rows: repoints all foreign-key references (opportunities.primary_contact_id, opportunities.bant_authority_contact_id, activities.contact_id, documents.contact_id) from the loser onto the winner, then deletes the loser. NOT undoable. Default-off.',
+    description: 'Consolidate two contact rows: repoints all foreign-key references (opportunities.primary_contact_id, activities.contact_id, documents.contact_id) from the loser onto the winner, then deletes the loser. NOT undoable. Default-off.',
     defaultEnabled: false,
   },
 ];

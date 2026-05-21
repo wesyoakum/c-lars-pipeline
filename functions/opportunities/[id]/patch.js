@@ -17,8 +17,6 @@ const PATCHABLE = new Set([
   'rfi_due_date', 'quoted_date',
   'account_id', 'primary_contact_id',
   'owner_user_id', 'salesperson_user_id',
-  'bant_budget', 'bant_authority', 'bant_need', 'bant_timeline',
-  'bant_authority_contact_id',
   'customer_po_number',
   // Internal-notes panel — non-customer-facing free text. Migration
   // 0058 added the column; the AI Inbox apply-requirements flow

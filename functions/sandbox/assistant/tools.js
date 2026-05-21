@@ -465,7 +465,7 @@ export async function makeAssistantTools({ env, user }) {
         'Optional: description, transaction_type (default "spares"), stage (default "lead"), ' +
         'estimated_value_usd, expected_close_date, primary_contact_id, owner_user_id, ' +
         'salesperson_user_id, source, rfq_format, rfq_received_date, rfq_due_date, rfi_due_date, ' +
-        'quoted_date, bant_budget, bant_authority, bant_authority_contact_id, bant_need, bant_timeline, ' +
+        'quoted_date, ' +
         'notes_internal, number (auto-allocated from the sequence if omitted — that is the strongly ' +
         'preferred default; only pass an explicit number if the user dictates one). Returns the new ' +
         'opportunity id + auto-allocated number + audit_id. Always confirm with the user before opening.',
@@ -490,11 +490,6 @@ export async function makeAssistantTools({ env, user }) {
           rfq_due_date:              { type: 'string' },
           rfi_due_date:              { type: 'string' },
           quoted_date:               { type: 'string' },
-          bant_budget:               { type: 'string' },
-          bant_authority:            { type: 'string' },
-          bant_authority_contact_id: { type: 'string' },
-          bant_need:                 { type: 'string' },
-          bant_timeline:             { type: 'string' },
           notes_internal:            { type: 'string' },
           batch_id:                  { type: 'string' },
           summary:                   { type: 'string' },
@@ -530,11 +525,6 @@ export async function makeAssistantTools({ env, user }) {
           rfq_due_date:              { type: 'string' },
           rfi_due_date:              { type: 'string' },
           quoted_date:               { type: 'string' },
-          bant_budget:               { type: 'string' },
-          bant_authority:            { type: 'string' },
-          bant_authority_contact_id: { type: 'string' },
-          bant_need:                 { type: 'string' },
-          bant_timeline:             { type: 'string' },
           close_reason:              { type: 'string' },
           loss_reason_tag:           { type: 'string' },
           customer_po_number:        { type: 'string' },
@@ -818,7 +808,7 @@ export async function makeAssistantTools({ env, user }) {
       description:
         'Read-only inspection of an opportunity\'s stage workflow. For each stage in the opp\'s ' +
         'transaction_type, returns whether the move would advance/regress, plus any gate ' +
-        'violations (missing fields, unfilled BANT, etc.) and terminal-stage blockers (pending ' +
+        'violations (missing fields, etc.) and terminal-stage blockers (pending ' +
         'tasks, active quotes) that would prevent it. Use this BEFORE proposing a stage move ' +
         'so you can tell the user WHICH things need to happen first instead of just "it\'s ' +
         'blocked." Also useful when change_opportunity_stage returns "would regress" or fails — ' +
@@ -986,7 +976,7 @@ export async function makeAssistantTools({ env, user }) {
       name: 'merge_contacts',
       description:
         'Consolidate two contact rows into one. Repoints FK references on opportunities ' +
-        '(primary_contact_id, bant_authority_contact_id), activities (contact_id), and documents ' +
+        '(primary_contact_id), activities (contact_id), and documents ' +
         '(contact_id) from `loser_id` onto `winner_id`, then deletes the loser. ALL data on the ' +
         'loser row (name / email / phone / title / notes) is LOST — merge anything worth keeping ' +
         'via update_contact first. NOT undoable. Always confirm with the user, including which row ' +
@@ -2398,11 +2388,6 @@ async function createOpportunity(env, user, input = {}) {
     rfq_due_date:              trimOrNull(input.rfq_due_date),
     rfi_due_date:              trimOrNull(input.rfi_due_date),
     quoted_date:               trimOrNull(input.quoted_date),
-    bant_budget:               trimOrNull(input.bant_budget),
-    bant_authority:            trimOrNull(input.bant_authority),
-    bant_authority_contact_id: trimOrNull(input.bant_authority_contact_id),
-    bant_need:                 trimOrNull(input.bant_need),
-    bant_timeline:             trimOrNull(input.bant_timeline),
     notes_internal:            trimOrNull(input.notes_internal),
     owner_user_id:             trimOrNull(input.owner_user_id) || user.id,
     salesperson_user_id:       trimOrNull(input.salesperson_user_id) || user.id,
@@ -2437,8 +2422,7 @@ async function updateOpportunity(env, user, input = {}) {
     'estimated_value_usd', 'expected_close_date', 'actual_close_date',
     'primary_contact_id', 'owner_user_id', 'salesperson_user_id',
     'source', 'rfq_format', 'rfq_received_date', 'rfq_due_date', 'rfi_due_date',
-    'quoted_date', 'bant_budget', 'bant_authority', 'bant_authority_contact_id',
-    'bant_need', 'bant_timeline', 'close_reason', 'loss_reason_tag',
+    'quoted_date', 'close_reason', 'loss_reason_tag',
     'customer_po_number', 'notes_internal'];
   const fields = {};
   for (const k of updatable) {
@@ -2954,7 +2938,6 @@ const ACCOUNT_FK_REWRITERS = [
 
 const CONTACT_FK_REWRITERS = [
   { table: 'opportunities', column: 'primary_contact_id' },
-  { table: 'opportunities', column: 'bant_authority_contact_id' },
   { table: 'activities',    column: 'contact_id' },
   { table: 'documents',     column: 'contact_id' },
 ];

@@ -38,8 +38,6 @@ const UPDATE_FIELDS = [
   'estimated_value_usd', 'probability',
   'expected_close_date', 'rfq_received_date', 'rfq_due_date',
   'rfi_due_date', 'quoted_date',
-  'bant_budget', 'bant_authority', 'bant_authority_contact_id',
-  'bant_need', 'bant_timeline',
   'owner_user_id', 'salesperson_user_id', 'customer_po_number',
 ];
 
@@ -85,13 +83,6 @@ const SOURCE_OPTIONS = [
   { value: 'referral', label: 'Referral' },
   { value: 'existing', label: 'Existing customer' },
   { value: 'other', label: 'Other' },
-];
-
-const BANT_BUDGET_OPTIONS = [
-  { value: '', label: '— Unknown —' },
-  { value: 'known', label: 'Known' },
-  { value: 'estimated', label: 'Estimated' },
-  { value: 'unknown', label: 'Unknown' },
 ];
 
 // ---- helpers for inline-editable fields ----------------------------------
@@ -158,14 +149,11 @@ export async function onRequestGet(context) {
     `SELECT o.*, a.name AS account_name,
             c.first_name AS contact_first, c.last_name AS contact_last,
             c.email AS contact_email, c.phone AS contact_phone,
-            auth.first_name AS auth_first, auth.last_name AS auth_last,
-            auth.email AS auth_email, auth.title AS auth_title,
             ou.display_name AS owner_name, ou.email AS owner_email,
             sp.display_name AS sp_name, sp.email AS sp_email
        FROM opportunities o
        LEFT JOIN accounts  a    ON a.id    = o.account_id
        LEFT JOIN contacts  c    ON c.id    = o.primary_contact_id
-       LEFT JOIN contacts  auth ON auth.id = o.bant_authority_contact_id
        LEFT JOIN users     ou   ON ou.id   = o.owner_user_id
        LEFT JOIN users     sp   ON sp.id   = o.salesperson_user_id
       WHERE o.id = ?
@@ -391,7 +379,6 @@ export async function onRequestGet(context) {
   );
 
   const primaryContactName = [opp.contact_first, opp.contact_last].filter(Boolean).join(' ');
-  const authorityName = [opp.auth_first, opp.auth_last].filter(Boolean).join(' ');
   const ownerLabel = opp.owner_name ?? opp.owner_email ?? '—';
   const salespersonLabel = opp.sp_name ?? opp.sp_email ?? '—';
 
@@ -679,26 +666,6 @@ export async function onRequestGet(context) {
             </div>
           </div>
 
-          <!-- BANT -->
-          <strong style="font-size:0.85em; display:block; margin-top:0.5rem">Qualification (BANT)</strong>
-          <div class="detail-grid" style="margin-top:0.25rem">
-            <div class="detail-pair">
-              <span class="detail-label">Budget</span>
-              <span class="detail-value">${inlineSelect('bant_budget', opp.bant_budget, BANT_BUDGET_OPTIONS)}</span>
-            </div>
-            <div class="detail-pair">
-              <span class="detail-label">Authority</span>
-              <span class="detail-value">${inlineSelect('bant_authority_contact_id', opp.bant_authority_contact_id, contactOptions)}</span>
-            </div>
-            <div class="detail-pair">
-              <span class="detail-label">Need</span>
-              <span class="detail-value">${inlineText('bant_need', opp.bant_need ?? '', { placeholder: '—' })}</span>
-            </div>
-            <div class="detail-pair">
-              <span class="detail-label">Timeline</span>
-              <span class="detail-value">${inlineText('bant_timeline', opp.bant_timeline ?? '', { placeholder: '—' })}</span>
-            </div>
-          </div>
         </div>
       </div>
     </section>
@@ -1420,8 +1387,6 @@ export async function onRequestPost(context) {
                 estimated_value_usd = ?, probability = ?,
                 expected_close_date = ?, rfq_received_date = ?, rfq_due_date = ?,
                 rfi_due_date = ?, quoted_date = ?,
-                bant_budget = ?, bant_authority = ?, bant_authority_contact_id = ?,
-                bant_need = ?, bant_timeline = ?,
                 owner_user_id = ?, salesperson_user_id = ?,
                 customer_po_number = ?,
                 updated_at = ?
@@ -1432,8 +1397,6 @@ export async function onRequestPost(context) {
           value.estimated_value_usd, value.probability,
           value.expected_close_date, value.rfq_received_date, value.rfq_due_date,
           value.rfi_due_date, value.quoted_date,
-          value.bant_budget, value.bant_authority, value.bant_authority_contact_id,
-          value.bant_need, value.bant_timeline,
           value.owner_user_id, value.salesperson_user_id,
           value.customer_po_number,
           ts, oppId,
@@ -1774,7 +1737,7 @@ function oppInline(oppId, accountId) {
           opts.splice(opts.length - 1, 0, { value: newId, label: newLabel });
           el.dataset.options = JSON.stringify(opts);
           // Sync other contact selects on the page
-          this.$el.querySelectorAll('.ie[data-field="primary_contact_id"], .ie[data-field="bant_authority_contact_id"]').forEach(otherEl => {
+          this.$el.querySelectorAll('.ie[data-field="primary_contact_id"]').forEach(otherEl => {
             if (otherEl === el) return;
             const otherOpts = JSON.parse(otherEl.dataset.options || '[]');
             otherOpts.splice(otherOpts.length - 1, 0, { value: newId, label: newLabel });

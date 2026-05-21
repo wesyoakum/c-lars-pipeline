@@ -74,8 +74,8 @@ Sports / teams:
  */
 export const INDUSTRY_TERMS = `Industry terms — preserve verbatim, do not expand or substitute:
 - "VOO" / "vessel of opportunity" — a vessel/ship not yet chosen for a particular job. Used when a quote is for equipment going on a vessel TBD.
-- AHC = Active Heave Compensation. FAT = Factory Acceptance Test. RFQ = Request for Quote. HPU = Hydraulic Power Unit. LARS = Launch and Recovery System. ROV = Remotely Operated Vehicle. EPS = Engineered Product System. OC = Order Confirmation. NTP = Notice to Proceed. BANT = Budget / Authority / Need / Timeline. IWOCS = Installation / Workover Control System.
-- Capitalized acronyms (EPS, ROV, OC, RFQ, NTP, BANT, IWOCS, etc.) — preserve exact case as written. Do NOT pluralize differently than the user wrote them.
+- AHC = Active Heave Compensation. FAT = Factory Acceptance Test. RFQ = Request for Quote. HPU = Hydraulic Power Unit. LARS = Launch and Recovery System. ROV = Remotely Operated Vehicle. EPS = Engineered Product System. OC = Order Confirmation. NTP = Notice to Proceed. IWOCS = Installation / Workover Control System.
+- Capitalized acronyms (EPS, ROV, OC, RFQ, NTP, IWOCS, etc.) — preserve exact case as written. Do NOT pluralize differently than the user wrote them.
 - Pipeline opp numbers like WFM02-25314 / PMS25-25314 — keep with the dash and zero-padding the user wrote.`;
 
 /**

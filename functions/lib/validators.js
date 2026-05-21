@@ -27,7 +27,6 @@ const RFQ_FORMATS = new Set([
   'other',
 ]);
 const SOURCES = new Set(['inbound', 'outreach', 'referral', 'existing', 'other']);
-const BANT_BUDGET = new Set(['known', 'estimated', 'unknown']);
 // Cost-build statuses (migration 0005 — calculator-model price builds).
 const COST_BUILD_STATUSES = new Set(['draft', 'locked']);
 
@@ -90,7 +89,7 @@ export function deriveAlias(name) {
  * Validate an opportunity create/update payload. Covers every field the
  * forms expose: identity (number, title, account, type), pipeline dates
  * (rfq_received, rfq_due, rfi_due, expected_close, quoted), routing
- * (rfq_format, source), BANT-lite, value/probability, ownership, and
+ * (rfq_format, source), value/probability, ownership, and
  * primary contact. Stage transitions go through validateStageTransition
  * below — this function never mutates stage.
  *
@@ -153,22 +152,6 @@ export function validateOpportunity(input) {
   } else {
     value.source = input.source;
   }
-
-  // BANT-lite
-  if (input.bant_budget === undefined || input.bant_budget === '' || input.bant_budget === null) {
-    value.bant_budget = null;
-  } else if (!BANT_BUDGET.has(input.bant_budget)) {
-    errors.bant_budget = 'Must be known, estimated, or unknown';
-  } else {
-    value.bant_budget = input.bant_budget;
-  }
-  // Authority is now a contact reference (bant_authority_contact_id).
-  // The old free-text bant_authority column is kept as a fallback for
-  // cases where the user hasn't yet picked / created a contact.
-  value.bant_authority_contact_id = trim(input.bant_authority_contact_id) || null;
-  value.bant_authority = trim(input.bant_authority) || null;
-  value.bant_need = trim(input.bant_need) || null;
-  value.bant_timeline = trim(input.bant_timeline) || null;
 
   value.description = trim(input.description) || null;
 
@@ -888,7 +871,6 @@ export const ENUMS = {
   TRANSACTION_TYPES,
   RFQ_FORMATS,
   SOURCES,
-  BANT_BUDGET,
   COST_BUILD_STATUSES,
   DEFAULT_WORKCENTERS,
   DATE_FIELDS,
