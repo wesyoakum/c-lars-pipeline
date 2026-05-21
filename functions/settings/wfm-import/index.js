@@ -340,23 +340,9 @@ export async function onRequestGet(context) {
             </div>
           </div>
 
-          <!-- Random sample row -->
-          <div style="display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.5rem;align-items:center">
-            <label style="display:flex;align-items:center;gap:.4rem">
-              <span class="muted" style="font-size:.85rem">Sample size per entity:</span>
-              <input type="number" min="1" max="50" x-model.number="count"
-                     style="width:4.5rem;padding:.3rem .4rem;border:1px solid var(--border);border-radius:4px;font-family:ui-monospace,monospace"
-                     :disabled="busy">
-            </label>
-            <button type="button" class="btn" @click="fetchSamples()" :disabled="busy || !count || count < 1">
-              <span x-show="!busy">Get random samples</span>
-              <span x-show="busy && phase === 'sampling'">Sampling…</span>
-            </button>
-          </div>
-
-          <!-- Search row (simple) -->
+          <!-- Search row -->
           <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.5rem;align-items:center">
-            <span class="muted" style="font-size:.85rem">— or search:</span>
+            <span class="muted" style="font-size:.85rem">Search:</span>
             <select x-model="searchKind"
                     @change="onSearchKindChange()"
                     :disabled="busy"
