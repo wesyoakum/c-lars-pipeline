@@ -70,6 +70,7 @@ export async function onRequestGet(context) {
             ho_user.display_name AS handed_off_by_name,
             creator.display_name AS created_by_name,
             lq.number AS linked_quote_number, lq.id AS linked_quote_id,
+            json_extract(j.wfm_payload, '$.State') AS wfm_state,
             -- Prefer the ACCEPTED quote for OC/NTP number defaults
             -- (that's the quote the customer actually signed off on).
             -- Fall back to the newest live quote if none are accepted yet
@@ -207,6 +208,11 @@ export async function onRequestGet(context) {
           <span class="detail-label">Customer PO</span>
           <span class="detail-value">${escape(job.customer_po_number || job.opp_po_number || '—')}</span>
         </div>
+        ${job.wfm_state ? html`
+        <div class="detail-pair">
+          <span class="detail-label">WFM Status</span>
+          <span class="detail-value">${escape(job.wfm_state)}</span>
+        </div>` : ''}
         <div class="detail-pair">
           <span class="detail-label">External PM System</span>
           <span class="detail-value">${inlineText('external_pm_system', job.external_pm_system, { placeholder: 'Monday, Smartsheet...' })}</span>
