@@ -519,7 +519,7 @@ async function upsertJobRow(env, job, opportunityId) {
     await run(env.DB,
       `UPDATE jobs SET opportunity_id = ?, job_type = ?, status = ?, title = ?,
               customer_po_number = ?, quote_id = ?, external_url = ?,
-              wfm_number = ?, wfm_payload = ?, updated_at = ?
+              wfm_number = ?, wfm_payload = ?, deleted_at = NULL, updated_at = ?
         WHERE id = ?`,
       [opportunityId, jobType, jobStatus, s(job.Name),
        s(job.ClientOrderNumber), quoteId, s(job.WebURL),
