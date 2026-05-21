@@ -222,12 +222,11 @@ export async function onRequestGet(context) {
                 <span class="muted">Synth orphan quotes</span>
               </label>
               <button type="button" class="btn"
-                      @click="deltaImportStart()"
-                      :disabled="busy || (fullRun && fullRun.status === 'in_progress')"
-                      title="Fetch every WFM list, but only INSERT/UPDATE rows whose JSON payload differs from what's stored. Untouched rows don't get an updated_at bump.">
-                <span x-show="!fullRun || fullRun.status !== 'in_progress'">Refresh changed only</span>
-                <span x-show="fullRun && fullRun.status === 'in_progress' && fullRun.mode === 'delta'">Running delta…</span>
-                <span x-show="fullRun && fullRun.status === 'in_progress' && fullRun.mode !== 'delta'">(full running)</span>
+                      @click="deltaReviewStart()"
+                      :disabled="busy || reviewMode || (fullRun && fullRun.status === 'in_progress')"
+                      title="Fetch WFM data and show changes for review before importing.">
+                <span x-show="!busy">Check for changes</span>
+                <span x-show="busy">Checking…</span>
               </button>
               <button type="button" class="btn primary"
                       @click="fullImportStart()"
@@ -338,6 +337,63 @@ export async function onRequestGet(context) {
                 </template>
               </div>
             </div>
+          </div>
+
+          <!-- Delta Review Panel -->
+          <div x-show="reviewMode" x-cloak style="margin-top:.75rem;padding:.75rem;background:var(--bg-alt,#f5f5f7);border-radius:var(--radius,6px)">
+            <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem">
+              <h3 style="margin:0;font-size:.9rem;font-weight:600">Review WFM Changes</h3>
+              <span class="muted" style="font-size:.8rem" x-text="reviewItems.length + ' item(s)'"></span>
+              <span style="flex:1"></span>
+              <button class="btn small" @click="reviewBulkAcceptAll()" :disabled="reviewApplying">Accept all</button>
+              <button class="btn small" @click="reviewBulkDismissAll()" :disabled="reviewApplying">Dismiss all</button>
+              <button class="btn small primary" @click="reviewApply()" :disabled="reviewApplying || reviewApprovedCount === 0"
+                      x-text="reviewApplying ? 'Applying…' : 'Apply ' + reviewApprovedCount + ' approved'"></button>
+              <button class="btn small" @click="reviewMode = false; reviewItems = [];" :disabled="reviewApplying">Close</button>
+            </div>
+
+            <template x-if="reviewItems.length === 0">
+              <p class="muted" style="margin:.5rem 0">No changes found.</p>
+            </template>
+
+            <template x-for="item in reviewItems" :key="item.id">
+              <div style="margin-bottom:.5rem;padding:.5rem .6rem;background:#fff;border:1px solid var(--border,#e5e7eb);border-radius:4px"
+                   :style="item._decision === 'approve' ? 'border-left:3px solid #10b981' : item._decision === 'reject' ? 'border-left:3px solid #ef4444;opacity:.6' : ''">
+                <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem">
+                  <span style="font-size:.7rem;font-weight:600;text-transform:uppercase;color:var(--muted,#666);letter-spacing:.04em" x-text="item.entity_type"></span>
+                  <span :class="item.action === 'insert' ? 'pill pill-success' : 'pill'" style="font-size:.7rem" x-text="item.action"></span>
+                  <strong style="font-size:.85rem" x-text="item.name"></strong>
+                  <span style="flex:1"></span>
+                  <button class="btn small" style="font-size:.72rem" @click="reviewDecide(item, 'approve')"
+                          :class="item._decision === 'approve' ? 'primary' : ''"
+                          :disabled="reviewApplying">Accept</button>
+                  <button class="btn small" style="font-size:.72rem" @click="reviewDecide(item, 'skip')"
+                          :class="!item._decision || item._decision === 'skip' ? '' : ''"
+                          :disabled="reviewApplying">Skip</button>
+                  <button class="btn small danger" style="font-size:.72rem" @click="reviewDecide(item, 'reject')"
+                          :class="item._decision === 'reject' ? '' : ''"
+                          :disabled="reviewApplying">Dismiss</button>
+                </div>
+                <table style="width:100%;font-size:.78rem;border-collapse:collapse">
+                  <template x-for="(d, field) in item.diff" :key="field">
+                    <tr x-show="d.case !== 1 && d.case !== 4 && d.case !== 7"
+                        style="border-bottom:1px solid #f0f0f0">
+                      <td style="padding:.15rem .3rem;width:120px;color:var(--muted,#666);white-space:nowrap" x-text="d.label"></td>
+                      <td style="padding:.15rem .3rem">
+                        <span x-show="d.case === 6" style="color:#10b981" x-text="d.wfm"></span>
+                        <span x-show="d.case === 3" style="color:#3b82f6" x-text="d.wfm"></span>
+                        <span x-show="d.case === 2" class="muted" x-text="d.pipeline + ' (Pipeline edited)'"></span>
+                        <span x-show="d.case === 5 || d.case === 8">
+                          <span style="color:#ef4444;text-decoration:line-through" x-text="d.pipeline || '(empty)'"></span>
+                          <span style="margin:0 .3rem">&rarr;</span>
+                          <span style="color:#10b981" x-text="d.wfm || '(empty)'"></span>
+                        </span>
+                      </td>
+                    </tr>
+                  </template>
+                </table>
+              </div>
+            </template>
           </div>
 
           <!-- Search row -->
@@ -1153,32 +1209,100 @@ export async function onRequestGet(context) {
                   }
                 },
 
-                async deltaImportStart() {
-                  if (!confirm('Queue a delta refresh? Fetches every WFM list (same as a full import) but only INSERTs/UPDATEs rows whose JSON payload changed. Untouched rows do NOT get an updated_at bump. You can close this tab.')) return;
+                // ---- Delta review state ----
+                reviewMode: false,
+                reviewRunId: null,
+                reviewItems: [],
+                reviewApplying: false,
+                get reviewApprovedCount() {
+                  return this.reviewItems.filter(i => i._decision === 'approve').length;
+                },
+
+                async deltaReviewStart() {
                   this.busy = true;
                   try {
                     const res = await fetch('/settings/wfm-import/delta/start', {
                       method: 'POST', credentials: 'same-origin',
                       headers: { 'content-type': 'application/json' },
-                      body: JSON.stringify({
-                        options: { synth_orphan_quotes: !!this.fullImportSynth },
-                      }),
+                      body: JSON.stringify({}),
                     });
                     const j = await res.json();
                     if (!j.ok) {
                       alert('Failed: ' + (j.message || j.error || 'unknown'));
                       return;
                     }
-                    // Empty deltas finish immediately — surface that.
                     if (j.total === 0) {
-                      alert('Nothing changed in WFM since the last import. No rows queued.');
+                      alert('Nothing changed in WFM since the last import.');
+                      return;
                     }
-                    await this._fullStatusFetch();
-                    this._fullStatusEnsurePolling();
+                    this.reviewRunId = j.run_id;
+                    // Fetch the pending items for review.
+                    const rRes = await fetch('/settings/wfm-import/delta/review?run_id=' + j.run_id, {
+                      credentials: 'same-origin',
+                    });
+                    const rj = await rRes.json();
+                    if (rj.ok) {
+                      this.reviewItems = (rj.items || []).map(item => ({
+                        ...item,
+                        _decision: item.status === 'approved' ? 'approve' : null,
+                      }));
+                      this.reviewMode = true;
+                    }
                   } catch (e) {
-                    alert('Failed to start: ' + (e.message || e));
+                    alert('Failed: ' + (e.message || e));
                   } finally {
                     this.busy = false;
+                  }
+                },
+
+                reviewDecide(item, decision) {
+                  item._decision = decision;
+                },
+
+                reviewBulkAcceptAll() {
+                  for (const item of this.reviewItems) item._decision = 'approve';
+                },
+
+                reviewBulkDismissAll() {
+                  for (const item of this.reviewItems) item._decision = 'reject';
+                },
+
+                async reviewApply() {
+                  // Save decisions first.
+                  const decisions = this.reviewItems
+                    .filter(i => i._decision && i._decision !== 'skip')
+                    .map(i => ({
+                      pending_id: i.id,
+                      decision: i._decision,
+                    }));
+                  if (decisions.length === 0) return;
+
+                  this.reviewApplying = true;
+                  try {
+                    // Post decisions.
+                    await fetch('/settings/wfm-import/delta/review', {
+                      method: 'POST', credentials: 'same-origin',
+                      headers: { 'content-type': 'application/json' },
+                      body: JSON.stringify({ decisions }),
+                    });
+                    // Apply approved items.
+                    const res = await fetch('/settings/wfm-import/delta/apply', {
+                      method: 'POST', credentials: 'same-origin',
+                      headers: { 'content-type': 'application/json' },
+                      body: JSON.stringify({ run_id: this.reviewRunId }),
+                    });
+                    const j = await res.json();
+                    if (j.ok) {
+                      alert('Applied ' + (j.applied || 0) + ' change(s). ' + (j.remaining || 0) + ' pending.');
+                      this.reviewMode = false;
+                      this.reviewItems = [];
+                    } else {
+                      alert('Apply failed: ' + (j.message || j.error || 'unknown'));
+                    }
+                  } catch (e) {
+                    alert('Apply failed: ' + (e.message || e));
+                  } finally {
+                    this.reviewApplying = false;
                   }
                 },
 
