@@ -197,8 +197,8 @@ export async function onRequestGet(context) {
   // Account contacts for primary-contact dropdown + contact strip.
   const contacts = await all(
     env.DB,
-    `SELECT id, first_name, last_name, title, email, phone, is_primary
-       FROM contacts WHERE account_id = ? AND deleted_at IS NULL ORDER BY is_primary DESC, last_name, first_name`,
+    `SELECT id, first_name, last_name, title, email, phone
+       FROM contacts WHERE account_id = ? AND deleted_at IS NULL ORDER BY last_name, first_name`,
     [opp.account_id]
   );
 
@@ -772,7 +772,7 @@ export async function onRequestGet(context) {
             <button type="button" class="btn btn-sm" onclick="window.open('/accounts/${escape(opp.account_id)}/contacts/new?popup=1', 'pipeline-new-contact', 'width=720,height=780,resizable=yes,scrollbars=yes')">Add contact</button>
           </div>
           <table class="data compact">
-            <thead><tr><th>Name</th><th>Title</th><th>Email</th><th>Phone</th><th></th></tr></thead>
+            <thead><tr><th>Name</th><th>Title</th><th>Email</th><th>Phone</th></tr></thead>
             <tbody>
               ${contacts.map(c => {
                 const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '(no name)';
@@ -801,7 +801,6 @@ export async function onRequestGet(context) {
                       <span class="ie-display ${c.phone ? '' : 'muted'}">${escape(c.phone ?? '—')}</span>
                     </span>
                   </td>
-                  <td>${c.is_primary ? html`<span class="pill pill-success">primary</span>` : ''}</td>
                 </tr>`;
               })}
             </tbody>

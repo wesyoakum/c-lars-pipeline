@@ -8,7 +8,7 @@ import { auditStmt } from '../../lib/audit.js';
 import { now } from '../../lib/ids.js';
 
 const PATCHABLE = new Set([
-  'first_name', 'last_name', 'title', 'email', 'phone', 'mobile', 'is_primary', 'notes',
+  'first_name', 'last_name', 'title', 'email', 'phone', 'mobile', 'notes',
   // LinkedIn: linkedin_url is the URL, linkedin_url_source marks
   // whether it was AI-suggested or user-confirmed. Patching either
   // field has special-case behavior in the handler below.
@@ -34,9 +34,7 @@ export async function onRequestPost(context) {
   if (!contact) return json({ ok: false, error: 'Not found' }, 404);
 
   let newValue;
-  if (field === 'is_primary') {
-    newValue = rawValue === '1' || rawValue === true || rawValue === 1 ? 1 : 0;
-  } else if (field === 'linkedin_url_source') {
+  if (field === 'linkedin_url_source') {
     // Only 'user' (confirm) is a meaningful patch from the UI. Any
     // other value is rejected — 'ai_suggested' is set server-side by
     // /push/linkedin only.
@@ -96,13 +94,6 @@ export async function onRequestPost(context) {
     summary: `Updated contact ${field}: ${contact.first_name} ${contact.last_name}`,
     changes,
   }));
-
-  // If setting is_primary = 1, clear other primaries on the same account
-  if (field === 'is_primary' && newValue === 1) {
-    stmts.unshift(
-      stmt(env.DB, `UPDATE contacts SET is_primary = 0 WHERE account_id = ? AND id != ?`, [contact.account_id, contactId])
-    );
-  }
 
   await batch(env.DB, stmts);
 

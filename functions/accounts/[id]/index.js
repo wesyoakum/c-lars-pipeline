@@ -174,11 +174,11 @@ export async function onRequestGet(context) {
 
   const contacts = await all(
     env.DB,
-    `SELECT id, first_name, last_name, title, email, phone, mobile, is_primary
+    `SELECT id, first_name, last_name, title, email, phone, mobile
        FROM contacts
       WHERE account_id = ?
         AND deleted_at IS NULL
-      ORDER BY is_primary DESC, last_name, first_name`,
+      ORDER BY last_name, first_name`,
     [accountId]
   );
 
@@ -557,7 +557,6 @@ export async function onRequestGet(context) {
           { key: 'title',      label: 'Title',    sort: 'text', filter: 'text', default: true },
           { key: 'email',      label: 'Email',    sort: 'text', filter: 'text', default: true },
           { key: 'phone',      label: 'Phone',    sort: 'text', filter: 'text', default: true },
-          { key: 'primary',    label: 'Primary',  sort: 'text', filter: null,   default: true },
           { key: 'actions',    label: '',          sort: null,   filter: null,   default: true, hideable: false },
         ];
         const ctData = contacts.map(c => ({
@@ -567,7 +566,6 @@ export async function onRequestGet(context) {
           title: c.title ?? '',
           email: c.email ?? '',
           phone: c.phone ?? '',
-          primary: c.is_primary ? 'primary' : '',
           actions: '',
         }));
         return contacts.length === 0
@@ -585,7 +583,6 @@ export async function onRequestGet(context) {
                     <td class="col-title" data-col="title">${ieText('title', r.title)}</td>
                     <td class="col-email" data-col="email">${ieText('email', r.email, { inputType: 'email' })}</td>
                     <td class="col-phone" data-col="phone">${ieText('phone', r.phone, { inputType: 'tel' })}</td>
-                    <td class="col-primary" data-col="primary">${contacts[i].is_primary ? html`<span class="pill pill-success">primary</span>` : ''}</td>
                     <td class="col-actions" data-col="actions" data-row-no-nav>
                       <form method="post" action="/contacts/${escape(r.id)}/delete"
                             onsubmit="return confirm('Delete this contact?');"

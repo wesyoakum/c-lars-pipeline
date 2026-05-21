@@ -1,9 +1,6 @@
 // functions/accounts/[id]/contacts/index.js
 //
 // POST /accounts/:id/contacts — create a new contact under an account.
-//
-// If is_primary is set, demote any existing primary on this account in
-// the same batch so there's always at most one primary.
 
 import { one, stmt, batch } from '../../../lib/db.js';
 import { auditStmt } from '../../../lib/audit.js';
@@ -80,24 +77,13 @@ export async function onRequestPost(context) {
 
   const statements = [];
 
-  // If the new contact should be primary, clear any existing primary on this account.
-  if (value.is_primary) {
-    statements.push(
-      stmt(
-        env.DB,
-        `UPDATE contacts SET is_primary = 0, updated_at = ? WHERE account_id = ? AND is_primary = 1`,
-        [ts, accountId]
-      )
-    );
-  }
-
   statements.push(
     stmt(
       env.DB,
       `INSERT INTO contacts
          (id, account_id, first_name, last_name, title, email, phone, mobile,
-          is_primary, notes, created_at, updated_at, created_by_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          notes, created_at, updated_at, created_by_user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         accountId,
@@ -107,7 +93,6 @@ export async function onRequestPost(context) {
         value.email,
         value.phone,
         value.mobile,
-        value.is_primary,
         value.notes,
         ts,
         ts,
@@ -122,7 +107,7 @@ export async function onRequestPost(context) {
       entityId: id,
       eventType: 'created',
       user,
-      summary: `Created contact "${displayName}" on ${account.name}${value.is_primary ? ' (primary)' : ''}`,
+      summary: `Created contact "${displayName}" on ${account.name}`,
       changes: value,
     })
   );

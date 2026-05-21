@@ -34,8 +34,8 @@ export async function onRequestPost(context) {
 
   await batch(env.DB, [
     stmt(env.DB,
-      `INSERT INTO contacts (id, account_id, first_name, last_name, title, email, phone, is_primary, created_at, updated_at, created_by_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+      `INSERT INTO contacts (id, account_id, first_name, last_name, title, email, phone, created_at, updated_at, created_by_user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, accountId, firstName, lastName, title, email, phone, ts, ts, user?.id]),
     auditStmt(env.DB, {
       entityType: 'contact',

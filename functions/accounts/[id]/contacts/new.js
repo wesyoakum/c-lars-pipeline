@@ -60,11 +60,6 @@ export function renderNewContactForm(context, opts = {}) {
           </label>
         </div>
 
-        <label class="checkbox">
-          <input type="checkbox" name="is_primary" value="1" ${values.is_primary ? 'checked' : ''}>
-          <span>Primary contact for this account</span>
-        </label>
-
         <label>
           <span>Notes</span>
           <textarea name="notes" rows="4">${escape(values.notes ?? '')}</textarea>

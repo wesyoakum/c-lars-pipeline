@@ -19,7 +19,6 @@ const FIELDS = [
   'phone',
   'mobile',
   'linkedin_url',
-  'is_primary',
   'notes',
 ];
 
@@ -39,14 +38,6 @@ function inlineTextarea(field, value, opts = {}) {
   return html`<span class="ie" data-field="${field}" data-type="textarea">
     <span class="ie-display ${displayClass}">${escape(display)}</span>
     <span class="ie-raw" hidden>${escape(value ?? '')}</span>
-  </span>`;
-}
-
-function inlineCheckbox(field, value) {
-  return html`<span class="ie" data-field="${field}" data-type="checkbox">
-    <span class="ie-display">
-      ${value ? raw('<span class="pill pill-success">Yes</span>') : raw('<span class="muted">No</span>')}
-    </span>
   </span>`;
 }
 
@@ -163,7 +154,6 @@ export async function onRequestGet(context) {
           </h1>
           <p class="muted" style="margin:0.15rem 0 0">
             <a href="/accounts/${escape(contact.account_id)}">${escape(contact.account_name ?? '—')}</a>
-            ${contact.is_primary ? raw(' &middot; <span class="pill pill-success">Primary</span>') : ''}
           </p>
         </div>
         <div class="header-actions">
@@ -198,10 +188,6 @@ export async function onRequestGet(context) {
           <span class="detail-value detail-value-linkedin">
             ${linkedinCellHtml}
           </span>
-        </div>
-        <div class="detail-pair">
-          <span class="detail-label">Primary contact</span>
-          <span class="detail-value">${inlineCheckbox('is_primary', contact.is_primary)}</span>
         </div>
         <div class="detail-pair">
           <span class="detail-label">Created</span>
@@ -264,12 +250,7 @@ export async function onRequestGet(context) {
           const currentValue = rawEl ? rawEl.textContent : (display.classList.contains('muted') ? '' : display.textContent.trim());
 
           let input;
-          if (type === 'checkbox') {
-            // Toggle immediately, no input needed
-            const newVal = display.querySelector('.pill-success') ? 0 : 1;
-            this.saveValue(el, field, newVal);
-            return;
-          } else if (type === 'textarea') {
+          if (type === 'textarea') {
             input = document.createElement('textarea');
             input.className = 'ie-input';
             input.rows = 3;
@@ -318,14 +299,8 @@ export async function onRequestGet(context) {
             // Update display
             const display = el.querySelector('.ie-display');
             const rawEl = el.querySelector('.ie-raw');
-            if (field === 'is_primary') {
-              display.innerHTML = data.value
-                ? '<span class="pill pill-success">Yes</span>'
-                : '<span class="muted">No</span>';
-            } else {
-              display.textContent = data.value || '\u2014';
-              display.classList.toggle('muted', !data.value);
-            }
+            display.textContent = data.value || '\u2014';
+            display.classList.toggle('muted', !data.value);
             if (rawEl) rawEl.textContent = data.value ?? '';
 
             el.classList.add('ie-saved');
@@ -474,25 +449,12 @@ export async function onRequestPost(context) {
 
   const statements = [];
 
-  // Clear any other primary on the (possibly new) account if this one is
-  // being promoted. Demote on the old account too if we're moving away.
-  if (value.is_primary) {
-    statements.push(
-      stmt(
-        env.DB,
-        `UPDATE contacts SET is_primary = 0, updated_at = ?
-          WHERE account_id = ? AND id != ? AND is_primary = 1`,
-        [ts, value.account_id, contactId]
-      )
-    );
-  }
-
   statements.push(
     stmt(
       env.DB,
       `UPDATE contacts
           SET account_id = ?, first_name = ?, last_name = ?, title = ?,
-              email = ?, phone = ?, mobile = ?, is_primary = ?,
+              email = ?, phone = ?, mobile = ?,
               notes = ?, updated_at = ?
         WHERE id = ?`,
       [
@@ -503,7 +465,6 @@ export async function onRequestPost(context) {
         value.email,
         value.phone,
         value.mobile,
-        value.is_primary,
         value.notes,
         ts,
         contactId,

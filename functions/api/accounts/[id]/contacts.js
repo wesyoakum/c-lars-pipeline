@@ -11,10 +11,10 @@ export async function onRequestGet(context) {
   const { env, params } = context;
   const rows = await all(
     env.DB,
-    `SELECT id, first_name, last_name, title, email, phone, is_primary
+    `SELECT id, first_name, last_name, title, email, phone
        FROM contacts
       WHERE account_id = ?
-      ORDER BY is_primary DESC, last_name, first_name`,
+      ORDER BY last_name, first_name`,
     [params.id]
   );
   return new Response(JSON.stringify(rows), {

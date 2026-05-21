@@ -9,13 +9,8 @@ import { all } from '../lib/db.js';
 import { layout, htmlResponse, html, raw, escape, subnavTabs } from '../lib/layout.js';
 import { readFlash } from '../lib/http.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
-import { ieText, ieSelect, listInlineEditScript } from '../lib/list-inline-edit.js';
+import { ieText, listInlineEditScript } from '../lib/list-inline-edit.js';
 import { isActiveOnly, contactActivePredicate } from '../lib/activeness.js';
-
-const PRIMARY_OPTIONS = [
-  { value: '0', label: 'No' },
-  { value: '1', label: 'Yes' },
-];
 
 // Render a LinkedIn URL cell that's both inline-editable AND clickable.
 // The inline-edit script (list-inline-edit.js) lets clicks on <a>
@@ -58,7 +53,6 @@ export async function onRequestGet(context) {
             c.mobile,
             c.linkedin_url,
             c.linkedin_url_source,
-            c.is_primary,
             c.updated_at,
             c.external_source,
             a.name AS account_name
@@ -78,7 +72,6 @@ export async function onRequestGet(context) {
     { key: 'phone',        label: 'Phone',        sort: 'text',   filter: 'text',   default: true },
     { key: 'mobile',       label: 'Mobile',       sort: 'text',   filter: 'text',   default: false },
     { key: 'linkedin',     label: 'LinkedIn',     sort: 'text',   filter: 'text',   default: true },
-    { key: 'is_primary',   label: 'Primary',      sort: 'text',   filter: 'select', default: true },
     // WFM-imported vs Pipeline-native. Off by default; flip on via the
     // column-picker when auditing import coverage.
     { key: 'source',       label: 'Source',       sort: 'text',   filter: 'select', default: false },
@@ -98,10 +91,6 @@ export async function onRequestGet(context) {
     mobile: r.mobile ?? '',
     linkedin: r.linkedin_url ?? '',
     linkedin_source: r.linkedin_url_source ?? '',
-    // is_primary stored as string '0'/'1' so the inline-edit select and
-    // the select-filter dropdown handle it uniformly; the patch handler
-    // coerces back to 0/1 for storage.
-    is_primary: r.is_primary === 1 ? '1' : '0',
     source: r.external_source ? 'wfm' : 'pipeline',
     updated: (r.updated_at ?? '').slice(0, 10),
   }));
@@ -161,9 +150,6 @@ export async function onRequestGet(context) {
                     </td>
                     <td class="col-linkedin" data-col="linkedin">
                       ${ieLinkedinCell(r.linkedin, r.linkedin_source)}
-                    </td>
-                    <td class="col-is_primary" data-col="is_primary">
-                      ${ieSelect('is_primary', r.is_primary, PRIMARY_OPTIONS)}
                     </td>
                     <td class="col-source" data-col="source">
                       <span class="cell-text muted" style="font-size:.78rem">${escape(r.source)}</span>
