@@ -814,13 +814,13 @@ const CASCADE_DELETE_MODAL_MARKUP = (
 
   // Empty state — no children
   '<template x-if="$store.cascadeDelete.preview && $store.cascadeDelete.preview.children.length === 0">' +
-  '<p>No related records will be affected. This is permanent.</p>' +
+  '<p>No related records will be affected.</p>' +
   '</template>' +
 
   // Populated state — list children
   '<template x-if="$store.cascadeDelete.preview && $store.cascadeDelete.preview.children.length > 0">' +
   '<div>' +
-  '<p class="cascade-delete-warning"><strong>This is permanent.</strong> The following will also be deleted:</p>' +
+  '<p class="cascade-delete-warning">The following will also be deleted:</p>' +
   '<ul class="cascade-delete-list">' +
   '<template x-for="(c, idx) in $store.cascadeDelete.preview.children" :key="idx">' +
   '<li>' +
