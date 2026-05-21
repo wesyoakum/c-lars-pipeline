@@ -68,10 +68,8 @@ async function fetchSingleShot(env, basePath, primaryKey) {
   return recordList(r.body, primaryKey);
 }
 
-// Probe pagination: /client.api/list paginates and returns
-// TotalRecords; /lead.api/current and /quote.api/current and
-// /job.api/current return everything in one shot and ignore page=
-// params. Pick the right strategy.
+// Probe pagination: /list endpoints paginate and return TotalRecords.
+// Pick the right strategy (paginated walk vs single shot).
 async function fetchKind(env, basePath, primaryKey) {
   const total = await readTotalRecords(env, basePath);
   if (total === null) {
@@ -89,16 +87,15 @@ export async function onRequestPost(context) {
   const startedAt = Date.now();
 
   try {
-    // Run all five list endpoints in parallel. /staff.api/list is small,
-    // /client.api/list paginates, the three /current endpoints are
-    // single-shot. Promise.all gives us total wall clock = max of
-    // the slowest, not the sum.
+    // Run all five list endpoints in parallel. All use /list (paginated)
+    // to pull ALL records regardless of state — not /current which only
+    // returns active/open records and misses Won leads, Accepted quotes, etc.
     const [staff, clients, leads, quotes, jobs] = await Promise.all([
       apiGet(env, '/staff.api/list').then((r) => r.ok ? recordList(r.body, 'Staff') : []),
-      fetchKind(env, '/client.api/list',   'Client'),
-      fetchKind(env, '/lead.api/current',  'Lead'),
-      fetchKind(env, '/quote.api/current', 'Quote'),
-      fetchKind(env, '/job.api/current',   'Job'),
+      fetchKind(env, '/client.api/list', 'Client'),
+      fetchKind(env, '/lead.api/list',   'Lead'),
+      fetchKind(env, '/quote.api/list',  'Quote'),
+      fetchKind(env, '/job.api/list',    'Job'),
     ]);
 
     return json({
