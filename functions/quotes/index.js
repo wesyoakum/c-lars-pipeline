@@ -142,8 +142,127 @@ export async function onRequestGet(context) {
     '/quotes'
   );
 
+  // Status order for chart — mirrors the quote lifecycle.
+  const STATUS_ORDER = ['Draft', 'Revision Draft', 'Issued', 'Revision Issued', 'Expired', 'Accepted', 'Rejected', 'Dead'];
+
+  const statusChartScript = `
+(function(){
+  var chart = document.querySelector('[data-role="status-chart"]');
+  if (!chart) return;
+  var host = document.querySelector('.opp-list');
+  var bodyEl = chart.querySelector('[data-role="status-chart-body"]');
+  var STATUS_ORDER = ${raw(JSON.stringify(STATUS_ORDER))};
+  var statusOrderIndex = {};
+  for (var i = 0; i < STATUS_ORDER.length; i++) statusOrderIndex[STATUS_ORDER[i]] = i;
+  function orderIndex(s){ return s in statusOrderIndex ? statusOrderIndex[s] : 9999; }
+  function esc(x){ return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function fmt$(n){
+    n = Number(n) || 0;
+    if (n >= 1e9) return '$' + (n/1e9).toFixed(n >= 1e10 ? 0 : 1).replace(/\\.0$/,'') + 'B';
+    if (n >= 1e6) return '$' + (n/1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\\.0$/,'') + 'M';
+    if (n >= 1e3) return '$' + (n/1e3).toFixed(n >= 1e4 ? 0 : 1).replace(/\\.0$/,'') + 'K';
+    return '$' + Math.round(n);
+  }
+
+  var STORAGE_KEY = 'pipeline.quoteStatusChart.mode.v1';
+  var mode = 'count';
+  try { var saved = localStorage.getItem(STORAGE_KEY); if (saved === 'value' || saved === 'count') mode = saved; } catch(e) {}
+  var modeBtns = chart.querySelectorAll('[data-role="status-chart-mode"] button');
+  function setMode(next){
+    mode = next;
+    try { localStorage.setItem(STORAGE_KEY, mode); } catch(e) {}
+    for (var i = 0; i < modeBtns.length; i++){
+      modeBtns[i].classList.toggle('qsc-mode-active', modeBtns[i].getAttribute('data-mode') === mode);
+    }
+    render();
+  }
+  for (var i = 0; i < modeBtns.length; i++){
+    (function(btn){
+      btn.classList.toggle('qsc-mode-active', btn.getAttribute('data-mode') === mode);
+      btn.addEventListener('click', function(){ setMode(btn.getAttribute('data-mode')); });
+    })(modeBtns[i]);
+  }
+
+  function render(){
+    if (!host || !bodyEl){ chart.hidden = true; return; }
+    var trs = host.querySelectorAll('tbody[data-role="rows"] tr[data-row-id]');
+    var counts = {}, values = {}, order = [], total = 0;
+    for (var i=0;i<trs.length;i++){
+      var tr = trs[i];
+      if (tr.style.display === 'none') continue;
+      var s = (tr.getAttribute('data-status_label') || '').trim() || '—';
+      var v = parseFloat(tr.getAttribute('data-total'));
+      if (!isFinite(v)) v = 0;
+      if (!(s in counts)){ counts[s] = 0; values[s] = 0; order.push(s); }
+      counts[s]++;
+      values[s] += v;
+      total++;
+    }
+    if (total === 0){ chart.hidden = true; bodyEl.innerHTML = ''; return; }
+    var metric = mode === 'value' ? values : counts;
+    var max = 0; for (var k in metric){ if (metric[k] > max) max = metric[k]; }
+    var axis;
+    if (mode === 'value') {
+      if (max <= 0) axis = 1;
+      else {
+        var exp = Math.floor(Math.log10(max));
+        var step = Math.pow(10, exp);
+        axis = Math.ceil(max / step) * step;
+        if (axis === max) axis = max + step;
+      }
+    } else {
+      axis = Math.max(50, Math.ceil(max / 50) * 50);
+    }
+    var palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#e11d48'];
+    order.sort(function(a,b){
+      var di = orderIndex(a) - orderIndex(b);
+      return di !== 0 ? di : a.localeCompare(b);
+    });
+    bodyEl.innerHTML = order.map(function(s,idx){
+      var v = metric[s];
+      var pct = Math.round(v / axis * 100);
+      var color = palette[idx % palette.length];
+      var rightLabel = mode === 'value' ? fmt$(v) : String(v);
+      var tip = esc(s) + ' — ' + counts[s] + ' quotes · ' + fmt$(values[s]);
+      return '<div class="qsc-row" title="'+tip+'"><span class="qsc-label" title="'+esc(s)+'">'+esc(s)+'</span>'+
+             '<span class="qsc-track"><span class="qsc-bar" style="width:'+pct+'%;background:'+color+'"></span></span>'+
+             '<span class="qsc-count">'+rightLabel+'</span></div>';
+    }).join('');
+    chart.hidden = false;
+  }
+  render();
+  if (host) host.addEventListener('list:filtered', render);
+})();
+`;
+
   const body = html`
     ${tabs}
+    <style>
+      .quote-status-chart{margin:.4rem 0 .6rem;padding:.5rem .7rem;background:var(--bg-alt,#f5f5f7);border-radius:var(--radius,6px)}
+      .quote-status-chart[hidden]{display:none}
+      .quote-status-chart h2{margin:0;font-size:.72rem;font-weight:600;color:var(--muted,#666);text-transform:uppercase;letter-spacing:.04em}
+      .quote-status-chart-head{display:flex;align-items:center;gap:.5rem;margin-bottom:.35rem}
+      .qsc-mode-toggle{display:inline-flex;border:1px solid var(--border,#d8d8d8);border-radius:4px;overflow:hidden;background:#fff}
+      .qsc-mode-toggle button{background:transparent;border:0;padding:.1rem .55rem;cursor:pointer;font-size:.7rem;color:var(--muted,#666);line-height:1.4}
+      .qsc-mode-toggle button + button{border-left:1px solid var(--border,#d8d8d8)}
+      .qsc-mode-toggle button.qsc-mode-active{background:#eef2ff;color:#1d4ed8;font-weight:600}
+      .qsc-row{display:grid;grid-template-columns:150px 1fr 60px;align-items:center;gap:.5rem;margin:.1rem 0;font-size:.8rem}
+      .qsc-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text,#222)}
+      .qsc-track{display:block;width:100%;background:#e5e7eb;border-radius:3px;height:11px;overflow:hidden}
+      .qsc-bar{display:block;height:100%;background:#3b82f6;border-radius:3px;min-width:2px;transition:width .15s}
+      .qsc-count{text-align:right;color:var(--muted,#666);font-variant-numeric:tabular-nums}
+    </style>
+    <div class="quote-status-chart" data-role="status-chart" hidden>
+      <div class="quote-status-chart-head">
+        <h2>Quotes by status</h2>
+        <span style="flex:1"></span>
+        <div class="qsc-mode-toggle" data-role="status-chart-mode" role="group" aria-label="Chart metric">
+          <button type="button" data-mode="count" title="Show quote count per status">Count</button>
+          <button type="button" data-mode="value" title="Show total quote value per status">Value ($)</button>
+        </div>
+      </div>
+      <div data-role="status-chart-body"></div>
+    </div>
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Quotes</h1>
@@ -220,6 +339,7 @@ export async function onRequestGet(context) {
             status_label: { values: ['Draft', 'Issued', 'Expired'] },
           }))}</script>
           <script>${raw(listInlineEditScript('/opportunities/:opp_id/quotes/:id/patch'))}</script>
+          <script>${raw(statusChartScript)}</script>
         `}
     </section>
   `;
