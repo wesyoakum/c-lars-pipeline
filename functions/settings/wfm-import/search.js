@@ -57,9 +57,9 @@ import { apiGet, recordList } from '../../lib/wfm-client.js';
 
 const DEFAULT_LIMIT  = 50;
 const MAX_LIMIT      = 500;
-const MAX_LIST_PAGES = 8;          // cap the list-walk for paginated kinds
+const MAX_LIST_PAGES = 30;         // enough for ~3000 records
 const LIST_PAGE_SIZE = 100;
-const SINGLE_SHOT_PAGE_SIZE = 500; // for /current endpoints
+const SINGLE_SHOT_PAGE_SIZE = 500;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
