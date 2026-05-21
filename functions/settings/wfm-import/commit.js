@@ -1427,6 +1427,27 @@ export async function onRequestPost(context) {
       errors.push('opp-number post-pass: ' + (e.message || e));
     }
 
+    // Post-pass 2: mark quotes as accepted when their parent opp is Won.
+    // WFM's /quote.api/list returns accepted quotes as "Issued" — the
+    // acceptance state only shows on the lead (State = "Won"). So we
+    // cross-reference: for Won opps, find the latest issued quote and
+    // mark it accepted.
+    try {
+      await env.DB.exec(
+        `UPDATE quotes SET status = 'accepted'
+          WHERE status = 'issued'
+            AND deleted_at IS NULL
+            AND external_source = 'wfm'
+            AND opportunity_id IN (
+              SELECT id FROM opportunities
+               WHERE stage = 'won'
+                 AND deleted_at IS NULL
+                 AND external_source IN ('wfm-lead', 'wfm-quote-orphan')
+            )`);
+    } catch (e) {
+      errors.push('quote-accepted post-pass: ' + (e.message || e));
+    }
+
     // Cap errors at 50 so the row-size stays bounded in D1; the UI
     // also caps display at 50.
     const cappedErrors = errors.slice(0, 50);
