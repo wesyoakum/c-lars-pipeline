@@ -1509,6 +1509,77 @@ export async function onRequestPost(context) {
       errors.push('approved-quote post-pass: ' + (e.message || e));
     }
 
+    // Post-pass 4: re-link orphan quotes to lead-derived opps.
+    // The /quote.api/list response often omits LeadUUID, so quotes
+    // land on synthesized orphan opps even when a lead-derived opp
+    // for the same account exists. For each orphan-sourced opp, if
+    // there's exactly one wfm-lead opp on the same account with 0
+    // quotes, move the orphan's quotes there and soft-delete the
+    // empty orphan opp.
+    let quotesRelinked = 0;
+    let orphansMerged = 0;
+    try {
+      const orphanOpps = await all(env.DB,
+        `SELECT o.id, o.account_id, o.title
+           FROM opportunities o
+          WHERE o.external_source = 'wfm-quote-orphan'
+            AND o.deleted_at IS NULL`);
+
+      for (const orphan of orphanOpps) {
+        // Find lead-derived opps on the same account that have 0 quotes
+        const candidates = await all(env.DB,
+          `SELECT o.id, o.title FROM opportunities o
+            WHERE o.account_id = ? AND o.deleted_at IS NULL
+              AND o.external_source = 'wfm-lead'
+              AND NOT EXISTS (
+                SELECT 1 FROM quotes q
+                 WHERE q.opportunity_id = o.id AND q.deleted_at IS NULL
+              )
+            ORDER BY o.created_at`,
+          [orphan.account_id]);
+
+        if (candidates.length === 0) continue;
+
+        // Prefer exact title match, then first candidate if only one
+        let target = candidates.find(c => c.title === orphan.title);
+        if (!target && candidates.length === 1) target = candidates[0];
+        if (!target) continue;
+
+        // Move quotes, cost_builds, activities, documents from orphan → target
+        const ts = nowIso();
+        const movedQuotes = await all(env.DB,
+          'SELECT id FROM quotes WHERE opportunity_id = ? AND deleted_at IS NULL',
+          [orphan.id]);
+        if (movedQuotes.length === 0) continue;
+
+        await run(env.DB,
+          'UPDATE quotes SET opportunity_id = ?, updated_at = ? WHERE opportunity_id = ? AND deleted_at IS NULL',
+          [target.id, ts, orphan.id]);
+        await run(env.DB,
+          'UPDATE cost_builds SET opportunity_id = ?, updated_at = ? WHERE opportunity_id = ? AND deleted_at IS NULL',
+          [target.id, ts, orphan.id]);
+        await run(env.DB,
+          'UPDATE activities SET opportunity_id = ? WHERE opportunity_id = ?',
+          [target.id, orphan.id]);
+        await run(env.DB,
+          'UPDATE documents SET opportunity_id = ? WHERE opportunity_id = ?',
+          [target.id, orphan.id]);
+        // Soft-delete the now-empty orphan opp
+        await run(env.DB,
+          'UPDATE opportunities SET deleted_at = ?, updated_at = ? WHERE id = ?',
+          [ts, ts, orphan.id]);
+
+        quotesRelinked += movedQuotes.length;
+        orphansMerged++;
+      }
+      if (orphansMerged > 0) {
+        errors.push('[info] post-pass 4: re-linked ' + quotesRelinked +
+          ' quote(s) from ' + orphansMerged + ' orphan opp(s) to lead-derived opps');
+      }
+    } catch (e) {
+      errors.push('orphan-relink post-pass: ' + (e.message || e));
+    }
+
     // Cap errors at 50 so the row-size stays bounded in D1; the UI
     // also caps display at 50.
     const cappedErrors = errors.slice(0, 50);
