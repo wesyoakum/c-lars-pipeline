@@ -62,7 +62,9 @@ export async function onRequestGet(context) {
             a.name AS account_name, a.alias AS account_alias,
             a.parent_group AS account_parent_group,
             a.id AS account_id,
-            (SELECT COUNT(*) FROM quotes q WHERE q.opportunity_id = o.id AND q.deleted_at IS NULL) AS quote_count
+            (SELECT COUNT(*) FROM quotes q WHERE q.opportunity_id = o.id AND q.deleted_at IS NULL) AS quote_count,
+            (SELECT GROUP_CONCAT(q.number, ', ') FROM quotes q WHERE q.opportunity_id = o.id AND q.deleted_at IS NULL ORDER BY q.number) AS quote_numbers,
+            (SELECT GROUP_CONCAT(j.number, ', ') FROM jobs j WHERE j.opportunity_id = o.id AND j.deleted_at IS NULL ORDER BY j.number) AS job_numbers
        FROM opportunities o
        LEFT JOIN accounts a ON a.id = o.account_id
        LEFT JOIN users ou ON ou.id = o.owner_user_id
@@ -144,6 +146,8 @@ export async function onRequestGet(context) {
     { key: 'rfi_due',      label: 'RFI due',      sort: 'date',   filter: 'text',   default: false },
     { key: 'quoted',       label: 'Quoted',       sort: 'date',   filter: 'text',   default: false },
     { key: 'quotes',       label: 'Quotes',       sort: 'number', filter: 'text',   default: true },
+    { key: 'quote_numbers', label: 'Quote #s',   sort: 'text',   filter: 'text',   default: true },
+    { key: 'job_numbers',   label: 'Job #s',     sort: 'text',   filter: 'text',   default: true },
   ];
 
   // Shape rows once so each <tr> knows its sort/filter values and the
@@ -185,6 +189,8 @@ export async function onRequestGet(context) {
     rfi_due: r.rfi_due_date ?? '',
     quoted: r.quoted_date ?? '',
     quotes: r.quote_count ?? 0,
+    quote_numbers: r.quote_numbers ?? '',
+    job_numbers: r.job_numbers ?? '',
   });
   });
 
@@ -411,6 +417,8 @@ export async function onRequestGet(context) {
                         ${ieText('quoted_date', r.quoted, { inputType: 'date' })}
                       </td>
                       <td class="col-quotes num" data-col="quotes">${r.quotes}</td>
+                      <td class="col-quote_numbers" data-col="quote_numbers"><small>${escape(r.quote_numbers)}</small></td>
+                      <td class="col-job_numbers" data-col="job_numbers"><small>${escape(r.job_numbers)}</small></td>
                     </tr>`
                 )}
               </tbody>
