@@ -17,7 +17,7 @@ import { redirectWithFlash, formBody } from '../../lib/http.js';
 import { stageDef, stagesFor, evaluateGate, loadGateContext, GATE_MODE } from '../../lib/stages.js';
 import { notifyStmt } from '../../lib/notify.js';
 import { notifyExternal, NOTIFICATION_EVENTS } from '../../lib/notify-external.js';
-import { checkInactivateBlockers, summarizeBlockers } from '../../lib/inactivate-blocker.js';
+
 import { fireEvent } from '../../lib/auto-tasks.js';
 import { queueClaudiaEvent } from '../../lib/claudia-events.js';
 
@@ -123,19 +123,25 @@ export async function onRequestPost(context) {
     );
   }
 
-  // ---- Blocker gate: can't move to a terminal stage while the opp
-  //      has pending tasks or active quotes (migration 0035 rule).
-  //      The existing close-reason + gate-violation checks above are
-  //      orthogonal — they enforce domain rules. This check enforces
-  //      the simpler "don't orphan work in flight" rule.
+  // ---- Terminal stage: auto-close active quotes and pending tasks.
+  //      Active quotes → 'dead', pending tasks → 'completed'.
+  //      This replaces the old blocker gate that refused the transition.
+  let autoClosedQuotes = 0;
+  let autoCompletedTasks = 0;
   if (targetDef.is_terminal) {
-    const blockers = await checkInactivateBlockers(env.DB, 'opportunity', oppId);
-    if (blockers.length > 0) {
-      const summary = summarizeBlockers(blockers);
-      const msg = `Cannot close this opportunity \u2014 ${summary}.`;
-      if (ajax) return jsonResponse({ ok: false, error: msg, blockers }, 409);
-      return redirectWithFlash(`/opportunities/${oppId}`, msg, 'error');
-    }
+    const activeQuoteList = ['draft','issued','revision_draft','revision_issued','accepted','expired']
+      .map(s => `'${s}'`).join(', ');
+    const activeQuotes = await all(env.DB,
+      `SELECT id, number FROM quotes
+        WHERE opportunity_id = ? AND status IN (${activeQuoteList}) AND deleted_at IS NULL`,
+      [oppId]);
+    autoClosedQuotes = activeQuotes.length;
+
+    const pendingTasks = await all(env.DB,
+      `SELECT id FROM activities
+        WHERE opportunity_id = ? AND status = 'pending'`,
+      [oppId]);
+    autoCompletedTasks = pendingTasks.length;
   }
 
   // ---- Perform the transition -----------------------------------------
@@ -200,6 +206,36 @@ export async function onRequestPost(context) {
       overrideReason: value.override_reason,
     }),
   ];
+
+  // Auto-close active quotes → 'dead' and pending tasks → 'completed'
+  if (autoClosedQuotes > 0) {
+    const activeQuoteList = ['draft','issued','revision_draft','revision_issued','accepted','expired']
+      .map(s => `'${s}'`).join(', ');
+    statements.push(stmt(env.DB,
+      `UPDATE quotes SET status = 'dead', updated_at = ?
+        WHERE opportunity_id = ? AND status IN (${activeQuoteList}) AND deleted_at IS NULL`,
+      [ts, oppId]));
+    statements.push(auditStmt(env.DB, {
+      entityType: 'opportunity',
+      entityId: oppId,
+      eventType: 'quotes_auto_closed',
+      user,
+      summary: `${autoClosedQuotes} active quote${autoClosedQuotes === 1 ? '' : 's'} moved to Dead (opportunity closed)`,
+    }));
+  }
+  if (autoCompletedTasks > 0) {
+    statements.push(stmt(env.DB,
+      `UPDATE activities SET status = 'completed', is_completed = 1, completed_at = ?, updated_at = ?
+        WHERE opportunity_id = ? AND status = 'pending'`,
+      [ts, ts, oppId]));
+    statements.push(auditStmt(env.DB, {
+      entityType: 'opportunity',
+      entityId: oppId,
+      eventType: 'tasks_auto_completed',
+      user,
+      summary: `${autoCompletedTasks} pending task${autoCompletedTasks === 1 ? '' : 's'} auto-completed (opportunity closed)`,
+    }));
+  }
 
   await batch(env.DB, statements);
 
@@ -331,6 +367,8 @@ export async function onRequestPost(context) {
   // Flash: show the success + any warnings
   let flashMsg = `Moved to ${targetDef.label}.`;
   if (jobNumber) flashMsg += ` Job ${jobNumber} created.`;
+  if (autoClosedQuotes > 0) flashMsg += ` ${autoClosedQuotes} quote${autoClosedQuotes === 1 ? '' : 's'} moved to Dead.`;
+  if (autoCompletedTasks > 0) flashMsg += ` ${autoCompletedTasks} task${autoCompletedTasks === 1 ? '' : 's'} completed.`;
   if (warningMessages.length > 0) {
     flashMsg += ` ⚠ ${warningMessages.join(' · ')}`;
   }
