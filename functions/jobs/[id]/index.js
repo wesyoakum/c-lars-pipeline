@@ -177,30 +177,27 @@ export async function onRequestGet(context) {
             : '—'}</span>
         </div>
         <div class="detail-pair">
-          <span class="detail-label">Customer PO</span>
-          <span class="detail-value">${escape(job.customer_po_number || job.opp_po_number || '—')}</span>
-        </div>
-        <div class="detail-pair">
           <span class="detail-label">OC Number</span>
           <span class="detail-value">${escape(job.oc_number || '—')}</span>
-        </div>
-        <div class="detail-pair">
-          <span class="detail-label">OC Revision</span>
-          <span class="detail-value">${job.oc_issued_at ? escape(String(job.oc_revision)) : '—'}</span>
-        </div>
-        <div class="detail-pair">
-          <span class="detail-label">OC Issued</span>
-          <span class="detail-value">${job.oc_issued_at ? html`${escape(job.oc_issued_at.slice(0, 10))} by ${escape(job.oc_issued_by_name || '—')}` : '—'}</span>
         </div>
         ${isEps ? html`
           <div class="detail-pair">
             <span class="detail-label">NTP Number</span>
             <span class="detail-value">${escape(job.ntp_number || '—')}</span>
-          </div>
-          <div class="detail-pair">
-            <span class="detail-label">NTP Issued</span>
-            <span class="detail-value">${job.ntp_issued_at ? html`${escape(job.ntp_issued_at.slice(0, 10))} by ${escape(job.ntp_issued_by_name || '—')}` : '—'}</span>
           </div>` : ''}
+        <div class="detail-pair">
+          <span class="detail-label">OC Date</span>
+          <span class="detail-value">${job.oc_issued_at ? escape(job.oc_issued_at.slice(0, 10)) : '—'}</span>
+        </div>
+        ${isEps ? html`
+          <div class="detail-pair">
+            <span class="detail-label">NTP Date</span>
+            <span class="detail-value">${job.ntp_issued_at ? escape(job.ntp_issued_at.slice(0, 10)) : '—'}</span>
+          </div>` : ''}
+        <div class="detail-pair">
+          <span class="detail-label">Customer PO</span>
+          <span class="detail-value">${escape(job.customer_po_number || job.opp_po_number || '—')}</span>
+        </div>
         <div class="detail-pair">
           <span class="detail-label">External PM System</span>
           <span class="detail-value">${inlineText('external_pm_system', job.external_pm_system, { placeholder: 'Monday, Smartsheet...' })}</span>
