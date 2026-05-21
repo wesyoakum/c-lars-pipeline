@@ -163,13 +163,14 @@ export async function onRequestPost(context) {
   try {
     await getAccessToken(env);
 
-    // Phase 1 — fetch every list (same as full).
+    // Phase 1 — fetch every list using /list (all states, not just active).
+    const dateRange = 'from=2020-01-01&to=2027-12-31';
     const [staff, clients, leads, quotes, jobs] = await Promise.all([
       apiGet(env, '/staff.api/list').then((r) => r.ok ? recordList(r.body, 'Staff') : []),
-      fetchKind(env, '/client.api/list',   'Client'),
-      fetchKind(env, '/lead.api/current',  'Lead'),
-      fetchKind(env, '/quote.api/current', 'Quote'),
-      fetchKind(env, '/job.api/current',   'Job'),
+      fetchKind(env, '/client.api/list',              'Client'),
+      fetchKind(env, `/lead.api/list?${dateRange}`,   'Lead'),
+      fetchKind(env, `/quote.api/list?${dateRange}`,  'Quote'),
+      fetchKind(env, `/job.api/list?${dateRange}`,    'Job'),
     ]);
 
     // Phase 1.5 — load stored payloads for the change comparator.
@@ -219,9 +220,13 @@ export async function onRequestPost(context) {
 
     // Phase 3 — persist run + plan rows. Run row goes first so the
     // cron worker can find it even mid-plan-insert.
+    const kindSummary = Object.entries(counts)
+      .filter(([_, v]) => v.changed + v.new > 0)
+      .map(([k, v]) => `${k}: ${v.changed} changed + ${v.new} new (of ${v.fetched} fetched)`)
+      .join(' · ');
     const summary = totalPlanned === 0
       ? 'Delta import — nothing changed; 0 records queued.'
-      : `Delta import in progress — ${totalPlanned} changed/new records planned.`;
+      : `Delta: ${totalPlanned} records planned — ${kindSummary}`;
     await run(env.DB,
       `INSERT INTO wfm_import_runs
          (id, started_at, finished_at, triggered_by, ok, summary,
