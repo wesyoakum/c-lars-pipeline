@@ -83,7 +83,8 @@ export async function onRequestPost(context) {
       statements.push(softDeleteChildrenStmt(env.DB, 'change_orders', 'job_id', j.id, ts));
       statements.push(softDeleteChildrenStmt(env.DB, 'activities', 'job_id', j.id, ts));
       statements.push(softDeleteChildrenStmt(env.DB, 'documents', 'job_id', j.id, ts));
-      statements.push(softDeleteChildrenStmt(env.DB, 'cost_builds', 'job_id', j.id, ts));
+      // cost_builds has no job_id column — they hang off opportunity_id
+      // and are already covered by the opp-level cascade below.
       statements.push(softDeleteStmt(env.DB, 'jobs', j.id, ts));
     }
   }
