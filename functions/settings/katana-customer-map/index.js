@@ -236,12 +236,26 @@ export async function onRequestGet(context) {
                         &rarr; <span x-text="s.name"></span>
                       </button>
                     </template>
-                    <select x-model="row.pickId" :disabled="row.busy || katanaCustomers.length === 0" style="font-size:.8em;max-width:14rem">
-                      <option value="">— pick from Katana —</option>
-                      <template x-for="kc in katanaCustomers" :key="kc.id">
-                        <option :value="kc.id" x-text="kc.name"></option>
-                      </template>
-                    </select>
+                    <div style="position:relative;display:inline-block" x-data="{ open: false, search: '' }">
+                      <input type="text" x-model="search" placeholder="Search Katana customers..."
+                             @focus="open = true" @input="open = true"
+                             @click.outside="open = false"
+                             @keydown.escape="open = false"
+                             :disabled="row.busy || katanaCustomers.length === 0"
+                             style="font-size:.8em;width:14rem;padding:.25rem .4rem;border:1px solid var(--border);border-radius:4px">
+                      <div x-show="open && search.length > 0" x-cloak
+                           style="position:absolute;top:100%;left:0;width:14rem;max-height:12rem;overflow-y:auto;background:var(--bg,#fff);border:1px solid var(--border);border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.12);z-index:50">
+                        <template x-for="kc in katanaCustomers.filter(c => c.name.toLowerCase().includes(search.toLowerCase()))" :key="kc.id">
+                          <div @mousedown.prevent="row.pickId = kc.id; search = kc.name; open = false"
+                               style="padding:.3rem .5rem;font-size:.8em;cursor:pointer;border-bottom:1px solid var(--border-light,#f0f0f0)"
+                               @mouseenter="$el.style.background='var(--bg-alt,#f5f5f7)'"
+                               @mouseleave="$el.style.background=''"
+                               x-text="kc.name"></div>
+                        </template>
+                        <div x-show="katanaCustomers.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).length === 0"
+                             style="padding:.3rem .5rem;font-size:.8em;color:var(--fg-muted)">No matches</div>
+                      </div>
+                    </div>
                     <button type="button" class="btn btn-xs" @click="linkPicked(row)" :disabled="row.busy || !row.pickId">Link</button>
                     <button type="button" class="btn btn-xs" @click="createInKatana(row)" :disabled="row.busy" title="Create a new Katana customer using this account's name">+ Create in Katana</button>
                   </div>
