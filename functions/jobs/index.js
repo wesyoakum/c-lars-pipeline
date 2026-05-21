@@ -71,6 +71,7 @@ export async function onRequestGet(context) {
             j.oc_number, j.ntp_required,
             j.handed_off_at, j.created_at, j.updated_at,
             j.external_source,
+            json_extract(j.wfm_payload, '$.State') AS wfm_state,
             o.number AS opp_number, o.title AS opp_title, o.id AS opp_id,
             a.name AS account_name, a.alias AS account_alias,
             a.parent_group AS account_parent_group
@@ -93,6 +94,7 @@ export async function onRequestGet(context) {
     { key: 'created',      label: 'Created',  sort: 'date',   filter: 'text',   default: false },
     // WFM-imported vs Pipeline-native. Off by default; flip on via the
     // column-picker when auditing import coverage.
+    { key: 'wfm_status',   label: 'WFM Status', sort: 'text', filter: 'select', default: true },
     { key: 'source',       label: 'Source',   sort: 'text',   filter: 'select', default: false },
   ];
 
@@ -118,6 +120,7 @@ export async function onRequestGet(context) {
       oc_number: r.oc_number ?? '',
       updated: (r.updated_at ?? '').slice(0, 10),
       created: (r.created_at ?? '').slice(0, 10),
+      wfm_status: r.wfm_state || '',
       source: r.external_source ? 'wfm' : 'pipeline',
     };
   });
@@ -161,6 +164,7 @@ export async function onRequestGet(context) {
                     <td class="col-oc_number" data-col="oc_number">${escape(r.oc_number)}</td>
                     <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
                     <td class="col-created" data-col="created"><small class="muted">${escape(r.created)}</small></td>
+                    <td class="col-wfm_status" data-col="wfm_status">${escape(r.wfm_status)}</td>
                     <td class="col-source" data-col="source">
                       <span class="cell-text muted" style="font-size:.78rem">${escape(r.source)}</span>
                     </td>
