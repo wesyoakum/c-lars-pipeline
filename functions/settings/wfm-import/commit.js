@@ -21,10 +21,10 @@
 //   6. Jobs    — INSERT/UPDATE opportunities (won/post-win stages),
 //                + INSERT/UPDATE jobs row when ClientOrderNumber set
 //
-// Number allocation: WFM-imported records get OPP-WFM-NNNN /
-// Q-WFM-NNNN / JOB-WFM-NNNN numbers — separate from the
-// human-typed OPP-2026-NNNN sequence so the two namespaces don't
-// fight.
+// Number allocation: Quotes use their WFM quote ID (e.g., Q25332).
+// Jobs use their WFM job ID (e.g., D102-S). Opportunities get
+// WFM-{lowest quote number} as a post-pass after all quotes land.
+// Opps without quotes fall back to OPP-WFM-NNNN auto-allocation.
 
 import { hasRole } from '../../lib/auth.js';
 import { one, run, all } from '../../lib/db.js';
@@ -1387,6 +1387,29 @@ export async function onRequestPost(context) {
     links  = result.links;
 
     const summary = buildSummaryLine(counts);
+
+    // Post-pass: update opp numbers to WFM-{lowest quote number}.
+    // Runs after all leads + quotes are imported so the quote FK exists.
+    try {
+      await run(env.DB,
+        `UPDATE opportunities SET number = (
+           SELECT 'WFM-' || MIN(q.number)
+             FROM quotes q
+            WHERE q.opportunity_id = opportunities.id
+              AND q.deleted_at IS NULL
+              AND q.number IS NOT NULL
+         )
+         WHERE external_source IN ('wfm-lead', 'wfm-quote-orphan')
+           AND deleted_at IS NULL
+           AND EXISTS (
+             SELECT 1 FROM quotes q2
+              WHERE q2.opportunity_id = opportunities.id
+                AND q2.deleted_at IS NULL
+                AND q2.number IS NOT NULL
+           )`);
+    } catch (e) {
+      errors.push('opp-number post-pass: ' + (e.message || e));
+    }
 
     // Cap errors at 50 so the row-size stays bounded in D1; the UI
     // also caps display at 50.
