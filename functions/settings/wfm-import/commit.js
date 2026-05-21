@@ -517,11 +517,11 @@ async function upsertJobRow(env, job, opportunityId) {
 
   if (existingJob) {
     await run(env.DB,
-      `UPDATE jobs SET opportunity_id = ?, job_type = ?, status = ?, title = ?,
+      `UPDATE jobs SET number = ?, opportunity_id = ?, job_type = ?, status = ?, title = ?,
               customer_po_number = ?, quote_id = ?, external_url = ?,
               wfm_number = ?, wfm_payload = ?, deleted_at = NULL, updated_at = ?
         WHERE id = ?`,
-      [opportunityId, jobType, jobStatus, s(job.Name),
+      [s(job.ID) || existingJob.number, opportunityId, jobType, jobStatus, s(job.Name),
        s(job.ClientOrderNumber), quoteId, s(job.WebURL),
        s(job.ID), JSON.stringify(job), ts,
        existingJob.id]);
@@ -552,6 +552,7 @@ async function upsertQuote(env, q, opportunityId) {
     opportunity_id:      opportunityId,
     title:               s(q.Name),
     description:         s(q.Description),
+    number:              s(q.ID) || existing?.number || null,
     quote_type:          'spares',                         // default; usually overridden by parent opp's transaction_type
     status:              QUOTE_STATE_TO_STATUS[q.State] || 'draft',
     valid_until:         s(q.ValidDate),
