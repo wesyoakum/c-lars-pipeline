@@ -72,6 +72,7 @@ export async function onRequestGet(context) {
             j.handed_off_at, j.created_at, j.updated_at,
             j.external_source,
             json_extract(j.wfm_payload, '$.State') AS wfm_state,
+            o.stage AS opp_stage,
             o.number AS opp_number, o.title AS opp_title, o.id AS opp_id,
             a.name AS account_name, a.alias AS account_alias,
             a.parent_group AS account_parent_group
@@ -95,6 +96,7 @@ export async function onRequestGet(context) {
     // WFM-imported vs Pipeline-native. Off by default; flip on via the
     // column-picker when auditing import coverage.
     { key: 'wfm_status',   label: 'WFM Status', sort: 'text', filter: 'select', default: true },
+    { key: 'opp_stage',    label: 'Opp Stage', sort: 'text', filter: 'select', default: false },
     { key: 'source',       label: 'Source',   sort: 'text',   filter: 'select', default: false },
   ];
 
@@ -121,6 +123,7 @@ export async function onRequestGet(context) {
       updated: (r.updated_at ?? '').slice(0, 10),
       created: (r.created_at ?? '').slice(0, 10),
       wfm_status: r.wfm_state || '',
+      opp_stage: r.opp_stage || '',
       source: r.external_source ? 'wfm' : 'pipeline',
     };
   });
@@ -134,8 +137,74 @@ export async function onRequestGet(context) {
     '/jobs'
   );
 
+  const jobChartScript = `
+(function(){
+  var container = document.querySelector('[data-role="job-charts"]');
+  if (!container) return;
+  var host = document.querySelector('.opp-list');
+  var wfmBody = container.querySelector('[data-role="wfm-chart-body"]');
+  var oppBody = container.querySelector('[data-role="opp-chart-body"]');
+  function esc(x){ return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  function renderChart(bodyEl, dataKey, label) {
+    if (!host || !bodyEl) return;
+    var trs = host.querySelectorAll('tbody[data-role="rows"] tr[data-row-id]');
+    var counts = {}, order = [], total = 0;
+    for (var i=0;i<trs.length;i++){
+      var tr = trs[i];
+      if (tr.style.display === 'none') continue;
+      var s = (tr.getAttribute('data-' + dataKey) || '').trim() || '—';
+      if (!(s in counts)){ counts[s] = 0; order.push(s); }
+      counts[s]++;
+      total++;
+    }
+    if (total === 0){ bodyEl.innerHTML = ''; return; }
+    var max = 0; for (var k in counts){ if (counts[k] > max) max = counts[k]; }
+    var axis = Math.max(10, Math.ceil(max / 10) * 10);
+    var palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#e11d48'];
+    order.sort(function(a,b){ return (counts[b] || 0) - (counts[a] || 0); });
+    bodyEl.innerHTML = order.map(function(s,idx){
+      var v = counts[s];
+      var pct = Math.round(v / axis * 100);
+      var color = palette[idx % palette.length];
+      return '<div class="jc-row" title="'+esc(s)+': '+v+'"><span class="jc-label" title="'+esc(s)+'">'+esc(s)+'</span>'+
+             '<span class="jc-track"><span class="jc-bar" style="width:'+pct+'%;background:'+color+'"></span></span>'+
+             '<span class="jc-count">'+v+'</span></div>';
+    }).join('');
+  }
+
+  function render(){
+    container.hidden = false;
+    renderChart(wfmBody, 'wfm_status', 'WFM Status');
+    renderChart(oppBody, 'opp_stage', 'Opp Stage');
+  }
+  render();
+  if (host) host.addEventListener('list:filtered', render);
+})();
+`;
+
   const body = html`
     ${tabs}
+    <style>
+      .job-charts{margin:.4rem 0 .6rem;display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
+      .job-chart{padding:.5rem .7rem;background:var(--bg-alt,#f5f5f7);border-radius:var(--radius,6px)}
+      .job-chart h2{margin:0 0 .35rem;font-size:.72rem;font-weight:600;color:var(--muted,#666);text-transform:uppercase;letter-spacing:.04em}
+      .jc-row{display:grid;grid-template-columns:130px 1fr 40px;align-items:center;gap:.5rem;margin:.1rem 0;font-size:.8rem}
+      .jc-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text,#222)}
+      .jc-track{display:block;width:100%;background:#e5e7eb;border-radius:3px;height:11px;overflow:hidden}
+      .jc-bar{display:block;height:100%;border-radius:3px;min-width:2px;transition:width .15s}
+      .jc-count{text-align:right;color:var(--muted,#666);font-variant-numeric:tabular-nums}
+    </style>
+    <div class="job-charts" data-role="job-charts" hidden>
+      <div class="job-chart">
+        <h2>Jobs by WFM Status</h2>
+        <div data-role="wfm-chart-body"></div>
+      </div>
+      <div class="job-chart">
+        <h2>Jobs by Opp Stage</h2>
+        <div data-role="opp-chart-body"></div>
+      </div>
+    </div>
     <section class="card">
       <div class="card-header">
         <h1 class="page-title">Jobs</h1>
@@ -165,6 +234,7 @@ export async function onRequestGet(context) {
                     <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
                     <td class="col-created" data-col="created"><small class="muted">${escape(r.created)}</small></td>
                     <td class="col-wfm_status" data-col="wfm_status">${escape(r.wfm_status)}</td>
+                    <td class="col-opp_stage" data-col="opp_stage">${escape(r.opp_stage)}</td>
                     <td class="col-source" data-col="source">
                       <span class="cell-text muted" style="font-size:.78rem">${escape(r.source)}</span>
                     </td>
@@ -173,7 +243,8 @@ export async function onRequestGet(context) {
             </table>
           </div>
           <script>${raw(listScript('pipeline.jobs.v1'))}</script>
-          <script>${raw(listInlineEditScript('/jobs/:id/patch'))}</script>`}
+          <script>${raw(listInlineEditScript('/jobs/:id/patch'))}</script>
+          <script>${raw(jobChartScript)}</script>`}
     </section>`;
 
   return htmlResponse(
