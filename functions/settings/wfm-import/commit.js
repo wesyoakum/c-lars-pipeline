@@ -402,7 +402,8 @@ async function upsertOpportunityFromLead(env, lead, accountId, contactId, ownerU
     return { id: existing.id, number: existing.number, action: 'updated' };
   } else {
     const id = uuid();
-    const number = await allocateNumber(env, 'OPP-WFM');
+    // Placeholder — post-pass rewrites to WFM-{lowest quote} or WFM-LEAD-{UUID}.
+    const number = 'WFM-LEAD-' + (lead.UUID || id).slice(0, 8);
     await run(env.DB,
       `INSERT INTO opportunities
          (id, number, external_source, external_id,
@@ -978,7 +979,7 @@ async function synthesizeOpportunityFromQuote(env, q, ctx) {
     oppId = existing.id; oppNumber = existing.number;
   } else {
     oppId = uuid();
-    oppNumber = await allocateNumber(env, 'OPP-WFM');
+    oppNumber = 'WFM-' + (s(q.ID) || q.UUID || oppId).replace(/^Q/, 'Q');
     await run(env.DB,
       `INSERT INTO opportunities
          (id, number, external_source, external_id,
@@ -1254,40 +1255,43 @@ export async function processSamples(env, samples, options = {}) {
   }
 
   // -------- Quotes ---------
-  for (const q of (samples.quotes || [])) {
+  // Fetch the DETAIL for every quote to get LeadUUID (the /list
+  // endpoint omits it). Then link: has lead → lead's opp, no lead →
+  // synthesize opp numbered WFM-{quote number}.
+  for (const qList of (samples.quotes || [])) {
     try {
+      // Fetch detail to get LeadUUID + line items in one shot.
+      let q = qList;
+      if (q.UUID) {
+        const detail = await fetchQuoteDetail(env, q.UUID, fetchCache);
+        if (detail) q = detail;
+      }
+
       let oppId = null;
-      if (q.LeadUUID) oppId = await ensureOpportunityFromLead(env, q.LeadUUID, ctx);
-      if (!oppId && q.JobUUID) oppId = await ensureOpportunityFromJob(env, q.JobUUID, ctx);
-      if (!oppId && synthOrphanQuotes) {
+
+      // Path 1: quote has a lead → link to the lead's opp
+      if (q.LeadUUID) {
+        oppId = await ensureOpportunityFromLead(env, q.LeadUUID, ctx);
+      }
+
+      // Path 2: no lead — create/find orphan opp numbered WFM-{quote number}
+      if (!oppId) {
         oppId = await synthesizeOpportunityFromQuote(env, q, ctx);
         if (oppId) {
           links.push({
             url: '/opportunities/' + oppId,
-            label: 'Synthesized opp: ' + (q.Name || q.ID || q.UUID || '?'),
+            label: 'Orphan opp: ' + (q.Name || q.ID || q.UUID || '?'),
           });
         }
       }
+
       if (!oppId) {
         counts.skipped++;
-        let reason;
-        if (!q.LeadUUID && !q.JobUUID) {
-          reason = 'orphan quote: no LeadUUID and no JobUUID set on the WFM record';
-        } else if (q.LeadUUID && !q.JobUUID) {
-          reason = 'LeadUUID ' + q.LeadUUID + ' present but cascade failed (lead missing/archived/inaccessible in WFM?)';
-        } else if (!q.LeadUUID && q.JobUUID) {
-          reason = 'JobUUID ' + q.JobUUID + ' present but cascade failed (job missing/inaccessible in WFM?)';
-        } else {
-          reason = 'both LeadUUID (' + q.LeadUUID + ') and JobUUID (' + q.JobUUID + ') present, neither cascade succeeded';
-        }
-        if (!synthOrphanQuotes) {
-          reason += ' (enable synthesize-orphan-quotes option to import anyway)';
-        } else {
-          reason += ' (synthesis attempted but quote.Client.UUID could not be resolved either)';
-        }
-        errors.push('quote "' + (q?.Name || q?.ID || q?.UUID || '?') + '" skipped: ' + reason);
+        errors.push('quote "' + (q?.Name || q?.ID || q?.UUID || '?') +
+          '" skipped: no LeadUUID and could not synthesize opp (no Client.UUID?)');
         continue;
       }
+
       const r = await upsertQuote(env, q, oppId);
       counts.quotes++;
 
@@ -1312,7 +1316,7 @@ export async function processSamples(env, samples, options = {}) {
         errors.push('quote-lines ' + (q?.Name || '?') + ': ' + lineErr.message);
       }
       links.push({ url: '/opportunities/' + oppId + '/quotes/' + r.id, label: 'Quote: ' + (q.Name || r.number) });
-    } catch (e) { errors.push('quote ' + (q?.Name || '?') + ': ' + e.message); }
+    } catch (e) { errors.push('quote ' + (qList?.Name || '?') + ': ' + e.message); }
   }
 
   // -------- Jobs ---------
@@ -1417,11 +1421,11 @@ export async function onRequestPost(context) {
 
     const summary = buildSummaryLine(counts);
 
-    // Post-pass: update opp numbers to WFM-{lowest quote number}.
-    // Runs after all leads + quotes are imported so the quote FK exists.
+    // Post-pass 1: assign opp numbers.
+    // Opps with quotes: WFM-{lowest quote number}
+    // Opps without quotes (lead-only): WFM-LEAD-{lead external_id or DB id}
     try {
-      // Use exec() not run() — the correlated subquery UPDATE has no
-      // bind params and run(db, sql, []) was silently failing in Workers.
+      // Opps with quotes → WFM-{MIN(quote.number)}
       await env.DB.exec(
         `UPDATE opportunities SET number = (
            SELECT 'WFM-' || MIN(q.number)
@@ -1430,7 +1434,7 @@ export async function onRequestPost(context) {
               AND q.deleted_at IS NULL
               AND q.number IS NOT NULL
          )
-         WHERE external_source IN ('wfm-lead', 'wfm-quote-orphan', 'wfm-job')
+         WHERE external_source IN ('wfm-lead', 'wfm-quote-orphan')
            AND deleted_at IS NULL
            AND EXISTS (
              SELECT 1 FROM quotes q2
@@ -1438,15 +1442,25 @@ export async function onRequestPost(context) {
                 AND q2.deleted_at IS NULL
                 AND q2.number IS NOT NULL
            )`);
+      // Opps without quotes → WFM-LEAD-{external_id}
+      await env.DB.exec(
+        `UPDATE opportunities SET number = 'WFM-LEAD-' || COALESCE(external_id, id)
+         WHERE external_source = 'wfm-lead'
+           AND deleted_at IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM quotes q
+              WHERE q.opportunity_id = opportunities.id
+                AND q.deleted_at IS NULL
+                AND q.number IS NOT NULL
+           )`);
     } catch (e) {
       errors.push('opp-number post-pass: ' + (e.message || e));
     }
 
     // Post-pass 2: mark quotes as accepted when their parent opp is Won.
-    // WFM's /quote.api/list returns accepted quotes as "Issued" — the
-    // acceptance state only shows on the lead (State = "Won"). So we
-    // cross-reference: for Won opps, find the latest issued quote and
-    // mark it accepted.
+    // The detail fetch gives us the quote's own State, but for quotes
+    // whose State was "Issued" in WFM while the lead was "Won", we
+    // cross-reference to correct the status.
     try {
       await env.DB.exec(
         `UPDATE quotes SET status = 'accepted'
@@ -1462,222 +1476,6 @@ export async function onRequestPost(context) {
     } catch (e) {
       errors.push('quote-accepted post-pass: ' + (e.message || e));
     }
-
-    // Post-pass 3: fetch accepted quotes that /quote.api/list missed.
-    // WFM's /list doesn't return Accepted/Declined quotes. For each job
-    // with a non-empty ApprovedQuoteUUID, fetch the quote detail from
-    // WFM, upsert it, link it to the job, and mark it accepted.
-    try {
-      const jobsWithApprovedQuote = await all(env.DB,
-        `SELECT j.id AS job_id, j.opportunity_id,
-                json_extract(j.wfm_payload, '$.ApprovedQuoteUUID') AS aq_uuid
-           FROM jobs j
-          WHERE j.external_source = 'wfm'
-            AND j.deleted_at IS NULL
-            AND json_extract(j.wfm_payload, '$.ApprovedQuoteUUID') > ''
-            AND j.quote_id IS NULL`);
-
-      for (const row of jobsWithApprovedQuote) {
-        try {
-          // Check if the quote already exists in Pipeline
-          let q = await one(env.DB,
-            'SELECT id FROM quotes WHERE external_id = ? AND deleted_at IS NULL',
-            [row.aq_uuid]);
-
-          if (!q) {
-            // Fetch from WFM detail endpoint
-            const r = await apiGet(env, '/quote.api/get/' + encodeURIComponent(row.aq_uuid));
-            if (r.ok) {
-              const quoteRec = recordList(r.body, 'Quote')[0];
-              if (quoteRec) {
-                const result = await upsertQuote(env, quoteRec, row.opportunity_id);
-                q = { id: result.id };
-                counts.quotes = (counts.quotes || 0) + 1;
-                // Sync line items for this quote
-                try {
-                  const lineCount = await syncQuoteLines(env, result.id, row.aq_uuid, ctx || { fetchCache: new Map() });
-                  counts.quote_lines = (counts.quote_lines || 0) + lineCount;
-                } catch (_) {}
-              }
-            }
-          }
-
-          if (q) {
-            // Link job to quote and mark quote accepted
-            await run(env.DB,
-              'UPDATE jobs SET quote_id = ? WHERE id = ?',
-              [q.id, row.job_id]);
-            await run(env.DB,
-              `UPDATE quotes SET status = 'accepted' WHERE id = ? AND status != 'accepted'`,
-              [q.id]);
-            // Advance the parent opp to won
-            await run(env.DB,
-              `UPDATE opportunities SET stage = 'won'
-                WHERE id = ? AND stage != 'won' AND deleted_at IS NULL`,
-              [row.opportunity_id]);
-          }
-        } catch (e) {
-          errors.push('approved-quote fetch ' + row.aq_uuid + ': ' + (e.message || e));
-        }
-      }
-    } catch (e) {
-      errors.push('approved-quote post-pass: ' + (e.message || e));
-    }
-
-    // Post-pass 4: re-link orphan quotes to lead-derived opps.
-    // The /quote.api/list response often omits LeadUUID, so quotes
-    // land on synthesized orphan opps even when a lead-derived opp
-    // for the same account exists. For each orphan-sourced opp, if
-    // there's exactly one wfm-lead opp on the same account with 0
-    // quotes, move the orphan's quotes there and soft-delete the
-    // empty orphan opp.
-    let quotesRelinked = 0;
-    let orphansMerged = 0;
-    try {
-      const orphanOpps = await all(env.DB,
-        `SELECT o.id, o.account_id, o.title
-           FROM opportunities o
-          WHERE o.external_source = 'wfm-quote-orphan'
-            AND o.deleted_at IS NULL`);
-
-      for (const orphan of orphanOpps) {
-        // Find lead-derived opps on the same account that have 0 quotes
-        const candidates = await all(env.DB,
-          `SELECT o.id, o.title FROM opportunities o
-            WHERE o.account_id = ? AND o.deleted_at IS NULL
-              AND o.external_source = 'wfm-lead'
-              AND NOT EXISTS (
-                SELECT 1 FROM quotes q
-                 WHERE q.opportunity_id = o.id AND q.deleted_at IS NULL
-              )
-            ORDER BY o.created_at`,
-          [orphan.account_id]);
-
-        if (candidates.length === 0) continue;
-
-        // Prefer exact title match, then first candidate if only one
-        let target = candidates.find(c => c.title === orphan.title);
-        if (!target && candidates.length === 1) target = candidates[0];
-        if (!target) continue;
-
-        // Move quotes, cost_builds, activities, documents from orphan → target
-        const ts = nowIso();
-        const movedQuotes = await all(env.DB,
-          'SELECT id FROM quotes WHERE opportunity_id = ? AND deleted_at IS NULL',
-          [orphan.id]);
-        if (movedQuotes.length === 0) continue;
-
-        await run(env.DB,
-          'UPDATE quotes SET opportunity_id = ?, updated_at = ? WHERE opportunity_id = ? AND deleted_at IS NULL',
-          [target.id, ts, orphan.id]);
-        await run(env.DB,
-          'UPDATE cost_builds SET opportunity_id = ?, updated_at = ? WHERE opportunity_id = ? AND deleted_at IS NULL',
-          [target.id, ts, orphan.id]);
-        await run(env.DB,
-          'UPDATE activities SET opportunity_id = ? WHERE opportunity_id = ?',
-          [target.id, orphan.id]);
-        await run(env.DB,
-          'UPDATE documents SET opportunity_id = ? WHERE opportunity_id = ?',
-          [target.id, orphan.id]);
-        // Soft-delete the now-empty orphan opp
-        await run(env.DB,
-          'UPDATE opportunities SET deleted_at = ?, updated_at = ? WHERE id = ?',
-          [ts, ts, orphan.id]);
-
-        quotesRelinked += movedQuotes.length;
-        orphansMerged++;
-      }
-      if (orphansMerged > 0) {
-        errors.push('[info] post-pass 4: re-linked ' + quotesRelinked +
-          ' quote(s) from ' + orphansMerged + ' orphan opp(s) to lead-derived opps');
-      }
-    } catch (e) {
-      errors.push('orphan-relink post-pass: ' + (e.message || e));
-    }
-
-    // Post-pass 5: clean up wfm-job orphan opps.
-    // a) Strip job-number prefixes from opp titles (e.g. "D102-S - Adapter Plate" → "Adapter Plate").
-    // b) Re-link wfm-job opps to lead-derived opps by moving children and soft-deleting.
-    let jobOppsRelinked = 0;
-    try {
-      // 5a: strip "ID - " prefix from opp titles where a job payload has that ID
-      await env.DB.exec(
-        `UPDATE opportunities SET title = SUBSTR(title, INSTR(title, ' - ') + 3)
-          WHERE external_source = 'wfm-job' AND deleted_at IS NULL
-            AND INSTR(title, ' - ') > 0`);
-
-      // 5b: for each wfm-job opp, try to find a lead-derived opp on the same account
-      const jobOpps = await all(env.DB,
-        `SELECT o.id, o.account_id, o.title
-           FROM opportunities o
-          WHERE o.external_source = 'wfm-job'
-            AND o.deleted_at IS NULL`);
-
-      for (const jo of jobOpps) {
-        // Find a lead-derived or orphan opp on the same account
-        const candidates = await all(env.DB,
-          `SELECT o.id, o.title FROM opportunities o
-            WHERE o.account_id = ? AND o.deleted_at IS NULL
-              AND o.external_source IN ('wfm-lead', 'wfm-quote-orphan')
-              AND o.id != ?
-            ORDER BY o.created_at`,
-          [jo.account_id, jo.id]);
-
-        if (candidates.length === 0) continue;
-
-        let target = candidates.find(c => c.title === jo.title);
-        if (!target && candidates.length === 1) target = candidates[0];
-        if (!target) continue;
-
-        const ts = nowIso();
-        // Move children from wfm-job opp → target
-        await run(env.DB,
-          'UPDATE quotes SET opportunity_id = ?, updated_at = ? WHERE opportunity_id = ? AND deleted_at IS NULL',
-          [target.id, ts, jo.id]);
-        await run(env.DB,
-          'UPDATE jobs SET opportunity_id = ? WHERE opportunity_id = ? AND deleted_at IS NULL',
-          [target.id, jo.id]);
-        await run(env.DB,
-          'UPDATE cost_builds SET opportunity_id = ?, updated_at = ? WHERE opportunity_id = ? AND deleted_at IS NULL',
-          [target.id, ts, jo.id]);
-        await run(env.DB,
-          'UPDATE activities SET opportunity_id = ? WHERE opportunity_id = ?',
-          [target.id, jo.id]);
-        await run(env.DB,
-          'UPDATE documents SET opportunity_id = ? WHERE opportunity_id = ?',
-          [target.id, jo.id]);
-        // Soft-delete the empty wfm-job opp
-        await run(env.DB,
-          'UPDATE opportunities SET deleted_at = ?, updated_at = ? WHERE id = ?',
-          [ts, ts, jo.id]);
-        jobOppsRelinked++;
-      }
-      if (jobOppsRelinked > 0) {
-        errors.push('[info] post-pass 5: re-linked ' + jobOppsRelinked + ' wfm-job opp(s) to lead-derived opps');
-      }
-    } catch (e) {
-      errors.push('job-opp-relink post-pass: ' + (e.message || e));
-    }
-
-    // Re-run opp number assignment after relink passes moved quotes.
-    try {
-      await env.DB.exec(
-        `UPDATE opportunities SET number = (
-           SELECT 'WFM-' || MIN(q.number)
-             FROM quotes q
-            WHERE q.opportunity_id = opportunities.id
-              AND q.deleted_at IS NULL
-              AND q.number IS NOT NULL
-         )
-         WHERE external_source IN ('wfm-lead', 'wfm-quote-orphan', 'wfm-job')
-           AND deleted_at IS NULL
-           AND EXISTS (
-             SELECT 1 FROM quotes q2
-              WHERE q2.opportunity_id = opportunities.id
-                AND q2.deleted_at IS NULL
-                AND q2.number IS NOT NULL
-           )`);
-    } catch (_) {}
 
     // Cap errors at 50 so the row-size stays bounded in D1; the UI
     // also caps display at 50.
