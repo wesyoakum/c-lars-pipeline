@@ -177,6 +177,7 @@ async function upsertAccount(env, c) {
     is_prospect:          yesNo(c.IsProspect),
     is_deleted:           yesNo(c.IsDeleted),
     wfm_payload:          JSON.stringify(c),
+    deleted_at:           null,
     updated_at:           ts,
   };
 
@@ -323,6 +324,7 @@ async function upsertContact(env, ct, accountId) {
     salutation:  s(ct.Salutation),
     addressee:   s(ct.Addressee),
     wfm_payload: JSON.stringify(ct),
+    deleted_at:  null,
     updated_at:  ts,
   };
 
@@ -375,6 +377,7 @@ async function upsertOpportunityFromLead(env, lead, accountId, contactId, ownerU
     wfm_category:        s(lead.Category),
     wfm_type:            '',
     wfm_payload:         JSON.stringify(lead),
+    deleted_at:          null,
     updated_at:          ts,
   };
 
@@ -459,6 +462,7 @@ async function upsertOpportunityFromJob(env, job, accountId, ownerUserId) {
     external_url:        s(job.WebURL),
     notes_internal:      noteLine,
     wfm_payload:         JSON.stringify(job),
+    deleted_at:          null,
     updated_at:          ts,
   };
 
@@ -560,6 +564,7 @@ async function upsertQuote(env, q, opportunityId) {
     wfm_state:           s(q.State),
     wfm_budget:          s(q.Budget),
     wfm_payload:         JSON.stringify(q),
+    deleted_at:          null,
     updated_at:          ts,
   };
 
@@ -968,6 +973,7 @@ async function synthesizeOpportunityFromQuote(env, q, ctx) {
     primary_contact_id:  contactId,
     notes_internal:      noteLine,
     wfm_payload:         JSON.stringify(q),
+    deleted_at:          null,
     updated_at:          ts,
   };
 
