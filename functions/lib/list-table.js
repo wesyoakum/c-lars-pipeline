@@ -588,7 +588,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
     var filterState_table = JSON.parse('${JSON.stringify(defaultFilters).replace(/'/g, "\\'")}');
     var filterState_card  = JSON.parse('${JSON.stringify(defaultFilters).replace(/'/g, "\\'")}');
     if (savedFilters) {
-      // Prefer per-view keys if present; fall back to legacy single `filters`.
+      // Prefer per-view keys if present; fall back to legacy single filters key.
       if (savedFilters._table || savedFilters._card) {
         if (savedFilters._table) Object.keys(savedFilters._table).forEach(function(k) { filterState_table[k] = savedFilters._table[k]; });
         if (savedFilters._card)  Object.keys(savedFilters._card).forEach(function(k)  { filterState_card[k]  = savedFilters._card[k]; });
