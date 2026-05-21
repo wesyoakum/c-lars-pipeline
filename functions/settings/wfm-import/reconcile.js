@@ -79,11 +79,11 @@ export async function onRequestGet(context) {
 
   const rows = groups.map(g => {
     const dupsHtml = g.duplicates.map(d =>
-      `<span style="display:inline-block;margin:.1rem .3rem .1rem 0;padding:.1rem .4rem;background:#fff3cd;border-radius:3px;font-size:.82rem">${esc(d.number)} <small style="color:#666">(${esc(d.external_source)}, ${esc(d.stage)})</small></span>`
+      `<a href="/opportunities/${esc(d.id)}" target="_blank" style="display:inline-block;margin:.1rem .3rem .1rem 0;padding:.1rem .4rem;background:#fff3cd;border-radius:3px;font-size:.82rem;text-decoration:none;color:inherit">${esc(d.number)} <small style="color:#666">(${esc(d.external_source)}, ${esc(d.stage)})</small></a>`
     ).join('');
     return `<tr>
       <td>${esc(g.title)}</td>
-      <td><strong>${esc(g.canonical.number)}</strong> <small style="color:#666">(${esc(g.canonical.external_source)}, ${esc(g.canonical.stage)})</small></td>
+      <td><a href="/opportunities/${esc(g.canonical.id)}" target="_blank"><strong>${esc(g.canonical.number)}</strong></a> <small style="color:#666">(${esc(g.canonical.external_source)}, ${esc(g.canonical.stage)})</small></td>
       <td>${dupsHtml}</td>
     </tr>`;
   }).join('\n');
