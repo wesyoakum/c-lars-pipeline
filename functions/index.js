@@ -65,6 +65,7 @@ export async function onRequestGet(context) {
        FROM opportunities
       WHERE stage IN ('closed_won', 'closed_lost')
         AND updated_at >= datetime('now', '-90 days')
+        AND deleted_at IS NULL
       GROUP BY stage`
   );
 
@@ -109,9 +110,9 @@ export async function onRequestGet(context) {
   }
 
   const [oppCount, acctCount, quoteCount] = await Promise.all([
-    one(env.DB, 'SELECT COUNT(*) AS n FROM opportunities'),
-    one(env.DB, 'SELECT COUNT(*) AS n FROM accounts'),
-    one(env.DB, 'SELECT COUNT(*) AS n FROM quotes'),
+    one(env.DB, 'SELECT COUNT(*) AS n FROM opportunities WHERE deleted_at IS NULL'),
+    one(env.DB, 'SELECT COUNT(*) AS n FROM accounts WHERE deleted_at IS NULL'),
+    one(env.DB, 'SELECT COUNT(*) AS n FROM quotes WHERE deleted_at IS NULL'),
   ]);
 
   const wonRow = winLoss.find(w => w.stage === 'closed_won');
