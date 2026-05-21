@@ -317,10 +317,10 @@ export async function onRequestPost(context) {
       const all = recordList(r.body, 'Staff');
       results = all.filter((rec) => recordMatches(rec, kind, query, filters));
     } else {
-      // Try /list first (returns all states including Won/Accepted),
-      // fall back to /current if /list returns nothing (some WFM
-      // endpoints behave differently with /list).
-      let basePath = '/' + kind + '.api/list';
+      // Use /list with a wide date range (returns all states including
+      // Won/Accepted). Fall back to /current if /list fails.
+      const dateRange = 'from=2020-01-01&to=2027-12-31';
+      let basePath = '/' + kind + '.api/list?' + dateRange;
       let all = await fetchAllRecords(env, basePath, cfg.primary);
       if (all.length === 0) {
         basePath = '/' + kind + '.api/current';
