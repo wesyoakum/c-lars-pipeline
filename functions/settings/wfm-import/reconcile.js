@@ -73,19 +73,40 @@ export async function onRequestGet(context) {
   }
 
   const groups = await findDuplicateGroups(env.DB);
+  const totalDups = groups.reduce((n, g) => n + g.duplicates.length, 0);
 
-  // Summarize for preview
-  const preview = groups.map(g => ({
-    title: g.title,
-    canonical: { number: g.canonical.number, source: g.canonical.external_source, stage: g.canonical.stage },
-    merging: g.duplicates.map(d => ({ number: d.number, source: d.external_source, stage: d.stage })),
-  }));
+  const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-  return json({
-    ok: true,
-    total_groups: groups.length,
-    total_duplicates: groups.reduce((n, g) => n + g.duplicates.length, 0),
-    preview,
+  const rows = groups.map(g => {
+    const dupsHtml = g.duplicates.map(d =>
+      `<span style="display:inline-block;margin:.1rem .3rem .1rem 0;padding:.1rem .4rem;background:#fff3cd;border-radius:3px;font-size:.82rem">${esc(d.number)} <small style="color:#666">(${esc(d.external_source)}, ${esc(d.stage)})</small></span>`
+    ).join('');
+    return `<tr>
+      <td>${esc(g.title)}</td>
+      <td><strong>${esc(g.canonical.number)}</strong> <small style="color:#666">(${esc(g.canonical.external_source)}, ${esc(g.canonical.stage)})</small></td>
+      <td>${dupsHtml}</td>
+    </tr>`;
+  }).join('\n');
+
+  const html = `<!DOCTYPE html><html><head><title>WFM Reconciliation Preview</title>
+<style>body{font-family:system-ui;margin:2rem;color:#222}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:.5rem .7rem;text-align:left;vertical-align:top}th{background:#f5f5f7;font-size:.85rem;font-weight:600}tr:hover{background:#f9f9fb}.summary{margin-bottom:1.5rem;padding:1rem;background:#e6f4ea;border-radius:6px}button{padding:.5rem 1.5rem;font-size:1rem;cursor:pointer;background:#cf222e;color:white;border:none;border-radius:4px;margin-top:1rem}button:hover{background:#a3161a}</style></head>
+<body>
+<h1>WFM Reconciliation Preview</h1>
+<div class="summary">
+  <strong>${groups.length}</strong> duplicate groups found containing <strong>${totalDups}</strong> duplicate opps to merge.
+  <br><small>The <strong>Keep</strong> column is the canonical opp. All quotes, jobs, activities, and documents from the <strong>Merge &amp; Delete</strong> opps will be moved to the canonical, then the duplicates will be soft-deleted.</small>
+</div>
+<table>
+  <thead><tr><th>Title</th><th>Keep (canonical)</th><th>Merge &amp; Delete</th></tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+<form method="post" action="/settings/wfm-import/reconcile" onsubmit="return confirm('This will merge ${totalDups} duplicate opps into ${groups.length} canonical opps. This is reversible (soft delete). Proceed?')">
+  <button type="submit">Run Reconciliation (${totalDups} merges)</button>
+</form>
+</body></html>`;
+
+  return new Response(html, {
+    headers: { 'content-type': 'text/html; charset=utf-8' },
   });
 }
 
