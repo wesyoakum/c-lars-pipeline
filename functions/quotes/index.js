@@ -36,7 +36,7 @@ export async function onRequestGet(context) {
             q.title, q.total_price, q.valid_until,
             q.created_at, q.updated_at,
             q.opportunity_id, q.external_source,
-            o.number AS opp_number, o.title AS opp_title,
+            o.number AS opp_number, o.title AS opp_title, o.stage AS opp_stage,
             a.name AS account_name, a.id AS account_id,
             a.alias AS account_alias, a.parent_group AS account_parent_group
        FROM quotes q
@@ -69,6 +69,7 @@ export async function onRequestGet(context) {
     { key: 'created',      label: 'Created',      sort: 'date',   filter: 'text',   default: false },
     // WFM-imported vs Pipeline-native. Off by default; flip on via the
     // column-picker when auditing import coverage.
+    { key: 'opp_stage',    label: 'Opp Stage',    sort: 'text',   filter: 'select', default: false },
     { key: 'source',       label: 'Source',       sort: 'text',   filter: 'select', default: false },
     // Delete affordance \u2014 only renders the button for draft / revision-
     // draft rows; other statuses get a hyphen. Server-side route blocks
@@ -118,6 +119,7 @@ export async function onRequestGet(context) {
       valid_until: r.valid_until ?? '',
       updated: (r.updated_at ?? '').slice(0, 10),
       created: (r.created_at ?? '').slice(0, 10),
+      opp_stage: r.opp_stage || '',
       source: r.external_source ? 'wfm' : 'pipeline',
     };
   });
@@ -235,6 +237,46 @@ export async function onRequestGet(context) {
 })();
 `;
 
+  const oppStageChartScript = `
+(function(){
+  var chart = document.querySelector('[data-role="opp-stage-chart"]');
+  if (!chart) return;
+  var host = document.querySelector('.opp-list');
+  var bodyEl = chart.querySelector('[data-role="opp-stage-chart-body"]');
+  function esc(x){ return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  function render(){
+    if (!host || !bodyEl){ chart.hidden = true; return; }
+    var trs = host.querySelectorAll('tbody[data-role="rows"] tr[data-row-id]');
+    var counts = {}, order = [], total = 0;
+    for (var i=0;i<trs.length;i++){
+      var tr = trs[i];
+      if (tr.style.display === 'none') continue;
+      var s = (tr.getAttribute('data-opp_stage') || '').trim() || '—';
+      if (!(s in counts)){ counts[s] = 0; order.push(s); }
+      counts[s]++;
+      total++;
+    }
+    if (total === 0){ chart.hidden = true; bodyEl.innerHTML = ''; return; }
+    var max = 0; for (var k in counts){ if (counts[k] > max) max = counts[k]; }
+    var axis = Math.max(10, Math.ceil(max / 10) * 10);
+    var palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#e11d48'];
+    order.sort(function(a,b){ return (counts[b] || 0) - (counts[a] || 0); });
+    bodyEl.innerHTML = order.map(function(s,idx){
+      var v = counts[s];
+      var pct = Math.round(v / axis * 100);
+      var color = palette[idx % palette.length];
+      return '<div class="qsc-row" title="'+esc(s)+': '+v+'"><span class="qsc-label" title="'+esc(s)+'">'+esc(s)+'</span>'+
+             '<span class="qsc-track"><span class="qsc-bar" style="width:'+pct+'%;background:'+color+'"></span></span>'+
+             '<span class="qsc-count">'+v+'</span></div>';
+    }).join('');
+    chart.hidden = false;
+  }
+  render();
+  if (host) host.addEventListener('list:filtered', render);
+})();
+`;
+
   const body = html`
     ${tabs}
     <style>
@@ -251,8 +293,12 @@ export async function onRequestGet(context) {
       .qsc-track{display:block;width:100%;background:#e5e7eb;border-radius:3px;height:11px;overflow:hidden}
       .qsc-bar{display:block;height:100%;background:#3b82f6;border-radius:3px;min-width:2px;transition:width .15s}
       .qsc-count{text-align:right;color:var(--muted,#666);font-variant-numeric:tabular-nums}
+      .quote-charts-row{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin:.4rem 0 .6rem}
+      .qoc-chart{padding:.5rem .7rem;background:var(--bg-alt,#f5f5f7);border-radius:var(--radius,6px)}
+      .qoc-chart h2{margin:0 0 .35rem;font-size:.72rem;font-weight:600;color:var(--muted,#666);text-transform:uppercase;letter-spacing:.04em}
     </style>
-    <div class="quote-status-chart" data-role="status-chart" hidden>
+    <div class="quote-charts-row">
+    <div class="quote-status-chart" data-role="status-chart" hidden style="margin:0">
       <div class="quote-status-chart-head">
         <h2>Quotes by status</h2>
         <span style="flex:1"></span>
@@ -262,6 +308,11 @@ export async function onRequestGet(context) {
         </div>
       </div>
       <div data-role="status-chart-body"></div>
+    </div>
+    <div class="qoc-chart" data-role="opp-stage-chart" hidden>
+      <h2>Quotes by opp stage</h2>
+      <div data-role="opp-stage-chart-body"></div>
+    </div>
     </div>
     <section class="card">
       <div class="card-header">
@@ -310,6 +361,7 @@ export async function onRequestGet(context) {
                     </td>
                     <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
                     <td class="col-created" data-col="created"><small class="muted">${escape(r.created)}</small></td>
+                    <td class="col-opp_stage" data-col="opp_stage">${escape(r.opp_stage)}</td>
                     <td class="col-source" data-col="source">
                       <span class="cell-text muted" style="font-size:.78rem">${escape(r.source)}</span>
                     </td>
@@ -340,6 +392,7 @@ export async function onRequestGet(context) {
           }))}</script>
           <script>${raw(listInlineEditScript('/opportunities/:opp_id/quotes/:id/patch'))}</script>
           <script>${raw(statusChartScript)}</script>
+          <script>${raw(oppStageChartScript)}</script>
         `}
     </section>
   `;
