@@ -68,6 +68,7 @@ export async function onRequestGet(context) {
             ntp_user.display_name AS ntp_issued_by_name,
             ho_user.display_name AS handed_off_by_name,
             creator.display_name AS created_by_name,
+            lq.number AS linked_quote_number, lq.id AS linked_quote_id,
             -- Prefer the ACCEPTED quote for OC/NTP number defaults
             -- (that's the quote the customer actually signed off on).
             -- Fall back to the newest live quote if none are accepted yet
@@ -88,6 +89,7 @@ export async function onRequestGet(context) {
        LEFT JOIN users oc_user ON oc_user.id = j.oc_issued_by_user_id
        LEFT JOIN users ntp_user ON ntp_user.id = j.ntp_issued_by_user_id
        LEFT JOIN users ho_user ON ho_user.id = j.handed_off_by_user_id
+       LEFT JOIN quotes lq ON lq.id = j.quote_id
        LEFT JOIN users creator ON creator.id = j.created_by_user_id
       WHERE j.id = ?`,
     [jobId]
@@ -168,6 +170,12 @@ export async function onRequestGet(context) {
       </p>
 
       <div class="detail-grid">
+        <div class="detail-pair">
+          <span class="detail-label">Quote</span>
+          <span class="detail-value">${job.linked_quote_id
+            ? html`<a href="/opportunities/${escape(job.opp_id)}/quotes/${escape(job.linked_quote_id)}">${escape(job.linked_quote_number)}</a>`
+            : '—'}</span>
+        </div>
         <div class="detail-pair">
           <span class="detail-label">Customer PO</span>
           <span class="detail-value">${escape(job.customer_po_number || job.opp_po_number || '—')}</span>
