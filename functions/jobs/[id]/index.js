@@ -62,6 +62,7 @@ export async function onRequestGet(context) {
     env.DB,
     `SELECT j.*,
             o.number AS opp_number, o.title AS opp_title, o.id AS opp_id,
+            o.created_at AS opp_created_at,
             o.transaction_type, o.customer_po_number AS opp_po_number,
             a.name AS account_name, a.id AS account_id,
             oc_user.display_name AS oc_issued_by_name,
@@ -171,6 +172,10 @@ export async function onRequestGet(context) {
 
       <div class="detail-grid">
         <div class="detail-pair">
+          <span class="detail-label">Opportunity</span>
+          <span class="detail-value"><a href="/opportunities/${escape(job.opp_id)}">${escape(job.opp_number)}</a></span>
+        </div>
+        <div class="detail-pair">
           <span class="detail-label">Quote</span>
           <span class="detail-value">${job.linked_quote_id
             ? html`<a href="/opportunities/${escape(job.opp_id)}/quotes/${escape(job.linked_quote_id)}">${escape(job.linked_quote_number)}</a>`
@@ -194,6 +199,10 @@ export async function onRequestGet(context) {
             <span class="detail-label">NTP Date</span>
             <span class="detail-value">${job.ntp_issued_at ? escape(job.ntp_issued_at.slice(0, 10)) : '—'}</span>
           </div>` : ''}
+        <div class="detail-pair">
+          <span class="detail-label">Opp Created</span>
+          <span class="detail-value">${job.opp_created_at ? escape(job.opp_created_at.slice(0, 10)) : '—'}</span>
+        </div>
         <div class="detail-pair">
           <span class="detail-label">Customer PO</span>
           <span class="detail-value">${escape(job.customer_po_number || job.opp_po_number || '—')}</span>
