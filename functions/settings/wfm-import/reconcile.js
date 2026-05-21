@@ -111,6 +111,46 @@ async function findOrphanRelinks(db) {
   return relinks;
 }
 
+// Find wfm-job opps that should be merged into a lead-derived opp on
+// the same account. Also strips job-number prefixes from titles.
+async function findJobOppRelinks(db) {
+  const jobOpps = await all(db,
+    `SELECT o.id, o.number, o.title, o.account_id,
+            (SELECT COUNT(*) FROM jobs j WHERE j.opportunity_id = o.id AND j.deleted_at IS NULL) AS job_count,
+            (SELECT COUNT(*) FROM quotes q WHERE q.opportunity_id = o.id AND q.deleted_at IS NULL) AS quote_count
+       FROM opportunities o
+      WHERE o.deleted_at IS NULL
+        AND o.external_source = 'wfm-job'`);
+
+  const relinks = [];
+  for (const jo of jobOpps) {
+    // Clean title: strip "ID - " prefix for matching
+    const cleanTitle = jo.title && jo.title.includes(' - ')
+      ? jo.title.slice(jo.title.indexOf(' - ') + 3)
+      : jo.title;
+
+    const candidates = await all(db,
+      `SELECT o.id, o.number, o.title FROM opportunities o
+        WHERE o.account_id = ? AND o.deleted_at IS NULL
+          AND o.external_source IN ('wfm-lead', 'wfm-quote-orphan')
+          AND o.id != ?
+        ORDER BY o.created_at`,
+      [jo.account_id, jo.id]);
+
+    if (candidates.length === 0) continue;
+
+    let target = candidates.find(c => c.title === jo.title || c.title === cleanTitle);
+    if (!target && candidates.length === 1) target = candidates[0];
+    if (!target) continue;
+
+    relinks.push({
+      jobOpp: { ...jo, cleanTitle },
+      target,
+    });
+  }
+  return relinks;
+}
+
 export async function onRequestGet(context) {
   const { env, data } = context;
   const user = data?.user;
@@ -122,6 +162,7 @@ export async function onRequestGet(context) {
   const totalDups = groups.reduce((n, g) => n + g.duplicates.length, 0);
   const relinks = await findOrphanRelinks(env.DB);
   const totalRelinkedQuotes = relinks.reduce((n, r) => n + r.quote_count, 0);
+  const jobRelinks = await findJobOppRelinks(env.DB);
 
   const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -168,9 +209,22 @@ ${relinks.length > 0 ? `
   <tbody>${relinkRows}</tbody>
 </table>` : '<h2>Orphan Quote Re-links</h2><p>No orphan quotes to re-link.</p>'}
 
-${(groups.length + relinks.length) > 0 ? `
-<form method="post" action="/settings/wfm-import/reconcile" onsubmit="return confirm('This will merge ${totalDups} duplicate(s) and re-link ${totalRelinkedQuotes} quote(s) from ${relinks.length} orphan opp(s). This is reversible (soft delete). Proceed?')">
-  <button type="submit">Run Reconciliation (${totalDups} merges + ${relinks.length} re-links)</button>
+${jobRelinks.length > 0 ? `
+<h2>Job-Opp Re-links</h2>
+<div class="summary">
+  <strong>${jobRelinks.length}</strong> wfm-job opp${jobRelinks.length === 1 ? '' : 's'} to merge into lead-derived opps. Jobs and quotes will be moved, then the empty wfm-job opp will be soft-deleted.
+</div>
+<table>
+  <thead><tr><th>Job opp (merge from)</th><th>Lead opp (merge into)</th></tr></thead>
+  <tbody>${jobRelinks.map(r => `<tr>
+    <td><a href="/opportunities/${esc(r.jobOpp.id)}" target="_blank">${esc(r.jobOpp.number)}</a> — ${esc(r.jobOpp.title)} <small style="color:#666">(${r.jobOpp.job_count} job${r.jobOpp.job_count === 1 ? '' : 's'}, ${r.jobOpp.quote_count} quote${r.jobOpp.quote_count === 1 ? '' : 's'})</small></td>
+    <td><a href="/opportunities/${esc(r.target.id)}" target="_blank"><strong>${esc(r.target.number)}</strong></a> — ${esc(r.target.title)}</td>
+  </tr>`).join('\n')}</tbody>
+</table>` : '<h2>Job-Opp Re-links</h2><p>No wfm-job opps to re-link.</p>'}
+
+${(groups.length + relinks.length + jobRelinks.length) > 0 ? `
+<form method="post" action="/settings/wfm-import/reconcile" onsubmit="return confirm('This will merge ${totalDups} duplicate(s), re-link ${relinks.length} orphan opp(s), and merge ${jobRelinks.length} job opp(s). This is reversible (soft delete). Proceed?')">
+  <button type="submit">Run Reconciliation (${totalDups} merges + ${relinks.length} orphan re-links + ${jobRelinks.length} job re-links)</button>
 </form>` : ''}
 </body></html>`;
 
@@ -188,8 +242,9 @@ export async function onRequestPost(context) {
 
   const groups = await findDuplicateGroups(env.DB);
   const relinks = await findOrphanRelinks(env.DB);
+  const jobRelinks = await findJobOppRelinks(env.DB);
 
-  if (groups.length === 0 && relinks.length === 0) {
+  if (groups.length === 0 && relinks.length === 0 && jobRelinks.length === 0) {
     return json({ ok: true, merged: 0, relinked: 0, message: 'Nothing to reconcile.' });
   }
 
@@ -271,13 +326,90 @@ export async function onRequestPost(context) {
     }
   }
 
+  // Pass 3: wfm-job opp re-links + title cleanup
+  let jobsMerged = 0;
+  for (const r of jobRelinks) {
+    try {
+      // Strip job-number prefix from the wfm-job opp title before merging
+      const cleanTitle = r.jobOpp.title && r.jobOpp.title.includes(' - ')
+        ? r.jobOpp.title.slice(r.jobOpp.title.indexOf(' - ') + 3)
+        : r.jobOpp.title;
+      if (cleanTitle !== r.jobOpp.title) {
+        await run(env.DB,
+          'UPDATE opportunities SET title = ? WHERE id = ?',
+          [cleanTitle, r.jobOpp.id]);
+      }
+
+      // Move children from wfm-job opp → target
+      await run(env.DB,
+        'UPDATE quotes SET opportunity_id = ?, updated_at = ? WHERE opportunity_id = ? AND deleted_at IS NULL',
+        [r.target.id, ts, r.jobOpp.id]);
+      await run(env.DB,
+        'UPDATE jobs SET opportunity_id = ? WHERE opportunity_id = ? AND deleted_at IS NULL',
+        [r.target.id, r.jobOpp.id]);
+      await run(env.DB,
+        'UPDATE cost_builds SET opportunity_id = ?, updated_at = ? WHERE opportunity_id = ? AND deleted_at IS NULL',
+        [r.target.id, ts, r.jobOpp.id]);
+      await run(env.DB,
+        'UPDATE activities SET opportunity_id = ? WHERE opportunity_id = ?',
+        [r.target.id, r.jobOpp.id]);
+      await run(env.DB,
+        'UPDATE documents SET opportunity_id = ? WHERE opportunity_id = ?',
+        [r.target.id, r.jobOpp.id]);
+
+      await run(env.DB,
+        'UPDATE opportunities SET deleted_at = ?, updated_at = ? WHERE id = ?',
+        [ts, ts, r.jobOpp.id]);
+
+      await run(env.DB,
+        `INSERT INTO audit_events (entity_type, entity_id, event_type, user_email, user_display_name, summary, at)
+         VALUES ('opportunity', ?, 'merged', ?, ?, ?, ?)`,
+        [r.target.id, user.email, user.display_name,
+         `Merged wfm-job opp ${r.jobOpp.number} (${r.jobOpp.job_count} jobs, ${r.jobOpp.quote_count} quotes)`, ts]);
+
+      jobsMerged++;
+    } catch (e) {
+      errors.push(`job-relink ${r.jobOpp.number}: ${e.message || e}`);
+    }
+  }
+
+  // Strip job-number prefixes from remaining wfm-job opp titles.
+  try {
+    await run(env.DB,
+      `UPDATE opportunities SET title = SUBSTR(title, INSTR(title, ' - ') + 3)
+        WHERE external_source = 'wfm-job' AND deleted_at IS NULL
+          AND INSTR(title, ' - ') > 0`, []);
+  } catch (_) {}
+
+  // Re-assign opp numbers as WFM-{lowest quote number} after all moves.
+  try {
+    const renumberSql =
+      `UPDATE opportunities SET number = (
+         SELECT 'WFM-' || MIN(q.number)
+           FROM quotes q
+          WHERE q.opportunity_id = opportunities.id
+            AND q.deleted_at IS NULL
+            AND q.number IS NOT NULL
+       )
+       WHERE external_source IN ('wfm-lead', 'wfm-quote-orphan', 'wfm-job')
+         AND deleted_at IS NULL
+         AND EXISTS (
+           SELECT 1 FROM quotes q2
+            WHERE q2.opportunity_id = opportunities.id
+              AND q2.deleted_at IS NULL
+              AND q2.number IS NOT NULL
+         )`;
+    await env.DB.exec(renumberSql);
+  } catch (_) {}
+
   return json({
     ok: true,
     merged,
     relinked,
     quotes_relinked: quotesRelinked,
+    jobs_merged: jobsMerged,
     groups: groups.length,
     errors: errors.length > 0 ? errors : undefined,
-    message: `Merged ${merged} duplicate(s), re-linked ${quotesRelinked} quote(s) from ${relinked} orphan opp(s).`,
+    message: `Merged ${merged} duplicate(s), re-linked ${quotesRelinked} quote(s) from ${relinked} orphan opp(s), merged ${jobsMerged} job opp(s).`,
   });
 }

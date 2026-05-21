@@ -422,89 +422,67 @@ async function upsertOpportunityFromLead(env, lead, accountId, contactId, ownerU
   }
 }
 
-async function upsertOpportunityFromJob(env, job, accountId, ownerUserId) {
-  // First check if this job already has its own opp row.
+// Find the parent opportunity for a job. Jobs should NEVER create
+// their own opp — the chain is Job → Quote → Opp (Lead) → Account.
+// Returns { id, number } or null if no parent opp can be found.
+async function findOpportunityForJob(env, job, accountId) {
+  // Check if this job already has a linked opp from a previous import.
   let existing = await one(env.DB,
     'SELECT id, number FROM opportunities WHERE external_source = ? AND external_id = ?',
     ['wfm-job', job.UUID]);
+  if (existing) return existing;
 
-  // Cross-source linking: try to find the parent opp via the job's
-  // accepted quote (ApprovedQuoteUUID → quote row → opportunity_id),
-  // or by matching title + account against existing wfm/wfm-lead opps.
-  // This prevents creating a separate wfm-job opp when a wfm-lead opp
-  // for the same deal already exists.
-  if (!existing) {
-    // Path 1: trace via ApprovedQuoteUUID
-    if (job.ApprovedQuoteUUID) {
-      const linkedQuote = await one(env.DB,
-        'SELECT opportunity_id FROM quotes WHERE external_id = ? AND deleted_at IS NULL',
-        [job.ApprovedQuoteUUID]);
-      if (linkedQuote?.opportunity_id) {
-        existing = await one(env.DB,
-          'SELECT id, number FROM opportunities WHERE id = ? AND deleted_at IS NULL',
-          [linkedQuote.opportunity_id]);
-      }
-    }
-    // Path 2: title + account match against wfm or wfm-lead opps
-    if (!existing && accountId && job.Name) {
+  // Path 1: trace via ApprovedQuoteUUID → quote → opportunity
+  if (job.ApprovedQuoteUUID) {
+    const linkedQuote = await one(env.DB,
+      'SELECT opportunity_id FROM quotes WHERE external_id = ? AND deleted_at IS NULL',
+      [job.ApprovedQuoteUUID]);
+    if (linkedQuote?.opportunity_id) {
       existing = await one(env.DB,
-        `SELECT id, number FROM opportunities
-          WHERE title = ? AND account_id = ? AND deleted_at IS NULL
-            AND external_source IN ('wfm', 'wfm-lead')
-          ORDER BY created_at LIMIT 1`,
-        [s(job.Name), accountId]);
+        'SELECT id, number FROM opportunities WHERE id = ? AND deleted_at IS NULL',
+        [linkedQuote.opportunity_id]);
+      if (existing) return existing;
     }
   }
 
+  // Path 2: title + account match against any WFM-sourced opp
+  if (accountId && job.Name) {
+    existing = await one(env.DB,
+      `SELECT id, number FROM opportunities
+        WHERE title = ? AND account_id = ? AND deleted_at IS NULL
+          AND external_source IN ('wfm', 'wfm-lead', 'wfm-quote-orphan')
+        ORDER BY created_at LIMIT 1`,
+      [s(job.Name), accountId]);
+    if (existing) return existing;
+  }
+
+  // Path 3: sole opp on this account (common for single-deal accounts)
+  if (accountId) {
+    const candidates = await all(env.DB,
+      `SELECT id, number FROM opportunities
+        WHERE account_id = ? AND deleted_at IS NULL
+          AND external_source IN ('wfm', 'wfm-lead', 'wfm-quote-orphan')`,
+      [accountId]);
+    if (candidates.length === 1) return candidates[0];
+  }
+
+  return null;
+}
+
+// Update an existing opp's stage/type when a job links to it.
+async function advanceOppFromJob(env, oppId, job) {
   const typeMap = CATEGORY_NAME_TO_TYPE[job.Type] || { type: 'spares', note: null };
   const stage   = JOB_STATE_TO_STAGE[job.State] || 'won';
-  const noteLine = typeMap.note ? `[WFM] Original category: ${typeMap.note} (mapped → ${typeMap.type}).` : '';
-
   const ts = nowIso();
-  const cols = {
-    title:               job.ID ? `${s(job.ID)} - ${s(job.Name)}` : s(job.Name),
-    description:         s(job.Description),
-    transaction_type:    typeMap.type,
-    stage,
-    estimated_value_usd: n(job.Budget),
-    actual_close_date:   s(job.StartDate),
-    account_id:          accountId,
-    owner_user_id:       ownerUserId || null,
-    wfm_category:        s(job.Type),
-    wfm_type:            s(job.Type),
-    external_url:        s(job.WebURL),
-    notes_internal:      noteLine,
-    wfm_payload:         JSON.stringify(job),
-    deleted_at:          null,
-    updated_at:          ts,
-  };
-
-  if (existing) {
-    const setClause = Object.keys(cols).map((k) => `${k} = ?`).join(', ');
-    await run(env.DB,
-      `UPDATE opportunities SET ${setClause} WHERE id = ?`,
-      [...Object.values(cols), existing.id]);
-    return { id: existing.id, number: existing.number, action: 'updated' };
-  } else {
-    const id = uuid();
-    const number = await allocateNumber(env, 'OPP-WFM');
-    await run(env.DB,
-      `INSERT INTO opportunities
-         (id, number, external_source, external_id,
-          account_id, owner_user_id,
-          title, description, transaction_type, stage,
-          estimated_value_usd, actual_close_date,
-          wfm_category, wfm_type, external_url, notes_internal, wfm_payload,
-          stage_entered_at, created_at, updated_at)
-       VALUES (?, ?, 'wfm-job', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, number, job.UUID,
-       accountId, ownerUserId || null,
-       cols.title, cols.description, cols.transaction_type, cols.stage,
-       cols.estimated_value_usd, cols.actual_close_date,
-       cols.wfm_category, cols.wfm_type, cols.external_url, cols.notes_internal, cols.wfm_payload,
-       ts, ts, ts]);
-    return { id, number, action: 'created' };
-  }
+  await run(env.DB,
+    `UPDATE opportunities
+        SET stage = ?, transaction_type = ?, wfm_type = ?,
+            estimated_value_usd = COALESCE(estimated_value_usd, ?),
+            actual_close_date = COALESCE(actual_close_date, ?),
+            updated_at = ?
+      WHERE id = ? AND deleted_at IS NULL`,
+    [stage, typeMap.type, s(job.Type),
+     n(job.Budget), s(job.StartDate), ts, oppId]);
 }
 
 // Create or update a Pipeline jobs row from a WFM Job record.
@@ -1023,10 +1001,9 @@ async function synthesizeOpportunityFromQuote(env, q, ctx) {
   return oppId;
 }
 
-// Get-or-import a job-derived opportunity by WFM Job UUID. Cascades
-// account if the parent client isn't in our maps. Mirrors
-// ensureOpportunityFromLead but for the JobUUID FK path that quotes
-// can take when there's no parent Lead.
+// Find the opportunity for a job referenced by a quote's JobUUID.
+// Jobs never create their own opp — if we can't find one, return null
+// and the quote will fall through to the orphan synthesis path.
 async function ensureOpportunityFromJob(env, wfmJobUuid, ctx) {
   if (!wfmJobUuid) return null;
   if (ctx.oppByWfmUuid.has(wfmJobUuid)) return ctx.oppByWfmUuid.get(wfmJobUuid);
@@ -1037,18 +1014,12 @@ async function ensureOpportunityFromJob(env, wfmJobUuid, ctx) {
     ? await ensureAccount(env, job.Client.UUID, ctx)
     : null;
   if (!accountId) return null;
-  const ownerId = job.Manager?.UUID
-    ? (ctx.userByWfmUuid.get(job.Manager.UUID) || null)
-    : null;
 
-  const o = await upsertOpportunityFromJob(env, job, accountId, ownerId);
-  ctx.oppByWfmUuid.set(wfmJobUuid, o.id);
-  ctx.counts.opportunities_cascaded++;
+  const opp = await findOpportunityForJob(env, job, accountId);
+  if (!opp) return null;
 
-  // Also create/update the Pipeline jobs row for this WFM job.
-  await upsertJobRow(env, job, o.id);
-
-  return o.id;
+  ctx.oppByWfmUuid.set(wfmJobUuid, opp.id);
+  return opp.id;
 }
 
 async function enrichUserFromStaff(env, st) {
@@ -1345,6 +1316,8 @@ export async function processSamples(env, samples, options = {}) {
   }
 
   // -------- Jobs ---------
+  // Jobs must link to an existing opp via their quote. They never
+  // create their own opportunity. Chain: Job → Quote → Opp → Account.
   for (const job of (samples.jobs || [])) {
     try {
       const accountId = job.Client?.UUID
@@ -1359,12 +1332,54 @@ export async function processSamples(env, samples, options = {}) {
             : 'no Client.UUID on job'));
         continue;
       }
-      const ownerId = job.Manager?.UUID ? userByWfmUuid.get(job.Manager.UUID) : null;
-      const o = await upsertOpportunityFromJob(env, job, accountId, ownerId);
-      oppByWfmUuid.set(job.UUID, o.id);
-      const jr = await upsertJobRow(env, job, o.id);
+
+      // Ensure the job's accepted quote is imported first so we can
+      // trace Job → Quote → Opp. The quote may not be in the current
+      // batch (list API may not have returned it).
+      if (job.ApprovedQuoteUUID) {
+        const existingQuote = await one(env.DB,
+          'SELECT id FROM quotes WHERE external_id = ? AND deleted_at IS NULL',
+          [job.ApprovedQuoteUUID]);
+        if (!existingQuote) {
+          // Fetch quote detail from WFM and import it
+          try {
+            const qr = await apiGet(env, '/quote.api/get/' + encodeURIComponent(job.ApprovedQuoteUUID));
+            if (qr.ok) {
+              const quoteRec = recordList(qr.body, 'Quote')[0];
+              if (quoteRec) {
+                // Find opp for this quote — try LeadUUID from detail, then account match
+                let qOppId = null;
+                if (quoteRec.LeadUUID) qOppId = await ensureOpportunityFromLead(env, quoteRec.LeadUUID, ctx);
+                if (!qOppId && quoteRec.JobUUID) qOppId = await ensureOpportunityFromJob(env, quoteRec.JobUUID, ctx);
+                if (!qOppId && synthOrphanQuotes) qOppId = await synthesizeOpportunityFromQuote(env, quoteRec, ctx);
+                if (qOppId) {
+                  const result = await upsertQuote(env, quoteRec, qOppId);
+                  counts.quotes++;
+                  try {
+                    const lineCount = await syncQuoteLines(env, result.id, quoteRec.UUID, ctx);
+                    counts.quote_lines += lineCount;
+                  } catch (_) {}
+                }
+              }
+            }
+          } catch (qErr) {
+            errors.push('job ' + (job?.ID || '?') + ' quote-fetch ' + job.ApprovedQuoteUUID + ': ' + qErr.message);
+          }
+        }
+      }
+
+      const opp = await findOpportunityForJob(env, job, accountId);
+      if (!opp) {
+        counts.skipped++;
+        errors.push('job "' + (job?.Name || job?.ID || '?') +
+          '" skipped: no parent opportunity found (no matching quote, lead, or account opp)');
+        continue;
+      }
+      await advanceOppFromJob(env, opp.id, job);
+      oppByWfmUuid.set(job.UUID, opp.id);
+      const jr = await upsertJobRow(env, job, opp.id);
       counts.jobs++;
-      links.push({ url: '/opportunities/' + o.id, label: 'Job-opp: ' + (job.Name || o.number) });
+      links.push({ url: '/opportunities/' + opp.id, label: 'Job: ' + (job.ID || job.Name || opp.number) });
     } catch (e) { errors.push('job ' + (job?.Name || '?') + ': ' + e.message); }
   }
 
@@ -1415,7 +1430,7 @@ export async function onRequestPost(context) {
               AND q.deleted_at IS NULL
               AND q.number IS NOT NULL
          )
-         WHERE external_source IN ('wfm-lead', 'wfm-quote-orphan')
+         WHERE external_source IN ('wfm-lead', 'wfm-quote-orphan', 'wfm-job')
            AND deleted_at IS NULL
            AND EXISTS (
              SELECT 1 FROM quotes q2
@@ -1579,6 +1594,90 @@ export async function onRequestPost(context) {
     } catch (e) {
       errors.push('orphan-relink post-pass: ' + (e.message || e));
     }
+
+    // Post-pass 5: clean up wfm-job orphan opps.
+    // a) Strip job-number prefixes from opp titles (e.g. "D102-S - Adapter Plate" → "Adapter Plate").
+    // b) Re-link wfm-job opps to lead-derived opps by moving children and soft-deleting.
+    let jobOppsRelinked = 0;
+    try {
+      // 5a: strip "ID - " prefix from opp titles where a job payload has that ID
+      await env.DB.exec(
+        `UPDATE opportunities SET title = SUBSTR(title, INSTR(title, ' - ') + 3)
+          WHERE external_source = 'wfm-job' AND deleted_at IS NULL
+            AND INSTR(title, ' - ') > 0`);
+
+      // 5b: for each wfm-job opp, try to find a lead-derived opp on the same account
+      const jobOpps = await all(env.DB,
+        `SELECT o.id, o.account_id, o.title
+           FROM opportunities o
+          WHERE o.external_source = 'wfm-job'
+            AND o.deleted_at IS NULL`);
+
+      for (const jo of jobOpps) {
+        // Find a lead-derived or orphan opp on the same account
+        const candidates = await all(env.DB,
+          `SELECT o.id, o.title FROM opportunities o
+            WHERE o.account_id = ? AND o.deleted_at IS NULL
+              AND o.external_source IN ('wfm-lead', 'wfm-quote-orphan')
+              AND o.id != ?
+            ORDER BY o.created_at`,
+          [jo.account_id, jo.id]);
+
+        if (candidates.length === 0) continue;
+
+        let target = candidates.find(c => c.title === jo.title);
+        if (!target && candidates.length === 1) target = candidates[0];
+        if (!target) continue;
+
+        const ts = nowIso();
+        // Move children from wfm-job opp → target
+        await run(env.DB,
+          'UPDATE quotes SET opportunity_id = ?, updated_at = ? WHERE opportunity_id = ? AND deleted_at IS NULL',
+          [target.id, ts, jo.id]);
+        await run(env.DB,
+          'UPDATE jobs SET opportunity_id = ? WHERE opportunity_id = ? AND deleted_at IS NULL',
+          [target.id, jo.id]);
+        await run(env.DB,
+          'UPDATE cost_builds SET opportunity_id = ?, updated_at = ? WHERE opportunity_id = ? AND deleted_at IS NULL',
+          [target.id, ts, jo.id]);
+        await run(env.DB,
+          'UPDATE activities SET opportunity_id = ? WHERE opportunity_id = ?',
+          [target.id, jo.id]);
+        await run(env.DB,
+          'UPDATE documents SET opportunity_id = ? WHERE opportunity_id = ?',
+          [target.id, jo.id]);
+        // Soft-delete the empty wfm-job opp
+        await run(env.DB,
+          'UPDATE opportunities SET deleted_at = ?, updated_at = ? WHERE id = ?',
+          [ts, ts, jo.id]);
+        jobOppsRelinked++;
+      }
+      if (jobOppsRelinked > 0) {
+        errors.push('[info] post-pass 5: re-linked ' + jobOppsRelinked + ' wfm-job opp(s) to lead-derived opps');
+      }
+    } catch (e) {
+      errors.push('job-opp-relink post-pass: ' + (e.message || e));
+    }
+
+    // Re-run opp number assignment after relink passes moved quotes.
+    try {
+      await env.DB.exec(
+        `UPDATE opportunities SET number = (
+           SELECT 'WFM-' || MIN(q.number)
+             FROM quotes q
+            WHERE q.opportunity_id = opportunities.id
+              AND q.deleted_at IS NULL
+              AND q.number IS NOT NULL
+         )
+         WHERE external_source IN ('wfm-lead', 'wfm-quote-orphan', 'wfm-job')
+           AND deleted_at IS NULL
+           AND EXISTS (
+             SELECT 1 FROM quotes q2
+              WHERE q2.opportunity_id = opportunities.id
+                AND q2.deleted_at IS NULL
+                AND q2.number IS NOT NULL
+           )`);
+    } catch (_) {}
 
     // Cap errors at 50 so the row-size stays bounded in D1; the UI
     // also caps display at 50.
