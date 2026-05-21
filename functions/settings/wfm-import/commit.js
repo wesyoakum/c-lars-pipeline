@@ -355,9 +355,22 @@ async function upsertContact(env, ct, accountId) {
 }
 
 async function upsertOpportunityFromLead(env, lead, accountId, contactId, ownerUserId) {
-  const existing = await one(env.DB,
-    'SELECT id, number FROM opportunities WHERE external_source = ? AND external_id = ?',
-    ['wfm-lead', lead.UUID]);
+  // Check all WFM source types — the same lead may have been imported
+  // via a different path (old sample import used 'wfm', not 'wfm-lead').
+  let existing = await one(env.DB,
+    `SELECT id, number FROM opportunities
+      WHERE external_id = ? AND external_source IN ('wfm-lead','wfm','wfm-job','wfm-quote-orphan')`,
+    [lead.UUID]);
+  // Also match by title + account if UUID didn't hit (covers opps
+  // originally created from a different WFM entity for the same deal).
+  if (!existing && accountId && lead.Name) {
+    existing = await one(env.DB,
+      `SELECT id, number FROM opportunities
+        WHERE title = ? AND account_id = ? AND deleted_at IS NULL
+          AND external_source IN ('wfm','wfm-lead','wfm-job','wfm-quote-orphan')
+        ORDER BY created_at LIMIT 1`,
+      [s(lead.Name), accountId]);
+  }
 
   let stage = LEAD_CATEGORY_TO_STAGE[lead.Category] || 'lead';
   if (lead.State === 'Won')  stage = 'won';
@@ -1392,7 +1405,9 @@ export async function onRequestPost(context) {
     // Post-pass: update opp numbers to WFM-{lowest quote number}.
     // Runs after all leads + quotes are imported so the quote FK exists.
     try {
-      await run(env.DB,
+      // Use exec() not run() — the correlated subquery UPDATE has no
+      // bind params and run(db, sql, []) was silently failing in Workers.
+      await env.DB.exec(
         `UPDATE opportunities SET number = (
            SELECT 'WFM-' || MIN(q.number)
              FROM quotes q
