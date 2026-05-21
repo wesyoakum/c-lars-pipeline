@@ -126,15 +126,18 @@ export async function onRequestPost(context) {
     await getAccessToken(env);
 
     // -------- Phase 1: walk every WFM list endpoint --------
-    // Five list calls in parallel. /staff.api/list is small,
-    // /client.api/list paginates, the three /current endpoints are
-    // single-shot. Total wall-clock = max(slowest call) ≈ 5–10s.
+    // All use /list (paginated, all states) — not /current which only
+    // returns active/open records and misses Won leads, Accepted
+    // quotes, Completed jobs, etc. /list endpoints for leads, quotes,
+    // and jobs require from/to date params. Use a wide range to pull
+    // everything.
+    const dateRange = 'from=2020-01-01&to=2027-12-31';
     const [staff, clients, leads, quotes, jobs] = await Promise.all([
       apiGet(env, '/staff.api/list').then((r) => r.ok ? recordList(r.body, 'Staff') : []),
-      fetchKind(env, '/client.api/list',   'Client'),
-      fetchKind(env, '/lead.api/current',  'Lead'),
-      fetchKind(env, '/quote.api/current', 'Quote'),
-      fetchKind(env, '/job.api/current',   'Job'),
+      fetchKind(env, '/client.api/list',              'Client'),
+      fetchKind(env, `/lead.api/list?${dateRange}`,   'Lead'),
+      fetchKind(env, `/quote.api/list?${dateRange}`,  'Quote'),
+      fetchKind(env, `/job.api/list?${dateRange}`,    'Job'),
     ]);
 
     // -------- Phase 2: build plan rows --------
