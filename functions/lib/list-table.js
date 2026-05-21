@@ -627,7 +627,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       }
       for (var k = 0; k < columns.length; k++) {
         var col = columns[k];
-        var fs = filterState[col.key];
+        var fs = getFilterState()[col.key];
         if (!fs) continue;
         if (col.filter === 'text') {
           if (fs.text) {
