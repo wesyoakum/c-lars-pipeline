@@ -1231,8 +1231,15 @@ export async function processSamples(env, samples, options = {}) {
   }
 
   // -------- Leads ---------
-  for (const lead of (samples.leads || [])) {
+  // Fetch detail for every lead for completeness/auditability
+  // (full payload stored in wfm_payload).
+  for (const leadList of (samples.leads || [])) {
+    let lead = leadList;
     try {
+      if (lead.UUID) {
+        const detail = await fetchLeadDetail(env, lead.UUID, fetchCache);
+        if (detail) lead = detail;
+      }
       const accountId = lead.Client?.UUID
         ? await ensureAccount(env, lead.Client.UUID, ctx)
         : null;
@@ -1251,7 +1258,7 @@ export async function processSamples(env, samples, options = {}) {
       oppByWfmUuid.set(lead.UUID, o.id);
       counts.opportunities++;
       links.push({ url: '/opportunities/' + o.id, label: 'Opp: ' + (lead.Name || o.number) });
-    } catch (e) { errors.push('lead ' + (lead?.Name || '?') + ': ' + e.message); }
+    } catch (e) { errors.push('lead ' + (leadList?.Name || lead?.Name || '?') + ': ' + e.message); }
   }
 
   // -------- Quotes ---------
@@ -1320,10 +1327,16 @@ export async function processSamples(env, samples, options = {}) {
   }
 
   // -------- Jobs ---------
+  // Fetch detail for every job for completeness/auditability.
   // Jobs must link to an existing opp via their quote. They never
   // create their own opportunity. Chain: Job → Quote → Opp → Account.
-  for (const job of (samples.jobs || [])) {
+  for (const jobList of (samples.jobs || [])) {
+    let job = jobList;
     try {
+      if (job.UUID) {
+        const detail = await fetchJobDetail(env, job.UUID, fetchCache);
+        if (detail) job = detail;
+      }
       const accountId = job.Client?.UUID
         ? await ensureAccount(env, job.Client.UUID, ctx)
         : null;
@@ -1384,7 +1397,7 @@ export async function processSamples(env, samples, options = {}) {
       const jr = await upsertJobRow(env, job, opp.id);
       counts.jobs++;
       links.push({ url: '/opportunities/' + opp.id, label: 'Job: ' + (job.ID || job.Name || opp.number) });
-    } catch (e) { errors.push('job ' + (job?.Name || '?') + ': ' + e.message); }
+    } catch (e) { errors.push('job ' + (jobList?.Name || job?.Name || '?') + ': ' + e.message); }
   }
 
   return { counts, errors, links };
