@@ -83,8 +83,7 @@ export async function onRequestGet(context) {
             (SELECT COUNT(*) FROM opportunities o WHERE o.account_id = a.id AND o.deleted_at IS NULL) AS opp_count
        FROM accounts a
       ${activeWhere ? activeWhere + ' AND a.deleted_at IS NULL' : 'WHERE a.deleted_at IS NULL'}
-      ORDER BY ${orderBy}
-      LIMIT 500`
+      ORDER BY ${orderBy}`
   );
 
   // Collect the set of distinct parent_group labels already in use so

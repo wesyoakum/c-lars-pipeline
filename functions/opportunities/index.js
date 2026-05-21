@@ -67,8 +67,7 @@ export async function onRequestGet(context) {
        LEFT JOIN accounts a ON a.id = o.account_id
        LEFT JOIN users ou ON ou.id = o.owner_user_id
       WHERE o.deleted_at IS NULL
-      ORDER BY o.updated_at DESC
-      LIMIT 500`
+      ORDER BY o.updated_at DESC`
   );
 
   // Active users for the inline-edit Owner dropdown — same canonical
