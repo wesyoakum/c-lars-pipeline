@@ -121,7 +121,11 @@ export async function onRequestGet(context) {
     { key: 'number',       label: 'Number',       sort: 'number', filter: 'text',   default: true },
     { key: 'title',        label: 'Title',        sort: 'text',   filter: 'text',   default: true },
     { key: 'account_name', label: 'Account',      sort: 'text',   filter: 'text',   default: true },
-    { key: 'type_label',   label: 'Type',         sort: 'text',   filter: 'select', default: true },
+    { key: 'type_label',   label: 'Type',         sort: 'text',   filter: 'multiselect', default: true,
+      multiselect: {
+        options: ['Spares', 'EPS', 'Refurb', 'Service'],
+        dataKey: 'types_raw',
+      } },
     { key: 'stage_label',  label: 'Stage',        sort: 'text',   filter: 'select', default: true, optionOrder: stageOrder,
       quickFilters: [
         { label: 'Active only', values: activeStageLabels },
@@ -163,6 +167,7 @@ export async function onRequestGet(context) {
     account_name: acct.label,
     account_href: acct.href,
     type_label: parseTransactionTypes(r.transaction_type).map(t => TYPE_LABELS[t] ?? t).join(', ') || '—',
+    types_raw: parseTransactionTypes(r.transaction_type).map(t => ({ spares: 'Spares', eps: 'EPS', refurb: 'Refurb', service: 'Service' })[t] ?? t).join(' '),
     stage_label: stageLabel(catalog, parseTransactionTypes(r.transaction_type)[0] ?? 'spares', r.stage),
     owner_user_id: r.owner_user_id ?? '',
     owner: r.owner_name ?? '',
@@ -353,6 +358,7 @@ export async function onRequestGet(context) {
                         data-title="${escape(r.title)}"
                         data-account_name="${escape(r.account_name)}"
                         data-type_label="${escape(r.type_label)}"
+                        data-types_raw="${escape(r.types_raw)}"
                         data-stage_label="${escape(r.stage_label)}"
                         data-owner="${escape(r.owner)}"
                         data-value="${escape(r.value === '' ? '' : String(r.value))}"

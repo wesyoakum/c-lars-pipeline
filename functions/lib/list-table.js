@@ -645,6 +645,26 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
           var rv = data[col.key];
           if (fs.min != null && fs.min !== '' && (rv === '' || Number(rv) < Number(fs.min))) return false;
           if (fs.max != null && fs.max !== '' && (rv === '' || Number(rv) > Number(fs.max))) return false;
+        } else if (col.filter === 'multiselect') {
+          if (fs.values && fs.values.length > 0) {
+            var dk = (col.multiselect && col.multiselect.dataKey) || col.key;
+            var rowTags = String(data[dk] || '').split(/\\s+/).filter(Boolean);
+            var mode = fs.mode || 'or';
+            if (mode === 'and') {
+              // AND = row must have ALL selected types (exact combo)
+              if (fs.values.length !== rowTags.length) return false;
+              for (var m = 0; m < fs.values.length; m++) {
+                if (rowTags.indexOf(fs.values[m]) === -1) return false;
+              }
+            } else {
+              // OR = row must have ANY of the selected types
+              var anyHit = false;
+              for (var m2 = 0; m2 < rowTags.length; m2++) {
+                if (fs.values.indexOf(rowTags[m2]) !== -1) { anyHit = true; break; }
+              }
+              if (!anyHit) return false;
+            }
+          }
         }
       }
       return true;
@@ -895,6 +915,29 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
                '<input type="number" class="col-filter-min" placeholder="min" value="' + escHtml(fs.min != null ? fs.min : '') + '">' +
                '<input type="number" class="col-filter-max" placeholder="max" value="' + escHtml(fs.max != null ? fs.max : '') + '">' +
                '</div>';
+      } else if (col.filter === 'multiselect' && col.multiselect) {
+        var msOpts = col.multiselect.options || [];
+        var msSelected = fs.values || [];
+        var msMode = fs.mode || 'or';
+        var msSelSet = {};
+        msSelected.forEach(function(v) { msSelSet[v] = true; });
+        out += '<div class="col-filter-mode" style="display:flex;gap:.3rem;margin-bottom:.4rem">' +
+               '<button type="button" data-ms-mode="or" class="btn btn-xs' + (msMode === 'or' ? ' primary' : '') + '" style="flex:1">Any (OR)</button>' +
+               '<button type="button" data-ms-mode="and" class="btn btn-xs' + (msMode === 'and' ? ' primary' : '') + '" style="flex:1">Exact (AND)</button>' +
+               '</div>';
+        out += '<div class="col-filter-actions">' +
+               '<button type="button" data-action="all">Select all</button>' +
+               '<button type="button" data-action="none">Clear</button>' +
+               '</div>';
+        out += '<div class="col-filter-list">';
+        msOpts.forEach(function(v) {
+          var checked = msSelSet[v] ? ' checked' : '';
+          out += '<label class="col-filter-item">' +
+                 '<input type="checkbox" value="' + escHtml(v) + '"' + checked + '>' +
+                 '<span>' + escHtml(v) + '</span>' +
+                 '</label>';
+        });
+        out += '</div>';
       }
       return out;
     }
@@ -964,6 +1007,44 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         }
         if (minInput) minInput.addEventListener('input', readRange);
         if (maxInput) maxInput.addEventListener('input', readRange);
+      } else if (col.filter === 'multiselect') {
+        var msCheckboxes = Array.prototype.slice.call(
+          popContent.querySelectorAll('.col-filter-list input[type="checkbox"]')
+        );
+        var msCurrentMode = (getFilterState()[key] || {}).mode || 'or';
+        function readMsSelected() {
+          var arr = [];
+          msCheckboxes.forEach(function(cb) { if (cb.checked) arr.push(cb.value); });
+          getFilterState()[key] = { values: arr, mode: msCurrentMode };
+          applyFilters();
+          save();
+        }
+        msCheckboxes.forEach(function(cb) { cb.addEventListener('change', readMsSelected); });
+        var msAllBtn = popContent.querySelector('[data-action="all"]');
+        var msNoneBtn = popContent.querySelector('[data-action="none"]');
+        if (msAllBtn) msAllBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          msCheckboxes.forEach(function(cb) { cb.checked = true; });
+          readMsSelected();
+        });
+        if (msNoneBtn) msNoneBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          msCheckboxes.forEach(function(cb) { cb.checked = false; });
+          readMsSelected();
+        });
+        var modeBtns = Array.prototype.slice.call(
+          popContent.querySelectorAll('[data-ms-mode]')
+        );
+        modeBtns.forEach(function(btn) {
+          btn.addEventListener('click', function(e) {
+            e.preventDefault();
+            msCurrentMode = btn.getAttribute('data-ms-mode');
+            modeBtns.forEach(function(b) {
+              b.classList.toggle('primary', b.getAttribute('data-ms-mode') === msCurrentMode);
+            });
+            readMsSelected();
+          });
+        });
       }
     }
 
