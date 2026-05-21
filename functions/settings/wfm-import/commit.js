@@ -1448,6 +1448,67 @@ export async function onRequestPost(context) {
       errors.push('quote-accepted post-pass: ' + (e.message || e));
     }
 
+    // Post-pass 3: fetch accepted quotes that /quote.api/list missed.
+    // WFM's /list doesn't return Accepted/Declined quotes. For each job
+    // with a non-empty ApprovedQuoteUUID, fetch the quote detail from
+    // WFM, upsert it, link it to the job, and mark it accepted.
+    try {
+      const jobsWithApprovedQuote = await all(env.DB,
+        `SELECT j.id AS job_id, j.opportunity_id,
+                json_extract(j.wfm_payload, '$.ApprovedQuoteUUID') AS aq_uuid
+           FROM jobs j
+          WHERE j.external_source = 'wfm'
+            AND j.deleted_at IS NULL
+            AND json_extract(j.wfm_payload, '$.ApprovedQuoteUUID') > ''
+            AND j.quote_id IS NULL`);
+
+      for (const row of jobsWithApprovedQuote) {
+        try {
+          // Check if the quote already exists in Pipeline
+          let q = await one(env.DB,
+            'SELECT id FROM quotes WHERE external_id = ? AND deleted_at IS NULL',
+            [row.aq_uuid]);
+
+          if (!q) {
+            // Fetch from WFM detail endpoint
+            const r = await apiGet(env, '/quote.api/get/' + encodeURIComponent(row.aq_uuid));
+            if (r.ok) {
+              const quoteRec = recordList(r.body, 'Quote')[0];
+              if (quoteRec) {
+                const result = await upsertQuote(env, quoteRec, row.opportunity_id);
+                q = { id: result.id };
+                counts.quotes = (counts.quotes || 0) + 1;
+                // Sync line items for this quote
+                try {
+                  const lineCount = await syncQuoteLines(env, result.id, row.aq_uuid, ctx || { fetchCache: new Map() });
+                  counts.quote_lines = (counts.quote_lines || 0) + lineCount;
+                } catch (_) {}
+              }
+            }
+          }
+
+          if (q) {
+            // Link job to quote and mark quote accepted
+            await run(env.DB,
+              'UPDATE jobs SET quote_id = ? WHERE id = ?',
+              [q.id, row.job_id]);
+            await run(env.DB,
+              `UPDATE quotes SET status = 'accepted' WHERE id = ? AND status != 'accepted'`,
+              [q.id]);
+            // Advance the parent opp to won
+            await run(env.DB,
+              `UPDATE opportunities SET stage = 'won'
+                WHERE id = ? AND stage != 'won' AND deleted_at IS NULL`,
+              [row.opportunity_id]);
+          }
+        } catch (e) {
+          errors.push('approved-quote fetch ' + row.aq_uuid + ': ' + (e.message || e));
+        }
+      }
+    } catch (e) {
+      errors.push('approved-quote post-pass: ' + (e.message || e));
+    }
+
     // Cap errors at 50 so the row-size stays bounded in D1; the UI
     // also caps display at 50.
     const cappedErrors = errors.slice(0, 50);
