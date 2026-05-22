@@ -1137,7 +1137,8 @@ export async function onRequestGet(context) {
                   ` : ''}
                   <div class="line-item-fields">
                     <input type="text" name="title" value="${escape(l.title ?? '')}" ${readOnly ? 'disabled' : ''}
-                           placeholder="Title / Part #" class="line-title" data-autosave>
+                           placeholder="Title / Part #" class="line-title" data-autosave data-typeahead="library"
+                           autocomplete="off">
                     <textarea name="description" ${readOnly ? 'disabled' : ''}
                               placeholder="Description" class="line-desc" rows="1" data-autosave>${escape(l.description ?? '')}</textarea>
                   </div>
@@ -3022,6 +3023,96 @@ export async function onRequestGet(context) {
       });
 
       modal.addEventListener('close', function(){ input.value = ''; results.innerHTML = ''; });
+    })();
+    </script>
+    <style>
+      .typeahead-dropdown{position:absolute;z-index:100;background:#fff;border:1px solid var(--border,#d8d8d8);border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,.12);max-height:220px;overflow-y:auto;width:100%;left:0;top:100%}
+      .typeahead-dropdown[hidden]{display:none}
+      .ta-item{padding:.35rem .5rem;cursor:pointer;font-size:.82rem;border-bottom:1px solid #f5f5f5}
+      .ta-item:hover,.ta-item.ta-active{background:#eef2ff}
+      .ta-item-name{font-weight:600}
+      .ta-item-meta{font-size:.75rem;color:var(--muted,#666)}
+    </style>
+    <script>
+    (function(){
+      var inputs = document.querySelectorAll('input[data-typeahead="library"]');
+      if (!inputs.length) return;
+      function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+      inputs.forEach(function(inp){
+        var wrap = inp.parentNode;
+        if (getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
+        var dd = document.createElement('div');
+        dd.className = 'typeahead-dropdown';
+        dd.hidden = true;
+        wrap.appendChild(dd);
+        var timer = null;
+        var activeIdx = -1;
+
+        inp.addEventListener('input', function(){
+          clearTimeout(timer);
+          var q = inp.value.trim();
+          if (q.length < 2) { dd.hidden = true; return; }
+          timer = setTimeout(function(){
+            fetch('/api/items-library-search?q=' + encodeURIComponent(q) + '&limit=8', { credentials: 'same-origin' })
+              .then(function(r){ return r.json(); })
+              .then(function(items){
+                if (!items.length) { dd.hidden = true; return; }
+                activeIdx = -1;
+                dd.innerHTML = items.map(function(it, i){
+                  var meta = [it.part_number, it.default_unit, it.default_price ? '$' + Number(it.default_price).toFixed(2) : ''].filter(Boolean).join(' · ');
+                  return '<div class="ta-item" data-idx="' + i + '" data-json="' + esc(JSON.stringify(it)) + '"><span class="ta-item-name">' + esc(it.name) + '</span> <span class="ta-item-meta">' + esc(meta) + '</span></div>';
+                }).join('');
+                dd.hidden = false;
+              })
+              .catch(function(){ dd.hidden = true; });
+          }, 200);
+        });
+
+        dd.addEventListener('click', function(e){
+          var el = e.target.closest('.ta-item');
+          if (!el) return;
+          applyItem(inp, JSON.parse(el.getAttribute('data-json')));
+          dd.hidden = true;
+        });
+
+        inp.addEventListener('keydown', function(e){
+          if (dd.hidden) return;
+          var items = dd.querySelectorAll('.ta-item');
+          if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, items.length - 1); highlight(items); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, 0); highlight(items); }
+          else if (e.key === 'Enter' && activeIdx >= 0 && items[activeIdx]) {
+            e.preventDefault();
+            applyItem(inp, JSON.parse(items[activeIdx].getAttribute('data-json')));
+            dd.hidden = true;
+          }
+          else if (e.key === 'Escape') { dd.hidden = true; }
+        });
+
+        function highlight(items){
+          items.forEach(function(el, i){ el.classList.toggle('ta-active', i === activeIdx); });
+          if (items[activeIdx]) items[activeIdx].scrollIntoView({ block: 'nearest' });
+        }
+
+        inp.addEventListener('blur', function(){ setTimeout(function(){ dd.hidden = true; }, 150); });
+      });
+
+      function applyItem(inp, it){
+        var form = inp.closest('form');
+        if (!form) return;
+        inp.value = it.name || '';
+        var desc = form.querySelector('[name="description"]');
+        var unit = form.querySelector('[name="unit"]');
+        var price = form.querySelector('[name="unit_price"]');
+        var qty = form.querySelector('[name="quantity"]');
+        if (desc && !desc.value && it.description) desc.value = it.description;
+        if (unit && it.default_unit) unit.value = it.default_unit;
+        if (price && it.default_price) price.value = it.default_price;
+        // Trigger autosave on each field
+        [inp, desc, unit, price].forEach(function(el){
+          if (el) el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+      }
     })();
     </script>
   ` : '';
