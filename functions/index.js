@@ -109,10 +109,10 @@ export async function onRequestGet(context) {
     for (const s of list) if (!stageLabels.has(s.stage_key)) stageLabels.set(s.stage_key, s.label);
   }
 
-  const [oppCount, acctCount, quoteCount] = await Promise.all([
-    one(env.DB, 'SELECT COUNT(*) AS n FROM opportunities WHERE deleted_at IS NULL'),
-    one(env.DB, 'SELECT COUNT(*) AS n FROM accounts WHERE deleted_at IS NULL'),
-    one(env.DB, 'SELECT COUNT(*) AS n FROM quotes WHERE deleted_at IS NULL'),
+  const [oppCount, quoteCount, bookings2026] = await Promise.all([
+    one(env.DB, `SELECT COUNT(*) AS n FROM opportunities WHERE deleted_at IS NULL AND stage IN ('lead','rfq_received','quote_drafted','quote_submitted','quote_under_revision','revised_quote_submitted','quote_expired')`),
+    one(env.DB, `SELECT COUNT(*) AS n FROM quotes WHERE deleted_at IS NULL AND status IN ('draft','issued','revision_draft','revision_issued','expired')`),
+    one(env.DB, `SELECT COALESCE(SUM(estimated_value_usd), 0) AS total FROM opportunities WHERE stage IN ('completed','job_in_progress') AND deleted_at IS NULL AND actual_close_date >= '2026-01-01'`),
   ]);
 
   const wonStages = new Set(['completed', 'job_in_progress']);
@@ -146,7 +146,7 @@ export async function onRequestGet(context) {
     <div class="dashboard-metrics">
       <div class="metric-card">
         <span class="metric-value">${oppCount?.n ?? 0}</span>
-        <span class="metric-label">Opportunities</span>
+        <span class="metric-label">Active opps</span>
       </div>
       <div class="metric-card">
         <span class="metric-value">$${formatMoney(totals.pipeline)}</span>
@@ -154,15 +154,15 @@ export async function onRequestGet(context) {
       </div>
       <div class="metric-card">
         <span class="metric-value">${quoteCount?.n ?? 0}</span>
-        <span class="metric-label">Quotes</span>
+        <span class="metric-label">Active quotes</span>
       </div>
       <div class="metric-card">
         <span class="metric-value">${winRate}%</span>
         <span class="metric-label">Win rate (90d)</span>
       </div>
       <div class="metric-card">
-        <span class="metric-value">${acctCount?.n ?? 0}</span>
-        <span class="metric-label">Accounts</span>
+        <span class="metric-value">$${formatMoney(bookings2026?.total ?? 0)}</span>
+        <span class="metric-label">Bookings YTD 2026</span>
       </div>
     </div>
 
