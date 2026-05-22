@@ -228,13 +228,15 @@ export async function onRequestGet(context) {
             <a class="btn btn-sm" href="/activities">All tasks</a>
           </div>
         </div>
-        <table class="data compact">
+        <style>.dash-tasks td,.dash-tasks th{vertical-align:middle}</style>
+        <table class="data compact dash-tasks">
           <thead>
             <tr>
-              <th style="width:2rem"></th>
+              <th style="width:2rem">\u2713</th>
               <th>Subject</th>
               <th>Opportunity</th>
               <th>Due</th>
+              <th style="width:2rem"></th>
             </tr>
           </thead>
           <tbody>
@@ -244,23 +246,21 @@ export async function onRequestGet(context) {
                 <tr class="${isOverdue ? 'row-overdue' : ''}">
                   <td>
                     <form method="post" action="/activities/${escape(t.id)}/complete" style="display:inline">
-                      <button type="submit" class="check-btn" title="Mark complete">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
-                          <circle cx="8" cy="8" r="6"/>
-                        </svg>
-                      </button>
-                    </form>
-                    <form method="post" action="/activities/${escape(t.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this task?')">
-                      <input type="hidden" name="return_to" value="/">
-                      <button type="submit" class="row-delete-btn" title="Delete task" aria-label="Delete task">×</button>
+                      <button type="submit" class="task-complete-toggle" title="Mark complete" aria-label="Mark complete"></button>
                     </form>
                   </td>
                   <td><a href="/activities/${escape(t.id)}"><strong>${escape(t.subject || '(no subject)')}</strong></a></td>
                   <td>${t.opp_id
                     ? html`<a href="/opportunities/${escape(t.opp_id)}"><code>${escape(t.opp_number ?? '')}</code></a>`
-                    : html`<span class="muted">—</span>`}
+                    : html`<span class="muted">\u2014</span>`}
                   </td>
-                  <td class="${isOverdue ? 'overdue-text' : ''}">${t.due_at ? escape(t.due_at.slice(0, 10)) : html`<span class="muted">—</span>`}</td>
+                  <td class="${isOverdue ? 'overdue-text' : ''}">${t.due_at ? escape(t.due_at.slice(0, 10)) : html`<span class="muted">\u2014</span>`}</td>
+                  <td style="text-align:center">
+                    <form method="post" action="/activities/${escape(t.id)}/delete" style="display:inline;margin:0" onsubmit="return confirm('Delete this task?')">
+                      <input type="hidden" name="return_to" value="/">
+                      <button type="submit" class="row-delete-btn" title="Delete task" aria-label="Delete task" style="display:inline-flex;align-items:center;justify-content:center">&times;</button>
+                    </form>
+                  </td>
                 </tr>
               `;
             })}
