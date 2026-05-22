@@ -159,7 +159,8 @@ export async function onRequestGet(context) {
         ? html`<p class="muted">No activities found.</p>`
         : html`
           <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
-            <table class="data compact opp-list-table">
+            <table class="data compact opp-list-table" style="vertical-align:middle">
+            <style>.opp-list-table td,.opp-list-table th{vertical-align:middle}</style>
               ${listTableHead(columns, rowData)}
               <tbody data-role="rows">
                 ${rowData.map(r => html`
