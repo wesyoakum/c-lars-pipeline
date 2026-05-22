@@ -3690,7 +3690,6 @@ table.data tr.totals-row td {
    PDF: heavier top border + slightly larger / bolder type. */
 table.data tr.totals-row:last-child td {
   border-top: 2px solid var(--fg);
-  font-size: 1.05em;
   font-weight: 700;
   padding-top: 0.55rem;
   padding-bottom: 0.55rem;
