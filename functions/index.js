@@ -50,7 +50,7 @@ export async function onRequestGet(context) {
                 a.name AS account_name, a.id AS account_id
            FROM opportunities o
            LEFT JOIN accounts a ON a.id = o.account_id
-          WHERE o.stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
+          WHERE o.stage NOT IN ('completed', 'lost', 'closed_died')
             AND (o.owner_user_id = ? OR o.owner_user_id IS NULL)
           ORDER BY o.updated_at DESC
           LIMIT 20`,
@@ -63,7 +63,7 @@ export async function onRequestGet(context) {
     env.DB,
     `SELECT stage, COUNT(*) AS n, COALESCE(SUM(estimated_value_usd), 0) AS total_value
        FROM opportunities
-      WHERE stage IN ('closed_won', 'closed_lost')
+      WHERE stage IN ('completed', 'job_in_progress', 'lost', 'closed_died', 'quote_expired')
         AND updated_at >= datetime('now', '-90 days')
         AND deleted_at IS NULL
       GROUP BY stage`
@@ -115,10 +115,13 @@ export async function onRequestGet(context) {
     one(env.DB, 'SELECT COUNT(*) AS n FROM quotes WHERE deleted_at IS NULL'),
   ]);
 
-  const wonRow = winLoss.find(w => w.stage === 'closed_won');
-  const lostRow = winLoss.find(w => w.stage === 'closed_lost');
-  const wonCount = wonRow?.n ?? 0;
-  const lostCount = lostRow?.n ?? 0;
+  const wonStages = new Set(['completed', 'job_in_progress']);
+  const lostStages = new Set(['lost', 'closed_died', 'quote_expired']);
+  let wonCount = 0, lostCount = 0;
+  for (const w of winLoss) {
+    if (wonStages.has(w.stage)) wonCount += w.n;
+    else if (lostStages.has(w.stage)) lostCount += w.n;
+  }
   const winRate = (wonCount + lostCount) > 0
     ? Math.round(wonCount / (wonCount + lostCount) * 100)
     : 0;
@@ -195,7 +198,8 @@ export async function onRequestGet(context) {
         <div class="carousel-slide" :class="{active: current === 6}"><canvas id="car-bookings"></canvas></div>
         <div class="carousel-slide" :class="{active: current === 7}"><canvas id="car-forecast"></canvas></div>
         <div class="carousel-slide" :class="{active: current === 8}"><canvas id="car-bottleneck"></canvas></div>
-        <div class="carousel-slide" :class="{active: current === 9}">
+        <div class="carousel-slide" :class="{active: current === 9}"><canvas id="car-sparesWinRate"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 10}">
           <div class="carousel-heatmap-wrap">
             ${renderHeatmapGrid(charts.heatmap)}
           </div>

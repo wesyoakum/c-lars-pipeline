@@ -56,6 +56,9 @@ export const CHART_SLIDES = [
   { key: 'bottleneck', title: 'Bottleneck — avg days in current stage',
     caption: 'How long open opps have been sitting in each stage.',
     kind: 'chart' },
+  { key: 'sparesWinRate', title: 'Spares win rate',
+    caption: 'Won vs lost/expired/died across all spares opps that reached a terminal outcome.',
+    kind: 'chart' },
   { key: 'heatmap',    title: 'Team activity heatmap — last 12 weeks',
     caption: 'Tasks, notes, calls, meetings, and emails logged day-by-day.',
     kind: 'heatmap' },
@@ -305,7 +308,35 @@ export async function gatherDashboardCharts(db) {
   const maxCount = Math.max(1, ...cells.flat().map(c => c.count));
   const heatmap = { cells, weeksBack, total: heatmapTotal, maxCount };
 
-  const charts = { stage, type, owner, topAccounts, segment, aging, bookings, forecast, bottleneck, heatmap };
+  // Spares win rate — out of all spares opps that reached a terminal
+  // outcome (quote_expired, job_in_progress, completed, lost, closed_died).
+  // Won = completed + job_in_progress. Lost = the rest.
+  const sparesWinRows = await all(db,
+    `SELECT stage, COUNT(*) AS n
+       FROM opportunities
+      WHERE transaction_type LIKE '%spares%'
+        AND stage IN ('quote_expired', 'job_in_progress', 'completed', 'lost', 'closed_died')
+        AND deleted_at IS NULL
+      GROUP BY stage`);
+  const sparesWonStages = new Set(['completed', 'job_in_progress']);
+  let sparesWon = 0, sparesExpired = 0, sparesLost = 0, sparesDied = 0;
+  for (const r of sparesWinRows) {
+    if (sparesWonStages.has(r.stage)) sparesWon += r.n;
+    else if (r.stage === 'quote_expired') sparesExpired += r.n;
+    else if (r.stage === 'lost') sparesLost += r.n;
+    else if (r.stage === 'closed_died') sparesDied += r.n;
+  }
+  const sparesTotal = sparesWon + sparesExpired + sparesLost + sparesDied;
+  const sparesWinPct = sparesTotal > 0 ? Math.round((sparesWon / sparesTotal) * 100) : 0;
+  const sparesWinRate = {
+    labels: ['Won', 'Expired', 'Lost', 'Died'],
+    values: [sparesWon, sparesExpired, sparesLost, sparesDied],
+    colors: ['#10b981', '#991b1b', '#ef4444', '#dc2626'],
+    pct: sparesWinPct,
+    total: sparesTotal,
+  };
+
+  const charts = { stage, type, owner, topAccounts, segment, aging, bookings, forecast, bottleneck, heatmap, sparesWinRate };
 
   // Pre-serialize each payload so the caller can drop straight into
   // a template via raw(). Heatmap is rendered via CSS grid, not a
@@ -558,6 +589,40 @@ export function buildChartInitScript(prefix, chartsJson) {
               }
             },
             scales: { y: { beginAtZero: true, title: { display: true, text: 'Average days' } } }
+          }
+        });
+      });
+
+      var swr = ${chartsJson.sparesWinRate};
+      if (swr.total > 0) make('sparesWinRate', function(canvas) {
+        new Chart(canvas, {
+          type: 'pie',
+          data: {
+            labels: swr.labels,
+            datasets: [{
+              data: swr.values,
+              backgroundColor: swr.colors
+            }]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'bottom' },
+              title: {
+                display: true,
+                text: swr.pct + '% win rate (' + swr.total + ' resolved spares opps)',
+                font: { size: 16, weight: '600' }
+              },
+              tooltip: {
+                callbacks: {
+                  label: function(ctx) {
+                    var total = swr.values.reduce(function(a,b){return a+b},0);
+                    var pct = total > 0 ? Math.round(ctx.parsed / total * 100) : 0;
+                    return ctx.label + ': ' + ctx.parsed + ' (' + pct + '%)';
+                  }
+                }
+              }
+            }
           }
         });
       });
