@@ -51,6 +51,8 @@ export async function onRequestGet(context) {
     `SELECT DISTINCT stage_key FROM stage_definitions ORDER BY sort_order`);
   const stageKeyOrder = stageOrderRows.map(r => r.stage_key);
 
+  const STATUS_ORDER = ['Draft', 'Issued', 'Revision Draft', 'Revision Issued', 'Expired', 'Accepted', 'Rejected', 'Dead'];
+
   const columns = [
     { key: 'number',       label: 'Number',      sort: 'text',   filter: 'text',   default: true },
     { key: 'revision',     label: 'Rev',          sort: 'text',   filter: 'text',   default: true },
@@ -63,8 +65,9 @@ export async function onRequestGet(context) {
       // Preset subsets shown above the checkbox list in the filter
       // popover. "Active" = the statuses the user is likely still
       // acting on; "Inactive" = fully-settled / dead ones.
+      optionOrder: STATUS_ORDER,
       quickFilters: [
-        { label: 'Active',   values: ['Draft', 'Revision Draft', 'Issued', 'Revision Issued', 'Expired'] },
+        { label: 'Active',   values: ['Draft', 'Issued', 'Revision Draft', 'Revision Issued', 'Expired'] },
         { label: 'Inactive', values: ['Accepted', 'Rejected', 'Dead'] },
       ],
     },
@@ -149,8 +152,7 @@ export async function onRequestGet(context) {
     '/quotes'
   );
 
-  // Status order for chart — mirrors the quote lifecycle.
-  const STATUS_ORDER = ['Draft', 'Revision Draft', 'Issued', 'Revision Issued', 'Expired', 'Accepted', 'Rejected', 'Dead'];
+  // (STATUS_ORDER moved above columns definition)
 
   const quoteChartScript = `
 (function(){
