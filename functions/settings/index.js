@@ -64,9 +64,9 @@ export async function onRequestGet(context) {
     for (const qt of VALIDITY_DAYS_TYPES) {
       validityDays[qt] = await getQuoteValidityDays(env, qt, 14);
     }
-    // Current EPS default payment schedule (migration 0040).
+    // Current New Product default payment schedule (migration 0040).
     epsSchedule = await loadEpsSchedule(env);
-    // Non-EPS payment schedules (migration 0094).
+    // Non-New Product payment schedules (migration 0094).
     var paymentSchedules = await loadPaymentSchedules(env);
     // Site-wide messaging kill-switch (migration 0049).
     const sp = await one(env.DB, 'SELECT messaging_enabled FROM site_prefs WHERE id = 1');
@@ -240,10 +240,10 @@ export async function onRequestGet(context) {
       </section>
 
       <section class="card" x-data="epsScheduleEditor(${JSON.stringify(epsSchedule || { rows: [] })}, ${JSON.stringify(DEFAULT_EPS_SCHEDULE)})">
-        <h2>EPS default payment schedule</h2>
+        <h2>New Product default payment schedule</h2>
         <p class="muted">
           Milestone rows that populate the "Default EPS Terms" textarea
-          on new EPS quotes. Percentages must sum to exactly 100 —
+          on new New Product quotes. Percentages must sum to exactly 100 —
           they're applied to the quote total. Use <code>{weeks}</code>
           in the label to substitute a delivery-week value, computed
           as <code>floor(num &times; delivery_weeks / den)</code>.
@@ -526,7 +526,7 @@ document.addEventListener('alpine:init', function () {
     };
   });
 
-  // EPS default payment-schedule editor. A single blob stored on
+  // New Product default payment-schedule editor. A single blob stored on
   // site_prefs.eps_schedule (migration 0040). Validates client-side
   // (percentages must sum to 100) so the Save button is disabled
   // until the total is correct; the server validates again and is
@@ -546,7 +546,7 @@ document.addEventListener('alpine:init', function () {
       rows: cloneRows(initial),
       siteDefault: siteDefault,
       busy: false,
-      saveLabel: 'Save EPS schedule',
+      saveLabel: 'Save New Product schedule',
       get totalPct() {
         var sum = 0;
         this.rows.forEach(function (r) {
@@ -631,21 +631,21 @@ document.addEventListener('alpine:init', function () {
         }).then(function () {
           self.saveLabel = 'Saved \u2713';
           self.busy = false;
-          setTimeout(function () { self.saveLabel = 'Save EPS schedule'; }, 1500);
+          setTimeout(function () { self.saveLabel = 'Save New Product schedule'; }, 1500);
         }).catch(function (err) {
           self.busy = false;
-          self.saveLabel = 'Save EPS schedule';
+          self.saveLabel = 'Save New Product schedule';
           alert('Could not save: ' + (err && err.message ? err.message : 'unknown error'));
         });
       },
       resetToDefault: function () {
-        if (!confirm('Reset the EPS schedule to the built-in default (10/15/30/20/20/5 — six milestones aligned with Katana billing)? This does not save until you click "Save EPS schedule".')) return;
+        if (!confirm('Reset the New Product schedule to the built-in default (10/15/30/20/20/5 — six milestones aligned with Katana billing)? This does not save until you click "Save New Product schedule".')) return;
         this.rows = cloneRows(this.siteDefault);
       },
     };
   });
 
-  // Non-EPS payment schedule editor (spares, service, refurb). Same
+  // Non-New Product payment schedule editor (spares, service, refurb). Same
   // pattern as EPS but simpler — no weeks columns, just percent + label.
   Alpine.data('paymentScheduleEditor', function (quoteType, initial, siteDefault) {
     function cloneRows(src) {

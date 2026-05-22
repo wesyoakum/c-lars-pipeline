@@ -76,7 +76,7 @@ export async function onRequestGet(context) {
   if (!(job.job_type || '').split(',').includes('eps')) {
     return redirectWithFlash(
       `/jobs/${jobId}`,
-      'NTP is only applicable to EPS jobs.',
+      'NTP is only applicable to New Product jobs.',
       'error'
     );
   }

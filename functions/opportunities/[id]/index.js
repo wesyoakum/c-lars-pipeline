@@ -42,13 +42,13 @@ const UPDATE_FIELDS = [
 ];
 
 const TYPE_LABELS = {
-  spares: 'Spares', eps: 'Engineered Product (EPS)',
+  spares: 'Spares', eps: 'New Product',
   refurb: 'Refurbishment', service: 'Service',
 };
 
 const TYPE_OPTIONS = [
   { value: 'spares', label: 'Spares' },
-  { value: 'eps', label: 'Engineered Product (EPS)' },
+  { value: 'eps', label: 'New Product' },
   { value: 'refurb', label: 'Refurbishment' },
   { value: 'service', label: 'Service' },
 ];
@@ -1864,7 +1864,7 @@ function oppTypePicker(initial, oppId) {
     selected: initial ? initial.split(',').map(function(s){ return s.trim(); }).filter(Boolean) : [],
     allTypes: [
       { value: 'spares', label: 'Spares' },
-      { value: 'eps', label: 'EPS' },
+      { value: 'eps', label: 'New Product' },
       { value: 'refurb', label: 'Refurb' },
       { value: 'service', label: 'Service' },
     ],

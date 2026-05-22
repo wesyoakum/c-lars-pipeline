@@ -14,7 +14,7 @@ import { parseTransactionTypes } from '../../lib/validators.js';
 
 const TYPE_OPTIONS = [
   { value: 'spares', label: 'Spares' },
-  { value: 'eps', label: 'Engineered Product (EPS)' },
+  { value: 'eps', label: 'New Product' },
   { value: 'refurb', label: 'Refurbishment' },
   { value: 'service', label: 'Service' },
 ];

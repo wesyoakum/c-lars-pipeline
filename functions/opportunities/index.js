@@ -21,7 +21,7 @@ import { displayAccountForGroupMode } from '../lib/account-groups.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
-  eps: 'Engineered Product (EPS)',
+  eps: 'New Product',
   refurb: 'Refurbishment',
   service: 'Service',
 };
@@ -84,7 +84,7 @@ export async function onRequestGet(context) {
 
   const typeOptions = [
     { value: 'spares', label: 'Spares' },
-    { value: 'eps', label: 'EPS' },
+    { value: 'eps', label: 'New Product' },
     { value: 'refurb', label: 'Refurbishment' },
     { value: 'service', label: 'Service' },
   ];
@@ -131,7 +131,7 @@ export async function onRequestGet(context) {
     { key: 'account_name', label: 'Account',      sort: 'text',   filter: 'text',   default: true },
     { key: 'type_label',   label: 'Type',         sort: 'text',   filter: 'multiselect', default: true,
       multiselect: {
-        options: ['Spares', 'EPS', 'Refurb', 'Service'],
+        options: ['Spares', 'New Product', 'Refurb', 'Service'],
         dataKey: 'types_raw',
       } },
     { key: 'stage_label',  label: 'Stage',        sort: 'text',   filter: 'select', default: true, optionOrder: stageOrder,
@@ -178,7 +178,7 @@ export async function onRequestGet(context) {
     account_href: acct.href,
     transaction_type: r.transaction_type ?? '',
     type_label: parseTransactionTypes(r.transaction_type).map(t => TYPE_LABELS[t] ?? t).join(', ') || '—',
-    types_raw: parseTransactionTypes(r.transaction_type).map(t => ({ spares: 'Spares', eps: 'EPS', refurb: 'Refurb', service: 'Service' })[t] ?? t).join(' '),
+    types_raw: parseTransactionTypes(r.transaction_type).map(t => ({ spares: 'Spares', eps: 'New Product', refurb: 'Refurb', service: 'Service' })[t] ?? t).join(' '),
     stage_label: stageLabel(catalog, parseTransactionTypes(r.transaction_type)[0] ?? 'spares', r.stage),
     owner_user_id: r.owner_user_id ?? '',
     owner: r.owner_name ?? '',

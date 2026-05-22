@@ -93,7 +93,7 @@ export async function onRequestGet(context) {
         <h1>Katana milestones</h1>
       </div>
       <p class="muted" style="margin-top:0">
-        Map each EPS payment milestone to the Katana variant it bills
+        Map each New Product payment milestone to the Katana variant it bills
         against. The "Push to Katana" button on a won quote uses this
         map to build the sales-order rows. Percentages must sum to 100.
       </p>

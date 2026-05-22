@@ -22,7 +22,7 @@ export async function onRequestPost(context) {
   if (!(job.job_type || '').split(',').includes('eps')) {
     return redirectWithFlash(
       `/jobs/${jobId}/ntp`,
-      'NTP is only applicable to EPS jobs.',
+      'NTP is only applicable to New Product jobs.',
       'error'
     );
   }

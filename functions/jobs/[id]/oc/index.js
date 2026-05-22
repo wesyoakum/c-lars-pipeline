@@ -122,7 +122,7 @@ export async function onRequestGet(context) {
   const canGenerate = !!sourceQuote;
   const jobType = (job.job_type || '').split(',')[0].trim() || 'spares';
   const jobTypeLabel = {
-    spares: 'Spares', service: 'Service', eps: 'EPS', refurb: 'Refurbishment',
+    spares: 'Spares', service: 'Service', eps: 'New Product', refurb: 'Refurbishment',
   }[jobType] || jobType;
   const ocTemplateKey = templateTypeForOC(jobType);
 

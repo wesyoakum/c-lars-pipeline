@@ -522,7 +522,7 @@ const WIZARD_MODAL_MARKUP = (
   '<select x-model="$store.wizard.plan.opportunity.proposed_new.transaction_type" required>' +
   '<option value="">— Pick a type —</option>' +
   '<option value="spares">Spares</option>' +
-  '<option value="eps">Engineered Product (EPS)</option>' +
+  '<option value="eps">New Product</option>' +
   '<option value="refurb">Refurbishment</option>' +
   '<option value="service">Service</option>' +
   '</select>' +
@@ -582,7 +582,7 @@ const WIZARD_MODAL_MARKUP = (
   '<select x-model="$store.wizard.plan.opportunity.proposed_new.transaction_type">' +
   '<option value="">— Pick a type —</option>' +
   '<option value="spares">Spares</option>' +
-  '<option value="eps">Engineered Product (EPS)</option>' +
+  '<option value="eps">New Product</option>' +
   '<option value="refurb">Refurbishment</option>' +
   '<option value="service">Service</option>' +
   '</select>' +

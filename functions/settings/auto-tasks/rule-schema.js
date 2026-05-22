@@ -243,14 +243,14 @@ export const STAGE_KEYS = [
 
 export const TRANSACTION_TYPES = [
   { key: 'spares',  label: 'Spares' },
-  { key: 'eps',     label: 'EPS' },
+  { key: 'eps',     label: 'New Product' },
   { key: 'refurb',  label: 'Refurb' },
   { key: 'service', label: 'Service' },
 ];
 
 export const QUOTE_TYPES = [
   { key: 'spares',              label: 'Spares' },
-  { key: 'eps',                 label: 'EPS' },
+  { key: 'eps',                 label: 'New Product' },
   { key: 'refurb_baseline',     label: 'Refurb — baseline' },
   { key: 'refurb_modified',     label: 'Refurb — modified' },
   { key: 'refurb_supplemental', label: 'Refurb — supplemental' },

@@ -1,7 +1,7 @@
 // functions/lib/payment-schedules.js
 //
-// Fixed-percentage payment schedules for non-EPS quote types (spares,
-// service, refurb_baseline, refurb_modified). Unlike the EPS schedule,
+// Fixed-percentage payment schedules for non-New Product quote types (spares,
+// service, refurb_baseline, refurb_modified). Unlike the New Product schedule,
 // these have no delivery-weeks math — just percent + label rows.
 //
 // Stored as a JSON blob in site_prefs.payment_schedules, keyed by

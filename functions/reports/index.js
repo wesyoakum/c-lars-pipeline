@@ -371,7 +371,7 @@ export async function onRequestGet(context) {
 
   `;
 
-  const TYPE_LABELS = { spares: 'Spares', eps: 'EPS', refurb: 'Refurb', service: 'Service' };
+  const TYPE_LABELS = { spares: 'Spares', eps: 'New Product', refurb: 'Refurb', service: 'Service' };
 
   const ownerChartData = JSON.stringify({
     labels: pipelineByOwner.map(o => o.owner_name),

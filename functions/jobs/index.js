@@ -39,7 +39,7 @@ function jsonResponse(data, status = 200) {
 
 const TYPE_LABELS = {
   spares: 'Spares',
-  eps: 'Engineered Product (EPS)',
+  eps: 'New Product',
   refurb: 'Refurbishment',
   service: 'Service',
 };
@@ -284,7 +284,7 @@ export async function onRequestGet(context) {
       </div>
 
       ${rows.length === 0
-        ? html`<p class="muted">No jobs yet. Jobs are usually auto-created when an opportunity reaches Closed Won \u2014 click the <strong>+</strong> button above to start one earlier (e.g. on NTP for an EPS build).</p>`
+        ? html`<p class="muted">No jobs yet. Jobs are usually auto-created when an opportunity reaches Closed Won \u2014 click the <strong>+</strong> button above to start one earlier (e.g. on NTP for an New Product build).</p>`
         : html`
           <div class="opp-list" data-columns="${escape(JSON.stringify(columns))}">
             <table class="data opp-list-table">

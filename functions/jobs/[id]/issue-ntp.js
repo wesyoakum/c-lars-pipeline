@@ -25,7 +25,7 @@ export async function onRequestPost(context) {
   if (!job) return redirectWithFlash('/jobs', 'Job not found.', 'error');
 
   if (!(job.job_type || '').split(',').includes('eps')) {
-    return redirectWithFlash(`/jobs/${jobId}/ntp`, 'NTP is only applicable to EPS jobs.', 'error');
+    return redirectWithFlash(`/jobs/${jobId}/ntp`, 'NTP is only applicable to New Product jobs.', 'error');
   }
   if (job.ntp_issued_at) {
     return redirectWithFlash(

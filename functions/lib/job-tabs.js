@@ -6,7 +6,7 @@
 // looking at.
 //
 // `active` selects the highlighted tab: 'overview' | 'oc' | 'ntp'.
-// The NTP tab is hidden for non-EPS jobs since NTP doesn't apply.
+// The NTP tab is hidden for non-New Product jobs since NTP doesn't apply.
 
 import { html, escape } from './layout.js';
 

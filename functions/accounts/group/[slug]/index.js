@@ -34,7 +34,7 @@ const SEGMENT_OPTIONS = [
 
 const TYPE_LABELS = {
   spares: 'Spares',
-  eps: 'Engineered Product (EPS)',
+  eps: 'New Product',
   refurb: 'Refurbishment',
   service: 'Service',
 };

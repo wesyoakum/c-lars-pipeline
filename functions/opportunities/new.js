@@ -12,7 +12,7 @@ import { readFlash } from '../lib/http.js';
 
 const TYPE_OPTIONS = [
   { value: 'spares', label: 'Spares' },
-  { value: 'eps', label: 'EPS' },
+  { value: 'eps', label: 'New Product' },
   { value: 'refurb', label: 'Refurb' },
   { value: 'service', label: 'Service' },
 ];

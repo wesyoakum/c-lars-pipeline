@@ -27,7 +27,7 @@ import { changeOppStage } from '../../../lib/stage-transitions.js';
 
 const TXN_LABELS = {
   spares: 'Spares',
-  eps: 'Engineered Product (EPS)',
+  eps: 'New Product',
   refurb: 'Refurbishment',
   service: 'Service',
 };
@@ -147,7 +147,7 @@ export async function onRequestPost(context) {
   //   - If any part is spares/service, use the 14d expiration (shorter).
   //   - Prefer spares terms when spares is in the mix (they are the
   //     strictest — 50% PO / 50% delivery Net 15). Fall back to service
-  //     terms when it's the only non-EPS/refurb part. EPS terms are
+  //     terms when it's the only non-New Product/refurb part. EPS terms are
   //     computed client-side from delivery weeks so we don't seed
   //     payment_terms for EPS-only quotes.
   //   - Delivery terms default to the EPS / refurb saved default

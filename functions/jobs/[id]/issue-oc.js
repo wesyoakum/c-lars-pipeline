@@ -7,7 +7,7 @@
 // For refurb: status → handed_off (baseline OC).
 //
 // Also advances the parent opportunity's stage to 'oc_issued' (if it
-// isn't already there) and fires oc.issued + job.handed_off (non-EPS)
+// isn't already there) and fires oc.issued + job.handed_off (non-New Product)
 // + opportunity.stage_changed auto-task events so downstream rules
 // (e.g. "Notify Finance to send initial invoice") can create tasks.
 

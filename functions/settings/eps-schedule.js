@@ -3,7 +3,7 @@
 // POST /settings/eps-schedule
 //   Body JSON: { rows: [ { percent, label, weeks_num?, weeks_den? }, ... ] }
 //
-// Admin-only. Validates and upserts the EPS default payment schedule
+// Admin-only. Validates and upserts the New Product default payment schedule
 // into site_prefs.eps_schedule (migration 0040). Returns the
 // normalized schedule on success so the client can replace its local
 // view without an extra round-trip.

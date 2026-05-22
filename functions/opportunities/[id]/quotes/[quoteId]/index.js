@@ -313,10 +313,10 @@ export async function onRequestGet(context) {
   // components can consult (or save) defaults without a round-trip.
   const termDefaults = await loadQuoteTermDefaultsMap(env);
 
-  // Admin-editable EPS default payment schedule (migration 0040).
+  // Admin-editable New Product default payment schedule (migration 0040).
   // Serialized into JS below so the epsTerms Alpine component renders
   // the configured rows instead of the old hardcoded 25/25/25/15/10
-  // string. Hybrid/non-EPS quotes ignore this blob.
+  // string. Hybrid/non-New Product quotes ignore this blob.
   const epsSchedule = await loadEpsSchedule(env);
   const paymentSchedules = await loadPaymentSchedules(env);
 
@@ -1848,7 +1848,7 @@ export async function onRequestGet(context) {
         };
       });
 
-      // --- EPS default payment terms based on delivery weeks ---
+      // --- New Product default payment terms based on delivery weeks ---
       var _quoteType = ${raw(JSON.stringify(quote.quote_type || ''))};
       var _deliveryWeeks = null;
       var _initialPaymentTerms = ${raw(JSON.stringify(quote.payment_terms || ''))};

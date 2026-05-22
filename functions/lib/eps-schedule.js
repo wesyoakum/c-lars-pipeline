@@ -1,6 +1,6 @@
 // functions/lib/eps-schedule.js
 //
-// Admin-editable EPS default payment schedule. Stored as a JSON blob
+// Admin-editable New Product default payment schedule. Stored as a JSON blob
 // on site_prefs.eps_schedule (migration 0040). Rendered client-side
 // by the epsTerms Alpine component on the quote detail page, and
 // server-side by any future quote-doc generator that needs the
@@ -20,7 +20,7 @@ import { one, batch, stmt } from './db.js';
 import { auditStmt } from './audit.js';
 
 /**
- * Default 6-milestone EPS schedule. Used as the fallback when
+ * Default 6-milestone New Product schedule. Used as the fallback when
  * site_prefs.eps_schedule is NULL. The percent column sums to 100
  * (10 + 15 + 30 + 20 + 20 + 5). Rows 3-6 use the {weeks} token —
  * substituted at render time via floor(weeks_num * W / weeks_den)
@@ -130,7 +130,7 @@ export function validateEpsSchedule(schedule) {
 
 /**
  * Render a schedule into the multi-line string that populates the
- * EPS payment_terms textarea. Mirrors the old hardcoded JS exactly
+ * New Product payment_terms textarea. Mirrors the old hardcoded JS exactly
  * so existing quotes compare equal to `useDefault === true`.
  *
  * Returns '' when deliveryWeeks is missing/zero AND any row needs a
@@ -206,7 +206,7 @@ export async function saveEpsSchedule(env, schedule, user) {
       entityId: '1',
       eventType: 'updated',
       user,
-      summary: 'Updated EPS default payment schedule',
+      summary: 'Updated New Product default payment schedule',
       changes: { eps_schedule: { from: previous, to: json } },
     }),
   ]);

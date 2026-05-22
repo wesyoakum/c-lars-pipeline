@@ -101,7 +101,7 @@ export async function onRequestGet(context) {
     co.amended_oc_number || `OC-${co.number}`;
 
   const jobTypeLabel = {
-    spares: 'Spares', service: 'Service', eps: 'EPS', refurb: 'Refurbishment',
+    spares: 'Spares', service: 'Service', eps: 'New Product', refurb: 'Refurbishment',
   }[(co.job_type || '').split(',')[0].trim()] || 'Job';
 
   // ── 1. Header card ────────────────────────────────────────────────

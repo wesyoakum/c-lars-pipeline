@@ -19,7 +19,7 @@ import { html, escape } from './layout.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
-  eps: 'EPS',
+  eps: 'New Product',
   refurb: 'Refurb',
   service: 'Service',
 };

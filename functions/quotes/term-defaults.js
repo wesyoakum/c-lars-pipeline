@@ -43,14 +43,14 @@ export async function onRequestPost(context) {
   if (!QUOTE_TERM_FIELDS.has(field)) {
     return json({ ok: false, error: `Unknown field: ${field}` }, 400);
   }
-  // EPS payment terms are formula-driven (25/25/25/15/10 based on
+  // New Product payment terms are formula-driven (25/25/25/15/10 based on
   // delivery weeks) — there's no static string to save as a default.
   // The UI hides the "Save as default" button in this case, but we
   // also reject it here as a belt-and-suspenders.
   if (quoteType === 'eps' && field === 'payment_terms') {
     return json({
       ok: false,
-      error: 'EPS payment terms are computed from delivery weeks — no default to save.',
+      error: 'New Product payment terms are computed from delivery weeks — no default to save.',
     }, 400);
   }
 

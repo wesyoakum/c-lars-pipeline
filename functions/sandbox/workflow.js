@@ -72,7 +72,7 @@ flowchart TD
 
     S8 --> G2{"Transaction type?"}
     G2 --> O2a[/"Spares / Service / Refurb"/]
-    G2 --> O2b[/"EPS"/]
+    G2 --> O2b[/"New Product"/]
 
     O2b --> S9["NTP drafted"]
     S9 --> T4[["Task: Submit NTP to customer"]]

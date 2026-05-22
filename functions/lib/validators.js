@@ -564,7 +564,7 @@ export function quoteTypeCategory(part) {
  */
 export const QUOTE_TYPE_LABELS = {
   spares:               'Spares',
-  eps:                  'EPS',
+  eps:                  'New Product',
   refurb_baseline:      'Refurb – Base',
   refurb_modified:      'Refurb – Mod',
   service:              'Service',

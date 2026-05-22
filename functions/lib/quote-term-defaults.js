@@ -13,11 +13,11 @@
 // Unknown (type, field) pairs just return `fallback` / nothing; the
 // helper never throws on a missing row.
 //
-// NOTE: EPS payment terms are intentionally NOT saved here. The EPS
+// NOTE: New Product payment terms are intentionally NOT saved here. The EPS
 // payment schedule is computed client-side from the delivery-weeks value
 // (25% / 25% / 25% / 15% / 10% on a sliding w/3, 2w/3 schedule), so there
 // is no static string to save as a default. The "Save as default" button
-// is hidden on EPS quotes for payment_terms.
+// is hidden on New Product quotes for payment_terms.
 
 import { one, all, stmt, batch } from './db.js';
 import { auditStmt } from './audit.js';
