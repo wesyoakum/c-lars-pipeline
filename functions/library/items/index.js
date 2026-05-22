@@ -24,32 +24,49 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
 
   const rows = await all(
     env.DB,
-    `SELECT id, name, description, category, default_unit, default_price, active, updated_at
+    `SELECT id, name, part_number, description, category, item_type,
+            default_unit, default_price, default_cost,
+            use_count, last_used_at, item_notes, active, updated_at
        FROM items_library
       WHERE deleted_at IS NULL
-      ORDER BY active DESC, name`
+      ORDER BY active DESC, use_count DESC, name`
   );
 
+  const TYPE_LABELS = { product: 'Product', service: 'Service', labor: 'Labor', misc: 'Misc' };
+
   const columns = [
-    { key: 'name',          label: 'Name',          sort: 'text',   filter: 'text',   default: true },
-    { key: 'description',   label: 'Description',   sort: 'text',   filter: 'text',   default: true },
-    { key: 'category',      label: 'Category',      sort: 'text',   filter: 'select', default: true },
+    { key: 'part_number',   label: 'Part #',         sort: 'text',   filter: 'text',   default: true },
+    { key: 'name',          label: 'Name',           sort: 'text',   filter: 'text',   default: true },
+    { key: 'item_type_label', label: 'Type',         sort: 'text',   filter: 'select', default: true },
     { key: 'default_unit',  label: 'Unit',           sort: 'text',   filter: 'text',   default: true },
-    { key: 'default_price', label: 'Default Price',  sort: 'number', filter: 'range',  default: true },
-    { key: 'status',        label: 'Status',         sort: 'text',   filter: 'select', default: true },
+    { key: 'default_price', label: 'Price',          sort: 'number', filter: 'range',  default: true },
+    { key: 'default_cost',  label: 'Cost',           sort: 'number', filter: 'range',  default: false },
+    { key: 'item_notes',    label: 'Notes',          sort: 'text',   filter: 'text',   default: true },
+    { key: 'use_count',     label: 'Uses',           sort: 'number', filter: 'text',   default: true },
+    { key: 'last_used',     label: 'Last used',      sort: 'date',   filter: 'text',   default: true },
+    { key: 'description',   label: 'Description',   sort: 'text',   filter: 'text',   default: false },
+    { key: 'category',      label: 'Category',      sort: 'text',   filter: 'select', default: false },
+    { key: 'status',        label: 'Status',         sort: 'text',   filter: 'select', default: false },
   ];
 
   const rowData = rows.map(r => ({
     id: r.id,
+    part_number: r.part_number ?? '',
     name: r.name ?? '',
+    item_type: r.item_type ?? 'product',
+    item_type_label: TYPE_LABELS[r.item_type] ?? r.item_type ?? '',
     description: r.description ?? '',
     category: r.category ?? '',
     default_unit: r.default_unit ?? 'ea',
     default_price: r.default_price != null ? Number(r.default_price) : 0,
     default_price_display: fmtDollar(r.default_price),
+    default_cost: r.default_cost != null ? Number(r.default_cost) : '',
+    default_cost_display: r.default_cost != null ? fmtDollar(r.default_cost) : '',
+    item_notes: r.item_notes ?? '',
+    use_count: r.use_count ?? 0,
+    last_used: r.last_used_at ? r.last_used_at.slice(0, 10) : '',
     status: r.active ? 'Active' : 'Inactive',
     active: r.active,
-    updated: (r.updated_at ?? '').slice(0, 10),
   }));
 
   const errText = (k) => (errors[k] ? html`<small class="error">${errors[k]}</small>` : '');
@@ -80,15 +97,13 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
                       data-row-href="/library/items/${escape(r.id)}"
                       ${raw(rowDataAttrs(columns, r))}
                       ${!r.active ? 'class="inactive"' : ''}>
+                    <td class="col-part_number" data-col="part_number">
+                      ${ieText('part_number', r.part_number)}
+                    </td>
                     <td class="col-name" data-col="name">
                       ${ieText('name', r.name)}
                     </td>
-                    <td class="col-description" data-col="description">
-                      ${ieText('description', r.description)}
-                    </td>
-                    <td class="col-category" data-col="category">
-                      ${ieText('category', r.category)}
-                    </td>
+                    <td class="col-item_type_label" data-col="item_type_label">${escape(r.item_type_label)}</td>
                     <td class="col-default_unit" data-col="default_unit">
                       ${ieText('default_unit', r.default_unit)}
                     </td>
@@ -97,6 +112,23 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
                         inputType: 'number',
                         displayText: r.default_price_display,
                       })}
+                    </td>
+                    <td class="col-default_cost num" data-col="default_cost">
+                      ${ieText('default_cost', r.default_cost === '' ? '' : String(r.default_cost), {
+                        inputType: 'number',
+                        displayText: r.default_cost_display,
+                      })}
+                    </td>
+                    <td class="col-item_notes" data-col="item_notes">
+                      ${ieText('item_notes', r.item_notes)}
+                    </td>
+                    <td class="col-use_count num" data-col="use_count">${r.use_count}</td>
+                    <td class="col-last_used" data-col="last_used"><small class="muted">${escape(r.last_used)}</small></td>
+                    <td class="col-description" data-col="description">
+                      ${ieText('description', r.description)}
+                    </td>
+                    <td class="col-category" data-col="category">
+                      ${ieText('category', r.category)}
                     </td>
                     <td class="col-status" data-col="status">
                       ${ieSelect('active', r.active ? '1' : '0', [
@@ -108,7 +140,7 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
                 `)}
               </tbody>
               <tfoot>
-                <tr><th colspan="6">${rows.length} item${rows.length === 1 ? '' : 's'}</th></tr>
+                <tr><th colspan="12">${rows.length} item${rows.length === 1 ? '' : 's'}</th></tr>
               </tfoot>
             </table>
           </div>

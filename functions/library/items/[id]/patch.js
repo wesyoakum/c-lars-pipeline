@@ -12,7 +12,8 @@ import { now } from '../../../lib/ids.js';
 // Fields that may be patched inline.
 const PATCHABLE = new Set([
   'name', 'description', 'category', 'default_unit',
-  'default_price', 'notes', 'active',
+  'default_price', 'default_cost', 'notes', 'active',
+  'part_number', 'item_type', 'item_notes',
 ]);
 
 function coerce(field, raw) {
@@ -22,7 +23,7 @@ function coerce(field, raw) {
     if (field === 'name') return null;
     return null;
   }
-  if (field === 'default_price') {
+  if (field === 'default_price' || field === 'default_cost') {
     const n = parseFloat(v);
     return isNaN(n) ? null : n;
   }

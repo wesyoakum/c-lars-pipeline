@@ -8,6 +8,7 @@ import { auditStmt, diff } from '../../../../../../lib/audit.js';
 import { now } from '../../../../../../lib/ids.js';
 import { redirectWithFlash, formBody } from '../../../../../../lib/http.js';
 import { validateQuoteLine } from '../../../../../../lib/validators.js';
+import { upsertLibraryItem } from '../../../../../../lib/items-library.js';
 import {
   quoteTotalsRecomputeStmt,
   computeLineExtendedPrice,
@@ -175,6 +176,9 @@ export async function onRequestPost(context) {
       changes,
     }),
   ]);
+
+  // Auto-capture to items library (fire-and-forget).
+  upsertLibraryItem(env.DB, value).catch(() => {});
 
   // If the client accepts JSON (fetch auto-save), return JSON instead of redirect
   const accept = request.headers.get('accept') || '';
