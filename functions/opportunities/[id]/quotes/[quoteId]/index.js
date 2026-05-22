@@ -236,7 +236,7 @@ document.addEventListener('alpine:init', function () {
 });
 `;
 
-import { syncKatana } from '../../../api/katana-sync.js';
+import { syncKatana } from '../../../../api/katana-sync.js';
 
 export async function onRequestGet(context) {
   const { env, data, request, params } = context;
