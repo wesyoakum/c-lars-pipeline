@@ -1063,7 +1063,7 @@ export async function onRequestGet(context) {
                   </td>
                   <td class="num col-ext" data-line-extended>
                     <div style="display:flex;align-items:center;justify-content:flex-end;gap:4px">
-                      <strong>${fmtDollar(parentSum)}</strong>
+                      <strong data-ext-price>${fmtDollar(parentSum)}</strong>
                       ${!readOnly ? html`
                         <button type="button" class="line-eye-toggle line-active-toggle" data-line-id="${escape(l.id)}" data-target-active="${active ? '0' : '1'}" title="${active ? 'Exclude from quote' : 'Include in quote'}">
                           <svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 10s4-7 9-7 9 7 9 7-4 7-9 7-9-7-9-7z"/><circle cx="10" cy="10" r="3"/>${!active ? '<line x1="3" y1="3" x2="17" y2="17" stroke-width="2.5"/>' : ''}</svg>
@@ -1142,7 +1142,7 @@ export async function onRequestGet(context) {
               </td>
               <td class="num col-ext" data-line-extended>
                 <div style="display:flex;align-items:center;justify-content:flex-end;gap:4px">
-                  <span>${fmtDollar(l.extended_price)}</span>
+                  <span data-ext-price>${fmtDollar(l.extended_price)}</span>
                   ${!readOnly ? html`
                     <a href="${pbUrl(l.id)}" class="line-build-icon" title="${l.price_build_label ? 'Open price build ' + escape(l.build_number || l.price_build_label) : 'Add price build'}" style="color:${l.price_build_label ? '#3b82f6' : 'var(--muted,#999)'};text-decoration:none;display:inline-flex">
                       ${raw(ICON_CALCULATOR)}

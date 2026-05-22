@@ -337,7 +337,13 @@
         if (price === null) price = 0;
         var ext = qty * price;
         subtotal += ext;
-        if (extCell) extCell.textContent = fmtDollar(ext);
+        if (extCell) {
+          // Update only the price span, not the whole cell (which may
+          // contain action icons like delete, eye toggle, build link).
+          var priceSpan = extCell.querySelector('[data-ext-price]');
+          if (priceSpan) priceSpan.textContent = fmtDollar(ext);
+          else extCell.textContent = fmtDollar(ext);
+        }
       });
 
       var taxInput = document.querySelector('input[name="tax_amount"]');
