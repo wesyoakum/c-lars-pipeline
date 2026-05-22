@@ -1003,7 +1003,7 @@ export async function onRequestGet(context) {
             <th class="num col-qty">Qty</th>
             <th class="col-unit">Unit</th>
             <th class="num col-price">Unit price</th>
-            <th class="num col-ext">Ext</th>
+            <th class="num col-ext" style="width:130px">Ext</th>
           </tr>
         </thead>
         <tbody>
@@ -1045,8 +1045,8 @@ export async function onRequestGet(context) {
               ].filter(Boolean).join(' ');
               return html`
                 <tr data-line-row data-line-id="${escape(l.id)}" class="${parentRowClasses}">
-                  <td class="col-num">${i + 1}<br><span class="pill" style="font-size:0.7em;background:#e0e7ff;color:#3730a3;border-color:#c7d2fe">GROUP</span></td>
                   ${handleCell}
+                  <td class="col-num">${i + 1}<br><span class="pill" style="font-size:0.7em;background:#e0e7ff;color:#3730a3;border-color:#c7d2fe">GROUP</span></td>
                   <td class="col-item" colspan="4">
                     <form method="post" action="${lineUrl(l.id)}" class="inline-form" id="line-form-${escape(l.id)}">
                       <div class="line-item-fields">
@@ -1081,12 +1081,12 @@ export async function onRequestGet(context) {
             ].filter(Boolean).join(' ');
             return html`
             <tr data-line-row data-line-id="${escape(l.id)}" class="${trClasses}">
+              ${handleCell}
               <td class="col-num">
                 ${isChild ? html`<span class="line-child-indent" style="color:var(--fg-muted)">↳ </span>` : ''}${i + 1}
                 ${l.is_option ? html`<br><span class="pill" style="font-size:0.7em">OPT</span>` : ''}
                 ${!active ? html`<br><span class="pill" style="font-size:0.7em;background:var(--bg-alt);color:var(--fg-muted)">INACTIVE</span>` : ''}
               </td>
-              ${handleCell}
               <td class="col-item">
                 <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}" class="inline-form" id="line-form-${escape(l.id)}">
                   ${isHybrid ? html`
@@ -1158,8 +1158,8 @@ export async function onRequestGet(context) {
           ${!readOnly
             ? html`
               <tr class="new-line-row" data-line-row>
-                <td class="col-handle"></td>
-                <td class="col-num muted">${displayRows.length + 1}</td>
+                <td class="col-handle" style="width:28px"></td>
+                <td class="col-num" style="width:30px"><span class="muted">${displayRows.length + 1}</span></td>
                 <td class="col-item">
                   <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines" class="inline-form" id="new-line-form">
                     ${isHybrid ? html`
