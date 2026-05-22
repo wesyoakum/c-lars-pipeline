@@ -991,6 +991,9 @@ export async function onRequestGet(context) {
               Group selected
             </button>
           ` : ''}
+          ${!readOnly ? html`
+            <button type="button" class="btn small" onclick="document.getElementById('library-search-modal').showModal()">Add from library</button>
+          ` : ''}
           <span class="header-value" id="q-lines-subtotal">${fmtDollar(includedSubtotal)} subtotal</span>
         </div>
       </div>
@@ -2933,7 +2936,97 @@ export async function onRequestGet(context) {
     `
     : '';
 
-  const body = html`${headerSection}<div class="quote-doc">${bannerCard}${detailsSection}${linesSection}${footerSection}</div>${katanaPushModal}${scripts}${captureScripts}`;
+  const libraryModal = !readOnly ? html`
+    <dialog id="library-search-modal" style="max-width:600px;width:90%;border:1px solid var(--border,#d8d8d8);border-radius:8px;padding:1.2rem">
+      <form method="dialog" style="margin:0">
+        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.75rem">
+          <h3 style="margin:0;font-size:1rem">Add from library</h3>
+          <span style="flex:1"></span>
+          <button type="submit" class="btn small">Close</button>
+        </div>
+      </form>
+      <input type="text" id="lib-search-input" placeholder="Search by part #, name, or description..."
+             style="width:100%;padding:.4rem .6rem;font-size:.9rem;border:1px solid var(--border);border-radius:4px;margin-bottom:.5rem"
+             autocomplete="off">
+      <div id="lib-search-results" style="max-height:350px;overflow-y:auto"></div>
+    </dialog>
+    <style>
+      .lib-result{padding:.5rem .6rem;border-bottom:1px solid #f0f0f0;cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:.5rem;align-items:center}
+      .lib-result:hover{background:#f5f5f7}
+      .lib-result-name{font-weight:600;font-size:.85rem}
+      .lib-result-meta{font-size:.78rem;color:var(--muted,#666)}
+      .lib-result-price{font-size:.85rem;font-weight:500;text-align:right}
+      .lib-result-btn{font-size:.75rem}
+    </style>
+    <script>
+    (function(){
+      var modal = document.getElementById('library-search-modal');
+      var input = document.getElementById('lib-search-input');
+      var results = document.getElementById('lib-search-results');
+      if (!modal || !input || !results) return;
+      var timer = null;
+      var addUrl = '/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines';
+
+      input.addEventListener('input', function(){
+        clearTimeout(timer);
+        var q = input.value.trim();
+        if (q.length < 2) { results.innerHTML = '<p class="muted" style="padding:.5rem">Type at least 2 characters…</p>'; return; }
+        timer = setTimeout(function(){
+          fetch('/api/items-library-search?q=' + encodeURIComponent(q) + '&limit=20', { credentials: 'same-origin' })
+            .then(function(r){ return r.json(); })
+            .then(function(items){
+              if (!items.length) { results.innerHTML = '<p class="muted" style="padding:.5rem">No matches.</p>'; return; }
+              results.innerHTML = items.map(function(it){
+                var price = it.default_price ? '$' + Number(it.default_price).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '';
+                var meta = [it.part_number, it.item_type, it.default_unit, it.use_count ? it.use_count + ' uses' : ''].filter(Boolean).join(' · ');
+                return '<div class="lib-result" data-lib-id="' + it.id + '">' +
+                  '<div><div class="lib-result-name">' + esc(it.name) + '</div>' +
+                  '<div class="lib-result-meta">' + esc(meta) + '</div>' +
+                  (it.description ? '<div class="lib-result-meta">' + esc(it.description.slice(0, 100)) + '</div>' : '') +
+                  '</div>' +
+                  '<div style="text-align:right"><div class="lib-result-price">' + esc(price) + '</div>' +
+                  '<button type="button" class="btn small primary lib-result-btn" data-lib-json=\\'' + JSON.stringify(it).replace(/'/g, '&#39;') + '\\'>Add</button></div></div>';
+              }).join('');
+            })
+            .catch(function(){ results.innerHTML = '<p class="muted" style="padding:.5rem">Search failed.</p>'; });
+        }, 250);
+      });
+
+      function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+      results.addEventListener('click', function(e){
+        var btn = e.target.closest('[data-lib-json]');
+        if (!btn) return;
+        var it = JSON.parse(btn.getAttribute('data-lib-json'));
+        btn.disabled = true;
+        btn.textContent = 'Adding…';
+        var body = new URLSearchParams();
+        body.set('title', it.name || '');
+        body.set('part_number', it.part_number || '');
+        body.set('description', it.description || '');
+        body.set('item_type', it.item_type || 'product');
+        body.set('unit', it.default_unit || 'ea');
+        body.set('unit_price', String(it.default_price || 0));
+        body.set('quantity', '1');
+        body.set('notes', it.item_notes || '');
+        fetch(addUrl, {
+          method: 'POST', credentials: 'same-origin',
+          headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+          body: body.toString()
+        }).then(function(r){ return r.json(); })
+          .then(function(j){
+            if (j.ok) { btn.textContent = 'Added'; setTimeout(function(){ location.reload(); }, 300); }
+            else { btn.textContent = 'Error'; btn.disabled = false; }
+          })
+          .catch(function(){ btn.textContent = 'Error'; btn.disabled = false; });
+      });
+
+      modal.addEventListener('close', function(){ input.value = ''; results.innerHTML = ''; });
+    })();
+    </script>
+  ` : '';
+
+  const body = html`${headerSection}<div class="quote-doc">${bannerCard}${detailsSection}${linesSection}${footerSection}</div>${katanaPushModal}${libraryModal}${scripts}${captureScripts}`;
 
   return htmlResponse(
     layout(
