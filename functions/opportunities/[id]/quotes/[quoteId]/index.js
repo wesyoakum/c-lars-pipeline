@@ -1045,9 +1045,9 @@ export async function onRequestGet(context) {
                 !active ? 'line-inactive' : '',
               ].filter(Boolean).join(' ');
               return html`
-                <tr data-line-row data-line-id="${escape(l.id)}" class="${parentRowClasses}">
+                <tr data-line-row data-line-id="${escape(l.id)}" data-group-parent class="${parentRowClasses}">
                   ${handleCell}
-                  <td class="col-num">${i + 1}<br><span class="pill" style="font-size:0.7em;background:#e0e7ff;color:#3730a3;border-color:#c7d2fe">GROUP</span></td>
+                  <td class="col-num"><span class="group-chevron" data-parent-id="${escape(l.id)}" title="Expand/collapse group">&#9660;</span> ${i + 1}</td>
                   <td class="col-item" colspan="4">
                     <form method="post" action="${lineUrl(l.id)}" class="inline-form" id="line-form-${escape(l.id)}">
                       <div class="line-item-fields">
@@ -1085,7 +1085,7 @@ export async function onRequestGet(context) {
               !active ? 'line-inactive' : '',
             ].filter(Boolean).join(' ');
             return html`
-            <tr data-line-row data-line-id="${escape(l.id)}" class="${trClasses}">
+            <tr data-line-row data-line-id="${escape(l.id)}" ${isChild ? `data-child-of="${escape(l.parent_line_id)}"` : ''} class="${trClasses}">
               ${handleCell}
               <td class="col-num">
                 ${isChild ? html`<span class="line-child-indent" style="color:var(--fg-muted)">↳ </span>` : ''}${i + 1}
@@ -1180,7 +1180,8 @@ export async function onRequestGet(context) {
                       </div>
                     ` : ''}
                     <div class="line-item-fields">
-                      <input type="text" name="title" placeholder="Title / Part #" class="line-title">
+                      <input type="text" name="title" placeholder="Title / Part #" class="line-title"
+                             data-typeahead="library" autocomplete="off">
                       <input type="text" name="description" placeholder="Description" class="line-desc">
                     </div>
                     <textarea name="line_notes" placeholder="Item notes..." class="line-notes"></textarea>
@@ -2715,6 +2716,45 @@ export async function onRequestGet(context) {
       });
 
       // ---- Hover-only delete ----
+      function renumberLines() {
+        var rows = document.querySelectorAll('tr[data-line-row]');
+        var n = 0;
+        rows.forEach(function(tr) {
+          n++;
+          var numCell = tr.querySelector('.col-num');
+          if (!numCell) return;
+          // Preserve the indent arrow for children and chevron for parents
+          var indent = numCell.querySelector('.line-child-indent');
+          var chevron = numCell.querySelector('.group-chevron');
+          var pills = numCell.querySelectorAll('.pill');
+          // Rebuild: chevron/indent + number + pills
+          var parts = [];
+          if (chevron) parts.push(chevron.outerHTML + ' ');
+          if (indent) parts.push(indent.outerHTML);
+          parts.push(String(n));
+          pills.forEach(function(p) { parts.push('<br>' + p.outerHTML); });
+          numCell.innerHTML = parts.join('');
+        });
+        // Re-bind chevron listeners after innerHTML rebuild
+        document.querySelectorAll('.group-chevron').forEach(function(chev) {
+          chev.style.cursor = 'pointer';
+          chev.onclick = function(e) {
+            e.stopPropagation();
+            var pid = chev.getAttribute('data-parent-id');
+            var children = document.querySelectorAll('tr[data-child-of="' + pid + '"]');
+            if (collapsed.has(pid)) {
+              collapsed.delete(pid);
+              chev.innerHTML = '&#9660;';
+              children.forEach(function(c) { c.style.display = ''; });
+            } else {
+              collapsed.add(pid);
+              chev.innerHTML = '&#9654;';
+              children.forEach(function(c) { c.style.display = 'none'; });
+            }
+          };
+        });
+      }
+
       var deleteBaseUrl = '/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/';
       document.querySelectorAll('.line-delete-btn').forEach(function(btn) {
         btn.addEventListener('click', function(e) {
@@ -2727,7 +2767,7 @@ export async function onRequestGet(context) {
             headers: { accept: 'application/json' },
           }).then(function(r) { return r.json(); })
             .then(function(j) {
-              if (j.ok && tr) tr.remove();
+              if (j.ok && tr) { tr.remove(); renumberLines(); }
               if (j.subtotal_price != null) {
                 var el = document.getElementById('q-lines-subtotal');
                 if (el) el.textContent = '$' + Number(j.subtotal_price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' subtotal';
@@ -2778,6 +2818,38 @@ export async function onRequestGet(context) {
           if (e.detail > 1) return; // ignore double-click
           var lineId = handle.getAttribute('data-line-id');
           var tr = handle.closest('tr');
+          if (selected.has(lineId)) { selected.delete(lineId); tr.classList.remove('line-selected'); }
+          else { selected.add(lineId); tr.classList.add('line-selected'); }
+          updateFloatingBar();
+        });
+      });
+      // ---- Collapsible groups ----
+      var collapsed = new Set();
+      document.querySelectorAll('.group-chevron').forEach(function(chev) {
+        chev.style.cursor = 'pointer';
+        chev.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var pid = chev.getAttribute('data-parent-id');
+          var children = document.querySelectorAll('tr[data-child-of="' + pid + '"]');
+          if (collapsed.has(pid)) {
+            collapsed.delete(pid);
+            chev.innerHTML = '&#9660;';
+            children.forEach(function(c) { c.style.display = ''; });
+          } else {
+            collapsed.add(pid);
+            chev.innerHTML = '&#9654;';
+            children.forEach(function(c) { c.style.display = 'none'; });
+          }
+        });
+      });
+
+      // Click anywhere on the row to toggle selection (except on
+      // interactive elements where the click should do its normal thing).
+      document.querySelectorAll('tr[data-line-row]').forEach(function(tr) {
+        tr.addEventListener('click', function(e) {
+          if (e.target.closest('input,select,textarea,button,a,[data-drag-handle]')) return;
+          var lineId = tr.getAttribute('data-line-id');
+          if (!lineId) return;
           if (selected.has(lineId)) { selected.delete(lineId); tr.classList.remove('line-selected'); }
           else { selected.add(lineId); tr.classList.add('line-selected'); }
           updateFloatingBar();

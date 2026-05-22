@@ -183,8 +183,8 @@
       {
         key: 'title',
         type: 'text',
-        prompt: 'What\u2019s this quote for?',
-        hint: 'A short title. Tab to continue.',
+        prompt: 'Give this quote a title',
+        hint: 'Appears in the quote header and list views. Keep it short.',
         placeholder: 'e.g. Spare seals for pump station',
         placeholderKind: 'quote_title',
         required: true,
@@ -193,13 +193,8 @@
       {
         key: 'description',
         type: 'textarea',
-        // The quote's description is customer-facing \u2014 it lands on
-        // the generated PDF the customer reads. Coaching language
-        // here nudges the user to write sales copy, not internal
-        // shorthand. (Internal context lives in the yellow "Internal
-        // notes" box on the quote detail page after creation.)
-        prompt: 'What should the customer see at the top of the quote PDF?',
-        hint: 'Customer-facing. Write it like the opening of a quote letter, not internal notes. Optional \u2014 press Tab to skip.',
+        prompt: 'Description for the quote PDF (optional)',
+        hint: 'This text appears at the top of the customer-facing PDF. Write it like a quote letter opening, not internal notes. Press Tab to skip.',
         placeholder: 'e.g. Provision of replacement seals and consumables for the customer\u2019s pump station, per RFQ #1234. Lead time 8\u201310 weeks ARO.'
       },
     ],

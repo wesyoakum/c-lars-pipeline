@@ -65,12 +65,18 @@ export async function onRequestGet(context) {
 
   const page = Math.max(1, parseInt(url.searchParams.get('page'), 10) || 1);
   const offset = (page - 1) * PAGE_SIZE;
+  const filterUserId = url.searchParams.get('user') || null;
 
   // Narrowing happens inside list-table's per-column filters + quicksearch;
   // the server just pages through everything in reverse-chrono order.
+  // Optional ?user= param pre-filters to a single user's events.
+  const whereClause = filterUserId ? `WHERE e.user_id = ?` : '';
+  const whereParams = filterUserId ? [filterUserId] : [];
+
   const totalRow = await one(
     env.DB,
-    `SELECT COUNT(*) AS n FROM audit_events`
+    `SELECT COUNT(*) AS n FROM audit_events e ${whereClause}`,
+    whereParams
   );
   const total = totalRow?.n ?? 0;
 
@@ -82,9 +88,10 @@ export async function onRequestGet(context) {
             u.email AS user_email, u.display_name AS user_name
        FROM audit_events e
        LEFT JOIN users u ON u.id = e.user_id
+      ${whereClause}
       ORDER BY e.at DESC, e.id DESC
       LIMIT ? OFFSET ?`,
-    [PAGE_SIZE, offset]
+    [...whereParams, PAGE_SIZE, offset]
   );
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -120,8 +127,16 @@ export async function onRequestGet(context) {
     is_system: !r.user_id,
   }));
 
-  const pageHref = (n) =>
-    '/settings/history' + (n > 1 ? `?page=${n}` : '');
+  const filterUserName = filterUserId
+    ? (rows.length > 0 ? (rows[0].user_name || rows[0].user_email || filterUserId) : filterUserId)
+    : null;
+  const pageHref = (n) => {
+    const params = new URLSearchParams();
+    if (filterUserId) params.set('user', filterUserId);
+    if (n > 1) params.set('page', String(n));
+    const qs = params.toString();
+    return '/settings/history' + (qs ? `?${qs}` : '');
+  };
 
   const body = html`
     ${settingsSubNav('history', true, user?.email === 'wes.yoakum@c-lars.com')}
@@ -132,11 +147,18 @@ export async function onRequestGet(context) {
         ${listToolbar({ id: 'history', count: total, columns })}
       </div>
 
-      <p class="muted">
-        Every mutation in the app writes an audit row. Click a column
-        header to sort or filter; use the search box to narrow the
-        current page.
-      </p>
+      ${filterUserName ? html`
+        <p style="margin:0 0 0.5rem;font-size:0.9em">
+          Showing events for <strong>${escape(filterUserName)}</strong>
+          <a href="/settings/history" style="margin-left:0.5rem">(clear filter)</a>
+        </p>
+      ` : html`
+        <p class="muted">
+          Every mutation in the app writes an audit row. Click a column
+          header to sort or filter; use the search box to narrow the
+          current page.
+        </p>
+      `}
 
       ${rowData.length === 0
         ? html`<p class="muted">No events yet.</p>`

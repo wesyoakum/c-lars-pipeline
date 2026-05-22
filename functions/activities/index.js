@@ -60,6 +60,12 @@ export async function onRequestGet(context) {
     params.push(typeFilter);
   }
 
+  // Hide tasks scheduled to appear later (visible_after in the future).
+  // ?show_scheduled=1 overrides this to show all tasks.
+  if (url.searchParams.get('show_scheduled') !== '1') {
+    conditions.push("(a.visible_after IS NULL OR a.visible_after <= date('now'))");
+  }
+
   const where = conditions.length > 0
     ? 'WHERE ' + conditions.join(' AND ')
     : '';
@@ -360,6 +366,7 @@ export async function onRequestPost(context) {
   const accountId = input.account_id || null;
   const assignedUserId = input.assigned_user_id || user?.id || null;
   const dueAt = input.due_at || null;
+  const visibleAfter = input.visible_after || null;
   const remindAt = input.remind_at || null;
   const direction = input.direction || null;
   const status = (type === 'task') ? 'pending' : 'completed';
@@ -376,12 +383,12 @@ export async function onRequestPost(context) {
     stmt(env.DB,
       `INSERT INTO activities (
          id, opportunity_id, account_id, quote_id, type, subject, body,
-         direction, status, due_at, remind_at, assigned_user_id,
+         direction, status, due_at, visible_after, remind_at, assigned_user_id,
          created_at, updated_at, created_by_user_id
        )
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [id, oppId, accountId, quoteId, type, subject, body,
-       direction, status, dueAt, remindAt, assignedUserId,
+       direction, status, dueAt, visibleAfter, remindAt, assignedUserId,
        ts, ts, user?.id]),
     auditStmt(env.DB, {
       entityType: 'activity',

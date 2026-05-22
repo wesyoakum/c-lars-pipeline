@@ -177,6 +177,10 @@ export async function onRequestGet(context) {
           ${inlineDate('due_at', act.due_at)}
         </div>
         <div>
+          <span class="field-label">Show after</span>
+          ${inlineDate('visible_after', act.visible_after)}
+        </div>
+        <div>
           <span class="field-label">Opportunity</span>
           ${inlineSelect('opportunity_id', act.opportunity_id, oppOptions)}
         </div>
@@ -247,6 +251,7 @@ export async function onRequestPost(context) {
     direction: input.direction || null,
     status: input.status || before.status,
     due_at: input.due_at || null,
+    visible_after: input.visible_after || null,
     assigned_user_id: input.assigned_user_id || null,
     opportunity_id: input.opportunity_id || null,
   };
@@ -261,7 +266,7 @@ export async function onRequestPost(context) {
 
   const UPDATE_FIELDS = [
     'type', 'subject', 'body', 'direction', 'status',
-    'due_at', 'assigned_user_id', 'opportunity_id',
+    'due_at', 'visible_after', 'assigned_user_id', 'opportunity_id',
   ];
   const changes = diff(before, after, UPDATE_FIELDS);
 
@@ -269,11 +274,11 @@ export async function onRequestPost(context) {
     stmt(env.DB,
       `UPDATE activities
           SET type = ?, subject = ?, body = ?, direction = ?,
-              status = ?, due_at = ?, assigned_user_id = ?,
+              status = ?, due_at = ?, visible_after = ?, assigned_user_id = ?,
               opportunity_id = ?, completed_at = ?, updated_at = ?
         WHERE id = ?`,
       [after.type, after.subject, after.body, after.direction,
-       after.status, after.due_at, after.assigned_user_id,
+       after.status, after.due_at, after.visible_after, after.assigned_user_id,
        after.opportunity_id, completedAt, ts, actId]),
     auditStmt(env.DB, {
       entityType: 'activity',

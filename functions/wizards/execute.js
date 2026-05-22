@@ -350,6 +350,7 @@ export async function onRequestPost(context) {
     const subject = deriveSubject(t.body);
     const assignee = String(t.assignee_id || '').trim() || user.id;
     const dueAt = String(t.due_at || '').trim() || null;
+    const visibleAfter = String(t.visible_after || '').trim() || null;
 
     // Optional pinned link — opportunity / quote / account / contact.
     const link = t.link || null;
@@ -360,12 +361,12 @@ export async function onRequestPost(context) {
     statements.push(stmt(env.DB,
       `INSERT INTO activities
          (id, opportunity_id, account_id, quote_id, type, subject, body,
-          direction, status, due_at, remind_at, assigned_user_id,
+          direction, status, due_at, visible_after, remind_at, assigned_user_id,
           created_at, updated_at, created_by_user_id)
-       VALUES (?, ?, ?, ?, 'task', ?, ?, NULL, 'pending', ?, NULL, ?,
+       VALUES (?, ?, ?, ?, 'task', ?, ?, NULL, 'pending', ?, ?, NULL, ?,
                ?, ?, ?)`,
       [taskId, oppId, accountId, quoteId, subject, t.body.trim(),
-       dueAt, assignee, ts, ts, user.id]));
+       dueAt, visibleAfter, assignee, ts, ts, user.id]));
 
     statements.push(auditStmt(env.DB, {
       entityType: 'activity',

@@ -33,6 +33,19 @@ const ACTIVE_OPTIONS = [
   { value: 'inactive', label: 'Inactive' },
 ];
 
+function formatLastSeen(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (mins < 5) return 'Active now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
 export async function onRequestGet(context) {
   const { env, data, request } = context;
   const user = data?.user;
@@ -52,7 +65,7 @@ export async function onRequestGet(context) {
 
   const rows = await all(
     env.DB,
-    `SELECT id, email, display_name, role, active, created_at, updated_at
+    `SELECT id, email, display_name, role, active, created_at, updated_at, last_seen_at
        FROM users
       ORDER BY active DESC, email ASC`
   );
@@ -63,7 +76,9 @@ export async function onRequestGet(context) {
     { key: 'role',         label: 'Role',        sort: 'text',   filter: 'select', default: true  },
     { key: 'status',       label: 'Status',      sort: 'text',   filter: 'select', default: true  },
     { key: 'created',      label: 'Created',     sort: 'date',   filter: 'text',   default: true  },
+    { key: 'last_seen',    label: 'Last seen',   sort: 'date',   filter: 'text',   default: true  },
     { key: 'updated',      label: 'Updated',     sort: 'date',   filter: 'text',   default: false },
+    { key: 'history',      label: '',            sort: null,      filter: null,     default: true, hideable: false },
   ];
 
   const rowData = rows.map((r) => ({
@@ -73,6 +88,8 @@ export async function onRequestGet(context) {
     role: r.role ?? 'sales',
     status: r.active ? 'active' : 'inactive',
     active: r.active,
+    last_seen: formatLastSeen(r.last_seen_at),
+    last_seen_raw: r.last_seen_at ?? '',
     created: (r.created_at ?? '').slice(0, 10),
     updated: (r.updated_at ?? '').slice(0, 10),
   }));
@@ -111,8 +128,15 @@ export async function onRequestGet(context) {
                     <td class="col-status" data-col="status">
                       ${ieSelect('is_active', r.status, ACTIVE_OPTIONS)}
                     </td>
+                    <td class="col-last_seen" data-col="last_seen" title="${escape(r.last_seen_raw)}">
+                      ${r.last_seen === 'Active now'
+                        ? html`<span style="color:#16a34a;font-weight:500">${escape(r.last_seen)}</span>`
+                        : html`<small class="muted">${escape(r.last_seen)}</small>`
+                      }
+                    </td>
                     <td class="col-created" data-col="created"><small class="muted">${escape(r.created)}</small></td>
                     <td class="col-updated" data-col="updated"><small class="muted">${escape(r.updated)}</small></td>
+                    <td class="col-history" data-col="history"><a href="/settings/history?user=${escape(r.id)}" class="muted" title="View activity history">History</a></td>
                   </tr>
                 `)}
               </tbody>

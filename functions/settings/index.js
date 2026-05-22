@@ -240,14 +240,9 @@ export async function onRequestGet(context) {
       </section>
 
       <section class="card" x-data="epsScheduleEditor(${JSON.stringify(epsSchedule || { rows: [] })}, ${JSON.stringify(DEFAULT_EPS_SCHEDULE)})">
-        <h2>New Product default payment schedule</h2>
-        <p class="muted">
-          Milestone rows that populate the "Default EPS Terms" textarea
-          on new New Product quotes. Percentages must sum to exactly 100 —
-          they're applied to the quote total. Use <code>{weeks}</code>
-          in the label to substitute a delivery-week value, computed
-          as <code>floor(num &times; delivery_weeks / den)</code>.
-        </p>
+        <h2>New Product default payment schedule
+          <span class="info-tip" title="Milestone rows that populate the Default EPS Terms on new New Product quotes. Percentages must sum to exactly 100. Use {weeks} in the label to substitute a delivery-week value, computed as floor(num × delivery_weeks / den).">&#9432;</span>
+        </h2>
         <table class="meta-table" style="width:100%">
           <thead>
             <tr>
@@ -260,7 +255,7 @@ export async function onRequestGet(context) {
           </thead>
           <tbody>
             <template x-for="(row, i) in rows" :key="i">
-              <tr>
+              <tr @input="ensureBlankRow()">
                 <td style="text-align:right">
                   <input type="number" min="0" max="100" step="0.01"
                          x-model.number="row.percent"
@@ -284,7 +279,9 @@ export async function onRequestGet(context) {
                          style="width:5rem;text-align:right">
                 </td>
                 <td style="text-align:center">
-                  <button type="button" class="btn btn-xs" @click="removeRow(i)" title="Remove row">&times;</button>
+                  <template x-if="!isBlankRow(row)">
+                    <button type="button" class="btn btn-xs" @click="removeRow(i)" title="Remove row">&times;</button>
+                  </template>
                 </td>
               </tr>
             </template>
@@ -296,7 +293,6 @@ export async function onRequestGet(context) {
           </tbody>
         </table>
         <div class="settings-actions" style="margin-top:0.75rem">
-          <button type="button" class="btn" @click="addRow()">+ Add row</button>
           <button type="button" class="btn primary" :disabled="busy || !isValid" @click="save()" x-text="saveLabel"></button>
           <button type="button" class="btn" :disabled="busy" @click="resetToDefault()">Reset to site default</button>
         </div>
@@ -311,11 +307,9 @@ export async function onRequestGet(context) {
         const defaults = DEFAULT_SCHEDULES[qt] || { rows: [] };
         return html`
       <section class="card" x-data="paymentScheduleEditor('${qt}', ${JSON.stringify(sched)}, ${JSON.stringify(defaults)})">
-        <h2>${SCHEDULE_TYPE_LABELS[qt] || qt} default payment schedule</h2>
-        <p class="muted">
-          Fixed-percentage milestone rows for ${SCHEDULE_TYPE_LABELS[qt] || qt} quotes.
-          Percentages must sum to exactly 100.
-        </p>
+        <h2>${SCHEDULE_TYPE_LABELS[qt] || qt} default payment schedule
+          <span class="info-tip" title="Fixed-percentage milestone rows for ${SCHEDULE_TYPE_LABELS[qt] || qt} quotes. Percentages must sum to exactly 100.">&#9432;</span>
+        </h2>
         <table class="meta-table" style="width:100%">
           <thead>
             <tr>
@@ -326,7 +320,7 @@ export async function onRequestGet(context) {
           </thead>
           <tbody>
             <template x-for="(row, i) in rows" :key="i">
-              <tr>
+              <tr @input="ensureBlankRow()">
                 <td style="text-align:right">
                   <input type="number" min="0" max="100" step="0.01"
                          x-model.number="row.percent"
@@ -338,7 +332,9 @@ export async function onRequestGet(context) {
                          style="width:100%">
                 </td>
                 <td style="text-align:center">
-                  <button type="button" class="btn btn-xs" @click="removeRow(i)" title="Remove row">&times;</button>
+                  <template x-if="!isBlankRow(row)">
+                    <button type="button" class="btn btn-xs" @click="removeRow(i)" title="Remove row">&times;</button>
+                  </template>
                 </td>
               </tr>
             </template>
@@ -350,7 +346,6 @@ export async function onRequestGet(context) {
           </tbody>
         </table>
         <div class="settings-actions" style="margin-top:0.75rem">
-          <button type="button" class="btn" @click="addRow()">+ Add row</button>
           <button type="button" class="btn primary" :disabled="busy || !isValid" @click="save()" x-text="saveLabel"></button>
           <button type="button" class="btn" :disabled="busy" @click="resetToDefault()">Reset to default</button>
         </div>
@@ -549,7 +544,7 @@ document.addEventListener('alpine:init', function () {
       saveLabel: 'Save New Product schedule',
       get totalPct() {
         var sum = 0;
-        this.rows.forEach(function (r) {
+        this.dataRows().forEach(function (r) {
           var n = Number(r.percent);
           if (Number.isFinite(n)) sum += n;
         });
@@ -561,10 +556,11 @@ document.addEventListener('alpine:init', function () {
         return 'Total: ' + t + '% (must equal 100)';
       },
       get isValid() {
-        if (this.rows.length === 0) return false;
+        var dr = this.dataRows();
+        if (dr.length === 0) return false;
         if (Math.abs(this.totalPct - 100) > 0.01) return false;
-        for (var i = 0; i < this.rows.length; i++) {
-          var r = this.rows[i];
+        for (var i = 0; i < dr.length; i++) {
+          var r = dr[i];
           var p = Number(r.percent);
           if (!Number.isFinite(p) || p <= 0 || p > 100) return false;
           if (!r.label || !String(r.label).trim()) return false;
@@ -599,19 +595,30 @@ document.addEventListener('alpine:init', function () {
         });
         return lines.join(' \u2022 ');
       },
-      addRow: function () {
-        this.rows.push({ percent: 0, label: '', weeks_num: '', weeks_den: '' });
+      isBlankRow: function (r) {
+        return (!r.percent || r.percent === 0) && !r.label && !r.weeks_num && !r.weeks_den;
+      },
+      ensureBlankRow: function () {
+        if (this.rows.length === 0 || !this.isBlankRow(this.rows[this.rows.length - 1])) {
+          this.rows.push({ percent: 0, label: '', weeks_num: '', weeks_den: '' });
+        }
+      },
+      dataRows: function () {
+        var self = this;
+        return this.rows.filter(function (r) { return !self.isBlankRow(r); });
       },
       removeRow: function (i) {
         this.rows.splice(i, 1);
+        this.ensureBlankRow();
       },
+      init: function () { this.ensureBlankRow(); },
       save: function () {
         var self = this;
         if (!self.isValid) return;
         self.busy = true;
         self.saveLabel = 'Saving\u2026';
         var payload = {
-          rows: self.rows.map(function (r) {
+          rows: self.dataRows().map(function (r) {
             var out = { percent: Number(r.percent), label: String(r.label).trim() };
             if (r.weeks_num !== '' && r.weeks_num != null) {
               out.weeks_num = parseInt(r.weeks_num, 10);
@@ -661,7 +668,7 @@ document.addEventListener('alpine:init', function () {
       saveLabel: 'Save schedule',
       get totalPct() {
         var sum = 0;
-        this.rows.forEach(function (r) {
+        this.dataRows().forEach(function (r) {
           var n = Number(r.percent);
           if (Number.isFinite(n)) sum += n;
         });
@@ -673,10 +680,11 @@ document.addEventListener('alpine:init', function () {
         return 'Total: ' + t + '% (must equal 100)';
       },
       get isValid() {
-        if (this.rows.length === 0) return false;
+        var dr = this.dataRows();
+        if (dr.length === 0) return false;
         if (Math.abs(this.totalPct - 100) > 0.01) return false;
-        for (var i = 0; i < this.rows.length; i++) {
-          var r = this.rows[i];
+        for (var i = 0; i < dr.length; i++) {
+          var r = dr[i];
           var p = Number(r.percent);
           if (!Number.isFinite(p) || p <= 0 || p > 100) return false;
           if (!r.label || !String(r.label).trim()) return false;
@@ -684,19 +692,34 @@ document.addEventListener('alpine:init', function () {
         return true;
       },
       get preview() {
-        return this.rows.map(function (r) {
+        return this.dataRows().map(function (r) {
           return r.percent + '% ' + (r.label || '');
         }).join(' \u2022 ');
       },
-      addRow: function () { this.rows.push({ percent: 0, label: '' }); },
-      removeRow: function (i) { this.rows.splice(i, 1); },
+      isBlankRow: function (r) {
+        return (!r.percent || r.percent === 0) && !r.label;
+      },
+      ensureBlankRow: function () {
+        if (this.rows.length === 0 || !this.isBlankRow(this.rows[this.rows.length - 1])) {
+          this.rows.push({ percent: 0, label: '' });
+        }
+      },
+      dataRows: function () {
+        var self = this;
+        return this.rows.filter(function (r) { return !self.isBlankRow(r); });
+      },
+      removeRow: function (i) {
+        this.rows.splice(i, 1);
+        this.ensureBlankRow();
+      },
+      init: function () { this.ensureBlankRow(); },
       save: function () {
         var self = this;
         if (!self.isValid) return;
         self.busy = true;
         self.saveLabel = 'Saving\u2026';
         var payload = {
-          rows: self.rows.map(function (r) {
+          rows: self.dataRows().map(function (r) {
             return { percent: Number(r.percent), label: String(r.label).trim() };
           }),
         };

@@ -262,8 +262,9 @@ function renderQuestionRow(q) {
             hx-target="#claudia-questions-panel"
             hx-swap="outerHTML">
         <input type="text" name="answer" class="claudia-question-input"
-               placeholder="Answer (Enter to save)…"
+               placeholder="Type your answer…"
                autocomplete="off" />
+        <button type="submit" class="claudia-question-btn save" title="Save answer">Save</button>
         <button type="button" class="claudia-question-btn drop"
                 hx-post="/sandbox/assistant/questions/${id}/drop"
                 hx-target="#claudia-questions-panel"

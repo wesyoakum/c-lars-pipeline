@@ -159,9 +159,14 @@
     }
 
     if (!base) {
-      var inMatch = rest.match(/^in\s+(\d+)\s*(minute|minutes|min|mins|hour|hours|hr|hrs|day|days|week|weeks|month|months)$/);
+      // "two weeks from today", "3 days from now", "in 2 weeks", etc.
+      var WORD_NUMS = { one:1, two:2, three:3, four:4, five:5, six:6, seven:7,
+        eight:8, nine:9, ten:10, eleven:11, twelve:12, a:1, an:1 };
+      var inMatch = rest.match(/^(?:in\s+)?(\w+)\s*(minute|minutes|min|mins|hour|hours|hr|hrs|day|days|week|weeks|month|months)(?:\s+(?:from\s+)?(?:today|now))?$/);
       if (inMatch) {
-        var n = parseInt(inMatch[1], 10);
+        var nRaw = inMatch[1];
+        var n = WORD_NUMS[nRaw] !== undefined ? WORD_NUMS[nRaw] : parseInt(nRaw, 10);
+        if (isNaN(n)) n = 0;
         var unit = inMatch[2];
         var target = new Date(now);
         if (/^(minute|minutes|min|mins)$/.test(unit)) target.setMinutes(target.getMinutes() + n);

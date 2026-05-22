@@ -335,7 +335,7 @@ const WIZARD_MODAL_MARKUP = (
   '<h3 x-text="$store.wizard.title()"></h3>' +
   '<span class="task-wizard-step-indicator" x-text="$store.wizard.stepProgressLabel()" ' +
   'x-show="$store.wizard.phase === \'steps\' && $store.wizard.stepProgressLabel()"></span>' +
-  '<button type="button" class="task-modal-close" @click="$store.wizard.closeModal()" aria-label="Close">&times;</button>' +
+  '<button type="button" class="task-modal-close" @click="$store.wizard.closeModal()" aria-label="Close" title="Close">&times;</button>' +
   '</div>' +
   '<div class="task-modal-body">' +
 
@@ -651,6 +651,10 @@ const WIZARD_MODAL_MARKUP = (
   'placeholder="YYYY-MM-DD or blank">' +
   '</label>' +
   '<label class="task-wizard-review-input-row">' +
+  '<span>Show after</span>' +
+  '<input type="date" x-model="$store.wizard.plan.task.proposed_new.visible_after">' +
+  '</label>' +
+  '<label class="task-wizard-review-input-row">' +
   '<span>Assignee</span>' +
   '<select x-model="$store.wizard.plan.task.proposed_new.assignee_id">' +
   '<template x-for="u in $store.wizard.users" :key="u.id">' +
@@ -805,7 +809,7 @@ const CASCADE_DELETE_MODAL_MARKUP = (
   '<div class="task-modal cascade-delete-modal" @click.stop>' +
   '<div class="task-modal-header">' +
   '<h3>Delete <span x-text="$store.cascadeDelete.entity.label || $store.cascadeDelete.entity.type || \'this record\'"></span>?</h3>' +
-  '<button type="button" class="task-modal-close" @click="$store.cascadeDelete.closeModal()" aria-label="Close">&times;</button>' +
+  '<button type="button" class="task-modal-close" @click="$store.cascadeDelete.closeModal()" aria-label="Close" title="Close">&times;</button>' +
   '</div>' +
   '<div class="task-modal-body">' +
   '<p class="cascade-delete-busy" x-show="$store.cascadeDelete.busy">Loading…</p>' +
@@ -881,7 +885,7 @@ const BLOCKER_MODAL_MARKUP = (
   '<div class="task-modal blocker-modal" @click.stop>' +
   '<div class="task-modal-header">' +
   '<h3>Can\u2019t do that yet</h3>' +
-  '<button type="button" class="task-modal-close" @click="$store.blockerModal.close()" aria-label="Close">&times;</button>' +
+  '<button type="button" class="task-modal-close" @click="$store.blockerModal.close()" aria-label="Close" title="Close">&times;</button>' +
   '</div>' +
   '<div class="task-modal-body">' +
   '<p class="blocker-modal-intro">' +
@@ -1640,7 +1644,7 @@ export function layout(title, body, opts = {}) {
     <div class="header-right">
       ${user ? UNIVERSAL_SEARCH_HTML : ''}
       ${user ? BOARD_RESTORE_HEADER_BTN : ''}
-      ${user ? `<a href="/notifications" class="notification-bell" aria-label="Notifications" x-data>
+      ${user ? `<a href="/notifications" class="notification-bell" aria-label="Notifications" title="Notifications" x-data>
         <svg class="notification-bell-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
           <path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6V11a6 6 0 0 0-4.5-5.81V5a1.5 1.5 0 0 0-3 0v.19A6 6 0 0 0 6 11v5l-2 2v1h16v-1l-2-2z"/>
         </svg>
@@ -1655,7 +1659,7 @@ export function layout(title, body, opts = {}) {
   ${user ? `<div class="notification-toast-stack" x-data x-cloak>
     <template x-for="toast in ($store.notifications && $store.notifications.toasts) || []" :key="toast.id">
       <div class="notification-toast" @click="$store.notifications.clickToast(toast)">
-        <button type="button" class="notification-toast-close" @click.stop="$store.notifications.dismissToast(toast)" aria-label="Dismiss">&times;</button>
+        <button type="button" class="notification-toast-close" @click.stop="$store.notifications.dismissToast(toast)" aria-label="Dismiss" title="Dismiss">&times;</button>
         <div class="notification-toast-title" x-text="toast.title"></div>
         <div class="notification-toast-body" x-show="toast.body" x-text="toast.body"></div>
       </div>
@@ -1666,7 +1670,7 @@ export function layout(title, body, opts = {}) {
   ${CASCADE_DELETE_MODAL_MARKUP}
   ${user._sitePrefs?.messaging_enabled ? BOARD_LEFT_MARKUP : ''}
   ${BOARD_RIGHT_MARKUP}` : ''}
-  ${flash ? `<div class="flash flash-${escape(flash.kind ?? 'info')}" data-flash-kind="${escape(flash.kind ?? 'info')}" role="status" aria-live="polite">${escape(flash.message)}${flash.undo ? ` <form method="post" action="${escape(flash.undo)}" style="display:inline"><button type="submit" class="flash-undo">Undo</button></form>` : ''}<button type="button" class="flash-close" aria-label="Dismiss">&times;</button></div>` : ''}
+  ${flash ? `<div class="flash flash-${escape(flash.kind ?? 'info')}" data-flash-kind="${escape(flash.kind ?? 'info')}" role="status" aria-live="polite">${escape(flash.message)}${flash.undo ? ` <form method="post" action="${escape(flash.undo)}" style="display:inline"><button type="submit" class="flash-undo">Undo</button></form>` : ''}<button type="button" class="flash-close" aria-label="Dismiss" title="Dismiss">&times;</button></div>` : ''}
   ${user ? `<script>${displayPrefsBootScript(user)}</script>` : ''}
   <main class="site-main">
 ${breadcrumbHtml}

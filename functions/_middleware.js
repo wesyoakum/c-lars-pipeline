@@ -55,5 +55,21 @@ export async function onRequest(context) {
   context.data.user = user;
   context.data.env = env.PIPELINE_ENV ?? 'production';
 
+  // Fire-and-forget page-view tracking for admin activity log.
+  // Only log HTML page views (skip API/JSON/asset requests).
+  const accept = request.headers.get('accept') || '';
+  if (accept.includes('text/html') && env.DB && user.id) {
+    context.waitUntil(
+      env.DB.prepare(
+        `INSERT INTO user_page_views (user_id, url, at) VALUES (?, ?, datetime('now'))`
+      ).bind(user.id, url.pathname).run()
+        .then(() =>
+          env.DB.prepare(`UPDATE users SET last_seen_at = datetime('now') WHERE id = ?`)
+            .bind(user.id).run()
+        )
+        .catch(() => {/* ignore — table may not exist yet */})
+    );
+  }
+
   return next();
 }
