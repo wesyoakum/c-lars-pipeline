@@ -72,7 +72,7 @@ export async function onRequestGet(context) {
             j.handed_off_at, j.created_at, j.updated_at,
             j.external_source,
             json_extract(j.wfm_payload, '$.State') AS wfm_state,
-            o.stage AS opp_stage,
+            o.stage AS opp_stage, o.estimated_value_usd,
             o.number AS opp_number, o.title AS opp_title, o.id AS opp_id,
             a.name AS account_name, a.alias AS account_alias,
             a.parent_group AS account_parent_group
@@ -124,6 +124,7 @@ export async function onRequestGet(context) {
       created: (r.created_at ?? '').slice(0, 10),
       wfm_status: r.wfm_state || '',
       opp_stage: r.opp_stage || '',
+      value: r.estimated_value_usd != null ? Number(r.estimated_value_usd) : '',
       source: r.external_source ? 'wfm' : 'pipeline',
     };
   });
@@ -146,6 +147,33 @@ export async function onRequestGet(context) {
   var oppBody = chart.querySelector('[data-role="opp-chart-body"]');
   function esc(x){ return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   var palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#e11d48'];
+  function fmt$(n){
+    n = Number(n) || 0;
+    if (n >= 1e9) return '$' + (n/1e9).toFixed(n >= 1e10 ? 0 : 1).replace(/\\.0$/,'') + 'B';
+    if (n >= 1e6) return '$' + (n/1e6).toFixed(n >= 1e7 ? 0 : 1).replace(/\\.0$/,'') + 'M';
+    if (n >= 1e3) return '$' + (n/1e3).toFixed(n >= 1e4 ? 0 : 1).replace(/\\.0$/,'') + 'K';
+    return '$' + Math.round(n);
+  }
+
+  // Count/value mode toggle
+  var MODE_KEY = 'pipeline.jobChart.mode.v1';
+  var mode = 'count';
+  try { var sm = localStorage.getItem(MODE_KEY); if (sm === 'value' || sm === 'count') mode = sm; } catch(e) {}
+  var modeBtns = chart.querySelectorAll('[data-role="job-chart-mode"] button');
+  function setMode(next){
+    mode = next;
+    try { localStorage.setItem(MODE_KEY, mode); } catch(e) {}
+    for (var i = 0; i < modeBtns.length; i++){
+      modeBtns[i].classList.toggle('jc-mode-active', modeBtns[i].getAttribute('data-mode') === mode);
+    }
+    render();
+  }
+  for (var i = 0; i < modeBtns.length; i++){
+    (function(btn){
+      btn.classList.toggle('jc-mode-active', btn.getAttribute('data-mode') === mode);
+      btn.addEventListener('click', function(){ setMode(btn.getAttribute('data-mode')); });
+    })(modeBtns[i]);
+  }
 
   // View toggle
   var VIEW_KEY = 'pipeline.jobChart.view.v1';
@@ -173,26 +201,38 @@ export async function onRequestGet(context) {
   function renderChart(bodyEl, dataKey) {
     if (!host || !bodyEl) return;
     var trs = host.querySelectorAll('tbody[data-role="rows"] tr[data-row-id]');
-    var counts = {}, order = [], total = 0;
+    var counts = {}, values = {}, order = [], total = 0;
     for (var i=0;i<trs.length;i++){
       var tr = trs[i];
       if (tr.style.display === 'none') continue;
       var s = (tr.getAttribute('data-' + dataKey) || '').trim() || '—';
-      if (!(s in counts)){ counts[s] = 0; order.push(s); }
+      var v = parseFloat(tr.getAttribute('data-value'));
+      if (!isFinite(v)) v = 0;
+      if (!(s in counts)){ counts[s] = 0; values[s] = 0; order.push(s); }
       counts[s]++;
+      values[s] += v;
       total++;
     }
     if (total === 0){ bodyEl.innerHTML = ''; return; }
-    var max = 0; for (var k in counts){ if (counts[k] > max) max = counts[k]; }
-    var axis = Math.max(10, Math.ceil(max / 10) * 10);
-    order.sort(function(a,b){ return (counts[b] || 0) - (counts[a] || 0); });
+    var metric = mode === 'value' ? values : counts;
+    var max = 0; for (var k in metric){ if (metric[k] > max) max = metric[k]; }
+    var axis;
+    if (mode === 'value') {
+      if (max <= 0) axis = 1;
+      else { var exp = Math.floor(Math.log10(max)), step = Math.pow(10, exp); axis = Math.ceil(max / step) * step; if (axis === max) axis = max + step; }
+    } else {
+      axis = Math.max(10, Math.ceil(max / 10) * 10);
+    }
+    order.sort(function(a,b){ return (metric[b] || 0) - (metric[a] || 0); });
     bodyEl.innerHTML = order.map(function(s,idx){
-      var v = counts[s];
-      var pct = Math.round(v / axis * 100);
+      var mv = metric[s];
+      var pct = Math.round(mv / axis * 100);
       var color = palette[idx % palette.length];
-      return '<div class="jc-row" title="'+esc(s)+': '+v+'"><span class="jc-label" title="'+esc(s)+'">'+esc(s)+'</span>'+
+      var rightLabel = mode === 'value' ? fmt$(mv) : String(mv);
+      var tip = esc(s) + ' — ' + counts[s] + ' jobs · ' + fmt$(values[s]);
+      return '<div class="jc-row" title="'+tip+'"><span class="jc-label" title="'+esc(s)+'">'+esc(s)+'</span>'+
              '<span class="jc-track"><span class="jc-bar" style="width:'+pct+'%;background:'+color+'"></span></span>'+
-             '<span class="jc-count">'+v+'</span></div>';
+             '<span class="jc-count">'+rightLabel+'</span></div>';
     }).join('');
   }
 
@@ -228,6 +268,11 @@ export async function onRequestGet(context) {
           <button type="button" data-view="wfm_status">By WFM status</button>
           <button type="button" data-view="opp_stage">By opp stage</button>
         </div>
+        <span style="flex:1"></span>
+        <div class="jc-mode-toggle" data-role="job-chart-mode" role="group" aria-label="Chart metric">
+          <button type="button" data-mode="count" title="Show job count">Count</button>
+          <button type="button" data-mode="value" title="Show total value">Value ($)</button>
+        </div>
       </div>
       <div data-role="wfm-chart-body"></div>
       <div data-role="opp-chart-body" hidden></div>
@@ -248,6 +293,7 @@ export async function onRequestGet(context) {
                 ${rowData.map(r => html`
                   <tr data-row-id="${escape(r.id)}"
                       data-row-href="/jobs/${escape(r.id)}"
+                      data-value="${escape(r.value === '' ? '' : String(r.value))}"
                       ${raw(rowDataAttrs(columns, r))}>
                     <td class="col-number" data-col="number"><a href="/jobs/${escape(r.id)}"><strong>${escape(r.number)}</strong></a></td>
                     <td class="col-title" data-col="title">
