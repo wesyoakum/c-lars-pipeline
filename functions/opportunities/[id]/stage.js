@@ -154,7 +154,7 @@ export async function onRequestPost(context) {
   // If moving to a terminal stage, set close_reason and actual_close_date
   const isTerminal = !!targetDef.is_terminal;
   const closeReason = isTerminal
-    ? (targetDef.is_won ? 'won' : (targetDef.stage_key === 'lost' ? 'lost' : 'abandoned'))
+    ? (targetDef.is_won ? 'won' : (targetDef.stage_key === 'lost' ? 'lost' : 'closed_died'))
     : null;
   const isCloseLoss = targetDef.stage_key === 'lost' || targetDef.stage_key === 'closed_died';
   const lossReasonTag = isCloseLoss ? (value.override_reason || null) : null;

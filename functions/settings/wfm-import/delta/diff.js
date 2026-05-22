@@ -34,7 +34,7 @@ const LEAD_CATEGORY_TO_STAGE = {
   '2 Qualifying':  'rfq_received',
   '3 Opportunity': 'quote_drafted',
   '4 Quoted':      'quote_submitted',
-  '5 Won':         'won',
+  '5 Won':         'job_in_progress',
   '6 Lost':        'lost',
 };
 
@@ -54,8 +54,8 @@ const CATEGORY_NAME_TO_TYPE = {
 };
 
 const JOB_STATE_TO_STAGE = {
-  PLANNED: 'won', PRODUCTION: 'job_in_progress',
-  COMPLETED: 'completed', CANCELLED: 'abandoned',
+  PLANNED: 'job_in_progress', PRODUCTION: 'job_in_progress',
+  COMPLETED: 'completed', CANCELLED: 'closed_died',
   ENGINEERING: 'job_in_progress', PROCUREMENT: 'job_in_progress',
   'IN PROGRESS': 'job_in_progress', 'ON ORDER': 'job_in_progress',
   'PREP TO SHIP': 'job_in_progress', SHIPPED: 'job_in_progress',
@@ -90,7 +90,7 @@ export const OPPORTUNITY_FIELDS = [
   { pipeline: 'description',         wfm: 'Description',      label: 'Description' },
   { pipeline: 'stage',               wfm: null,               label: 'Stage',
     derive: (l) => {
-      if (l.State === 'Won') return 'won';
+      if (l.State === 'Won') return 'job_in_progress';
       if (l.State === 'Lost') return 'lost';
       return LEAD_CATEGORY_TO_STAGE[l.Category] || 'lead';
     } },

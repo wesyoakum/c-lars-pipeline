@@ -62,7 +62,8 @@ export const INACTIVE_JOB_STATUSES = [
 // active list until the downstream job is complete.
 export const CLOSED_OPPORTUNITY_STAGES = [
   'lost',
-  'abandoned',
+  'closed_died',
+  'abandoned',  // legacy — kept for any old data
 ];
 
 // Separate constant for the inactive-opportunities section on the

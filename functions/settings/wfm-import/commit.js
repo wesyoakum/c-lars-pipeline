@@ -74,7 +74,7 @@ const LEAD_CATEGORY_TO_STAGE = {
   '2 Qualifying':  'rfq_received',
   '3 Opportunity': 'quote_drafted',
   '4 Quoted':      'quote_submitted',
-  '5 Won':         'won',
+  '5 Won':         'job_in_progress',
   '6 Lost':        'lost',
 };
 
@@ -90,10 +90,10 @@ const CATEGORY_NAME_TO_TYPE = {
 };
 
 const JOB_STATE_TO_STAGE = {
-  PLANNED:    'won',
+  PLANNED:    'job_in_progress',
   PRODUCTION: 'job_in_progress',
   COMPLETED:  'completed',
-  CANCELLED:  'abandoned',
+  CANCELLED:  'closed_died',
 };
 
 const JOB_STATE_TO_JOBS_STATUS = {
@@ -373,7 +373,7 @@ async function upsertOpportunityFromLead(env, lead, accountId, contactId, ownerU
   }
 
   let stage = LEAD_CATEGORY_TO_STAGE[lead.Category] || 'lead';
-  if (lead.State === 'Won')  stage = 'won';
+  if (lead.State === 'Won')  stage = 'job_in_progress';
   if (lead.State === 'Lost') stage = 'lost';
 
   const ts = nowIso();
@@ -473,7 +473,7 @@ async function findOpportunityForJob(env, job, accountId) {
 // Update an existing opp's stage/type when a job links to it.
 async function advanceOppFromJob(env, oppId, job) {
   const typeMap = CATEGORY_NAME_TO_TYPE[job.Type] || { type: 'spares', note: null };
-  const stage   = JOB_STATE_TO_STAGE[job.State] || 'won';
+  const stage   = JOB_STATE_TO_STAGE[job.State] || 'job_in_progress';
   const ts = nowIso();
   await run(env.DB,
     `UPDATE opportunities
@@ -903,9 +903,9 @@ async function ensureOpportunityFromLead(env, wfmLeadUuid, ctx) {
 const QUOTE_STATE_TO_OPP_STAGE = {
   Draft:    'quote_drafted',
   Issued:   'quote_submitted',
-  Accepted: 'won',
+  Accepted: 'job_in_progress',
   Declined: 'lost',
-  Archived: 'abandoned',
+  Archived: 'closed_died',
 };
 
 // Synthesize a standalone opportunity from a quote that has no parent
@@ -1305,7 +1305,7 @@ export async function processSamples(env, samples, options = {}) {
       // Advance the parent opp's stage based on the quote's WFM state.
       const quoteStatus = QUOTE_STATE_TO_STATUS[q.State] || 'draft';
       const stageForQuote = {
-        accepted: 'won',
+        accepted: 'job_in_progress',
         issued: 'quote_submitted',
         rejected: 'closed_lost',
       }[quoteStatus];
@@ -1482,7 +1482,7 @@ export async function onRequestPost(context) {
             AND external_source = 'wfm'
             AND opportunity_id IN (
               SELECT id FROM opportunities
-               WHERE stage = 'won'
+               WHERE stage = 'job_in_progress'
                  AND deleted_at IS NULL
                  AND external_source IN ('wfm-lead', 'wfm-quote-orphan')
             )`);
