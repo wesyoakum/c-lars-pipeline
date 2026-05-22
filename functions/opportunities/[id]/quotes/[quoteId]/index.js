@@ -3019,7 +3019,8 @@ export async function onRequestGet(context) {
       <button type="button" data-action="group">Group lines</button>
       <button type="button" data-action="delete">Delete lines</button>
     </div>
-    <dialog id="library-search-modal" style="max-width:600px;width:90%;border:1px solid var(--border,#d8d8d8);border-radius:8px;padding:1.2rem">
+    <style>#library-search-modal::backdrop{background:rgba(0,0,0,.4)}</style>
+    <dialog id="library-search-modal" style="max-width:600px;width:90%;border:1px solid var(--border,#d8d8d8);border-radius:8px;padding:1.2rem;background:#fff">
       <form method="dialog" style="margin:0">
         <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.75rem">
           <h3 style="margin:0;font-size:1rem">Add from library</h3>
@@ -3032,7 +3033,8 @@ export async function onRequestGet(context) {
              autocomplete="off">
       <div id="lib-search-results" style="max-height:350px;overflow-y:auto"></div>
     </dialog>
-    <dialog id="import-lines-modal" style="max-width:800px;width:95%;border:1px solid var(--border,#d8d8d8);border-radius:8px;padding:1.2rem">
+    <style>#import-lines-modal::backdrop{background:rgba(0,0,0,.4)}</style>
+    <dialog id="import-lines-modal" style="max-width:800px;width:95%;border:1px solid var(--border,#d8d8d8);border-radius:8px;padding:1.2rem;background:#fff">
       <form method="dialog" style="margin:0">
         <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.75rem">
           <h3 style="margin:0;font-size:1rem">Import line items from file</h3>
