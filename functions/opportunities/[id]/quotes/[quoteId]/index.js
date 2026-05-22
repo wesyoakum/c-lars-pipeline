@@ -236,12 +236,17 @@ document.addEventListener('alpine:init', function () {
 });
 `;
 
+import { syncKatana } from '../../../api/katana-sync.js';
+
 export async function onRequestGet(context) {
   const { env, data, request, params } = context;
   const user = data?.user;
   const url = new URL(request.url);
   const oppId = params.id;
   const quoteId = params.quoteId;
+
+  // Background-sync Katana products so typeahead has fresh data
+  context.waitUntil(syncKatana(env).catch(() => {}));
 
   const quote = await one(
     env.DB,
@@ -3160,7 +3165,7 @@ export async function onRequestGet(context) {
               results.innerHTML = items.map(function(it){
                 var price = it.default_price ? '$' + Number(it.default_price).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '';
                 var meta = [it.part_number, it.item_type, it.default_unit, it.use_count ? it.use_count + ' uses' : ''].filter(Boolean).join(' · ');
-                var srcTag = it.source === 'mrpeasy' ? '<span class="ta-item-src">MRP</span> ' : '';
+                var srcTag = it.source === 'katana' ? '<span class="ta-item-src" style="background:#fef3c7;color:#92400e">KAT</span> ' : it.source === 'mrpeasy' ? '<span class="ta-item-src">MRP</span> ' : '';
                 return '<div class="lib-result" data-lib-id="' + it.id + '">' +
                   '<div><div class="lib-result-name">' + srcTag + esc(it.name) + '</div>' +
                   '<div class="lib-result-meta">' + esc(meta) + '</div>' +
@@ -3243,7 +3248,7 @@ export async function onRequestGet(context) {
                 activeIdx = -1;
                 dd.innerHTML = items.map(function(it, i){
                   var meta = [it.part_number, it.default_unit, it.default_price ? '$' + Number(it.default_price).toFixed(2) : ''].filter(Boolean).join(' · ');
-                  var srcBadge = it.source === 'mrpeasy' ? '<span class="ta-item-src">MRP</span> ' : '';
+                  var srcBadge = it.source === 'katana' ? '<span class="ta-item-src" style="background:#fef3c7;color:#92400e">KAT</span> ' : it.source === 'mrpeasy' ? '<span class="ta-item-src">MRP</span> ' : '';
                   return '<div class="ta-item" data-idx="' + i + '" data-json="' + esc(JSON.stringify(it)) + '">' + srcBadge + '<span class="ta-item-name">' + esc(it.name) + '</span> <span class="ta-item-meta">' + esc(meta) + '</span></div>';
                 }).join('');
                 dd.hidden = false;

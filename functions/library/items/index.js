@@ -13,8 +13,11 @@ import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/
 import { ieText, ieSelect, listInlineEditScript } from '../../lib/list-inline-edit.js';
 import { librarySubNav } from '../../lib/library-subnav.js';
 import { hasRole } from '../../lib/auth.js';
+import { syncKatana } from '../../api/katana-sync.js';
 
 export async function onRequestGet(context) {
+  // Background-sync Katana products
+  context.waitUntil(syncKatana(context.env).catch(() => {}));
   return renderList(context, {});
 }
 
@@ -34,7 +37,7 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
   );
 
   const TYPE_LABELS = { product: 'Product', service: 'Service', labor: 'Labor', misc: 'Misc' };
-  const SOURCE_LABELS = { manual: 'Manual', mrpeasy: 'MRPeasy' };
+  const SOURCE_LABELS = { manual: 'Manual', mrpeasy: 'MRPeasy', katana: 'Katana' };
 
   const columns = [
     { key: 'part_number',   label: 'Part #',         sort: 'text',   filter: 'text',   default: true },
@@ -219,6 +222,40 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
                     }
                   })
                   .catch(function(err) { self.busy = false; self.error = 'Upload failed: ' + err.message; });
+              }
+            };
+          });
+        });
+        </script>
+
+        <h2 class="section-h">Katana Sync</h2>
+        <div x-data="katanaSync()">
+          <button class="btn" @click="sync()" :disabled="busy">Refresh from Katana</button>
+          <span x-show="busy" class="muted">Syncing...</span>
+          <span x-show="result" x-text="result" style="color:#16a34a;font-weight:500"></span>
+          <span x-show="error" x-text="error" style="color:#cf222e"></span>
+        </div>
+        <script>
+        document.addEventListener('alpine:init', function() {
+          Alpine.data('katanaSync', function() {
+            return {
+              busy: false, result: '', error: '',
+              sync: function() {
+                var self = this;
+                self.busy = true; self.result = ''; self.error = '';
+                fetch('/api/katana-sync', {
+                  method: 'POST', credentials: 'same-origin',
+                }).then(function(r) { return r.json(); })
+                  .then(function(j) {
+                    self.busy = false;
+                    if (j.ok) {
+                      self.result = 'Synced ' + j.products + ' products + ' + j.services + ' services from Katana.';
+                      setTimeout(function() { location.reload(); }, 1500);
+                    } else {
+                      self.error = j.reason || j.error || 'Sync failed.';
+                    }
+                  })
+                  .catch(function(err) { self.busy = false; self.error = 'Sync failed: ' + err.message; });
               }
             };
           });

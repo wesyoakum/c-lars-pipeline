@@ -37,6 +37,7 @@ export async function onRequestGet(context) {
              OR category LIKE ? OR item_notes LIKE ? OR default_unit LIKE ?)
         ${typeFilter}
       ORDER BY
+        CASE WHEN source = 'katana' THEN 0 ELSE 1 END,
         CASE WHEN part_number = ? THEN 0 ELSE 1 END,
         use_count DESC,
         last_used_at DESC
