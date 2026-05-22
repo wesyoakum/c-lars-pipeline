@@ -373,14 +373,7 @@ export async function onRequestGet(context) {
         <div class="chart-wrap chart-wrap-wide"><canvas id="rpt-forecast"></canvas></div>
       </section>
 
-      <!-- Row 6 - full width -->
-      <section class="card" style="grid-column: 1 / -1">
-        <h2>9 · ${escape(slideByKey('bottleneck').title)}</h2>
-        <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('bottleneck').caption)}</p>
-        <div class="chart-wrap chart-wrap-wide"><canvas id="rpt-bottleneck"></canvas></div>
-      </section>
-
-      <!-- Row 7 - full width - heatmap -->
+      <!-- Row 6 - full width - heatmap -->
       <section class="card" style="grid-column: 1 / -1">
         <h2>10 · ${escape(slideByKey('heatmap').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('heatmap').caption)}</p>
