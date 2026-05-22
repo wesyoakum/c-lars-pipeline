@@ -539,13 +539,19 @@ async function upsertQuote(env, q, opportunityId) {
     'SELECT id, number FROM quotes WHERE external_source = ? AND external_id = ?',
     ['wfm', q.UUID]);
 
+  // Inherit quote_type from the parent opportunity's transaction_type.
+  const parentOpp = opportunityId
+    ? await one(env.DB, 'SELECT transaction_type FROM opportunities WHERE id = ?', [opportunityId])
+    : null;
+  const quoteType = parentOpp?.transaction_type || 'spares';
+
   const ts = nowIso();
   const cols = {
     opportunity_id:      opportunityId,
     title:               s(q.Name),
     description:         s(q.Description),
     number:              s(q.ID) || existing?.number || null,
-    quote_type:          'spares',                         // default; usually overridden by parent opp's transaction_type
+    quote_type:          quoteType,
     status:              QUOTE_STATE_TO_STATUS[q.State] || 'draft',
     valid_until:         s(q.ValidDate),
     subtotal_price:      n(q.Amount),
