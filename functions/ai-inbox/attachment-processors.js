@@ -99,62 +99,45 @@ async function processDocument(env, attachment) {
       return text;
     }
 
-    // Everything else needs ConvertAPI. Map our extension to the
-    // ConvertAPI 'from' format. Anything unrecognized is rejected.
-    const FROM_FORMAT = {
-      pdf: 'pdf',
-      docx: 'docx',
-      doc: 'doc',
-      rtf: 'rtf',
-      odt: 'odt',
-      ppt: 'ppt',
-      pptx: 'pptx',
-      xls: 'xls',
-      xlsx: 'xlsx',
+    // Binary documents — send to Claude's document API for text extraction.
+    const DOC_MEDIA_TYPES = {
+      pdf:  'application/pdf',
+      docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      doc:  'application/msword',
+      rtf:  'application/rtf',
+      odt:  'application/vnd.oasis.opendocument.text',
+      ppt:  'application/vnd.ms-powerpoint',
+      pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      xls:  'application/vnd.ms-excel',
+      xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     };
-    const fromFmt = FROM_FORMAT[ext];
-    if (!fromFmt) {
+    const docMediaType = DOC_MEDIA_TYPES[ext];
+    if (!docMediaType) {
       throw new Error(`Unsupported document format: .${ext}`);
     }
 
-    const secret = env.CONVERTAPI_SECRET;
-    if (!secret) {
-      throw new Error('CONVERTAPI_SECRET is not configured');
-    }
-
     const buffer = await obj.arrayBuffer();
-    const url = `https://v2.convertapi.com/convert/${fromFmt}/to/txt?Secret=${secret}`;
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'Content-Disposition': `attachment; filename="${escapeHeaderFilename(filename)}"`,
-      },
-      body: buffer,
+    const bytes = new Uint8Array(buffer);
+    // Chunked base64 encoding to avoid call stack overflow on large files.
+    let binary = '';
+    for (let i = 0; i < bytes.length; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64 = btoa(binary);
+
+    const model = env.AI_INBOX_OCR_MODEL || ANTHROPIC_MODELS.FAST;
+    const result = await messages(env, {
+      model,
+      system: 'Extract all text content from this document. Return the raw text only — no JSON wrapping, no commentary. Preserve table structure using tabs between columns and newlines between rows.',
+      user: [
+        { type: 'document', source: { type: 'base64', media_type: docMediaType, data: base64 } },
+        { type: 'text', text: 'Extract all text from this document.' },
+      ],
+      maxTokens: 8192,
     });
 
-    if (!resp.ok) {
-      const errText = await resp.text().catch(() => '');
-      throw new Error(`ConvertAPI failed (${resp.status}): ${errText.slice(0, 200)}`);
-    }
-
-    // ConvertAPI returns a JSON envelope when using octet-stream input
-    // for text output: { Files: [{ FileName, FileExt, FileData (base64) }] }.
-    // Parse and decode.
-    const ct = resp.headers.get('content-type') || '';
-    let text = '';
-    if (ct.includes('application/json')) {
-      const data = await resp.json();
-      const fileData = data?.Files?.[0]?.FileData;
-      if (!fileData) {
-        throw new Error('ConvertAPI returned no file data');
-      }
-      text = atob(fileData);
-    } else {
-      text = await resp.text();
-    }
-
-    await markReady(env.DB, attachment.id, text, 'convertapi');
+    const text = result.text || '';
+    await markReady(env.DB, attachment.id, text, 'claude-document');
     return text;
   } catch (e) {
     await markError(env.DB, attachment.id, `Document extraction failed: ${e.message || e}`);
