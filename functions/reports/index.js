@@ -372,11 +372,6 @@ export async function onRequestGet(context) {
 
       <!-- Row 3 -->
       <section class="card">
-        <h2>5 · ${escape(slideByKey('segment').title)}</h2>
-        <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('segment').caption)}</p>
-        <div class="chart-wrap"><canvas id="rpt-segment"></canvas></div>
-      </section>
-      <section class="card">
         <h2>6 · ${escape(slideByKey('aging').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('aging').caption)}</p>
         <div class="chart-wrap"><canvas id="rpt-aging"></canvas></div>
