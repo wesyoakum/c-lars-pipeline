@@ -106,13 +106,13 @@ export async function gatherDashboardCharts(db) {
     all(db,
       `SELECT stage, COUNT(*) AS n, COALESCE(SUM(estimated_value_usd), 0) AS total_value
          FROM opportunities
-        WHERE stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
+        WHERE stage IN ('lead', 'rfq_received', 'quote_drafted', 'quote_submitted', 'quote_under_revision', 'revised_quote_submitted', 'quote_expired')
           AND deleted_at IS NULL
         GROUP BY stage`),
     all(db,
       `SELECT transaction_type, COUNT(*) AS n, COALESCE(SUM(estimated_value_usd), 0) AS total_value
          FROM opportunities
-        WHERE stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
+        WHERE stage IN ('lead', 'rfq_received', 'quote_drafted', 'quote_submitted', 'quote_under_revision', 'revised_quote_submitted', 'quote_expired')
           AND deleted_at IS NULL
         GROUP BY transaction_type ORDER BY total_value DESC`),
     all(db,
@@ -120,7 +120,7 @@ export async function gatherDashboardCharts(db) {
               COUNT(*) AS n, COALESCE(SUM(o.estimated_value_usd), 0) AS total_value
          FROM opportunities o
          LEFT JOIN users u ON u.id = o.owner_user_id
-        WHERE o.stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
+        WHERE o.stage IN ('lead', 'rfq_received', 'quote_drafted', 'quote_submitted', 'quote_under_revision', 'revised_quote_submitted', 'quote_expired')
           AND o.deleted_at IS NULL
         GROUP BY o.owner_user_id ORDER BY total_value DESC`),
     all(db,
@@ -129,7 +129,7 @@ export async function gatherDashboardCharts(db) {
               COALESCE(SUM(o.estimated_value_usd), 0) AS pipeline
          FROM opportunities o
          JOIN accounts a ON a.id = o.account_id
-        WHERE o.stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
+        WHERE o.stage IN ('lead', 'rfq_received', 'quote_drafted', 'quote_submitted', 'quote_under_revision', 'revised_quote_submitted', 'quote_expired')
           AND o.deleted_at IS NULL
         GROUP BY a.id ORDER BY pipeline DESC LIMIT 10`),
     all(db,
@@ -138,7 +138,7 @@ export async function gatherDashboardCharts(db) {
               COALESCE(SUM(estimated_value_usd * COALESCE(probability, 0) / 100.0), 0) AS weighted,
               COUNT(*) AS n
          FROM opportunities
-        WHERE stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
+        WHERE stage IN ('lead', 'rfq_received', 'quote_drafted', 'quote_submitted', 'quote_under_revision', 'revised_quote_submitted', 'quote_expired')
           AND deleted_at IS NULL
           AND expected_close_date IS NOT NULL
           AND expected_close_date >= date('now', 'start of month')
@@ -149,18 +149,18 @@ export async function gatherDashboardCharts(db) {
               COALESCE(SUM(estimated_value_usd), 0) AS value,
               COUNT(*) AS n
          FROM opportunities
-        WHERE stage = 'closed_won'
+        WHERE stage = 'completed'
           AND deleted_at IS NULL
           AND COALESCE(actual_close_date, updated_at) >= date('now', 'start of month', '-12 months')
         GROUP BY month ORDER BY month`),
     all(db,
       `SELECT COALESCE(a.segment, 'Other') AS segment,
-              SUM(CASE WHEN o.stage = 'closed_won' THEN 1 ELSE 0 END) AS won,
-              SUM(CASE WHEN o.stage = 'closed_lost' THEN 1 ELSE 0 END) AS lost,
-              SUM(CASE WHEN o.stage = 'closed_abandoned' THEN 1 ELSE 0 END) AS abandoned
+              SUM(CASE WHEN o.stage = 'completed' THEN 1 ELSE 0 END) AS won,
+              SUM(CASE WHEN o.stage = 'lost' THEN 1 ELSE 0 END) AS lost,
+              SUM(CASE WHEN o.stage = 'closed_died' THEN 1 ELSE 0 END) AS abandoned
          FROM opportunities o
          LEFT JOIN accounts a ON a.id = o.account_id
-        WHERE o.stage IN ('closed_won', 'closed_lost', 'closed_abandoned')
+        WHERE o.stage IN ('completed', 'lost', 'closed_died')
           AND o.deleted_at IS NULL
         GROUP BY segment ORDER BY segment`),
     all(db,
@@ -175,7 +175,7 @@ export async function gatherDashboardCharts(db) {
               AVG(julianday('now') - julianday(stage_entered_at)) AS avg_days,
               COUNT(*) AS n
          FROM opportunities
-        WHERE stage NOT IN ('closed_won', 'closed_lost', 'closed_abandoned')
+        WHERE stage IN ('lead', 'rfq_received', 'quote_drafted', 'quote_submitted', 'quote_under_revision', 'revised_quote_submitted', 'quote_expired')
           AND deleted_at IS NULL
         GROUP BY stage`),
     all(db,
