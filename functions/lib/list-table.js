@@ -640,7 +640,10 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
           }
         } else if (col.filter === 'select') {
           if (fs.values && fs.values.length > 0) {
-            if (fs.values.indexOf(String(data[col.key] || '')) === -1) return false;
+            var cellVal = String(data[col.key] || '');
+            var matched = fs.values.indexOf(cellVal) !== -1;
+            if (!matched && cellVal === '' && fs.values.indexOf('(blank)') !== -1) matched = true;
+            if (!matched) return false;
           }
         } else if (col.filter === 'range') {
           var rv = data[col.key];
@@ -704,9 +707,11 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
 
     function distinctValuesForColumn(key) {
       var set = {};
+      var hasBlank = false;
       allRows.forEach(function(tr) {
         var v = tr.dataset[key];
-        if (v != null && v !== '') set[v] = true;
+        if (v == null || v === '') hasBlank = true;
+        else set[v] = true;
       });
       var arr = Object.keys(set);
       // A column may declare an optionOrder (array of values in the
@@ -731,6 +736,8 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       } else {
         arr.sort(function(a, b) { return String(a).localeCompare(String(b)); });
       }
+      // Add "(blank)" as a filterable option when any rows have empty values.
+      if (hasBlank) arr.push('(blank)');
       return arr;
     }
 

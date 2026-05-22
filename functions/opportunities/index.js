@@ -82,6 +82,13 @@ export async function onRequestGet(context) {
     userRows.map((u) => ({ value: u.id, label: u.display_name || u.email }))
   );
 
+  const typeOptions = [
+    { value: 'spares', label: 'Spares' },
+    { value: 'eps', label: 'EPS' },
+    { value: 'refurb', label: 'Refurbishment' },
+    { value: 'service', label: 'Service' },
+  ];
+
   // Stage catalog gives us per-row label rendering. Cached in lib/stages.js.
   const catalog = await loadStageCatalog(env.DB);
 
@@ -169,6 +176,7 @@ export async function onRequestGet(context) {
     account_id: r.account_id ?? '',
     account_name: acct.label,
     account_href: acct.href,
+    transaction_type: r.transaction_type ?? '',
     type_label: parseTransactionTypes(r.transaction_type).map(t => TYPE_LABELS[t] ?? t).join(', ') || '—',
     types_raw: parseTransactionTypes(r.transaction_type).map(t => ({ spares: 'Spares', eps: 'EPS', refurb: 'Refurb', service: 'Service' })[t] ?? t).join(' '),
     stage_label: stageLabel(catalog, parseTransactionTypes(r.transaction_type)[0] ?? 'spares', r.stage),
@@ -385,7 +393,9 @@ export async function onRequestGet(context) {
                           ? html`<a href="${escape(r.account_href)}">${escape(r.account_name || '—')}</a>`
                           : html`<span class="muted">—</span>`}
                       </td>
-                      <td class="col-type_label" data-col="type_label">${escape(r.type_label)}</td>
+                      <td class="col-type_label" data-col="type_label">
+                        ${ieSelect('transaction_type', r.transaction_type, typeOptions)}
+                      </td>
                       <td class="col-stage_label" data-col="stage_label">${escape(r.stage_label)}</td>
                       <td class="col-owner" data-col="owner">
                         ${ieSelect('owner_user_id', r.owner_user_id, ownerOptions)}
@@ -437,6 +447,7 @@ export async function onRequestGet(context) {
               rfq_due_date: 'rfq_due',
               rfi_due_date: 'rfi_due',
               quoted_date: 'quoted',
+              transaction_type: 'type_label',
             },
           }))}</script>
           <script>${raw(stageChartScript)}</script>
