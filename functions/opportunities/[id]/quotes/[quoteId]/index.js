@@ -1003,7 +1003,7 @@ export async function onRequestGet(context) {
             <th class="num col-qty">Qty</th>
             <th class="col-unit">Unit</th>
             <th class="num col-price">Unit price</th>
-            <th class="num col-ext" style="width:130px">Ext</th>
+            <th class="num col-ext" style="width:40px"></th>
           </tr>
         </thead>
         <tbody>
@@ -1061,16 +1061,16 @@ export async function onRequestGet(context) {
                       <input type="hidden" name="is_active" value="${active ? '1' : '0'}">
                     </form>
                   </td>
-                  <td class="num col-ext" data-line-extended>
-                    <div style="display:flex;align-items:center;justify-content:flex-end;gap:4px">
-                      <strong data-ext-price>${fmtDollar(parentSum)}</strong>
-                      ${!readOnly ? html`
+                  <td class="col-ext" data-line-extended>
+                    <span data-ext-price hidden>${fmtDollar(parentSum)}</span>
+                    ${!readOnly ? html`
+                      <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
                         <button type="button" class="line-eye-toggle line-active-toggle" data-line-id="${escape(l.id)}" data-target-active="${active ? '0' : '1'}" title="${active ? 'Exclude from quote' : 'Include in quote'}">
                           <svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 10s4-7 9-7 9 7 9 7-4 7-9 7-9-7-9-7z"/><circle cx="10" cy="10" r="3"/>${!active ? '<line x1="3" y1="3" x2="17" y2="17" stroke-width="2.5"/>' : ''}</svg>
                         </button>
                         <button type="button" class="line-delete-btn" data-line-id="${escape(l.id)}" title="Delete line">&times;</button>
-                      ` : ''}
-                    </div>
+                      </div>
+                    ` : ''}
                   </td>
                 </tr>
               `;
@@ -1140,10 +1140,10 @@ export async function onRequestGet(context) {
               <td class="num col-price">
                 <input type="text" name="unit_price" form="line-form-${escape(l.id)}" value="${escape(l.unit_price ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input" data-autosave>
               </td>
-              <td class="num col-ext" data-line-extended>
-                <div style="display:flex;align-items:center;justify-content:flex-end;gap:4px">
-                  <span data-ext-price>${fmtDollar(l.extended_price)}</span>
-                  ${!readOnly ? html`
+              <td class="col-ext" data-line-extended>
+                <span data-ext-price hidden>${fmtDollar(l.extended_price)}</span>
+                ${!readOnly ? html`
+                  <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
                     <a href="${pbUrl(l.id)}" class="line-build-icon" title="${l.price_build_label ? 'Open price build ' + escape(l.build_number || l.price_build_label) : 'Add price build'}" style="color:${l.price_build_label ? '#3b82f6' : 'var(--muted,#999)'};text-decoration:none;display:inline-flex">
                       ${raw(ICON_CALCULATOR)}
                     </a>
@@ -1151,11 +1151,8 @@ export async function onRequestGet(context) {
                       <svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 10s4-7 9-7 9 7 9 7-4 7-9 7-9-7-9-7z"/><circle cx="10" cy="10" r="3"/>${!active ? '<line x1="3" y1="3" x2="17" y2="17" stroke-width="2.5"/>' : ''}</svg>
                     </button>
                     <button type="button" class="line-delete-btn" data-line-id="${escape(l.id)}" title="Delete line">&times;</button>
-                  ` : ''}
-                </div>
-                ${l.build_quote_price != null && Math.abs(Number(l.unit_price ?? 0) - Number(l.build_quote_price)) > 0.01
-                  ? html`<small class="muted" style="color:var(--warning);display:block;text-align:right" title="Price build suggests ${fmtDollar(l.build_quote_price)}/unit">Build: ${fmtDollar(l.build_quote_price)}</small>`
-                  : ''}
+                  </div>
+                ` : ''}
               </td>
             </tr>
           `;})}
