@@ -84,15 +84,7 @@ export async function onRequestPost(context) {
     );
   }
 
-  // ---- Close reason required for terminal-loss stages -----------------
-  const CLOSE_REASON_REQUIRED = ['lost', 'closed_died'];
-  if (CLOSE_REASON_REQUIRED.includes(targetDef.stage_key) && !value.override_reason?.trim()) {
-    return redirectWithFlash(
-      `/opportunities/${oppId}`,
-      `A close reason is required when moving to "${targetDef.label}".`,
-      'error'
-    );
-  }
+  // Close reason is optional — captured if provided but not required.
 
   // ---- Customer PO required to enter the won / OC / job phase ---------
   // Mirrors the close-reason hard guard above: a human cannot push a
