@@ -977,23 +977,14 @@ export async function onRequestGet(context) {
     <section class="card quote-doc-card">
       <div class="card-header">
         <h2>Line items</h2>
-        <div class="header-actions" style="display:flex;align-items:center;gap:0.6rem">
+        <div class="header-actions" style="display:flex;align-items:center;gap:0.4rem">
           ${!readOnly ? html`
-            <input type="text" name="title" form="${groupFormId}"
-                   placeholder="Group title"
-                   class="group-title-input"
-                   style="font-size:0.85em;padding:0.2rem 0.4rem;width:9rem">
-            <button type="submit" form="${groupFormId}"
-                    id="group-selected-btn"
-                    class="btn small"
-                    disabled
-                    title="Wrap the selected top-level lines under a group header">
-              Group selected
+            <button type="button" class="btn-icon" onclick="document.getElementById('library-search-modal').showModal()" title="Add from library" style="padding:.3rem .45rem">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A1.5 1.5 0 012.5 18V2A1.5 1.5 0 014 .5h10l4 4V18a1.5 1.5 0 01-1.5 1.5H4z"/><path d="M12 .5V5h4.5"/><path d="M7 10h6M7 13h4"/></svg>
             </button>
-          ` : ''}
-          ${!readOnly ? html`
-            <button type="button" class="btn small" onclick="document.getElementById('library-search-modal').showModal()">Add from library</button>
-            <button type="button" class="btn small" onclick="document.getElementById('import-lines-modal').showModal()">Import lines</button>
+            <button type="button" class="btn-icon" onclick="document.getElementById('import-lines-modal').showModal()" title="Import lines from file" style="padding:.3rem .45rem">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V4a2 2 0 00-2-2z"/><path d="M10 6v6M7 9l3-3 3 3"/></svg>
+            </button>
           ` : ''}
           <span class="header-value" id="q-lines-subtotal">${fmtDollar(includedSubtotal)} subtotal</span>
         </div>
@@ -1006,14 +997,13 @@ export async function onRequestGet(context) {
       <table class="data compact quote-lines-table" data-live-calc="quote-lines" id="quote-lines-table">
         <thead>
           <tr>
-            <th class="col-num">#</th>
-            ${!readOnly ? html`<th class="col-actions" style="width:6rem">Actions</th>` : ''}
+            ${!readOnly ? html`<th class="col-handle" style="width:28px"></th>` : ''}
+            <th class="col-num" style="width:30px">#</th>
             <th class="col-item">Item</th>
             <th class="num col-qty">Qty</th>
             <th class="col-unit">Unit</th>
             <th class="num col-price">Unit price</th>
-            <th class="num col-ext">Price ext</th>
-            <th class="col-build">Price Builder</th>
+            <th class="num col-ext">Ext</th>
           </tr>
         </thead>
         <tbody>
@@ -1034,38 +1024,11 @@ export async function onRequestGet(context) {
             // minimal form to the line update endpoint flipping
             // is_active; the autosave layer ignores it because it's a
             // hard submit, not a data-autosave field change.
-            const actionsCell = readOnly ? '' : html`
-              <td class="col-actions">
-                <div class="line-actions-cell" style="display:flex;flex-direction:column;align-items:center;gap:0.15rem">
-                  <div style="display:flex;gap:0.15rem">
-                    <form method="post" action="${moveUrl(l.id)}" class="inline-form line-move-form" style="display:inline">
-                      <input type="hidden" name="direction" value="up">
-                      <button type="submit" class="btn-icon" title="Move up" ${row.isFirstInGroup ? 'disabled' : ''} style="padding:0 0.3rem">▲</button>
-                    </form>
-                    <form method="post" action="${moveUrl(l.id)}" class="inline-form line-move-form" style="display:inline">
-                      <input type="hidden" name="direction" value="down">
-                      <button type="submit" class="btn-icon" title="Move down" ${row.isLastInGroup ? 'disabled' : ''} style="padding:0 0.3rem">▼</button>
-                    </form>
-                  </div>
-                  <div style="display:flex;gap:0.15rem;align-items:center">
-                    <button type="button" class="btn-icon line-active-toggle"
-                            data-line-id="${escape(l.id)}"
-                            data-target-active="${active ? '0' : '1'}"
-                            title="${active ? 'Mark inactive (excluded from totals and PDF)' : 'Reactivate'}"
-                            style="padding:0 0.3rem">${active ? '◉' : '○'}</button>
-                    ${!isParent && !isChild ? html`
-                      <input type="checkbox" name="line_ids" value="${escape(l.id)}"
-                             form="${groupFormId}"
-                             class="line-group-check"
-                             title="Select to group with others">
-                    ` : ''}
-                    ${isParent ? html`
-                      <form method="post" action="${ungroupUrl(l.id)}" class="inline-form" style="display:inline">
-                        <button type="submit" class="btn-icon" title="Ungroup — children become top-level lines" style="padding:0 0.3rem">✂</button>
-                      </form>
-                    ` : ''}
-                  </div>
-                </div>
+            // Drag handle cell — click to select, drag to reorder.
+            const handleCell = readOnly ? '' : html`
+              <td class="col-handle" style="text-align:center;vertical-align:middle;cursor:grab;user-select:none"
+                  data-drag-handle data-line-id="${escape(l.id)}">
+                <span style="color:var(--muted,#999);font-size:1rem;line-height:1" title="Drag to reorder · Click to select">⠿</span>
               </td>
             `;
 
@@ -1083,7 +1046,7 @@ export async function onRequestGet(context) {
               return html`
                 <tr data-line-row data-line-id="${escape(l.id)}" class="${parentRowClasses}">
                   <td class="col-num">${i + 1}<br><span class="pill" style="font-size:0.7em;background:#e0e7ff;color:#3730a3;border-color:#c7d2fe">GROUP</span></td>
-                  ${actionsCell}
+                  ${handleCell}
                   <td class="col-item" colspan="4">
                     <form method="post" action="${lineUrl(l.id)}" class="inline-form" id="line-form-${escape(l.id)}">
                       <div class="line-item-fields">
@@ -1098,10 +1061,15 @@ export async function onRequestGet(context) {
                       <input type="hidden" name="is_active" value="${active ? '1' : '0'}">
                     </form>
                   </td>
-                  <td class="num col-ext" data-line-extended>
+                  <td class="num col-ext" data-line-extended style="position:relative">
                     <strong>${fmtDollar(parentSum)}</strong>
+                    ${!readOnly ? html`
+                      <button type="button" class="line-eye-toggle line-active-toggle" data-line-id="${escape(l.id)}" data-target-active="${active ? '0' : '1'}" title="${active ? 'Exclude from quote' : 'Include in quote'}" style="position:absolute;right:22px;top:50%;transform:translateY(-50%)">
+                        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 10s4-7 9-7 9 7 9 7-4 7-9 7-9-7-9-7z"/><circle cx="10" cy="10" r="3"/>${!active ? '<line x1="3" y1="3" x2="17" y2="17" stroke-width="2.5"/>' : ''}</svg>
+                      </button>
+                      <button type="button" class="line-delete-btn" data-line-id="${escape(l.id)}" title="Delete line" style="position:absolute;right:2px;top:50%;transform:translateY(-50%)">&times;</button>
+                    ` : ''}
                   </td>
-                  <td class="col-build"></td>
                 </tr>
               `;
             }
@@ -1118,7 +1086,7 @@ export async function onRequestGet(context) {
                 ${l.is_option ? html`<br><span class="pill" style="font-size:0.7em">OPT</span>` : ''}
                 ${!active ? html`<br><span class="pill" style="font-size:0.7em;background:var(--bg-alt);color:var(--fg-muted)">INACTIVE</span>` : ''}
               </td>
-              ${actionsCell}
+              ${handleCell}
               <td class="col-item">
                 <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}" class="inline-form" id="line-form-${escape(l.id)}">
                   ${isHybrid ? html`
@@ -1170,35 +1138,19 @@ export async function onRequestGet(context) {
               <td class="num col-price">
                 <input type="text" name="unit_price" form="line-form-${escape(l.id)}" value="${escape(l.unit_price ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input" data-autosave>
               </td>
-              <td class="num col-ext" data-line-extended>
+              <td class="num col-ext" data-line-extended style="position:relative;white-space:nowrap">
                 ${fmtDollar(l.extended_price)}
                 ${l.build_quote_price != null && Math.abs(Number(l.unit_price ?? 0) - Number(l.build_quote_price)) > 0.01
                   ? html`<br><small class="muted" style="color:var(--warning)" title="Price build suggests ${fmtDollar(l.build_quote_price)}/unit">Build: ${fmtDollar(l.build_quote_price)}</small>`
                   : ''}
-              </td>
-              <td class="col-build">
-                ${l.price_build_label
-                  ? html`<a href="${pbUrl(l.id)}"
-                            class="pill pill-build ${l.price_build_status === 'locked' ? 'pill-locked' : ''}"
-                            style="display:inline-flex;align-items:center;gap:0.3rem;font-size:0.8rem"
-                            title="Open price build ${escape(l.build_number || l.price_build_label || '')}">
-                            <span class="pill-icon" style="display:inline-flex;align-items:center">${raw(ICON_CALCULATOR)}</span>
-                            <span>${escape(l.build_number || l.price_build_label)}</span>
-                          </a>`
-                  : (!readOnly ? html`
-                      <form method="post" action="${pbUrl(l.id)}" class="inline-form" style="display:inline">
-                        <input type="hidden" name="_action" value="create">
-                        <input type="hidden" name="label" value="${escape(l.description || l.title || 'Price build')}">
-                        <button class="btn-icon" type="submit"
-                                title="Add a new price build for this line"
-                                style="display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--border);border-radius:4px;padding:0.25rem 0.4rem;cursor:pointer;color:var(--fg)">
-                          ${raw(ICON_CALCULATOR_PLUS)}
-                        </button>
-                      </form>` : html`<span class="muted">\u2014</span>`)}
                 ${!readOnly ? html`
-                  <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/${escape(l.id)}/delete" class="inline-form" style="display:inline">
-                    <button class="row-delete-btn" type="submit" title="Delete line" aria-label="Delete line">\u00d7</button>
-                  </form>
+                  <a href="${pbUrl(l.id)}" class="line-build-icon" title="${l.price_build_label ? 'Open price build ' + escape(l.build_number || l.price_build_label) : 'Add price build'}" style="position:absolute;right:38px;top:50%;transform:translateY(-50%);color:${l.price_build_label ? '#3b82f6' : 'var(--muted,#999)'};font-size:.85rem;text-decoration:none">
+                    ${raw(ICON_CALCULATOR)}
+                  </a>
+                  <button type="button" class="line-eye-toggle line-active-toggle" data-line-id="${escape(l.id)}" data-target-active="${active ? '0' : '1'}" title="${active ? 'Exclude from quote' : 'Include in quote'}" style="position:absolute;right:20px;top:50%;transform:translateY(-50%)">
+                    <svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 10s4-7 9-7 9 7 9 7-4 7-9 7-9-7-9-7z"/><circle cx="10" cy="10" r="3"/>${!active ? '<line x1="3" y1="3" x2="17" y2="17" stroke-width="2.5"/>' : ''}</svg>
+                  </button>
+                  <button type="button" class="line-delete-btn" data-line-id="${escape(l.id)}" title="Delete line" style="position:absolute;right:2px;top:50%;transform:translateY(-50%)">&times;</button>
                 ` : ''}
               </td>
             </tr>
@@ -1206,8 +1158,8 @@ export async function onRequestGet(context) {
           ${!readOnly
             ? html`
               <tr class="new-line-row" data-line-row>
+                <td class="col-handle"></td>
                 <td class="col-num muted">${displayRows.length + 1}</td>
-                <td class="col-actions"></td>
                 <td class="col-item">
                   <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines" class="inline-form" id="new-line-form">
                     ${isHybrid ? html`
@@ -1238,7 +1190,6 @@ export async function onRequestGet(context) {
                   <input type="text" name="unit_price" form="new-line-form" class="num-input" placeholder="0">
                 </td>
                 <td class="num col-ext" data-line-extended>\u2014</td>
-                <td class="col-build"></td>
               </tr>
             `
             : ''}
@@ -2733,27 +2684,14 @@ export async function onRequestGet(context) {
       // 2. Active toggle: POSTs the current line form with is_active
       //    flipped, then reloads so the row shows its new
       //    inactive/active treatment.
-      var groupBtn = document.getElementById('group-selected-btn');
-      function recountGroupSelection() {
-        if (!groupBtn) return;
-        var n = document.querySelectorAll('.line-group-check:checked').length;
-        groupBtn.disabled = n < 2;
-        groupBtn.textContent = n >= 2
-          ? 'Group selected (' + n + ')'
-          : 'Group selected';
-      }
-      document.querySelectorAll('.line-group-check').forEach(function(cb) {
-        cb.addEventListener('change', recountGroupSelection);
-      });
-      recountGroupSelection();
-
+      // ---- Eye toggle (include/exclude) ----
       document.querySelectorAll('.line-active-toggle').forEach(function(btn) {
-        btn.addEventListener('click', function() {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
           var lineId = btn.getAttribute('data-line-id');
           var target = btn.getAttribute('data-target-active');
           var form = document.getElementById('line-form-' + lineId);
           if (!form) return;
-          // Update the hidden is_active input, then save + reload.
           var hidden = form.querySelector('input[name="is_active"]');
           if (hidden) hidden.value = target;
           var fd = new FormData(form);
@@ -2765,11 +2703,125 @@ export async function onRequestGet(context) {
             headers: { 'accept': 'application/json' },
             body: fd,
           }).then(function() { window.location.reload(); })
-            .catch(function(err) {
-              console.error('Active toggle failed:', err);
-            });
+            .catch(function(err) { console.error('Active toggle failed:', err); });
         });
       });
+
+      // ---- Hover-only delete ----
+      var deleteBaseUrl = '/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/';
+      document.querySelectorAll('.line-delete-btn').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          if (!confirm('Delete this line?')) return;
+          var lineId = btn.getAttribute('data-line-id');
+          var tr = btn.closest('tr[data-line-row]');
+          fetch(deleteBaseUrl + lineId + '/delete', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { accept: 'application/json' },
+          }).then(function(r) { return r.json(); })
+            .then(function(j) {
+              if (j.ok && tr) tr.remove();
+              if (j.subtotal_price != null) {
+                var el = document.getElementById('q-lines-subtotal');
+                if (el) el.textContent = '$' + Number(j.subtotal_price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' subtotal';
+              }
+            })
+            .catch(function() { location.reload(); });
+        });
+      });
+
+      // ---- Drag-and-drop reordering ----
+      var reorderUrl = '/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/reorder';
+      var dragSrcId = null;
+      document.querySelectorAll('[data-drag-handle]').forEach(function(handle) {
+        var tr = handle.closest('tr');
+        if (!tr) return;
+        tr.setAttribute('draggable', 'true');
+        tr.addEventListener('dragstart', function(e) {
+          dragSrcId = tr.getAttribute('data-line-id');
+          tr.style.opacity = '0.4';
+          e.dataTransfer.effectAllowed = 'move';
+        });
+        tr.addEventListener('dragend', function() { tr.style.opacity = ''; dragSrcId = null; clearHighlights(); });
+        tr.addEventListener('dragover', function(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; tr.style.borderTop = '2px solid #3b82f6'; });
+        tr.addEventListener('dragleave', function() { tr.style.borderTop = ''; });
+        tr.addEventListener('drop', function(e) {
+          e.preventDefault();
+          tr.style.borderTop = '';
+          var afterId = tr.getAttribute('data-line-id');
+          if (!dragSrcId || dragSrcId === afterId) return;
+          fetch(reorderUrl, {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'content-type': 'application/json', accept: 'application/json' },
+            body: JSON.stringify({ lineId: dragSrcId, afterLineId: afterId }),
+          }).then(function() { location.reload(); })
+            .catch(function() { location.reload(); });
+        });
+      });
+      function clearHighlights() {
+        document.querySelectorAll('tr[data-line-row]').forEach(function(r) { r.style.borderTop = ''; });
+      }
+
+      // ---- Click-to-select + floating action bar ----
+      var selected = new Set();
+      var floatingBar = document.getElementById('line-floating-bar');
+      var groupUrl = '/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines/group';
+      document.querySelectorAll('[data-drag-handle]').forEach(function(handle) {
+        handle.addEventListener('click', function(e) {
+          if (e.detail > 1) return; // ignore double-click
+          var lineId = handle.getAttribute('data-line-id');
+          var tr = handle.closest('tr');
+          if (selected.has(lineId)) { selected.delete(lineId); tr.classList.remove('line-selected'); }
+          else { selected.add(lineId); tr.classList.add('line-selected'); }
+          updateFloatingBar();
+        });
+      });
+      function updateFloatingBar() {
+        if (!floatingBar) return;
+        var n = selected.size;
+        floatingBar.hidden = n < 2;
+        var groupBtn = floatingBar.querySelector('[data-action="group"]');
+        var delBtn = floatingBar.querySelector('[data-action="delete"]');
+        if (groupBtn) groupBtn.textContent = 'Group ' + n + ' lines';
+        if (delBtn) delBtn.textContent = 'Delete ' + n + ' lines';
+      }
+      if (floatingBar) {
+        floatingBar.querySelector('[data-action="group"]').addEventListener('click', function() {
+          var ids = Array.from(selected);
+          // Build the group note from selected lines' titles + descriptions.
+          var note = [];
+          ids.forEach(function(id) {
+            var tr = document.querySelector('tr[data-line-id="' + id + '"]');
+            if (!tr) return;
+            var form = document.getElementById('line-form-' + id);
+            if (!form) return;
+            var t = (form.querySelector('[name="title"]') || {}).value || '';
+            var d = (form.querySelector('[name="description"]') || {}).value || '';
+            if (t || d) note.push((t + (d ? ' — ' + d : '')).trim());
+          });
+          var fd = new URLSearchParams();
+          ids.forEach(function(id) { fd.append('line_ids', id); });
+          fd.set('title', note[0] || 'Group');
+          fd.set('line_notes', note.join('\\n'));
+          fetch(groupUrl, {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body: fd.toString(),
+          }).then(function() { location.reload(); });
+        });
+        floatingBar.querySelector('[data-action="delete"]').addEventListener('click', function() {
+          if (!confirm('Delete ' + selected.size + ' lines?')) return;
+          var ids = Array.from(selected);
+          var done = 0;
+          ids.forEach(function(id) {
+            fetch(deleteBaseUrl + id + '/delete', {
+              method: 'POST', credentials: 'same-origin',
+              headers: { accept: 'application/json' },
+            }).then(function() { done++; if (done >= ids.length) location.reload(); })
+              .catch(function() { done++; if (done >= ids.length) location.reload(); });
+          });
+        });
+      }
     })();
     </script>
   `;
@@ -2939,6 +2991,27 @@ export async function onRequestGet(context) {
     : '';
 
   const libraryModal = !readOnly ? html`
+    <style>
+      .line-delete-btn{opacity:0;transition:opacity .15s;background:transparent;border:0;color:var(--muted);font-size:1.1em;cursor:pointer;padding:.1rem .3rem;border-radius:3px}
+      tr[data-line-row]:hover .line-delete-btn{opacity:1}
+      .line-delete-btn:hover{color:#cf222e;background:#fff0f0}
+      .line-eye-toggle{background:transparent;border:0;cursor:pointer;padding:.1rem;color:var(--muted);opacity:.5;transition:opacity .15s}
+      tr[data-line-row]:hover .line-eye-toggle{opacity:1}
+      .line-build-icon{opacity:.3;transition:opacity .15s}
+      tr[data-line-row]:hover .line-build-icon{opacity:1}
+      tr.line-selected{background:#eef2ff !important;outline:2px solid #3b82f6;outline-offset:-2px}
+      .col-handle:active{cursor:grabbing}
+      #line-floating-bar{position:fixed;bottom:1.5rem;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:.5rem 1.2rem;border-radius:8px;display:flex;gap:.75rem;align-items:center;box-shadow:0 4px 20px rgba(0,0,0,.25);z-index:50;font-size:.85rem}
+      #line-floating-bar[hidden]{display:none}
+      #line-floating-bar button{background:transparent;border:1px solid rgba(255,255,255,.3);color:#fff;padding:.3rem .7rem;border-radius:4px;cursor:pointer;font-size:.82rem}
+      #line-floating-bar button:hover{background:rgba(255,255,255,.15)}
+      #line-floating-bar button[data-action="delete"]{border-color:#ef4444;color:#fca5a5}
+      #line-floating-bar button[data-action="delete"]:hover{background:#ef4444;color:#fff}
+    </style>
+    <div id="line-floating-bar" hidden>
+      <button type="button" data-action="group">Group lines</button>
+      <button type="button" data-action="delete">Delete lines</button>
+    </div>
     <dialog id="library-search-modal" style="max-width:600px;width:90%;border:1px solid var(--border,#d8d8d8);border-radius:8px;padding:1.2rem">
       <form method="dialog" style="margin:0">
         <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.75rem">

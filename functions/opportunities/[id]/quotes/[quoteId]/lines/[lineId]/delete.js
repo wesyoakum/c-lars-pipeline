@@ -69,6 +69,20 @@ export async function onRequestPost(context) {
     }),
   ]);
 
+  // JSON response for fetch-based delete (no page reload).
+  const accept = context.request.headers.get('accept') || '';
+  if (accept.includes('application/json')) {
+    const updated = await one(env.DB,
+      'SELECT subtotal_price, total_price, tax_amount FROM quotes WHERE id = ?',
+      [quoteId]);
+    return new Response(JSON.stringify({
+      ok: true,
+      lineId,
+      subtotal_price: Number(updated?.subtotal_price ?? 0),
+      total_price: Number(updated?.total_price ?? 0),
+    }), { headers: { 'content-type': 'application/json' } });
+  }
+
   return redirectWithFlash(
     `/opportunities/${oppId}/quotes/${quoteId}`,
     'Line deleted.',
