@@ -993,6 +993,7 @@ export async function onRequestGet(context) {
           ` : ''}
           ${!readOnly ? html`
             <button type="button" class="btn small" onclick="document.getElementById('library-search-modal').showModal()">Add from library</button>
+            <button type="button" class="btn small" onclick="document.getElementById('import-lines-modal').showModal()">Import lines</button>
           ` : ''}
           <span class="header-value" id="q-lines-subtotal">${fmtDollar(includedSubtotal)} subtotal</span>
         </div>
@@ -2951,6 +2952,22 @@ export async function onRequestGet(context) {
              autocomplete="off">
       <div id="lib-search-results" style="max-height:350px;overflow-y:auto"></div>
     </dialog>
+    <dialog id="import-lines-modal" style="max-width:800px;width:95%;border:1px solid var(--border,#d8d8d8);border-radius:8px;padding:1.2rem">
+      <form method="dialog" style="margin:0">
+        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.75rem">
+          <h3 style="margin:0;font-size:1rem">Import line items from file</h3>
+          <span style="flex:1"></span>
+          <button type="submit" class="btn small">Close</button>
+        </div>
+      </form>
+      <p class="muted" style="font-size:.82rem;margin:0 0 .5rem">Upload a CSV, Excel, PDF, or image. AI will extract line items for review.</p>
+      <input type="file" id="import-file-input"
+             accept=".csv,.tsv,.xlsx,.xls,.pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.gif,.webp"
+             style="margin-bottom:.5rem">
+      <p id="import-status" hidden class="muted" style="font-size:.85rem"></p>
+      <div id="import-preview" style="max-height:400px;overflow-y:auto"></div>
+      <button type="button" id="import-confirm-btn" class="btn primary" hidden style="margin-top:.5rem"></button>
+    </dialog>
     <style>
       .lib-result{padding:.5rem .6rem;border-bottom:1px solid #f0f0f0;cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:.5rem;align-items:center}
       .lib-result:hover{background:#f5f5f7}
@@ -3096,6 +3113,116 @@ export async function onRequestGet(context) {
 
         inp.addEventListener('blur', function(){ setTimeout(function(){ dd.hidden = true; }, 150); });
       });
+
+      // ---- Import Lines Modal ----
+      var importModal = document.getElementById('import-lines-modal');
+      var importInput = document.getElementById('import-file-input');
+      var importStatus = document.getElementById('import-status');
+      var importPreview = document.getElementById('import-preview');
+      var importConfirmBtn = document.getElementById('import-confirm-btn');
+      var importUrl = '/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/import-lines';
+      var addLinesUrl = '/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/lines';
+      var importedLines = [];
+
+      if (importInput) {
+        importInput.addEventListener('change', function(){
+          var file = importInput.files[0];
+          if (!file) return;
+          importStatus.textContent = 'Processing with AI... this may take a moment.';
+          importStatus.hidden = false;
+          importPreview.innerHTML = '';
+          importConfirmBtn.hidden = true;
+          var fd = new FormData();
+          fd.append('file', file);
+          fetch(importUrl, { method: 'POST', credentials: 'same-origin', body: fd })
+            .then(function(r){ return r.json(); })
+            .then(function(j){
+              importStatus.hidden = true;
+              if (!j.ok || !j.lines || !j.lines.length) {
+                importStatus.textContent = j.error || 'No line items found in the file.';
+                importStatus.hidden = false;
+                return;
+              }
+              importedLines = j.lines;
+              renderImportPreview();
+            })
+            .catch(function(e){
+              importStatus.textContent = 'Failed: ' + (e.message || e);
+              importStatus.hidden = false;
+            });
+        });
+      }
+
+      function renderImportPreview(){
+        if (!importedLines.length) { importPreview.innerHTML = '<p class="muted">No lines.</p>'; importConfirmBtn.hidden = true; return; }
+        var html = '<table class="data compact" style="font-size:.82rem;width:100%"><thead><tr><th>Part #</th><th>Title</th><th>Desc</th><th>Qty</th><th>Unit</th><th>Price</th><th>Notes</th><th></th></tr></thead><tbody>';
+        importedLines.forEach(function(l, i){
+          html += '<tr data-import-idx="' + i + '">' +
+            '<td><input type="text" value="' + esc(l.part_number) + '" data-field="part_number" style="width:80px"></td>' +
+            '<td><input type="text" value="' + esc(l.title) + '" data-field="title" style="width:120px"></td>' +
+            '<td><input type="text" value="' + esc(l.description) + '" data-field="description" style="width:150px"></td>' +
+            '<td><input type="number" value="' + (l.quantity||1) + '" data-field="quantity" style="width:50px"></td>' +
+            '<td><input type="text" value="' + esc(l.unit||'ea') + '" data-field="unit" style="width:40px"></td>' +
+            '<td><input type="number" value="' + (l.unit_price!=null?l.unit_price:'') + '" data-field="unit_price" style="width:70px" step="0.01"></td>' +
+            '<td><input type="text" value="' + esc(l.notes) + '" data-field="notes" style="width:100px"></td>' +
+            '<td><button type="button" class="row-delete-btn" onclick="removeImportLine(' + i + ')" title="Remove">&times;</button></td></tr>';
+        });
+        html += '</tbody></table>';
+        importPreview.innerHTML = html;
+        importConfirmBtn.hidden = false;
+        importConfirmBtn.textContent = 'Add ' + importedLines.length + ' line(s) to quote';
+      }
+      window.removeImportLine = function(idx){
+        importedLines.splice(idx, 1);
+        renderImportPreview();
+      };
+
+      if (importConfirmBtn) {
+        importConfirmBtn.addEventListener('click', function(){
+          // Read edited values from the preview table
+          var rows = importPreview.querySelectorAll('tr[data-import-idx]');
+          var lines = [];
+          rows.forEach(function(tr){
+            var line = {};
+            tr.querySelectorAll('input').forEach(function(inp){
+              line[inp.getAttribute('data-field')] = inp.value;
+            });
+            lines.push(line);
+          });
+          if (!lines.length) return;
+          importConfirmBtn.disabled = true;
+          importConfirmBtn.textContent = 'Adding...';
+          var pending = lines.length;
+          var done = 0;
+          lines.forEach(function(l){
+            var body = new URLSearchParams();
+            body.set('title', l.title || '');
+            body.set('part_number', l.part_number || '');
+            body.set('description', l.description || '');
+            body.set('quantity', l.quantity || '1');
+            body.set('unit', l.unit || 'ea');
+            body.set('unit_price', l.unit_price || '0');
+            body.set('notes', l.notes || '');
+            body.set('item_type', 'product');
+            fetch(addLinesUrl, {
+              method: 'POST', credentials: 'same-origin',
+              headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+              body: body.toString()
+            }).then(function(){ done++; if (done >= pending) location.reload(); })
+              .catch(function(){ done++; if (done >= pending) location.reload(); });
+          });
+        });
+      }
+
+      if (importModal) {
+        importModal.addEventListener('close', function(){
+          importInput.value = '';
+          importStatus.hidden = true;
+          importPreview.innerHTML = '';
+          importConfirmBtn.hidden = true;
+          importedLines = [];
+        });
+      }
 
       function applyItem(inp, it){
         var form = inp.closest('form');
