@@ -24,7 +24,7 @@
 //   3. Add the trigger key + schema hints to settings/auto-tasks
 //      (index.js TRIGGERS + rule-schema.js CONDITION_PATHS/TOKEN_PATHS).
 
-import { all } from './db.js';
+import { all, run } from './db.js';
 import { now } from './ids.js';
 import { fireEvent } from './auto-tasks.js';
 
@@ -376,10 +376,39 @@ export async function sweepPriceBuildsStale(env, { staleDays = 30 } = {}) {
  * result and keep going. Returns a summary object the endpoint can
  * serialize back to the caller for observability.
  */
+/**
+ * Auto-expire: move opps from quote_submitted → quote_expired when
+ * every quote on the opp has a valid_until date in the past.
+ * Runs daily. No windowing needed — the UPDATE is idempotent.
+ */
+async function sweepQuoteExpired(env) {
+  const today = todayBucketUtc();
+  const result = await run(env.DB,
+    `UPDATE opportunities
+        SET stage = 'quote_expired', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE stage = 'quote_submitted'
+        AND deleted_at IS NULL
+        AND EXISTS (
+          SELECT 1 FROM quotes q
+           WHERE q.opportunity_id = opportunities.id
+             AND q.deleted_at IS NULL
+             AND q.valid_until IS NOT NULL
+             AND q.valid_until < ?
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM quotes q2
+           WHERE q2.opportunity_id = opportunities.id
+             AND q2.deleted_at IS NULL
+             AND (q2.valid_until IS NULL OR q2.valid_until >= ?)
+        )`, [today, today]);
+  return { expired: result?.changes || 0 };
+}
+
 export async function runAllSweeps(env) {
   const results = {};
   const sweeps = [
     ['quote.expiring_soon',  () => sweepQuotesExpiringSoon(env)],
+    ['quote.auto_expired',   () => sweepQuoteExpired(env)],
     ['task.overdue',         () => sweepTasksOverdue(env)],
     ['opportunity.stalled',  () => sweepOpportunitiesStalled(env)],
     ['price_build.stale',    () => sweepPriceBuildsStale(env)],
