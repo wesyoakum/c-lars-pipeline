@@ -2960,10 +2960,19 @@ export async function onRequestGet(context) {
           <button type="submit" class="btn small">Close</button>
         </div>
       </form>
-      <p class="muted" style="font-size:.82rem;margin:0 0 .5rem">Upload a CSV, Excel, PDF, or image. AI will extract line items for review.</p>
+      <div id="import-dropzone"
+           style="border:2px dashed var(--border,#d8d8d8);border-radius:8px;padding:2rem;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;margin-bottom:.5rem"
+           ondragover="event.preventDefault();this.style.borderColor='#3b82f6';this.style.background='#eef2ff'"
+           ondragleave="this.style.borderColor='';this.style.background=''"
+           ondrop="event.preventDefault();this.style.borderColor='';this.style.background='';var f=event.dataTransfer.files[0];if(f){document.getElementById('import-file-input').files=event.dataTransfer.files;document.getElementById('import-file-input').dispatchEvent(new Event('change'))}"
+           onclick="document.getElementById('import-file-input').click()">
+        <div style="font-size:1.5rem;margin-bottom:.3rem;color:var(--muted,#999)">&#8593;</div>
+        <div style="font-size:.9rem;font-weight:500">Drop a file here or click to browse</div>
+        <div class="muted" style="font-size:.78rem;margin-top:.25rem">CSV, Excel, PDF, Word, image — any format</div>
+      </div>
       <input type="file" id="import-file-input"
              accept=".csv,.tsv,.xlsx,.xls,.pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.gif,.webp"
-             style="margin-bottom:.5rem">
+             style="display:none">
       <p id="import-status" hidden class="muted" style="font-size:.85rem"></p>
       <div id="import-preview" style="max-height:400px;overflow-y:auto"></div>
       <button type="button" id="import-confirm-btn" class="btn primary" hidden style="margin-top:.5rem"></button>

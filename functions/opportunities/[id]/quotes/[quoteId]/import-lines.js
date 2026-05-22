@@ -125,8 +125,8 @@ export async function onRequestPost(context) {
       stmt(env.DB,
         `INSERT INTO ai_inbox_links
            (id, item_id, action_type, ref_type, ref_id, ref_label, created_at, created_by_user_id)
-         VALUES (?, ?, 'link_to_quote', 'quote', ?, ?, ?, ?)`,
-        [uuid(), entryId, 'link_to_quote', quoteId, `Quote line import: ${filename}`, ts, user?.id]),
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [uuid(), entryId, 'link_to_quote', 'quote', quoteId, `Quote line import: ${filename}`, ts, user?.id]),
     ]);
 
     // Step 2: Run the AI Inbox pipeline (processes attachment → captured_text).
