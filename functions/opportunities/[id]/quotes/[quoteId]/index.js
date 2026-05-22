@@ -1383,7 +1383,7 @@ export async function onRequestGet(context) {
           <button type="button" class="btn-tiny"
                   @click="copyFromTypeDefault()"
                   :disabled="!typeDefaultRows || typeDefaultRows.length === 0"
-                  :title="(typeDefaultRows && typeDefaultRows.length > 0) ? ('Replace the current rows with the saved ' + typeLabel + ' default (' + typeDefaultRows.length + ' rows)') : ('No ' + typeLabel + ' default saved yet. Build a schedule, then "Set as default" to seed one.')"
+                  :title="(typeDefaultRows && typeDefaultRows.length > 0) ? ('Replace the current rows with the saved ' + typeLabel + ' default (' + typeDefaultRows.length + ' rows)') : ('No ' + typeLabel + ' default saved yet. Build a schedule, then Set as default to seed one.')"
                   ${readOnly ? 'disabled' : ''}
                   x-text="(typeDefaultRows && typeDefaultRows.length > 0) ? ('Copy from ' + typeLabel + ' default') : ('No ' + typeLabel + ' default yet')"></button>
           <button type="button" class="btn-tiny"
