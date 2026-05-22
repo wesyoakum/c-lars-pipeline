@@ -48,37 +48,35 @@ async function extractText(env, file, filename) {
     return result.json?.text || result.text || '';
   }
 
-  // Binary documents — ConvertAPI.
-  const fromFmt = CONVERT_FORMATS[ext];
-  if (!fromFmt) {
+  // Binary documents — send directly to Claude as a document.
+  // Claude natively reads PDF and can handle DOCX/XLS as base64.
+  const CLAUDE_DOC_TYPES = {
+    pdf: 'application/pdf',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    doc: 'application/msword',
+    xls: 'application/vnd.ms-excel',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt: 'application/vnd.ms-powerpoint',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    rtf: 'application/rtf',
+    odt: 'application/vnd.oasis.opendocument.text',
+  };
+  const docMediaType = CLAUDE_DOC_TYPES[ext];
+  if (!docMediaType) {
     throw new Error(`Unsupported file format: .${ext}`);
   }
-  const secret = env.CONVERTAPI_SECRET;
-  if (!secret) {
-    throw new Error('CONVERTAPI_SECRET is not configured');
-  }
   const buffer = await file.arrayBuffer();
-  const safeName = String(filename).replace(/[\r\n"]/g, '_').slice(0, 200);
-  const resp = await fetch(`https://v2.convertapi.com/convert/${fromFmt}/to/txt?Secret=${secret}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/octet-stream',
-      'Content-Disposition': `attachment; filename="${safeName}"`,
-    },
-    body: buffer,
+  const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+  const result = await messagesJson(env, {
+    model: env.AI_INBOX_EXTRACT_MODEL || undefined,
+    system: 'Extract all text content from this document. Return JSON: {"text": "...all extracted text..."}. Preserve table structure using tabs between columns and newlines between rows.',
+    user: [
+      { type: 'document', source: { type: 'base64', media_type: docMediaType, data: base64 } },
+      { type: 'text', text: 'Extract all text from this document as JSON.' },
+    ],
+    maxTokens: 8192,
   });
-  if (!resp.ok) {
-    const errText = await resp.text().catch(() => '');
-    throw new Error(`ConvertAPI failed (${resp.status}): ${errText.slice(0, 200)}`);
-  }
-  const ct = resp.headers.get('content-type') || '';
-  if (ct.includes('application/json')) {
-    const data = await resp.json();
-    const fileData = data?.Files?.[0]?.FileData;
-    if (!fileData) throw new Error('ConvertAPI returned no file data');
-    return atob(fileData);
-  }
-  return await resp.text();
+  return result.json?.text || result.text || '';
 }
 
 // ---------- Line items extraction prompt ----------
