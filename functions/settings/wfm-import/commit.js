@@ -1306,7 +1306,7 @@ export async function processSamples(env, samples, options = {}) {
       const quoteStatus = QUOTE_STATE_TO_STATUS[q.State] || 'draft';
       const stageForQuote = {
         accepted: 'won',
-        issued: 'quote_issued',
+        issued: 'quote_submitted',
         rejected: 'closed_lost',
       }[quoteStatus];
       if (stageForQuote) {
