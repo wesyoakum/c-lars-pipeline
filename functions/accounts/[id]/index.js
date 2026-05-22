@@ -470,10 +470,6 @@ export async function onRequestGet(context) {
           <span class="detail-label">Website</span>
           <span class="detail-value">${inlineText('website', account.website)}</span>
         </div>
-        <div class="detail-pair">
-          <span class="detail-label">Owner</span>
-          <span class="detail-value">${inlineSelect('owner_user_id', account.owner_user_id, ownerOptions)}</span>
-        </div>
         <div class="detail-pair" x-data="accountKatanaPicker()" x-init="init()">
           <span class="detail-label">Katana customer</span>
           <span class="detail-value">
