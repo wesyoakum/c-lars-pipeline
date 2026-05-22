@@ -383,7 +383,20 @@ export async function sweepPriceBuildsStale(env, { staleDays = 30 } = {}) {
  */
 async function sweepQuoteExpired(env) {
   const today = todayBucketUtc();
-  const result = await run(env.DB,
+
+  // 1) Mark individual quotes as 'expired' when their valid_until is past
+  //    and they're still in an active status (draft/issued/revision_*).
+  const quoteResult = await run(env.DB,
+    `UPDATE quotes
+        SET status = 'expired', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      WHERE deleted_at IS NULL
+        AND status IN ('draft', 'issued', 'revision_draft', 'revision_issued')
+        AND valid_until IS NOT NULL
+        AND valid_until < ?`, [today]);
+
+  // 2) Move opps from quote_submitted → quote_expired when every quote
+  //    on the opp has a valid_until date in the past.
+  const oppResult = await run(env.DB,
     `UPDATE opportunities
         SET stage = 'quote_expired', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
       WHERE stage = 'quote_submitted'
@@ -401,7 +414,11 @@ async function sweepQuoteExpired(env) {
              AND q2.deleted_at IS NULL
              AND (q2.valid_until IS NULL OR q2.valid_until >= ?)
         )`, [today, today]);
-  return { expired: result?.changes || 0 };
+
+  return {
+    quotes_expired: quoteResult?.changes || 0,
+    opps_expired: oppResult?.changes || 0,
+  };
 }
 
 export async function runAllSweeps(env) {
