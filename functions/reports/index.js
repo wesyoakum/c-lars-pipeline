@@ -54,8 +54,7 @@ export async function onRequestGet(context) {
     quotesIssuedMonthly,
     quoteOutcomeRows,
     pipelineByOwner,
-    pipelineByStage,
-    quoteMetrics,
+    pipelineByType,
     recentWins,
     winYTD,
     thisMonthWins,
@@ -158,44 +157,33 @@ export async function onRequestGet(context) {
               COUNT(*) AS n, COALESCE(SUM(o.estimated_value_usd), 0) AS total_value
          FROM opportunities o
          LEFT JOIN users u ON u.id = o.owner_user_id
-        WHERE o.stage NOT IN ('won', 'lost', 'abandoned')
+        WHERE o.stage IN ('lead','rfq_received','quote_drafted','quote_submitted','quote_under_revision','revised_quote_submitted','quote_expired')
           AND o.deleted_at IS NULL
         GROUP BY o.owner_user_id ORDER BY total_value DESC`),
     all(env.DB,
-      // Sort happens client-side below using the stage catalog's
-      // sort_order so the table reads earliest -> latest, matching
-      // the dropdown menus + the chart above it.
-      `SELECT stage, COUNT(*) AS n, COALESCE(SUM(estimated_value_usd), 0) AS total_value
+      `SELECT transaction_type, COUNT(*) AS n, COALESCE(SUM(estimated_value_usd), 0) AS total_value
          FROM opportunities
-        WHERE stage NOT IN ('won', 'lost', 'abandoned')
+        WHERE stage IN ('lead','rfq_received','quote_drafted','quote_submitted','quote_under_revision','revised_quote_submitted','quote_expired')
           AND deleted_at IS NULL
-        GROUP BY stage`),
-    one(env.DB,
-      `SELECT COUNT(*) AS total,
-              SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) AS accepted,
-              SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS rejected,
-              SUM(CASE WHEN status = 'submitted' THEN 1 ELSE 0 END) AS pending,
-              SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS drafts
-         FROM quotes
-        WHERE deleted_at IS NULL`),
+        GROUP BY transaction_type ORDER BY total_value DESC`),
     all(env.DB,
       `SELECT o.number, o.title, o.estimated_value_usd, o.updated_at,
               a.name AS account_name
          FROM opportunities o
          LEFT JOIN accounts a ON a.id = o.account_id
-        WHERE o.stage = 'won'
+        WHERE o.stage IN ('completed', 'job_in_progress')
           AND o.deleted_at IS NULL
         ORDER BY o.updated_at DESC LIMIT 10`),
     one(env.DB,
       `SELECT COALESCE(SUM(estimated_value_usd), 0) AS value, COUNT(*) AS n
          FROM opportunities
-        WHERE stage = 'won'
+        WHERE stage IN ('completed', 'job_in_progress')
           AND COALESCE(actual_close_date, updated_at) >= date('now', 'start of year')
           AND deleted_at IS NULL`),
     one(env.DB,
       `SELECT COALESCE(SUM(estimated_value_usd), 0) AS value, COUNT(*) AS n
          FROM opportunities
-        WHERE stage = 'won'
+        WHERE stage IN ('completed', 'job_in_progress')
           AND COALESCE(actual_close_date, updated_at) >= date('now', 'start of month')
           AND deleted_at IS NULL`),
   ]);
@@ -216,10 +204,6 @@ export async function onRequestGet(context) {
   }
   const rptWinRate = (rptWon + rptLost) > 0 ? Math.round(rptWon / (rptWon + rptLost) * 100) : 0;
 
-  // Sort the "Pipeline detail by stage" table earliest -> latest
-  // using the same catalog ordering the chart above uses.
-  pipelineByStage.sort((a, b) =>
-    (stageSortOrder.get(a.stage) ?? 999) - (stageSortOrder.get(b.stage) ?? 999));
 
   // Slide index → catalog entry (for titles, captions)
   function slideByKey(key) { return CHART_SLIDES.find(s => s.key === key); }
@@ -387,60 +371,92 @@ export async function onRequestGet(context) {
 
   `;
 
+  const TYPE_LABELS = { spares: 'Spares', eps: 'EPS', refurb: 'Refurb', service: 'Service' };
+
+  const ownerChartData = JSON.stringify({
+    labels: pipelineByOwner.map(o => o.owner_name),
+    counts: pipelineByOwner.map(o => o.n),
+    values: pipelineByOwner.map(o => Number(o.total_value)),
+  });
+  const typeChartData = JSON.stringify({
+    labels: pipelineByType.map(t => TYPE_LABELS[t.transaction_type] ?? t.transaction_type),
+    counts: pipelineByType.map(t => t.n),
+    values: pipelineByType.map(t => Number(t.total_value)),
+  });
+
   const salesTab = html`
+    <style>
+      .sales-chart-wrap{padding:.5rem .7rem;background:var(--bg-alt,#f5f5f7);border-radius:var(--radius,6px);margin-bottom:.75rem}
+      .sales-chart-head{display:flex;align-items:center;gap:.5rem;margin-bottom:.35rem}
+      .sales-chart-head h2{margin:0;font-size:.85rem;font-weight:600}
+      .sc-toggle{display:inline-flex;border:1px solid var(--border,#d8d8d8);border-radius:4px;overflow:hidden;background:#fff}
+      .sc-toggle button{background:transparent;border:0;padding:.1rem .55rem;cursor:pointer;font-size:.7rem;color:var(--muted,#666);line-height:1.4}
+      .sc-toggle button + button{border-left:1px solid var(--border,#d8d8d8)}
+      .sc-toggle button.sc-active{background:#eef2ff;color:#1d4ed8;font-weight:600}
+    </style>
     <section class="card">
-      <h2>Pipeline detail by owner</h2>
-      <table class="data">
-        <thead><tr><th>Owner</th><th class="num">Opps</th><th class="num">Value</th></tr></thead>
-        <tbody>
-          ${pipelineByOwner.map(o => html`
-            <tr>
-              <td>${escape(o.owner_name)}</td>
-              <td class="num">${o.n}</td>
-              <td class="num">$${formatMoney(o.total_value)}</td>
-            </tr>
-          `)}
-        </tbody>
-      </table>
-    </section>
-
-    <section class="card">
-      <h2>Pipeline detail by stage</h2>
-      <table class="data">
-        <thead><tr><th>Stage</th><th class="num">Opps</th><th class="num">Value</th></tr></thead>
-        <tbody>
-          ${pipelineByStage.map(s => html`
-            <tr>
-              <td>${escape(stageLabels.get(s.stage) ?? s.stage)}</td>
-              <td class="num">${s.n}</td>
-              <td class="num">$${formatMoney(s.total_value)}</td>
-            </tr>
-          `)}
-        </tbody>
-      </table>
-    </section>
-
-    <section class="card">
-      <h2>Quote metrics</h2>
-      <div class="detail-grid">
-        <div class="detail-pair">
-          <span class="detail-label">Total quotes</span>
-          <span class="detail-value">${quoteMetrics?.total ?? 0}</span>
+      <div class="sales-chart-wrap" id="owner-chart-wrap">
+        <div class="sales-chart-head">
+          <h2>Pipeline by owner</h2>
+          <span style="flex:1"></span>
+          <div class="sc-toggle" id="owner-mode-toggle">
+            <button type="button" data-mode="count" class="sc-active">Count</button>
+            <button type="button" data-mode="value">Value ($)</button>
+          </div>
         </div>
-        <div class="detail-pair">
-          <span class="detail-label">Accepted</span>
-          <span class="detail-value">${quoteMetrics?.accepted ?? 0}</span>
+        <canvas id="sales-owner-chart" height="200"></canvas>
+      </div>
+      <div class="sales-chart-wrap" id="type-chart-wrap">
+        <div class="sales-chart-head">
+          <h2>Pipeline by type</h2>
+          <span style="flex:1"></span>
+          <div class="sc-toggle" id="type-mode-toggle">
+            <button type="button" data-mode="count" class="sc-active">Count</button>
+            <button type="button" data-mode="value">Value ($)</button>
+          </div>
         </div>
-        <div class="detail-pair">
-          <span class="detail-label">Rejected</span>
-          <span class="detail-value">${quoteMetrics?.rejected ?? 0}</span>
-        </div>
-        <div class="detail-pair">
-          <span class="detail-label">Pending</span>
-          <span class="detail-value">${quoteMetrics?.pending ?? 0}</span>
-        </div>
+        <canvas id="sales-type-chart" height="160"></canvas>
       </div>
     </section>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      if (typeof Chart === 'undefined') return;
+      var palette = ['rgba(9,105,218,0.75)','rgba(26,127,55,0.75)','rgba(191,135,0,0.75)','rgba(207,34,46,0.75)','rgba(130,80,223,0.75)','rgba(17,138,178,0.75)'];
+      function fmt$(v){ if(v>=1e6)return'$'+(v/1e6).toFixed(1)+'M'; if(v>=1e3)return'$'+Math.round(v/1e3)+'k'; return'$'+Math.round(v); }
+
+      function makeBarChart(canvasId, toggleId, data) {
+        var canvas = document.getElementById(canvasId);
+        var toggle = document.getElementById(toggleId);
+        if (!canvas || !data.labels.length) return;
+        var mode = 'count';
+        var chart = new Chart(canvas, {
+          type: 'bar',
+          data: { labels: data.labels, datasets: [{ data: data.counts, backgroundColor: palette, borderRadius: 4 }] },
+          options: {
+            responsive: true, maintainAspectRatio: false, indexAxis: 'y',
+            plugins: {
+              legend: { display: false },
+              tooltip: { callbacks: { label: function(ctx) { return (mode==='value'?fmt$(ctx.parsed.x):ctx.parsed.x) + ' · ' + data.counts[ctx.dataIndex] + ' opps · ' + fmt$(data.values[ctx.dataIndex]); } } }
+            },
+            scales: { x: { ticks: { callback: function(v) { return mode==='value'?fmt$(v):v; } } } }
+          }
+        });
+        if (toggle) {
+          toggle.querySelectorAll('button').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+              mode = btn.getAttribute('data-mode');
+              toggle.querySelectorAll('button').forEach(function(b){ b.classList.toggle('sc-active', b===btn); });
+              chart.data.datasets[0].data = mode === 'value' ? data.values : data.counts;
+              chart.update();
+            });
+          });
+        }
+      }
+
+      makeBarChart('sales-owner-chart', 'owner-mode-toggle', ${raw(ownerChartData)});
+      makeBarChart('sales-type-chart', 'type-mode-toggle', ${raw(typeChartData)});
+    });
+    </script>
   `;
 
   // Outcome bucketing — the pie chart only cares about terminal states
