@@ -146,7 +146,7 @@ export async function onRequestGet(context) {
     <div class="dashboard-metrics">
       <div class="metric-card">
         <span class="metric-value">${oppCount?.n ?? 0}</span>
-        <span class="metric-label">Active opps</span>
+        <span class="metric-label">Active opportunities</span>
       </div>
       <div class="metric-card">
         <span class="metric-value">$${formatMoney(totals.pipeline)}</span>
