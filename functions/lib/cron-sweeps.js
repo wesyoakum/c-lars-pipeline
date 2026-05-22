@@ -390,7 +390,7 @@ async function sweepQuoteExpired(env) {
     `UPDATE quotes
         SET status = 'expired', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
       WHERE deleted_at IS NULL
-        AND status IN ('draft', 'issued')
+        AND status IN ('issued', 'revision_issued')
         AND valid_until IS NOT NULL
         AND valid_until < ?`, [today]);
 
