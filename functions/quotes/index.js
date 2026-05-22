@@ -46,6 +46,11 @@ export async function onRequestGet(context) {
       ORDER BY q.updated_at DESC`
   );
 
+  // Stage keys in pipeline process order for the opp-stage chart.
+  const stageOrderRows = await all(env.DB,
+    `SELECT DISTINCT stage_key FROM stage_definitions ORDER BY sort_order`);
+  const stageKeyOrder = stageOrderRows.map(r => r.stage_key);
+
   const columns = [
     { key: 'number',       label: 'Number',      sort: 'text',   filter: 'text',   default: true },
     { key: 'revision',     label: 'Rev',          sort: 'text',   filter: 'text',   default: true },
@@ -155,6 +160,9 @@ export async function onRequestGet(context) {
   var statusBody = chart.querySelector('[data-role="status-chart-body"]');
   var oppBody = chart.querySelector('[data-role="opp-stage-chart-body"]');
   var STATUS_ORDER = ${raw(JSON.stringify(STATUS_ORDER))};
+  var STAGE_KEY_ORDER = ${raw(JSON.stringify(stageKeyOrder))};
+  var stageKeyIndex = {};
+  for (var si = 0; si < STAGE_KEY_ORDER.length; si++) stageKeyIndex[STAGE_KEY_ORDER[si]] = si;
   var statusOrderIndex = {};
   for (var i = 0; i < STATUS_ORDER.length; i++) statusOrderIndex[STATUS_ORDER[i]] = i;
   function orderIndex(s){ return s in statusOrderIndex ? statusOrderIndex[s] : 9999; }
@@ -252,7 +260,7 @@ export async function onRequestGet(context) {
     // Render opp stage bars
     var oMax = 0; for (var k in oCounts){ if (oCounts[k] > oMax) oMax = oCounts[k]; }
     var oAxis = Math.max(10, Math.ceil(oMax / 10) * 10);
-    oOrder.sort(function(a,b){ return (oCounts[b]||0)-(oCounts[a]||0); });
+    oOrder.sort(function(a,b){ var da=(a in stageKeyIndex?stageKeyIndex[a]:9999),db=(b in stageKeyIndex?stageKeyIndex[b]:9999); return da!==db?da-db:a.localeCompare(b); });
     oppBody.innerHTML = oOrder.map(function(s,idx){
       var v = oCounts[s]; var pct = Math.round(v / oAxis * 100); var color = palette[idx % palette.length];
       return '<div class="qsc-row" title="'+esc(s)+': '+v+'"><span class="qsc-label" title="'+esc(s)+'">'+esc(s)+'</span><span class="qsc-track"><span class="qsc-bar" style="width:'+pct+'%;background:'+color+'"></span></span><span class="qsc-count">'+v+'</span></div>';
