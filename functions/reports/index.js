@@ -200,6 +200,22 @@ export async function onRequestGet(context) {
           AND deleted_at IS NULL`),
   ]);
 
+  // KPI cards — same as dashboard
+  const [activeOppCount, activeQuoteCount, bookings2026, winLossRows] = await Promise.all([
+    one(env.DB, `SELECT COUNT(*) AS n FROM opportunities WHERE deleted_at IS NULL AND stage IN ('lead','rfq_received','quote_drafted','quote_submitted','quote_under_revision','revised_quote_submitted')`),
+    one(env.DB, `SELECT COUNT(*) AS n FROM quotes WHERE deleted_at IS NULL AND status IN ('draft','issued','revision_draft','revision_issued')`),
+    one(env.DB, `SELECT COALESCE(SUM(estimated_value_usd), 0) AS total FROM opportunities WHERE stage IN ('completed','job_in_progress') AND deleted_at IS NULL AND actual_close_date >= '2026-01-01'`),
+    all(env.DB, `SELECT stage, COUNT(*) AS n FROM opportunities WHERE stage IN ('completed','job_in_progress','lost','closed_died','quote_expired') AND updated_at >= datetime('now', '-90 days') AND deleted_at IS NULL GROUP BY stage`),
+  ]);
+  const wonStages = new Set(['completed', 'job_in_progress']);
+  const lostStages = new Set(['lost', 'closed_died', 'quote_expired']);
+  let rptWon = 0, rptLost = 0;
+  for (const w of winLossRows) {
+    if (wonStages.has(w.stage)) rptWon += w.n;
+    else if (lostStages.has(w.stage)) rptLost += w.n;
+  }
+  const rptWinRate = (rptWon + rptLost) > 0 ? Math.round(rptWon / (rptWon + rptLost) * 100) : 0;
+
   // Sort the "Pipeline detail by stage" table earliest -> latest
   // using the same catalog ordering the chart above uses.
   pipelineByStage.sort((a, b) =>
@@ -308,24 +324,24 @@ export async function onRequestGet(context) {
         <span class="metric-label">Open pipeline</span>
       </div>
       <div class="metric-card">
-        <span class="metric-value">${totals.opps}</span>
-        <span class="metric-label">Active opps</span>
+        <span class="metric-value">${activeOppCount?.n ?? 0}</span>
+        <span class="metric-label">Active opportunities</span>
       </div>
       <div class="metric-card">
-        <span class="metric-value">$${formatMoney(thisMonthWins?.value ?? 0)}</span>
-        <span class="metric-label">Won this month</span>
+        <span class="metric-value">$${formatMoney(totals.pipeline)}</span>
+        <span class="metric-label">Pipeline value</span>
       </div>
       <div class="metric-card">
-        <span class="metric-value">$${formatMoney(winYTD?.value ?? 0)}</span>
-        <span class="metric-label">Won YTD</span>
+        <span class="metric-value">${activeQuoteCount?.n ?? 0}</span>
+        <span class="metric-label">Active quotes</span>
       </div>
       <div class="metric-card">
-        <span class="metric-value">${quoteMetrics?.pending ?? 0}</span>
-        <span class="metric-label">Quotes pending</span>
+        <span class="metric-value">${rptWinRate}%</span>
+        <span class="metric-label">Win rate (90d)</span>
       </div>
       <div class="metric-card">
-        <span class="metric-value">${quoteMetrics?.drafts ?? 0}</span>
-        <span class="metric-label">Quotes in draft</span>
+        <span class="metric-value">$${formatMoney(bookings2026?.total ?? 0)}</span>
+        <span class="metric-label">Bookings YTD 2026</span>
       </div>
     </div>
 
