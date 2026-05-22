@@ -9,6 +9,15 @@
 
 import { messagesJson } from '../../../../lib/anthropic.js';
 
+function toBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -33,7 +42,7 @@ async function extractText(env, file, filename) {
   // Images — use Claude vision OCR.
   if (IMAGE_EXTENSIONS.has(ext)) {
     const buffer = await file.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+    const base64 = toBase64(buffer);
     const mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', tiff: 'image/tiff', heic: 'image/heic', heif: 'image/heif' };
     const mediaType = mimeMap[ext] || 'image/png';
     const result = await messagesJson(env, {
@@ -66,7 +75,7 @@ async function extractText(env, file, filename) {
     throw new Error(`Unsupported file format: .${ext}`);
   }
   const buffer = await file.arrayBuffer();
-  const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+  const base64 = toBase64(buffer);
   const result = await messagesJson(env, {
     model: env.AI_INBOX_EXTRACT_MODEL || undefined,
     system: 'Extract all text content from this document. Return JSON: {"text": "...all extracted text..."}. Preserve table structure using tabs between columns and newlines between rows.',
