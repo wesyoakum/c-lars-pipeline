@@ -147,12 +147,13 @@ export async function onRequestGet(context) {
   // Status order for chart — mirrors the quote lifecycle.
   const STATUS_ORDER = ['Draft', 'Revision Draft', 'Issued', 'Revision Issued', 'Expired', 'Accepted', 'Rejected', 'Dead'];
 
-  const statusChartScript = `
+  const quoteChartScript = `
 (function(){
   var chart = document.querySelector('[data-role="status-chart"]');
   if (!chart) return;
   var host = document.querySelector('.opp-list');
-  var bodyEl = chart.querySelector('[data-role="status-chart-body"]');
+  var statusBody = chart.querySelector('[data-role="status-chart-body"]');
+  var oppBody = chart.querySelector('[data-role="opp-stage-chart-body"]');
   var STATUS_ORDER = ${raw(JSON.stringify(STATUS_ORDER))};
   var statusOrderIndex = {};
   for (var i = 0; i < STATUS_ORDER.length; i++) statusOrderIndex[STATUS_ORDER[i]] = i;
@@ -166,13 +167,14 @@ export async function onRequestGet(context) {
     return '$' + Math.round(n);
   }
 
-  var STORAGE_KEY = 'pipeline.quoteStatusChart.mode.v1';
+  // Count/value mode toggle
+  var MODE_KEY = 'pipeline.quoteStatusChart.mode.v1';
   var mode = 'count';
-  try { var saved = localStorage.getItem(STORAGE_KEY); if (saved === 'value' || saved === 'count') mode = saved; } catch(e) {}
+  try { var saved = localStorage.getItem(MODE_KEY); if (saved === 'value' || saved === 'count') mode = saved; } catch(e) {}
   var modeBtns = chart.querySelectorAll('[data-role="status-chart-mode"] button');
   function setMode(next){
     mode = next;
-    try { localStorage.setItem(STORAGE_KEY, mode); } catch(e) {}
+    try { localStorage.setItem(MODE_KEY, mode); } catch(e) {}
     for (var i = 0; i < modeBtns.length; i++){
       modeBtns[i].classList.toggle('qsc-mode-active', modeBtns[i].getAttribute('data-mode') === mode);
     }
@@ -185,92 +187,76 @@ export async function onRequestGet(context) {
     })(modeBtns[i]);
   }
 
-  function render(){
-    if (!host || !bodyEl){ chart.hidden = true; return; }
-    var trs = host.querySelectorAll('tbody[data-role="rows"] tr[data-row-id]');
-    var counts = {}, values = {}, order = [], total = 0;
-    for (var i=0;i<trs.length;i++){
-      var tr = trs[i];
-      if (tr.style.display === 'none') continue;
-      var s = (tr.getAttribute('data-status_label') || '').trim() || '—';
-      var v = parseFloat(tr.getAttribute('data-total'));
-      if (!isFinite(v)) v = 0;
-      if (!(s in counts)){ counts[s] = 0; values[s] = 0; order.push(s); }
-      counts[s]++;
-      values[s] += v;
-      total++;
+  // View toggle: status vs opp_stage
+  var VIEW_KEY = 'pipeline.quoteChart.view.v1';
+  var view = 'status';
+  try { var sv = localStorage.getItem(VIEW_KEY); if (sv === 'opp_stage') view = sv; } catch(e) {}
+  var viewBtns = chart.querySelectorAll('[data-role="chart-view-toggle"] button');
+  function setView(next){
+    view = next;
+    try { localStorage.setItem(VIEW_KEY, view); } catch(e) {}
+    for (var i = 0; i < viewBtns.length; i++){
+      viewBtns[i].classList.toggle('qsc-mode-active', viewBtns[i].getAttribute('data-view') === view);
     }
-    if (total === 0){ chart.hidden = true; bodyEl.innerHTML = ''; return; }
-    var metric = mode === 'value' ? values : counts;
-    var max = 0; for (var k in metric){ if (metric[k] > max) max = metric[k]; }
-    var axis;
-    if (mode === 'value') {
-      if (max <= 0) axis = 1;
-      else {
-        var exp = Math.floor(Math.log10(max));
-        var step = Math.pow(10, exp);
-        axis = Math.ceil(max / step) * step;
-        if (axis === max) axis = max + step;
-      }
-    } else {
-      axis = Math.max(50, Math.ceil(max / 50) * 50);
-    }
-    var palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#e11d48'];
-    order.sort(function(a,b){
-      var di = orderIndex(a) - orderIndex(b);
-      return di !== 0 ? di : a.localeCompare(b);
-    });
-    bodyEl.innerHTML = order.map(function(s,idx){
-      var v = metric[s];
-      var pct = Math.round(v / axis * 100);
-      var color = palette[idx % palette.length];
-      var rightLabel = mode === 'value' ? fmt$(v) : String(v);
-      var tip = esc(s) + ' — ' + counts[s] + ' quotes · ' + fmt$(values[s]);
-      return '<div class="qsc-row" title="'+tip+'"><span class="qsc-label" title="'+esc(s)+'">'+esc(s)+'</span>'+
-             '<span class="qsc-track"><span class="qsc-bar" style="width:'+pct+'%;background:'+color+'"></span></span>'+
-             '<span class="qsc-count">'+rightLabel+'</span></div>';
-    }).join('');
-    chart.hidden = false;
+    statusBody.hidden = view !== 'status';
+    oppBody.hidden = view !== 'opp_stage';
+    render();
   }
-  render();
-  if (host) host.addEventListener('list:filtered', render);
-})();
-`;
-
-  const oppStageChartScript = `
-(function(){
-  var chart = document.querySelector('[data-role="opp-stage-chart"]');
-  if (!chart) return;
-  var host = document.querySelector('.opp-list');
-  var bodyEl = chart.querySelector('[data-role="opp-stage-chart-body"]');
-  function esc(x){ return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  for (var i = 0; i < viewBtns.length; i++){
+    (function(btn){
+      btn.classList.toggle('qsc-mode-active', btn.getAttribute('data-view') === view);
+      btn.addEventListener('click', function(){ setView(btn.getAttribute('data-view')); });
+    })(viewBtns[i]);
+  }
+  statusBody.hidden = view !== 'status';
+  oppBody.hidden = view !== 'opp_stage';
 
   function render(){
-    if (!host || !bodyEl){ chart.hidden = true; return; }
+    if (!host){ chart.hidden = true; return; }
     var trs = host.querySelectorAll('tbody[data-role="rows"] tr[data-row-id]');
-    var counts = {}, order = [], total = 0;
+    var palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#e11d48'];
+
+    // Status chart
+    var sCounts = {}, sValues = {}, sOrder = [], sTotal = 0;
+    // Opp stage chart
+    var oCounts = {}, oOrder = [], oTotal = 0;
     for (var i=0;i<trs.length;i++){
       var tr = trs[i];
       if (tr.style.display === 'none') continue;
-      var s = (tr.getAttribute('data-opp_stage') || '').trim() || '—';
-      if (!(s in counts)){ counts[s] = 0; order.push(s); }
-      counts[s]++;
-      total++;
+      var ss = (tr.getAttribute('data-status_label') || '').trim() || '—';
+      var sv = parseFloat(tr.getAttribute('data-total'));
+      if (!isFinite(sv)) sv = 0;
+      if (!(ss in sCounts)){ sCounts[ss] = 0; sValues[ss] = 0; sOrder.push(ss); }
+      sCounts[ss]++; sValues[ss] += sv; sTotal++;
+      var os = (tr.getAttribute('data-opp_stage') || '').trim() || '—';
+      if (!(os in oCounts)){ oCounts[os] = 0; oOrder.push(os); }
+      oCounts[os]++; oTotal++;
     }
-    if (total === 0){ chart.hidden = true; bodyEl.innerHTML = ''; return; }
-    var max = 0; for (var k in counts){ if (counts[k] > max) max = counts[k]; }
-    var axis = Math.max(10, Math.ceil(max / 10) * 10);
-    var palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#e11d48'];
-    order.sort(function(a,b){ return (counts[b] || 0) - (counts[a] || 0); });
-    bodyEl.innerHTML = order.map(function(s,idx){
-      var v = counts[s];
-      var pct = Math.round(v / axis * 100);
-      var color = palette[idx % palette.length];
-      return '<div class="qsc-row" title="'+esc(s)+': '+v+'"><span class="qsc-label" title="'+esc(s)+'">'+esc(s)+'</span>'+
-             '<span class="qsc-track"><span class="qsc-bar" style="width:'+pct+'%;background:'+color+'"></span></span>'+
-             '<span class="qsc-count">'+v+'</span></div>';
-    }).join('');
+    if (sTotal === 0){ chart.hidden = true; statusBody.innerHTML = ''; oppBody.innerHTML = ''; return; }
     chart.hidden = false;
+
+    // Render status bars
+    var sMetric = mode === 'value' ? sValues : sCounts;
+    var sMax = 0; for (var k in sMetric){ if (sMetric[k] > sMax) sMax = sMetric[k]; }
+    var sAxis = mode === 'value'
+      ? (sMax <= 0 ? 1 : (function(){ var e=Math.floor(Math.log10(sMax)),st=Math.pow(10,e),a=Math.ceil(sMax/st)*st; return a===sMax?a+st:a; })())
+      : Math.max(50, Math.ceil(sMax / 50) * 50);
+    sOrder.sort(function(a,b){ var d=orderIndex(a)-orderIndex(b); return d!==0?d:a.localeCompare(b); });
+    statusBody.innerHTML = sOrder.map(function(s,idx){
+      var v = sMetric[s]; var pct = Math.round(v / sAxis * 100); var color = palette[idx % palette.length];
+      var rl = mode === 'value' ? fmt$(v) : String(v);
+      var tip = esc(s)+' — '+sCounts[s]+' quotes · '+fmt$(sValues[s]);
+      return '<div class="qsc-row" title="'+tip+'"><span class="qsc-label" title="'+esc(s)+'">'+esc(s)+'</span><span class="qsc-track"><span class="qsc-bar" style="width:'+pct+'%;background:'+color+'"></span></span><span class="qsc-count">'+rl+'</span></div>';
+    }).join('');
+
+    // Render opp stage bars
+    var oMax = 0; for (var k in oCounts){ if (oCounts[k] > oMax) oMax = oCounts[k]; }
+    var oAxis = Math.max(10, Math.ceil(oMax / 10) * 10);
+    oOrder.sort(function(a,b){ return (oCounts[b]||0)-(oCounts[a]||0); });
+    oppBody.innerHTML = oOrder.map(function(s,idx){
+      var v = oCounts[s]; var pct = Math.round(v / oAxis * 100); var color = palette[idx % palette.length];
+      return '<div class="qsc-row" title="'+esc(s)+': '+v+'"><span class="qsc-label" title="'+esc(s)+'">'+esc(s)+'</span><span class="qsc-track"><span class="qsc-bar" style="width:'+pct+'%;background:'+color+'"></span></span><span class="qsc-count">'+v+'</span></div>';
+    }).join('');
   }
   render();
   if (host) host.addEventListener('list:filtered', render);
@@ -293,26 +279,21 @@ export async function onRequestGet(context) {
       .qsc-track{display:block;width:100%;background:#e5e7eb;border-radius:3px;height:11px;overflow:hidden}
       .qsc-bar{display:block;height:100%;background:#3b82f6;border-radius:3px;min-width:2px;transition:width .15s}
       .qsc-count{text-align:right;color:var(--muted,#666);font-variant-numeric:tabular-nums}
-      .quote-charts-row{display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin:.4rem 0 .6rem}
-      .qoc-chart{padding:.5rem .7rem;background:var(--bg-alt,#f5f5f7);border-radius:var(--radius,6px)}
-      .qoc-chart h2{margin:0 0 .35rem;font-size:.72rem;font-weight:600;color:var(--muted,#666);text-transform:uppercase;letter-spacing:.04em}
     </style>
-    <div class="quote-charts-row">
-    <div class="quote-status-chart" data-role="status-chart" hidden style="margin:0">
+    <div class="quote-status-chart" data-role="status-chart" hidden>
       <div class="quote-status-chart-head">
-        <h2>Quotes by status</h2>
+        <div class="qsc-mode-toggle" data-role="chart-view-toggle" role="group" aria-label="Chart view">
+          <button type="button" data-view="status" class="qsc-mode-active">By status</button>
+          <button type="button" data-view="opp_stage">By opp stage</button>
+        </div>
         <span style="flex:1"></span>
         <div class="qsc-mode-toggle" data-role="status-chart-mode" role="group" aria-label="Chart metric">
-          <button type="button" data-mode="count" title="Show quote count per status">Count</button>
-          <button type="button" data-mode="value" title="Show total quote value per status">Value ($)</button>
+          <button type="button" data-mode="count" title="Show quote count">Count</button>
+          <button type="button" data-mode="value" title="Show total quote value">Value ($)</button>
         </div>
       </div>
       <div data-role="status-chart-body"></div>
-    </div>
-    <div class="qoc-chart" data-role="opp-stage-chart" hidden>
-      <h2>Quotes by opp stage</h2>
-      <div data-role="opp-stage-chart-body"></div>
-    </div>
+      <div data-role="opp-stage-chart-body" hidden></div>
     </div>
     <section class="card">
       <div class="card-header">
@@ -391,8 +372,7 @@ export async function onRequestGet(context) {
             status_label: { values: ['Draft', 'Issued', 'Expired'] },
           }))}</script>
           <script>${raw(listInlineEditScript('/opportunities/:opp_id/quotes/:id/patch'))}</script>
-          <script>${raw(statusChartScript)}</script>
-          <script>${raw(oppStageChartScript)}</script>
+          <script>${raw(quoteChartScript)}</script>
         `}
     </section>
   `;
