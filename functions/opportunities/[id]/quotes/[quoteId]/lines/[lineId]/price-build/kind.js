@@ -9,6 +9,7 @@ import { auditStmt } from '../../../../../../../lib/audit.js';
 import { now } from '../../../../../../../lib/ids.js';
 import { formBody } from '../../../../../../../lib/http.js';
 import { normalizePriceBuildKind } from '../../../../../../../lib/validators.js';
+import { kindConfig } from '../../../../../../../lib/pricing.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -43,10 +44,22 @@ export async function onRequestPost(context) {
   }
 
   const ts = now();
+
+  // Clear values for categories that become inactive under the new kind.
+  // This prevents stale DL/IMOH values from lingering in the DB when
+  // switching to a kind that doesn't use them.
+  const kc = kindConfig(kind);
+  const clearParts = [];
+  if (!kc.dl)   { clearParts.push('dl_user_cost = NULL'); clearParts.push('use_labor_library = 0'); }
+  if (!kc.imoh) { clearParts.push('imoh_user_cost = NULL'); }
+  if (!kc.dm)   { clearParts.push('dm_user_cost = NULL'); clearParts.push('use_dm_library = 0'); }
+  if (!kc.other){ clearParts.push('other_user_cost = NULL'); }
+  const clearSql = clearParts.length > 0 ? ', ' + clearParts.join(', ') : '';
+
   await batch(env.DB, [
     stmt(
       env.DB,
-      `UPDATE cost_builds SET build_kind = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE cost_builds SET build_kind = ?${clearSql}, updated_at = ? WHERE id = ?`,
       [kind, ts, build.id]
     ),
     auditStmt(env.DB, {

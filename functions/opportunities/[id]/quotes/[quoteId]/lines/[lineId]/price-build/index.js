@@ -17,6 +17,7 @@ import {
   loadPricingSettings,
   loadCostBuildBundle,
   computeFromBundle,
+  kindConfig,
   workcenterEntryCost,
   computeLineExtendedPrice,
   quoteTotalsRecomputeStmt,
@@ -194,6 +195,7 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
 
   const build = values || bundle.build;
   const locked = bundle.build.status === 'locked';
+  const kc = kindConfig(normalizePriceBuildKind(bundle.build.build_kind));
 
   const currentLaborByWc = new Map(
     (bundle.currentLabor || []).map((r) => [r.workcenter, r])
@@ -202,8 +204,8 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
   const errText = (k) => (errors[k] ? html`<small class="error">${errors[k]}</small>` : '');
   const base = baseUrl(oppId, quoteId, lineId);
 
-  const pricingTabBody = renderPricingSubtab({ build, pricing, totals, settings, errText, locked, showDiscounts });
-  const laborTabBody = renderLaborSubtab({
+  const pricingTabBody = renderPricingSubtab({ build, pricing, totals, settings, errText, locked, showDiscounts, kc });
+  const laborTabBody = kc.laborTab ? renderLaborSubtab({
     workcenters, settings, currentLaborByWc,
     currentLaborTotal: totals.currentLaborTotal,
     allLaborItems, laborSelectedIds, allLaborEntriesById,
@@ -211,17 +213,17 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
     useLaborLibrary: !!bundle.build.use_labor_library,
     laborCalcTotal: totals.laborCalcTotal,
     errText, locked,
-  });
-  const dmTabBody = renderDmSubtab({
+  }) : '';
+  const dmTabBody = kc.dmTab ? renderDmSubtab({
     allDmItems, dmSelectedIds, dmLibTotal: totals.dmLibTotal,
     useDmLibrary: !!bundle.build.use_dm_library, locked,
-  });
+  }) : '';
 
   const subNav = html`
     <nav class="card" style="padding: 0.5rem 1rem;">
       <a class="nav-link ${sub === 'pricing' ? 'active' : ''}" href="${base}">Pricing engine</a>
-      <a class="nav-link ${sub === 'labor' ? 'active' : ''}" href="${base}?sub=labor">Labor cost (${fmtDollar(totals.currentLaborTotal + totals.laborLibTotal)})</a>
-      <a class="nav-link ${sub === 'dm' ? 'active' : ''}" href="${base}?sub=dm">Direct Material (${fmtDollar(totals.dmLibTotal || 0)})</a>
+      ${kc.laborTab ? html`<a class="nav-link ${sub === 'labor' ? 'active' : ''}" href="${base}?sub=labor">Labor cost (${fmtDollar(totals.currentLaborTotal + totals.laborLibTotal)})</a>` : ''}
+      ${kc.dmTab ? html`<a class="nav-link ${sub === 'dm' ? 'active' : ''}" href="${base}?sub=dm">Direct Material (${fmtDollar(totals.dmLibTotal || 0)})</a>` : ''}
     </nav>`;
 
   const lineDesc = line.description || line.title || 'Line';
@@ -376,14 +378,23 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
     ${subNav}
     <div class="cost-build-form" id="cb-form" data-patch-url="${base}/patch">
       <script type="application/json" id="cb-pricing-data">${raw(JSON.stringify({
-        targetPct: settings.targetPct,
-        totalTargetPct: settings.targetPct.dm + settings.targetPct.dl + settings.targetPct.imoh + settings.targetPct.other,
+        targetPct: {
+          dm:    kc.dm    ? settings.targetPct.dm    : 0,
+          dl:    kc.dl    ? settings.targetPct.dl    : 0,
+          imoh:  kc.imoh  ? settings.targetPct.imoh  : 0,
+          other: kc.other ? settings.targetPct.other : 0,
+        },
+        totalTargetPct:
+          (kc.dm    ? settings.targetPct.dm    : 0) +
+          (kc.dl    ? settings.targetPct.dl    : 0) +
+          (kc.imoh  ? settings.targetPct.imoh  : 0) +
+          (kc.other ? settings.targetPct.other : 0),
         marginThresholdGood: settings.marginThresholdGood,
         defaultLaborRate: settings.defaultLaborRate,
       }))}</script>
       <div style="display: ${sub === 'pricing' ? 'block' : 'none'}">${pricingTabBody}</div>
-      <div style="display: ${sub === 'labor' ? 'block' : 'none'}">${laborTabBody}</div>
-      <div style="display: ${sub === 'dm' ? 'block' : 'none'}">${dmTabBody}</div>
+      ${kc.laborTab ? html`<div style="display: ${sub === 'labor' ? 'block' : 'none'}">${laborTabBody}</div>` : ''}
+      ${kc.dmTab ? html`<div style="display: ${sub === 'dm' ? 'block' : 'none'}">${dmTabBody}</div>` : ''}
 
       <div class="field" style="width:100%">
         <label>Notes</label>
@@ -730,7 +741,7 @@ function renderBuildDiscountEditor({ build, locked, errText }) {
   `;
 }
 
-function renderPricingSubtab({ build, pricing, totals, settings, errText, locked, showDiscounts }) {
+function renderPricingSubtab({ build, pricing, totals, settings, errText, locked, showDiscounts, kc }) {
   const eff = pricing.effective;
   const auto = pricing.auto;
   const notes = pricing.notes;
@@ -815,11 +826,9 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
 
       <h2 class="section-h">Cost Inputs &amp; Summary</h2>
       <p class="muted" style="margin-top:-0.5rem">
-        ${build.build_kind === 'spares_simple'
-          ? 'Material cost + Other only. Other defaults to $0.'
-          : (build.build_kind === 'wfm_reference'
-              ? html`<span style="display:inline-block;background:#e0e7ff;color:#3730a3;padding:.05rem .4rem;border-radius:3px;font-size:.78rem;font-weight:600;margin-right:.4rem">WFM imported</span> Cost basis + price came from the WFM quote. Editable; margin recalculates.`
-              : 'Blanks auto-fill from quote \u00d7 target %. Linked DM/labor totals override manual values.')}
+        ${build.build_kind === 'wfm_reference'
+          ? html`<span style="display:inline-block;background:#e0e7ff;color:#3730a3;padding:.05rem .4rem;border-radius:3px;font-size:.78rem;font-weight:600;margin-right:.4rem">WFM imported</span> Cost basis + price came from the WFM quote. Editable; margin recalculates.`
+          : 'Blanks auto-fill from quote \u00d7 target %. Linked DM/labor totals override manual values.'}
       </p>
 
       <table class="data compact cost-summary-table">
@@ -827,17 +836,10 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
           <tr><th></th><th class="num">Cost</th><th class="num">Target %</th><th class="num">% of Target</th><th class="num">% of Quote</th></tr>
         </thead>
         <tbody>
-          ${build.build_kind === 'spares_simple'
-            ? html`
-                ${categoryRow('dm',    'Material cost',     build.dm_user_cost,    auto.dm,    linked.dm ? notes.dm : (auto.dm !== null ? notes.dm : ''),    linked.dm, eff.dm)}
-                ${categoryRow('other', 'Other',             build.other_user_cost, auto.other, auto.other !== null ? notes.other : '',                      false,     eff.other)}
-              `
-            : html`
-                ${categoryRow('dm',    'Direct Material (DM)',        build.dm_user_cost,   auto.dm,   linked.dm ? notes.dm : (auto.dm !== null ? notes.dm : ''),       linked.dm,    eff.dm)}
-                ${categoryRow('dl',    'Direct Labor (DL)',           build.dl_user_cost,   auto.dl,   linked.labor ? notes.dl : (auto.dl !== null ? notes.dl : ''),    linked.labor, eff.dl)}
-                ${categoryRow('imoh',  'Indirect Material + OH', build.imoh_user_cost, auto.imoh, auto.imoh !== null ? notes.imoh : '',                       false,        eff.imoh)}
-                ${categoryRow('other', 'Other',                       build.other_user_cost, auto.other, auto.other !== null ? notes.other : '',                        false,        eff.other)}
-              `}
+          ${kc.dm   ? categoryRow('dm',    'Direct Material (DM)',   build.dm_user_cost,    auto.dm,    linked.dm ? notes.dm : (auto.dm !== null ? notes.dm : ''),       linked.dm,    eff.dm)    : ''}
+          ${kc.dl   ? categoryRow('dl',    'Direct Labor (DL)',      build.dl_user_cost,    auto.dl,    linked.labor ? notes.dl : (auto.dl !== null ? notes.dl : ''),    linked.labor, eff.dl)    : ''}
+          ${kc.imoh ? categoryRow('imoh',  'Indirect Material + OH', build.imoh_user_cost,  auto.imoh,  auto.imoh !== null ? notes.imoh : '',                           false,        eff.imoh)  : ''}
+          ${kc.other? categoryRow('other', 'Other',                  build.other_user_cost, auto.other, auto.other !== null ? notes.other : '',                          false,        eff.other) : ''}
         </tbody>
         <tfoot>
           <tr>
@@ -858,29 +860,29 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
           <div>
             <div class="ref-subhead">Estimates based on Quote Price</div>
             <table class="ref-table">
-              <tr><td>DM</td><td class="num" id="cb-ref-fq-dm">${fmtDollar(refs.fromQuote.dm)}</td></tr>
-              <tr><td>DL</td><td class="num" id="cb-ref-fq-dl">${fmtDollar(refs.fromQuote.dl)}</td></tr>
-              <tr><td>IMOH</td><td class="num" id="cb-ref-fq-imoh">${fmtDollar(refs.fromQuote.imoh)}</td></tr>
-              <tr><td>Other</td><td class="num" id="cb-ref-fq-other">${fmtDollar(refs.fromQuote.other)}</td></tr>
+              ${kc.dm    ? html`<tr><td>DM</td><td class="num" id="cb-ref-fq-dm">${fmtDollar(refs.fromQuote.dm)}</td></tr>`    : ''}
+              ${kc.dl    ? html`<tr><td>DL</td><td class="num" id="cb-ref-fq-dl">${fmtDollar(refs.fromQuote.dl)}</td></tr>`    : ''}
+              ${kc.imoh  ? html`<tr><td>IMOH</td><td class="num" id="cb-ref-fq-imoh">${fmtDollar(refs.fromQuote.imoh)}</td></tr>` : ''}
+              ${kc.other ? html`<tr><td>Other</td><td class="num" id="cb-ref-fq-other">${fmtDollar(refs.fromQuote.other)}</td></tr>` : ''}
             </table>
           </div>
-          <div>
+          ${kc.dm ? html`<div>
             <div class="ref-subhead">Estimates from DM only</div>
             <table class="ref-table">
               <tr><td>Price</td><td class="num" id="cb-ref-fdm-price">${fmtDollar(refs.fromDm.price)}</td></tr>
-              <tr><td>Labor</td><td class="num" id="cb-ref-fdm-dl">${fmtDollar(refs.fromDm.dl)}</td></tr>
-              <tr><td>IMOH</td><td class="num" id="cb-ref-fdm-imoh">${fmtDollar(refs.fromDm.imoh)}</td></tr>
-              <tr><td>Other</td><td class="num" id="cb-ref-fdm-other">${fmtDollar(refs.fromDm.other)}</td></tr>
+              ${kc.dl    ? html`<tr><td>Labor</td><td class="num" id="cb-ref-fdm-dl">${fmtDollar(refs.fromDm.dl)}</td></tr>`    : ''}
+              ${kc.imoh  ? html`<tr><td>IMOH</td><td class="num" id="cb-ref-fdm-imoh">${fmtDollar(refs.fromDm.imoh)}</td></tr>` : ''}
+              ${kc.other ? html`<tr><td>Other</td><td class="num" id="cb-ref-fdm-other">${fmtDollar(refs.fromDm.other)}</td></tr>` : ''}
             </table>
-          </div>
-          <div>
+          </div>` : ''}
+          ${kc.dm && kc.dl ? html`<div>
             <div class="ref-subhead">Estimates from DM + DL</div>
             <table class="ref-table">
               <tr><td>Price</td><td class="num" id="cb-ref-fdmdl-price">${fmtDollar(refs.fromDmDl.price)}</td></tr>
-              <tr><td>IMOH</td><td class="num" id="cb-ref-fdmdl-imoh">${fmtDollar(refs.fromDmDl.imoh)}</td></tr>
-              <tr><td>Other</td><td class="num" id="cb-ref-fdmdl-other">${fmtDollar(refs.fromDmDl.other)}</td></tr>
+              ${kc.imoh  ? html`<tr><td>IMOH</td><td class="num" id="cb-ref-fdmdl-imoh">${fmtDollar(refs.fromDmDl.imoh)}</td></tr>` : ''}
+              ${kc.other ? html`<tr><td>Other</td><td class="num" id="cb-ref-fdmdl-other">${fmtDollar(refs.fromDmDl.other)}</td></tr>` : ''}
             </table>
-          </div>
+          </div>` : ''}
         </div>
       </div>
     </section>

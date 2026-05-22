@@ -82,6 +82,28 @@ export async function loadPricingSettings(db) {
 export { DEFAULT_SETTINGS };
 
 // =====================================================================
+// 1b. Per-kind configuration
+// =====================================================================
+//
+// Each Price Build kind declares which cost categories are active and
+// which sub-tabs (Labor, DM) should render.  Kinds not listed here
+// fall back to new_build (the full 4-category layout).
+
+export const KIND_CONFIG = {
+  new_build:         { dm: true,  dl: true,  imoh: true,  other: true,  laborTab: true,  dmTab: true  },
+  buy_ship:          { dm: true,  dl: false, imoh: false, other: true,  laborTab: false, dmTab: true  },
+  cylinder_buy_ship: { dm: true,  dl: true,  imoh: false, other: true,  laborTab: true,  dmTab: true  },
+  cylinder_build:    { dm: true,  dl: true,  imoh: true,  other: true,  laborTab: true,  dmTab: true  },
+  refurb:            { dm: true,  dl: true,  imoh: true,  other: true,  laborTab: true,  dmTab: true  },
+  service:           { dm: true,  dl: true,  imoh: true,  other: true,  laborTab: true,  dmTab: true  },
+};
+
+/** Return the kind config for a build_kind value. Unknown kinds → new_build. */
+export function kindConfig(kind) {
+  return KIND_CONFIG[kind] || KIND_CONFIG.new_build;
+}
+
+// =====================================================================
 // 2. Labor cost helpers
 // =====================================================================
 
@@ -175,26 +197,31 @@ function normNum(v) {
  * preserved here for parity with the existing tool; if the user wants
  * to "fix" it later it's a one-line change.
  */
-export function computePricing(inputs, settings) {
+export function computePricing(inputs, settings, options = {}) {
   const s = settings || DEFAULT_SETTINGS;
-  const pDm    = s.targetPct.dm;
-  const pDl    = s.targetPct.dl;
-  const pImoh  = s.targetPct.imoh;
-  const pOther = s.targetPct.other;
+  // Per-kind active categories — inactive categories are excluded from
+  // target %, auto-fill, and effective values.
+  const active = options.activeCategories || { dm: true, dl: true, imoh: true, other: true };
+
+  const pDm    = active.dm    ? s.targetPct.dm    : 0;
+  const pDl    = active.dl    ? s.targetPct.dl    : 0;
+  const pImoh  = active.imoh  ? s.targetPct.imoh  : 0;
+  const pOther = active.other ? s.targetPct.other : 0;
   const pDmDl  = pDm + pDl;
   const totalTargetPct = pDm + pDl + pImoh + pOther;
 
   const dmLink    = normNum(inputs?.dmLibraryTotal);
   const laborLink = normNum(inputs?.laborCalcTotal);
-  const useDmLib    = dmLink    !== null;
-  const useLaborLib = laborLink !== null;
+  const useDmLib    = active.dm && dmLink    !== null;
+  const useLaborLib = active.dl && laborLink !== null;
 
   // Effective user-side values. Library/labor-calc linkage trumps manual
   // user entry; otherwise fall back to what the user typed.
-  const dmUser    = useDmLib    ? dmLink    : normNum(inputs?.dmUser);
-  const dlUser    = useLaborLib ? laborLink : normNum(inputs?.dlUser);
-  const imohUser  = normNum(inputs?.imohUser);
-  const otherUser = normNum(inputs?.otherUser);
+  // Inactive categories are forced to null (excluded from computation).
+  const dmUser    = active.dm    ? (useDmLib    ? dmLink    : normNum(inputs?.dmUser))    : null;
+  const dlUser    = active.dl    ? (useLaborLib ? laborLink : normNum(inputs?.dlUser))    : null;
+  const imohUser  = active.imoh  ? normNum(inputs?.imohUser)  : null;
+  const otherUser = active.other ? normNum(inputs?.otherUser) : null;
   const quoteUser = normNum(inputs?.quoteUser);
 
   // --- Auto-fill pass ---
@@ -203,7 +230,7 @@ export function computePricing(inputs, settings) {
   // Quote auto-fill from DM (and DL) when quote is blank.
   // Zero is treated as an explicit user value, not an auto-fill source.
   if (quoteUser === null && dmUser !== null && dmUser > 0) {
-    if (dlUser !== null && dlUser > 0) {
+    if (active.dl && dlUser !== null && dlUser > 0) {
       quoteAuto = (dmUser + dlUser) / pDmDl;
     } else {
       quoteAuto = dmUser / pDm;
@@ -213,24 +240,25 @@ export function computePricing(inputs, settings) {
   // Effective quote drives all remaining auto-fills.
   const effQuote = quoteUser !== null ? quoteUser : quoteAuto;
 
-  if (effQuote !== null && effQuote > 0 && dmUser === null) {
+  if (active.dm && effQuote !== null && effQuote > 0 && dmUser === null) {
     dmAuto = effQuote * pDm;
   }
-  if (effQuote !== null && effQuote > 0 && dlUser === null && !useLaborLib) {
+  if (active.dl && effQuote !== null && effQuote > 0 && dlUser === null && !useLaborLib) {
     dlAuto = effQuote * pDl;
   }
-  if (effQuote !== null && effQuote > 0 && imohUser === null) {
+  if (active.imoh && effQuote !== null && effQuote > 0 && imohUser === null) {
     imohAuto = effQuote * pImoh;
   }
-  if (effQuote !== null && effQuote > 0 && otherUser === null) {
+  if (active.other && effQuote !== null && effQuote > 0 && otherUser === null) {
     otherAuto = effQuote * pOther;
   }
 
-  // Effective (final) values per category.
-  const dm    = dmUser    !== null ? dmUser    : dmAuto;
-  const dl    = dlUser    !== null ? dlUser    : dlAuto;
-  const imoh  = imohUser  !== null ? imohUser  : imohAuto;
-  const other = otherUser !== null ? otherUser : otherAuto;
+  // Effective (final) values per category.  Inactive → null (contributes
+  // 0 to totalCost via the (x || 0) coercion below).
+  const dm    = active.dm    ? (dmUser    !== null ? dmUser    : dmAuto)    : null;
+  const dl    = active.dl    ? (dlUser    !== null ? dlUser    : dlAuto)    : null;
+  const imoh  = active.imoh  ? (imohUser  !== null ? imohUser  : imohAuto) : null;
+  const other = active.other ? (otherUser !== null ? otherUser : otherAuto) : null;
   const quote = quoteUser !== null ? quoteUser : quoteAuto;
 
   // Total cost: null when literally nothing is known. Otherwise treat
@@ -258,26 +286,29 @@ export function computePricing(inputs, settings) {
   }
 
   // --- Reference estimates (shown as helper panels in the UI) ---
+  // Only compute estimates for active categories; inactive → null.
   const fromQuote = {
-    dm:    quote !== null ? quote * pDm    : null,
-    dl:    quote !== null ? quote * pDl    : null,
-    imoh:  quote !== null ? quote * pImoh  : null,
-    other: quote !== null ? quote * pOther : null,
+    dm:    active.dm    && quote !== null ? quote * pDm    : null,
+    dl:    active.dl    && quote !== null ? quote * pDl    : null,
+    imoh:  active.imoh  && quote !== null ? quote * pImoh  : null,
+    other: active.other && quote !== null ? quote * pOther : null,
   };
 
   const fromDm = {
-    price: dm !== null ? dm / pDm                 : null,
-    dl:    dm !== null ? (dm * pDl)    / pDm      : null,
-    imoh:  dm !== null ? (dm * pImoh)  / pDm      : null,
-    // NB: calculator divides Other by pDl (not pDm). Preserved for parity.
-    other: dm !== null ? (dm * pOther) / pDl      : null,
+    price: active.dm && dm !== null && pDm > 0 ? dm / pDm           : null,
+    dl:    active.dm && active.dl   && dm !== null && pDm > 0 ? (dm * pDl)    / pDm : null,
+    imoh:  active.dm && active.imoh && dm !== null && pDm > 0 ? (dm * pImoh)  / pDm : null,
+    // NB: calculator divides Other by pDl (not pDm). Preserved for parity;
+    // only valid when both DM and DL are active.
+    other: active.dm && active.other && dm !== null && pDl > 0 ? (dm * pOther) / pDl : null,
   };
 
-  const dmDlPrice = (dm !== null && dl !== null) ? (dm + dl) / pDmDl : null;
+  const dmDlPrice = (active.dm && active.dl && dm !== null && dl !== null && pDmDl > 0)
+    ? (dm + dl) / pDmDl : null;
   const fromDmDl = {
     price: dmDlPrice,
-    imoh:  dmDlPrice !== null ? dmDlPrice * pImoh  : null,
-    other: dmDlPrice !== null ? dmDlPrice * pOther : null,
+    imoh:  active.imoh  && dmDlPrice !== null ? dmDlPrice * pImoh  : null,
+    other: active.other && dmDlPrice !== null ? dmDlPrice * pOther : null,
   };
 
   // --- Note/label helpers (parity with calculator UI phrasing) ---
@@ -287,16 +318,18 @@ export function computePricing(inputs, settings) {
   else if (dmUser !== null) estSrc = 'Estimated from DM';
 
   const notes = {
-    dm:    useDmLib
-             ? 'Linked to Direct Material library'
-             : (dmAuto !== null ? 'Estimated from Quote Price' : ''),
-    dl:    useLaborLib
-             ? 'Linked to Labor Cost calculator'
-             : (dlAuto !== null ? estSrc : ''),
-    imoh:  imohAuto  !== null ? estSrc : '',
-    other: otherAuto !== null ? estSrc : '',
+    dm:    active.dm
+             ? (useDmLib ? 'Linked to Direct Material library'
+                         : (dmAuto !== null ? 'Estimated from Quote Price' : ''))
+             : '',
+    dl:    active.dl
+             ? (useLaborLib ? 'Linked to Labor Cost calculator'
+                            : (dlAuto !== null ? estSrc : ''))
+             : '',
+    imoh:  active.imoh  && imohAuto  !== null ? estSrc : '',
+    other: active.other && otherAuto !== null ? estSrc : '',
     quote: quoteAuto !== null
-             ? ((dlUser !== null) ? 'Estimated from DM + DL' : 'Estimated from DM')
+             ? ((active.dl && dlUser !== null) ? 'Estimated from DM + DL' : 'Estimated from DM')
              : '',
   };
 
@@ -409,6 +442,8 @@ export async function loadCostBuildBundle(db, costBuildId) {
 export function computeFromBundle(bundle, settings) {
   const s = settings || DEFAULT_SETTINGS;
   const b = bundle.build;
+  const kc = kindConfig(b.build_kind);
+  const activeCategories = { dm: kc.dm, dl: kc.dl, imoh: kc.imoh, other: kc.other };
 
   // DM library total (null if linkage is off)
   const dmLibTotal = b.use_dm_library
@@ -439,7 +474,8 @@ export function computeFromBundle(bundle, settings) {
       dmLibraryTotal: dmLibTotal,
       laborCalcTotal,
     },
-    s
+    s,
+    { activeCategories }
   );
 
   return {
