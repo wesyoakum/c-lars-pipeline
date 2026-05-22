@@ -1138,7 +1138,7 @@ export async function onRequestGet(context) {
                 <input type="text" name="quantity" form="line-form-${escape(l.id)}" value="${escape(l.quantity ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input" data-autosave>
               </td>
               <td class="col-unit">
-                <input type="text" name="unit" form="line-form-${escape(l.id)}" value="${escape(l.unit ?? '')}" ${readOnly ? 'disabled' : ''} style="width: 4rem;" data-autosave>
+                <input type="text" name="unit" form="line-form-${escape(l.id)}" value="${escape(l.unit ?? '')}" ${readOnly ? 'disabled' : ''} data-autosave>
               </td>
               <td class="num col-price">
                 <input type="text" name="unit_price" form="line-form-${escape(l.id)}" value="${escape(l.unit_price ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input" data-autosave>
@@ -1190,7 +1190,7 @@ export async function onRequestGet(context) {
                   <input type="text" name="quantity" form="new-line-form" value="1" class="num-input">
                 </td>
                 <td class="col-unit">
-                  <input type="text" name="unit" form="new-line-form" value="ea" style="width: 4rem;">
+                  <input type="text" name="unit" form="new-line-form" value="ea">
                 </td>
                 <td class="num col-price">
                   <input type="text" name="unit_price" form="new-line-form" class="num-input" placeholder="0">
