@@ -18,7 +18,9 @@ export async function upsertLibraryItem(db, line) {
   try {
     const title = String(line.title || '').trim();
     const partNumber = String(line.part_number || '').trim();
-    if (!title && !partNumber) return null;
+    const description = String(line.description || '').trim();
+    const itemName = title || partNumber || description;
+    if (!itemName) return null;
 
     const ts = new Date().toISOString();
     let existing = null;
@@ -30,12 +32,12 @@ export async function upsertLibraryItem(db, line) {
           WHERE part_number = ? AND deleted_at IS NULL LIMIT 1`,
         [partNumber]);
     }
-    // Fallback: match by title (case-insensitive).
-    if (!existing && title) {
+    // Fallback: match by name (title, or description if no title).
+    if (!existing && itemName) {
       existing = await one(db,
         `SELECT id, use_count FROM items_library
           WHERE LOWER(TRIM(name)) = LOWER(?) AND deleted_at IS NULL LIMIT 1`,
-        [title]);
+        [itemName]);
     }
 
     if (existing) {
@@ -68,7 +70,7 @@ export async function upsertLibraryItem(db, line) {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL, NULL, 1, ?, ?)`,
         [
           id,
-          title || partNumber,
+          itemName,
           line.description || '',
           line.unit || 'ea',
           line.unit_price ?? 0,
