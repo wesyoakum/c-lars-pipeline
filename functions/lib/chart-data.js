@@ -53,8 +53,8 @@ export const CHART_SLIDES = [
   { key: 'segment',    title: 'Win rate by segment',
     caption: 'Won vs lost vs died outcomes broken out by account segment.',
     kind: 'chart' },
-  { key: 'aging',      title: 'Quote aging',
-    caption: 'Open quotes grouped by how long since they were submitted.',
+  { key: 'aging',      title: 'Quote expiration',
+    caption: 'Quotes by time to expiration — red = expired, yellow = expiring soon, green = healthy.',
     kind: 'chart' },
   { key: 'bookings',   title: 'Bookings trend — last 12 months',
     caption: 'Monthly value of completed deals.',
@@ -176,11 +176,11 @@ export async function gatherDashboardCharts(db) {
           AND o.deleted_at IS NULL
         GROUP BY segment ORDER BY segment`),
     all(db,
-      `SELECT q.id, q.total_price,
-              CAST(julianday('now') - julianday(q.submitted_at) AS INTEGER) AS days_old
+      `SELECT q.id, q.total_price, q.valid_until,
+              CAST(julianday(q.valid_until) - julianday('now') AS INTEGER) AS days_until
          FROM quotes q
-        WHERE q.status IN ('submitted', 'approved_internal', 'internal_review')
-          AND q.submitted_at IS NOT NULL
+        WHERE q.status IN ('draft', 'issued', 'revision_draft', 'revision_issued', 'expired')
+          AND q.valid_until IS NOT NULL
           AND q.deleted_at IS NULL`),
     all(db,
       `SELECT stage,
@@ -269,24 +269,30 @@ export async function gatherDashboardCharts(db) {
     abandoned: winRateBySegmentRows.map(s => Number(s.abandoned ?? 0)),
   };
 
-  const buckets = [
-    { label: '0–7 d',  max: 7,        n: 0, value: 0 },
-    { label: '8–14 d', max: 14,       n: 0, value: 0 },
-    { label: '15–30 d', max: 30,      n: 0, value: 0 },
-    { label: '31–60 d', max: 60,      n: 0, value: 0 },
-    { label: '61–90 d', max: 90,      n: 0, value: 0 },
-    { label: '90+ d',  max: Infinity, n: 0, value: 0 },
+  // Expiration buckets: negative = already expired, positive = expiring soon.
+  // Ordered from most expired → expiring soonest → furthest out.
+  const agingBuckets = [
+    { label: 'Expired 4+ wks', min: -Infinity, max: -28, n: 0, value: 0, color: '#991b1b' },
+    { label: 'Expired 3 wks',  min: -28,       max: -21, n: 0, value: 0, color: '#b91c1c' },
+    { label: 'Expired 2 wks',  min: -21,       max: -14, n: 0, value: 0, color: '#dc2626' },
+    { label: 'Expired 1 wk',   min: -14,       max: -7,  n: 0, value: 0, color: '#ef4444' },
+    { label: 'Expired < 1 wk', min: -7,        max: 0,   n: 0, value: 0, color: '#f87171' },
+    { label: 'Within 1 wk',    min: 0,         max: 7,   n: 0, value: 0, color: '#f59e0b' },
+    { label: 'Within 2 wks',   min: 7,         max: 14,  n: 0, value: 0, color: '#eab308' },
+    { label: 'Within 3 wks',   min: 14,        max: 21,  n: 0, value: 0, color: '#84cc16' },
+    { label: '3+ wks out',     min: 21,        max: Infinity, n: 0, value: 0, color: '#10b981' },
   ];
   for (const q of quoteAgingRows) {
-    const d = Number(q.days_old ?? 0);
-    for (const b of buckets) {
-      if (d <= b.max) { b.n += 1; b.value += Number(q.total_price ?? 0); break; }
+    const d = Number(q.days_until ?? 0);
+    for (const b of agingBuckets) {
+      if (d > b.min && d <= b.max) { b.n += 1; b.value += Number(q.total_price ?? 0); break; }
     }
   }
   const aging = {
-    labels: buckets.map(b => b.label),
-    counts: buckets.map(b => b.n),
-    values: buckets.map(b => b.value),
+    labels: agingBuckets.map(b => b.label),
+    counts: agingBuckets.map(b => b.n),
+    values: agingBuckets.map(b => b.value),
+    colors: agingBuckets.map(b => b.color),
   };
 
   const bottleneck = {
@@ -598,6 +604,36 @@ export function buildChartInitScript(prefix, chartsJson) {
               }
             },
             scales: { y: { beginAtZero: true, title: { display: true, text: 'Average days' } } }
+          }
+        });
+      });
+
+      var ag = ${chartsJson.aging};
+      if (ag.labels.length) make('aging', function(canvas) {
+        new Chart(canvas, {
+          type: 'bar',
+          data: {
+            labels: ag.labels,
+            datasets: [{
+              label: 'Quotes',
+              data: ag.counts,
+              backgroundColor: ag.colors,
+              borderRadius: 4
+            }]
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label: function(ctx) { return ctx.parsed.y + ' quotes · ' + fmt$(ag.values[ctx.dataIndex]); }
+                }
+              }
+            },
+            scales: {
+              y: { beginAtZero: true, ticks: { stepSize: 1 } }
+            }
           }
         });
       });
