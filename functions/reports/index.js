@@ -404,7 +404,7 @@ export async function onRequestGet(context) {
             <button type="button" data-mode="value">Value ($)</button>
           </div>
         </div>
-        <canvas id="sales-owner-chart" height="200"></canvas>
+        <div style="position:relative;height:250px"><canvas id="sales-owner-chart"></canvas></div>
       </div>
       <div class="sales-chart-wrap" id="type-chart-wrap">
         <div class="sales-chart-head">
@@ -415,7 +415,7 @@ export async function onRequestGet(context) {
             <button type="button" data-mode="value">Value ($)</button>
           </div>
         </div>
-        <canvas id="sales-type-chart" height="160"></canvas>
+        <div style="position:relative;height:180px"><canvas id="sales-type-chart"></canvas></div>
       </div>
     </section>
     <script>
