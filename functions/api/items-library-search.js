@@ -30,7 +30,7 @@ export async function onRequestGet(context) {
   const rows = await all(env.DB,
     `SELECT id, name, part_number, description, item_type,
             default_unit, default_price, default_cost,
-            use_count, last_used_at, item_notes, category
+            use_count, last_used_at, item_notes, category, source
        FROM items_library
       WHERE deleted_at IS NULL AND active = 1
         AND (name LIKE ? OR part_number LIKE ? OR description LIKE ?

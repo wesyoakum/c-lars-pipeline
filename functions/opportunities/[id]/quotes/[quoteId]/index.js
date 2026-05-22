@@ -3160,8 +3160,9 @@ export async function onRequestGet(context) {
               results.innerHTML = items.map(function(it){
                 var price = it.default_price ? '$' + Number(it.default_price).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '';
                 var meta = [it.part_number, it.item_type, it.default_unit, it.use_count ? it.use_count + ' uses' : ''].filter(Boolean).join(' · ');
+                var srcTag = it.source === 'mrpeasy' ? '<span class="ta-item-src">MRP</span> ' : '';
                 return '<div class="lib-result" data-lib-id="' + it.id + '">' +
-                  '<div><div class="lib-result-name">' + esc(it.name) + '</div>' +
+                  '<div><div class="lib-result-name">' + srcTag + esc(it.name) + '</div>' +
                   '<div class="lib-result-meta">' + esc(meta) + '</div>' +
                   (it.description ? '<div class="lib-result-meta">' + esc(it.description.slice(0, 100)) + '</div>' : '') +
                   '</div>' +
@@ -3212,6 +3213,7 @@ export async function onRequestGet(context) {
       .ta-item:hover,.ta-item.ta-active{background:#eef2ff}
       .ta-item-name{font-weight:600}
       .ta-item-meta{font-size:.75rem;color:var(--muted,#666)}
+      .ta-item-src{display:inline-block;font-size:.6rem;font-weight:700;background:#e0e7ff;color:#3730a3;border-radius:3px;padding:.05rem .3rem;vertical-align:middle;margin-right:.2rem}
     </style>
     <script>
     (function(){
@@ -3241,7 +3243,8 @@ export async function onRequestGet(context) {
                 activeIdx = -1;
                 dd.innerHTML = items.map(function(it, i){
                   var meta = [it.part_number, it.default_unit, it.default_price ? '$' + Number(it.default_price).toFixed(2) : ''].filter(Boolean).join(' · ');
-                  return '<div class="ta-item" data-idx="' + i + '" data-json="' + esc(JSON.stringify(it)) + '"><span class="ta-item-name">' + esc(it.name) + '</span> <span class="ta-item-meta">' + esc(meta) + '</span></div>';
+                  var srcBadge = it.source === 'mrpeasy' ? '<span class="ta-item-src">MRP</span> ' : '';
+                  return '<div class="ta-item" data-idx="' + i + '" data-json="' + esc(JSON.stringify(it)) + '">' + srcBadge + '<span class="ta-item-name">' + esc(it.name) + '</span> <span class="ta-item-meta">' + esc(meta) + '</span></div>';
                 }).join('');
                 dd.hidden = false;
               })

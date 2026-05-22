@@ -12,6 +12,7 @@ import { fmtDollar } from '../../lib/pricing.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
 import { ieText, ieSelect, listInlineEditScript } from '../../lib/list-inline-edit.js';
 import { librarySubNav } from '../../lib/library-subnav.js';
+import { hasRole } from '../../lib/auth.js';
 
 export async function onRequestGet(context) {
   return renderList(context, {});
@@ -26,13 +27,14 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
     env.DB,
     `SELECT id, name, part_number, description, category, item_type,
             default_unit, default_price, default_cost,
-            use_count, last_used_at, item_notes, active, updated_at
+            use_count, last_used_at, item_notes, active, updated_at, source
        FROM items_library
       WHERE deleted_at IS NULL
       ORDER BY active DESC, use_count DESC, name`
   );
 
   const TYPE_LABELS = { product: 'Product', service: 'Service', labor: 'Labor', misc: 'Misc' };
+  const SOURCE_LABELS = { manual: 'Manual', mrpeasy: 'MRPeasy' };
 
   const columns = [
     { key: 'part_number',   label: 'Part #',         sort: 'text',   filter: 'text',   default: true },
@@ -46,6 +48,7 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
     { key: 'last_used',     label: 'Last used',      sort: 'date',   filter: 'text',   default: true },
     { key: 'description',   label: 'Description',   sort: 'text',   filter: 'text',   default: false },
     { key: 'category',      label: 'Category',      sort: 'text',   filter: 'select', default: false },
+    { key: 'source_label',  label: 'Source',         sort: 'text',   filter: 'select', default: true  },
     { key: 'status',        label: 'Status',         sort: 'text',   filter: 'select', default: false },
   ];
 
@@ -65,6 +68,8 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
     item_notes: r.item_notes ?? '',
     use_count: r.use_count ?? 0,
     last_used: r.last_used_at ? r.last_used_at.slice(0, 10) : '',
+    source: r.source ?? 'manual',
+    source_label: SOURCE_LABELS[r.source] ?? r.source ?? 'Manual',
     status: r.active ? 'Active' : 'Inactive',
     active: r.active,
   }));
@@ -130,6 +135,7 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
                     <td class="col-category" data-col="category">
                       ${ieText('category', r.category)}
                     </td>
+                    <td class="col-source_label" data-col="source_label"><small class="muted">${escape(r.source_label)}</small></td>
                     <td class="col-status" data-col="status">
                       ${ieSelect('active', r.active ? '1' : '0', [
                         { value: '1', label: 'Active' },
@@ -179,6 +185,46 @@ export async function renderList(context, { values = {}, errors = {} } = {}) {
         </div>
         <button class="btn primary" type="submit">Add item</button>
       </form>
+
+      ${hasRole(user, 'admin') ? html`
+        <h2 class="section-h">Import MRPeasy CSV</h2>
+        <div x-data="mrpImport()">
+          <input type="file" accept=".csv" @change="upload($event)" :disabled="busy" style="margin-right:0.5rem">
+          <span x-show="busy" class="muted">Importing... <span x-text="status"></span></span>
+          <span x-show="result" x-text="result" style="color:#16a34a;font-weight:500"></span>
+          <span x-show="error" x-text="error" style="color:#cf222e"></span>
+        </div>
+        <script>
+        document.addEventListener('alpine:init', function() {
+          Alpine.data('mrpImport', function() {
+            return {
+              busy: false, status: '', result: '', error: '',
+              upload: function(e) {
+                var self = this;
+                var file = e.target.files[0];
+                if (!file) return;
+                self.busy = true; self.status = 'Uploading...'; self.result = ''; self.error = '';
+                var fd = new FormData();
+                fd.append('file', file);
+                fetch('/api/mrpeasy-import', {
+                  method: 'POST', credentials: 'same-origin', body: fd,
+                }).then(function(r) { return r.json(); })
+                  .then(function(j) {
+                    self.busy = false;
+                    if (j.ok) {
+                      self.result = 'Imported ' + j.imported + ' items' + (j.skipped ? ' (' + j.skipped + ' skipped)' : '') + '.';
+                      setTimeout(function() { location.reload(); }, 1500);
+                    } else {
+                      self.error = j.error || 'Import failed.';
+                    }
+                  })
+                  .catch(function(err) { self.busy = false; self.error = 'Upload failed: ' + err.message; });
+              }
+            };
+          });
+        });
+        </script>
+      ` : ''}
     </section>
   `;
 
