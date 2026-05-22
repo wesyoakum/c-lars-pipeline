@@ -94,6 +94,7 @@ export async function onRequestGet(context) {
     { key: 'assigned_name', label: 'Assigned to',  sort: 'text',   filter: 'select', default: true },
     { key: 'due',           label: 'Due',          sort: 'date',   filter: 'text',   default: true },
     { key: 'status_label',  label: 'Status',       sort: 'text',   filter: 'select', default: true },
+    { key: 'actions',       label: '',             sort: null,     filter: null,     default: true },
   ];
 
   const rowData = activities.map(a => {
@@ -171,7 +172,6 @@ export async function onRequestGet(context) {
                               class="task-complete-toggle ${r.isCompleted ? 'is-completed' : ''}"
                               title="${r.isCompleted ? 'Mark pending' : 'Mark complete'}"
                               aria-label="${r.isCompleted ? 'Mark pending' : 'Mark complete'}"></button>
-                      <form method="post" action="/activities/${escape(r.id)}/delete" style="display:inline" onsubmit="return confirm('Delete this task?')"><input type="hidden" name="return_to" value="/activities"><button type="submit" class="row-delete-btn" title="Delete task" aria-label="Delete task">×</button></form>
                     </td>
                     <td class="col-subject" data-col="subject">
                       ${ieText('subject', r.subject, { placeholder: '(no subject)' })}
@@ -188,6 +188,12 @@ export async function onRequestGet(context) {
                       ${ieText('due_at', r.due, { inputType: 'date' })}
                     </td>
                     <td class="col-status_label" data-col="status_label"><span class="pill ${r.status === 'completed' ? 'pill-success' : r.status === 'cancelled' ? 'pill-locked' : ''}">${escape(r.status_label)}</span></td>
+                    <td class="col-actions" data-col="actions" data-row-no-nav style="text-align:center;vertical-align:middle">
+                      <form method="post" action="/activities/${escape(r.id)}/delete" style="display:inline;margin:0" onsubmit="return confirm('Delete this task?')">
+                        <input type="hidden" name="return_to" value="/activities">
+                        <button type="submit" class="row-delete-btn" title="Delete task" aria-label="Delete task" style="display:inline-flex;align-items:center;justify-content:center">&times;</button>
+                      </form>
+                    </td>
                   </tr>
                 `)}
               </tbody>
