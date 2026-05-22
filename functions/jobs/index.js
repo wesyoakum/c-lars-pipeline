@@ -139,14 +139,38 @@ export async function onRequestGet(context) {
 
   const jobChartScript = `
 (function(){
-  var container = document.querySelector('[data-role="job-charts"]');
-  if (!container) return;
+  var chart = document.querySelector('[data-role="job-charts"]');
+  if (!chart) return;
   var host = document.querySelector('.opp-list');
-  var wfmBody = container.querySelector('[data-role="wfm-chart-body"]');
-  var oppBody = container.querySelector('[data-role="opp-chart-body"]');
+  var wfmBody = chart.querySelector('[data-role="wfm-chart-body"]');
+  var oppBody = chart.querySelector('[data-role="opp-chart-body"]');
   function esc(x){ return String(x).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  var palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#e11d48'];
 
-  function renderChart(bodyEl, dataKey, label) {
+  // View toggle
+  var VIEW_KEY = 'pipeline.jobChart.view.v1';
+  var view = 'wfm_status';
+  try { var sv = localStorage.getItem(VIEW_KEY); if (sv === 'opp_stage') view = sv; } catch(e) {}
+  var viewBtns = chart.querySelectorAll('[data-role="job-chart-view"] button');
+  function setView(next){
+    view = next;
+    try { localStorage.setItem(VIEW_KEY, view); } catch(e) {}
+    for (var i = 0; i < viewBtns.length; i++){
+      viewBtns[i].classList.toggle('jc-mode-active', viewBtns[i].getAttribute('data-view') === view);
+    }
+    wfmBody.hidden = view !== 'wfm_status';
+    oppBody.hidden = view !== 'opp_stage';
+  }
+  for (var i = 0; i < viewBtns.length; i++){
+    (function(btn){
+      btn.classList.toggle('jc-mode-active', btn.getAttribute('data-view') === view);
+      btn.addEventListener('click', function(){ setView(btn.getAttribute('data-view')); });
+    })(viewBtns[i]);
+  }
+  wfmBody.hidden = view !== 'wfm_status';
+  oppBody.hidden = view !== 'opp_stage';
+
+  function renderChart(bodyEl, dataKey) {
     if (!host || !bodyEl) return;
     var trs = host.querySelectorAll('tbody[data-role="rows"] tr[data-row-id]');
     var counts = {}, order = [], total = 0;
@@ -161,7 +185,6 @@ export async function onRequestGet(context) {
     if (total === 0){ bodyEl.innerHTML = ''; return; }
     var max = 0; for (var k in counts){ if (counts[k] > max) max = counts[k]; }
     var axis = Math.max(10, Math.ceil(max / 10) * 10);
-    var palette = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#e11d48'];
     order.sort(function(a,b){ return (counts[b] || 0) - (counts[a] || 0); });
     bodyEl.innerHTML = order.map(function(s,idx){
       var v = counts[s];
@@ -174,9 +197,9 @@ export async function onRequestGet(context) {
   }
 
   function render(){
-    container.hidden = false;
-    renderChart(wfmBody, 'wfm_status', 'WFM Status');
-    renderChart(oppBody, 'opp_stage', 'Opp Stage');
+    chart.hidden = false;
+    renderChart(wfmBody, 'wfm_status');
+    renderChart(oppBody, 'opp_stage');
   }
   render();
   if (host) host.addEventListener('list:filtered', render);
@@ -186,24 +209,28 @@ export async function onRequestGet(context) {
   const body = html`
     ${tabs}
     <style>
-      .job-charts{margin:.4rem 0 .6rem;display:grid;grid-template-columns:1fr 1fr;gap:.75rem}
-      .job-chart{padding:.5rem .7rem;background:var(--bg-alt,#f5f5f7);border-radius:var(--radius,6px)}
-      .job-chart h2{margin:0 0 .35rem;font-size:.72rem;font-weight:600;color:var(--muted,#666);text-transform:uppercase;letter-spacing:.04em}
+      .job-chart-wrap{margin:.4rem 0 .6rem;padding:.5rem .7rem;background:var(--bg-alt,#f5f5f7);border-radius:var(--radius,6px)}
+      .job-chart-wrap[hidden]{display:none}
+      .job-chart-head{display:flex;align-items:center;gap:.5rem;margin-bottom:.35rem}
+      .jc-mode-toggle{display:inline-flex;border:1px solid var(--border,#d8d8d8);border-radius:4px;overflow:hidden;background:#fff}
+      .jc-mode-toggle button{background:transparent;border:0;padding:.1rem .55rem;cursor:pointer;font-size:.7rem;color:var(--muted,#666);line-height:1.4}
+      .jc-mode-toggle button + button{border-left:1px solid var(--border,#d8d8d8)}
+      .jc-mode-toggle button.jc-mode-active{background:#eef2ff;color:#1d4ed8;font-weight:600}
       .jc-row{display:grid;grid-template-columns:130px 1fr 40px;align-items:center;gap:.5rem;margin:.1rem 0;font-size:.8rem}
       .jc-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text,#222)}
       .jc-track{display:block;width:100%;background:#e5e7eb;border-radius:3px;height:11px;overflow:hidden}
       .jc-bar{display:block;height:100%;border-radius:3px;min-width:2px;transition:width .15s}
       .jc-count{text-align:right;color:var(--muted,#666);font-variant-numeric:tabular-nums}
     </style>
-    <div class="job-charts" data-role="job-charts" hidden>
-      <div class="job-chart">
-        <h2>Jobs by WFM Status</h2>
-        <div data-role="wfm-chart-body"></div>
+    <div class="job-chart-wrap" data-role="job-charts" hidden>
+      <div class="job-chart-head">
+        <div class="jc-mode-toggle" data-role="job-chart-view" role="group" aria-label="Chart view">
+          <button type="button" data-view="wfm_status">By WFM status</button>
+          <button type="button" data-view="opp_stage">By opp stage</button>
+        </div>
       </div>
-      <div class="job-chart">
-        <h2>Jobs by Opp Stage</h2>
-        <div data-role="opp-chart-body"></div>
-      </div>
+      <div data-role="wfm-chart-body"></div>
+      <div data-role="opp-chart-body" hidden></div>
     </div>
     <section class="card">
       <div class="card-header">
