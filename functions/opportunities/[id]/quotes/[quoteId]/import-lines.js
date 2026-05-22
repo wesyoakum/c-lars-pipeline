@@ -2,21 +2,16 @@
 //
 // POST /opportunities/:id/quotes/:quoteId/import-lines
 //
-// Accepts a file upload (CSV, Excel, PDF, image, text), extracts
-// text from it, sends to Claude to identify line items, and returns
-// a JSON array of proposed lines for the user to review before
-// adding to the quote.
+// Accepts a file upload, routes it through the AI Inbox pipeline
+// for text extraction (same proven path as the inbox), then sends
+// the extracted text to Claude for line-item extraction. The AI
+// Inbox entry is persisted and linked to the quote for audit.
 
+import { run, stmt, batch, all, one } from '../../../../lib/db.js';
+import { uuid, now } from '../../../../lib/ids.js';
+import { uploadToR2 } from '../../../../lib/r2.js';
+import { processItem } from '../../../../ai-inbox/process-helpers.js';
 import { messagesJson } from '../../../../lib/anthropic.js';
-
-function toBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary);
-}
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -25,67 +20,21 @@ function json(data, status = 200) {
   });
 }
 
-// ---------- Text extraction from file buffer ----------
+const AUDIO_EXTS = new Set(['m4a', 'mp3', 'wav', 'webm', 'mp4', 'mpeg', 'mpga', 'ogg', 'flac']);
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'heic', 'heif', 'webp', 'bmp', 'tiff']);
+const EMAIL_EXTS = new Set(['eml', 'msg']);
+const DOCUMENT_EXTS = new Set([
+  'pdf', 'docx', 'doc', 'rtf', 'odt', 'txt', 'md', 'csv', 'tsv', 'log',
+  'json', 'xml', 'html', 'ppt', 'pptx', 'xls', 'xlsx',
+]);
 
-const TEXT_EXTENSIONS = new Set(['txt', 'md', 'csv', 'tsv', 'log', 'json', 'xml', 'html']);
-const CONVERT_FORMATS = { pdf: 'pdf', docx: 'docx', doc: 'doc', rtf: 'rtf', odt: 'odt', ppt: 'ppt', pptx: 'pptx', xls: 'xls', xlsx: 'xlsx' };
-const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tiff', 'heic', 'heif']);
-
-async function extractText(env, file, filename) {
-  const ext = (filename.split('.').pop() || '').toLowerCase();
-
-  // Plain text files — read directly.
-  if (TEXT_EXTENSIONS.has(ext)) {
-    return await file.text();
-  }
-
-  // Images — use Claude vision OCR.
-  if (IMAGE_EXTENSIONS.has(ext)) {
-    const buffer = await file.arrayBuffer();
-    const base64 = toBase64(buffer);
-    const mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', bmp: 'image/bmp', tiff: 'image/tiff', heic: 'image/heic', heif: 'image/heif' };
-    const mediaType = mimeMap[ext] || 'image/png';
-    const result = await messagesJson(env, {
-      model: env.AI_INBOX_OCR_MODEL || undefined,
-      system: 'Extract all text from this image. Return JSON: {"text": "...extracted text..."}. If the image contains a table, preserve the structure with tabs or pipes between columns.',
-      user: [
-        { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-        { type: 'text', text: 'Extract all text from this image as JSON.' },
-      ],
-      maxTokens: 4096,
-    });
-    return result.json?.text || result.text || '';
-  }
-
-  // Binary documents — send directly to Claude as a document.
-  // Claude natively reads PDF and can handle DOCX/XLS as base64.
-  const CLAUDE_DOC_TYPES = {
-    pdf: 'application/pdf',
-    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    doc: 'application/msword',
-    xls: 'application/vnd.ms-excel',
-    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    ppt: 'application/vnd.ms-powerpoint',
-    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-    rtf: 'application/rtf',
-    odt: 'application/vnd.oasis.opendocument.text',
-  };
-  const docMediaType = CLAUDE_DOC_TYPES[ext];
-  if (!docMediaType) {
-    throw new Error(`Unsupported file format: .${ext}`);
-  }
-  const buffer = await file.arrayBuffer();
-  const base64 = toBase64(buffer);
-  const result = await messagesJson(env, {
-    model: env.AI_INBOX_EXTRACT_MODEL || undefined,
-    system: 'Extract all text content from this document. Return JSON: {"text": "...all extracted text..."}. Preserve table structure using tabs between columns and newlines between rows.',
-    user: [
-      { type: 'document', source: { type: 'base64', media_type: docMediaType, data: base64 } },
-      { type: 'text', text: 'Extract all text from this document as JSON.' },
-    ],
-    maxTokens: 8192,
-  });
-  return result.json?.text || result.text || '';
+function inferKind(file) {
+  const mime = (file.type || '').toLowerCase();
+  const ext = ((file.name || '').split('.').pop() || '').toLowerCase();
+  if (mime.startsWith('audio/') || mime === 'video/mp4' || AUDIO_EXTS.has(ext)) return 'audio';
+  if (mime.startsWith('image/') || IMAGE_EXTS.has(ext)) return 'image';
+  if (mime === 'message/rfc822' || EMAIL_EXTS.has(ext)) return 'email';
+  return 'document';
 }
 
 // ---------- Line items extraction prompt ----------
@@ -121,7 +70,10 @@ Rules:
 // ---------- Handler ----------
 
 export async function onRequestPost(context) {
-  const { env, request, params } = context;
+  const { env, data, request, params } = context;
+  const user = data?.user;
+  const oppId = params.id;
+  const quoteId = params.quoteId;
 
   let formData;
   try {
@@ -131,23 +83,67 @@ export async function onRequestPost(context) {
   }
 
   const file = formData.get('file');
-  if (!file || typeof file === 'string') {
+  if (!file || typeof file === 'string' || file.size === 0) {
     return json({ ok: false, error: 'No file uploaded.' }, 400);
   }
-
-  const filename = file.name || 'upload';
   if (file.size > 50 * 1024 * 1024) {
     return json({ ok: false, error: 'File too large (max 50 MB).' }, 400);
   }
 
+  const filename = file.name || 'upload';
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  const kind = inferKind(file);
+  const mime = file.type || '';
+
   try {
-    // Step 1: Extract text from the file.
-    const text = await extractText(env, file, filename);
+    // Step 1: Create an AI Inbox entry + attachment (same as /ai-inbox/new).
+    const entryId = uuid();
+    const attachmentId = uuid();
+    const ts = now();
+    const r2Key = `ai-inbox/${entryId}/${uuid()}.${ext || 'bin'}`;
+
+    await uploadToR2(env.DOCS, r2Key, file, {
+      entryId,
+      kind,
+      uploadedBy: user?.email || '',
+    });
+
+    await batch(env.DB, [
+      stmt(env.DB,
+        `INSERT INTO ai_inbox_items
+           (id, user_id, created_at, updated_at, status, source, user_context)
+         VALUES (?, ?, ?, ?, 'pending', 'quote_line_import', ?)`,
+        [entryId, user?.id, ts, ts, `Import lines for quote ${quoteId}`]),
+      stmt(env.DB,
+        `INSERT INTO ai_inbox_attachments
+           (id, entry_id, kind, sort_order, is_primary, include_in_context,
+            r2_key, mime_type, size_bytes, filename,
+            status, created_at, updated_at)
+         VALUES (?, ?, ?, 0, 1, 1, ?, ?, ?, ?, 'pending', ?, ?)`,
+        [attachmentId, entryId, kind, r2Key, mime || null, file.size, filename, ts, ts]),
+      // Link the entry to the quote for audit trail.
+      stmt(env.DB,
+        `INSERT INTO ai_inbox_links
+           (id, item_id, action_type, ref_type, ref_id, ref_label, created_at, created_by_user_id)
+         VALUES (?, ?, 'link_to_quote', 'quote', ?, ?, ?, ?)`,
+        [uuid(), entryId, 'link_to_quote', quoteId, `Quote line import: ${filename}`, ts, user?.id]),
+    ]);
+
+    // Step 2: Run the AI Inbox pipeline (processes attachment → captured_text).
+    await processItem(env, entryId);
+
+    // Step 3: Read the captured text.
+    const attachment = await one(env.DB,
+      `SELECT captured_text FROM ai_inbox_attachments
+        WHERE entry_id = ? AND is_primary = 1 AND status = 'ready'`,
+      [entryId]);
+
+    const text = attachment?.captured_text || '';
     if (!text || text.trim().length < 10) {
-      return json({ ok: false, error: 'Could not extract usable text from the file.' }, 400);
+      return json({ ok: false, error: 'Could not extract usable text from the file.', entry_id: entryId }, 400);
     }
 
-    // Step 2: Send to Claude for line item extraction.
+    // Step 4: Send to Claude for line item extraction.
     const result = await messagesJson(env, {
       model: env.AI_INBOX_EXTRACT_MODEL || undefined,
       system: SYSTEM_PROMPT,
@@ -170,6 +166,7 @@ export async function onRequestPost(context) {
         unit_price: typeof l.unit_price === 'number' ? l.unit_price : null,
         notes: String(l.notes || '').trim(),
       })),
+      entry_id: entryId,
       source_text: text.slice(0, 500),
       model: result.model,
     });

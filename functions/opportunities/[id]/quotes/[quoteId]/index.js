@@ -3128,15 +3128,29 @@ export async function onRequestGet(context) {
         importInput.addEventListener('change', function(){
           var file = importInput.files[0];
           if (!file) return;
-          importStatus.textContent = 'Processing with AI... this may take a moment.';
           importStatus.hidden = false;
           importPreview.innerHTML = '';
           importConfirmBtn.hidden = true;
+          // Animated progress messages to keep the user engaged.
+          var steps = [
+            'Uploading file...',
+            'Reading document...',
+            'Extracting text...',
+            'Identifying line items with AI...',
+            'Almost there...',
+          ];
+          var stepIdx = 0;
+          importStatus.textContent = steps[0];
+          var stepTimer = setInterval(function(){
+            stepIdx++;
+            if (stepIdx < steps.length) importStatus.textContent = steps[stepIdx];
+          }, 4000);
           var fd = new FormData();
           fd.append('file', file);
           fetch(importUrl, { method: 'POST', credentials: 'same-origin', body: fd })
             .then(function(r){ return r.json(); })
             .then(function(j){
+              clearInterval(stepTimer);
               importStatus.hidden = true;
               if (!j.ok || !j.lines || !j.lines.length) {
                 importStatus.textContent = j.error || 'No line items found in the file.';
@@ -3147,6 +3161,7 @@ export async function onRequestGet(context) {
               renderImportPreview();
             })
             .catch(function(e){
+              clearInterval(stepTimer);
               importStatus.textContent = 'Failed: ' + (e.message || e);
               importStatus.hidden = false;
             });
