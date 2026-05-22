@@ -3057,7 +3057,7 @@ export async function onRequestGet(context) {
              style="display:none">
       <p id="import-status" hidden class="muted" style="font-size:.85rem"></p>
       <div id="import-preview" style="max-height:400px;overflow-y:auto"></div>
-      <button type="button" id="import-confirm-btn" class="btn primary" hidden style="margin-top:.5rem"></button>
+      <button type="button" id="import-confirm-btn" class="btn primary" style="margin-top:.5rem;display:none"></button>
     </dialog>
     <style>
       .lib-result{padding:.5rem .6rem;border-bottom:1px solid #f0f0f0;cursor:pointer;display:grid;grid-template-columns:1fr auto;gap:.5rem;align-items:center}
@@ -3221,7 +3221,7 @@ export async function onRequestGet(context) {
           if (!file) return;
           importStatus.hidden = false;
           importPreview.innerHTML = '';
-          importConfirmBtn.hidden = true;
+          importConfirmBtn.style.display = 'none';
           // Animated progress messages to keep the user engaged.
           var steps = [
             'Uploading file...',
@@ -3260,7 +3260,7 @@ export async function onRequestGet(context) {
       }
 
       function renderImportPreview(){
-        if (!importedLines.length) { importPreview.innerHTML = '<p class="muted">No lines.</p>'; importConfirmBtn.hidden = true; return; }
+        if (!importedLines.length) { importPreview.innerHTML = '<p class="muted">No lines.</p>'; importConfirmBtn.style.display = 'none'; return; }
         var html = '<table class="data compact" style="font-size:.82rem;width:100%"><thead><tr><th>Part #</th><th>Title</th><th>Desc</th><th>Qty</th><th>Unit</th><th>Price</th><th>Notes</th><th></th></tr></thead><tbody>';
         importedLines.forEach(function(l, i){
           html += '<tr data-import-idx="' + i + '">' +
@@ -3275,7 +3275,7 @@ export async function onRequestGet(context) {
         });
         html += '</tbody></table>';
         importPreview.innerHTML = html;
-        importConfirmBtn.hidden = false;
+        importConfirmBtn.style.display = '';
         importConfirmBtn.textContent = 'Add ' + importedLines.length + ' line(s) to quote';
       }
       window.removeImportLine = function(idx){
@@ -3325,7 +3325,7 @@ export async function onRequestGet(context) {
           importInput.value = '';
           importStatus.hidden = true;
           importPreview.innerHTML = '';
-          importConfirmBtn.hidden = true;
+          importConfirmBtn.style.display = 'none';
           importedLines = [];
         });
       }
