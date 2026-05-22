@@ -368,13 +368,6 @@ export async function onRequestGet(context) {
 
       <!-- Row 4 - full width -->
       <section class="card" style="grid-column: 1 / -1">
-        <h2>7 · ${escape(slideByKey('bookings').title)}</h2>
-        <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('bookings').caption)}</p>
-        <div class="chart-wrap chart-wrap-wide"><canvas id="rpt-bookings"></canvas></div>
-      </section>
-
-      <!-- Row 5 - full width -->
-      <section class="card" style="grid-column: 1 / -1">
         <h2>8 · ${escape(slideByKey('forecast').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('forecast').caption)}</p>
         <div class="chart-wrap chart-wrap-wide"><canvas id="rpt-forecast"></canvas></div>
