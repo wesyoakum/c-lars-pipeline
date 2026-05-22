@@ -99,6 +99,10 @@ async function renderList(context, { values = {}, errors = {} } = {}) {
   const body = html`
     ${librarySubNav('builds')}
 
+    <div class="flash flash-info" role="status" style="margin-bottom:0.75rem">
+      Price Builds are under active development. Some features may be incomplete or change without notice.
+    </div>
+
     <section class="card">
       <div class="card-header">
         <h1>Price Builds Library</h1>

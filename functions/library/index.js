@@ -8,7 +8,7 @@
 
 export async function onRequestGet(context) {
   return Response.redirect(
-    new URL('/library/dm-items', context.request.url),
+    new URL('/documents/library', context.request.url),
     302
   );
 }

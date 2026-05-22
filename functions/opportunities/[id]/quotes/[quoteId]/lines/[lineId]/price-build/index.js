@@ -87,10 +87,13 @@ async function renderCreatePrompt(context, ctx) {
   );
 
   const body = html`
+    <div class="flash flash-info" role="status" style="margin-bottom:0.75rem">
+      Price Builds are under active development. Some features may be incomplete or change without notice.
+    </div>
     <section class="card">
       <div class="card-header">
         <div>
-          <h1>Price build</h1>
+          <h1>Price Build</h1>
           <p class="muted">
             Line item: <strong>${escape(line.description)}</strong>
             · Quote <a href="${quoteUrl(oppId, quoteId)}">${escape(line.quote_number)} Rev ${escape(line.revision)}</a>
@@ -229,6 +232,9 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
   const lineDesc = line.description || line.title || 'Line';
   const lineUrl = `/opportunities/${oppId}/quotes/${quoteId}/lines/${lineId}`;
   const header = html`
+    <div class="flash flash-info" role="status" style="margin-bottom:0.75rem">
+      Price Builds are under active development. Some features may be incomplete or change without notice.
+    </div>
     <section class="card">
       <div class="card-header">
         <div>
@@ -532,6 +538,10 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
         // Target price
         var tpEl = document.getElementById('cb-target-price');
         if (tpEl && eff.targetPrice !== undefined) tpEl.textContent = fmtDollar(eff.targetPrice);
+
+        // Hidden IMOH (buy_ship kind)
+        var hiEl = document.getElementById('cb-hidden-imoh');
+        if (hiEl && res.pricing.hiddenCosts) hiEl.textContent = fmtDollar(res.pricing.hiddenCosts.imoh);
 
         // Margin
         var mvEl = document.getElementById('cb-margin-value');
@@ -840,6 +850,14 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
           ${kc.dl   ? categoryRow('dl',    'Direct Labor (DL)',      build.dl_user_cost,    auto.dl,    linked.labor ? notes.dl : (auto.dl !== null ? notes.dl : ''),    linked.labor, eff.dl)    : ''}
           ${kc.imoh ? categoryRow('imoh',  'Indirect Material + OH', build.imoh_user_cost,  auto.imoh,  auto.imoh !== null ? notes.imoh : '',                           false,        eff.imoh)  : ''}
           ${kc.other? categoryRow('other', 'Other',                  build.other_user_cost, auto.other, auto.other !== null ? notes.other : '',                          false,        eff.other) : ''}
+          ${pricing.hiddenCosts.imohPct > 0 ? html`
+          <tr class="muted" style="font-size:0.85em">
+            <td>IMOH (included)</td>
+            <td class="num" id="cb-hidden-imoh">${fmtDollar(pricing.hiddenCosts.imoh)}</td>
+            <td class="num">${fmtPct(pricing.hiddenCosts.imohPct, 1)}</td>
+            <td class="num">${pctOf(pricing.hiddenCosts.imoh, eff.targetPrice)}</td>
+            <td class="num">${pctOf(pricing.hiddenCosts.imoh, eff.quote)}</td>
+          </tr>` : ''}
         </tbody>
         <tfoot>
           <tr>
@@ -851,6 +869,10 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
           </tr>
         </tfoot>
       </table>
+      ${pricing.hiddenCosts.imohPct > 0 ? html`
+      <p class="muted" style="font-size:0.75rem; margin-top:0.4rem">
+        Total includes ${fmtPct(pricing.hiddenCosts.imohPct, 1)} IMOH on quote price for 28.5% target margin.
+      </p>` : ''}
 
       ${showDiscounts ? renderBuildDiscountEditor({ build, locked, errText }) : ''}
 
