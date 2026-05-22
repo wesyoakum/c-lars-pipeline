@@ -110,8 +110,8 @@ export async function onRequestGet(context) {
   }
 
   const [oppCount, quoteCount, bookings2026] = await Promise.all([
-    one(env.DB, `SELECT COUNT(*) AS n FROM opportunities WHERE deleted_at IS NULL AND stage IN ('lead','rfq_received','quote_drafted','quote_submitted','quote_under_revision','revised_quote_submitted','quote_expired')`),
-    one(env.DB, `SELECT COUNT(*) AS n FROM quotes WHERE deleted_at IS NULL AND status IN ('draft','issued','revision_draft','revision_issued','expired')`),
+    one(env.DB, `SELECT COUNT(*) AS n FROM opportunities WHERE deleted_at IS NULL AND stage IN ('lead','rfq_received','quote_drafted','quote_submitted','quote_under_revision','revised_quote_submitted')`),
+    one(env.DB, `SELECT COUNT(*) AS n FROM quotes WHERE deleted_at IS NULL AND status IN ('draft','issued','revision_draft','revision_issued')`),
     one(env.DB, `SELECT COALESCE(SUM(estimated_value_usd), 0) AS total FROM opportunities WHERE stage IN ('completed','job_in_progress') AND deleted_at IS NULL AND actual_close_date >= '2026-01-01'`),
   ]);
 
