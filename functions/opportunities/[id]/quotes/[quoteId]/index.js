@@ -1061,14 +1061,16 @@ export async function onRequestGet(context) {
                       <input type="hidden" name="is_active" value="${active ? '1' : '0'}">
                     </form>
                   </td>
-                  <td class="num col-ext" data-line-extended style="position:relative">
-                    <strong>${fmtDollar(parentSum)}</strong>
-                    ${!readOnly ? html`
-                      <button type="button" class="line-eye-toggle line-active-toggle" data-line-id="${escape(l.id)}" data-target-active="${active ? '0' : '1'}" title="${active ? 'Exclude from quote' : 'Include in quote'}" style="position:absolute;right:22px;top:50%;transform:translateY(-50%)">
-                        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 10s4-7 9-7 9 7 9 7-4 7-9 7-9-7-9-7z"/><circle cx="10" cy="10" r="3"/>${!active ? '<line x1="3" y1="3" x2="17" y2="17" stroke-width="2.5"/>' : ''}</svg>
-                      </button>
-                      <button type="button" class="line-delete-btn" data-line-id="${escape(l.id)}" title="Delete line" style="position:absolute;right:2px;top:50%;transform:translateY(-50%)">&times;</button>
-                    ` : ''}
+                  <td class="num col-ext" data-line-extended>
+                    <div style="display:flex;align-items:center;justify-content:flex-end;gap:4px">
+                      <strong>${fmtDollar(parentSum)}</strong>
+                      ${!readOnly ? html`
+                        <button type="button" class="line-eye-toggle line-active-toggle" data-line-id="${escape(l.id)}" data-target-active="${active ? '0' : '1'}" title="${active ? 'Exclude from quote' : 'Include in quote'}">
+                          <svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 10s4-7 9-7 9 7 9 7-4 7-9 7-9-7-9-7z"/><circle cx="10" cy="10" r="3"/>${!active ? '<line x1="3" y1="3" x2="17" y2="17" stroke-width="2.5"/>' : ''}</svg>
+                        </button>
+                        <button type="button" class="line-delete-btn" data-line-id="${escape(l.id)}" title="Delete line">&times;</button>
+                      ` : ''}
+                    </div>
                   </td>
                 </tr>
               `;
@@ -1138,20 +1140,22 @@ export async function onRequestGet(context) {
               <td class="num col-price">
                 <input type="text" name="unit_price" form="line-form-${escape(l.id)}" value="${escape(l.unit_price ?? '')}" ${readOnly ? 'disabled' : ''} class="num-input" data-autosave>
               </td>
-              <td class="num col-ext" data-line-extended style="position:relative;white-space:nowrap">
-                ${fmtDollar(l.extended_price)}
+              <td class="num col-ext" data-line-extended>
+                <div style="display:flex;align-items:center;justify-content:flex-end;gap:4px">
+                  <span>${fmtDollar(l.extended_price)}</span>
+                  ${!readOnly ? html`
+                    <a href="${pbUrl(l.id)}" class="line-build-icon" title="${l.price_build_label ? 'Open price build ' + escape(l.build_number || l.price_build_label) : 'Add price build'}" style="color:${l.price_build_label ? '#3b82f6' : 'var(--muted,#999)'};text-decoration:none;display:inline-flex">
+                      ${raw(ICON_CALCULATOR)}
+                    </a>
+                    <button type="button" class="line-eye-toggle line-active-toggle" data-line-id="${escape(l.id)}" data-target-active="${active ? '0' : '1'}" title="${active ? 'Exclude from quote' : 'Include in quote'}">
+                      <svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 10s4-7 9-7 9 7 9 7-4 7-9 7-9-7-9-7z"/><circle cx="10" cy="10" r="3"/>${!active ? '<line x1="3" y1="3" x2="17" y2="17" stroke-width="2.5"/>' : ''}</svg>
+                    </button>
+                    <button type="button" class="line-delete-btn" data-line-id="${escape(l.id)}" title="Delete line">&times;</button>
+                  ` : ''}
+                </div>
                 ${l.build_quote_price != null && Math.abs(Number(l.unit_price ?? 0) - Number(l.build_quote_price)) > 0.01
-                  ? html`<br><small class="muted" style="color:var(--warning)" title="Price build suggests ${fmtDollar(l.build_quote_price)}/unit">Build: ${fmtDollar(l.build_quote_price)}</small>`
+                  ? html`<small class="muted" style="color:var(--warning);display:block;text-align:right" title="Price build suggests ${fmtDollar(l.build_quote_price)}/unit">Build: ${fmtDollar(l.build_quote_price)}</small>`
                   : ''}
-                ${!readOnly ? html`
-                  <a href="${pbUrl(l.id)}" class="line-build-icon" title="${l.price_build_label ? 'Open price build ' + escape(l.build_number || l.price_build_label) : 'Add price build'}" style="position:absolute;right:38px;top:50%;transform:translateY(-50%);color:${l.price_build_label ? '#3b82f6' : 'var(--muted,#999)'};font-size:.85rem;text-decoration:none">
-                    ${raw(ICON_CALCULATOR)}
-                  </a>
-                  <button type="button" class="line-eye-toggle line-active-toggle" data-line-id="${escape(l.id)}" data-target-active="${active ? '0' : '1'}" title="${active ? 'Exclude from quote' : 'Include in quote'}" style="position:absolute;right:20px;top:50%;transform:translateY(-50%)">
-                    <svg width="13" height="13" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 10s4-7 9-7 9 7 9 7-4 7-9 7-9-7-9-7z"/><circle cx="10" cy="10" r="3"/>${!active ? '<line x1="3" y1="3" x2="17" y2="17" stroke-width="2.5"/>' : ''}</svg>
-                  </button>
-                  <button type="button" class="line-delete-btn" data-line-id="${escape(l.id)}" title="Delete line" style="position:absolute;right:2px;top:50%;transform:translateY(-50%)">&times;</button>
-                ` : ''}
               </td>
             </tr>
           `;})}
