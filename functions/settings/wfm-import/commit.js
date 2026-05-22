@@ -418,7 +418,7 @@ async function upsertOpportunityFromLead(env, lead, accountId, contactId, ownerU
        cols.title, cols.description, cols.transaction_type, cols.stage,
        cols.estimated_value_usd, cols.actual_close_date,
        cols.wfm_category, cols.wfm_type, cols.wfm_payload,
-       ts, ts, ts]);
+       s(lead.Date) || ts, ts, ts]);
     return { id, number, action: 'created' };
   }
 }
@@ -582,7 +582,7 @@ async function upsertQuote(env, q, opportunityId) {
        cols.title, cols.description, cols.quote_type, cols.status, cols.valid_until,
        cols.subtotal_price, cols.tax_amount, cols.total_price, cols.notes_customer,
        cols.wfm_number, cols.wfm_type, cols.wfm_state, cols.wfm_budget, cols.wfm_payload,
-       ts, ts]);
+       s(q.Date) || ts, ts]);
     return { id, number, action: 'created' };
   }
 }
@@ -994,7 +994,7 @@ async function synthesizeOpportunityFromQuote(env, q, ctx) {
        cols.title, cols.description, cols.transaction_type, cols.stage,
        cols.estimated_value_usd,
        cols.notes_internal, cols.wfm_payload,
-       ts, ts, ts]);
+       s(q.Date) || ts, s(q.Date) || ts, ts]);
   }
 
   ctx.oppByWfmUuid.set(cacheKey, oppId);
