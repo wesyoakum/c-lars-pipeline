@@ -81,7 +81,7 @@ export async function onRequestPost(context) {
       ORDER BY CASE entity_type WHEN 'account' THEN 1 WHEN 'opportunity' THEN 2 WHEN 'quote' THEN 3 WHEN 'job' THEN 4 ELSE 5 END, created_at
       LIMIT 1`, [runId]);
   const batchSize = (nextEntity?.entity_type === 'quote')
-    ? Math.min(requestedSize, 10)  // quotes need WFM API calls for line items
+    ? Math.min(requestedSize, 5)   // quotes need WFM API calls for line items
     : requestedSize;
   const approved = await all(env.DB,
     `SELECT id, entity_type, external_id, action,
