@@ -164,10 +164,10 @@ export async function onRequestPost(context) {
     await batch(env.DB, snapStmts.slice(i, i + 50));
   }
 
-  // Check if there are remaining pending items. If not, close the run.
+  // Check if there are remaining items (pending or approved). If not, close the run.
   const remaining = await one(env.DB,
     `SELECT COUNT(*) AS cnt FROM wfm_import_pending
-      WHERE run_id = ? AND status = 'pending'`,
+      WHERE run_id = ? AND status IN ('pending', 'approved')`,
     [runId]);
   if ((remaining?.cnt || 0) === 0) {
     await run(env.DB,
