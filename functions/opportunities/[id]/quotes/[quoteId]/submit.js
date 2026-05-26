@@ -7,7 +7,7 @@
 // via fireEvent('quote.issued') below — the old hard-coded
 // createIssueTask helper was removed with that migration.
 
-import { one, stmt, batch } from '../../../../lib/db.js';
+import { one, all, stmt, batch } from '../../../../lib/db.js';
 import { auditStmt } from '../../../../lib/audit.js';
 import { now } from '../../../../lib/ids.js';
 import { redirectWithFlash } from '../../../../lib/http.js';
@@ -45,6 +45,41 @@ export async function onRequestPost(context) {
     return redirectWithFlash(
       `/opportunities/${oppId}/quotes/${quoteId}`,
       `Cannot issue from ${quote.status} status.`,
+      'error'
+    );
+  }
+
+  // Validate required fields before issuing.
+  const missing = [];
+  if (!quote.description?.trim())      missing.push('Description');
+  if (!quote.valid_until)              missing.push('Expiration date');
+  if (!quote.payment_terms?.trim())    missing.push('Payment terms');
+  if (!quote.delivery_terms?.trim())   missing.push('Delivery terms');
+  if (!quote.delivery_estimate?.trim()) missing.push('Delivery estimate');
+
+  // Check account exists (via opportunity).
+  const opp = await one(env.DB,
+    'SELECT account_id FROM opportunities WHERE id = ?', [oppId]);
+  if (!opp?.account_id) {
+    missing.push('Account');
+  } else {
+    // Check account has at least one address.
+    const addr = await one(env.DB,
+      'SELECT id FROM account_addresses WHERE account_id = ? LIMIT 1',
+      [opp.account_id]);
+    if (!addr) missing.push('Account address');
+  }
+
+  // Check at least one active line item.
+  const lineCount = await one(env.DB,
+    'SELECT COUNT(*) AS cnt FROM quote_lines WHERE quote_id = ? AND is_active = 1',
+    [quoteId]);
+  if (!lineCount?.cnt) missing.push('At least one line item');
+
+  if (missing.length > 0) {
+    return redirectWithFlash(
+      `/opportunities/${oppId}/quotes/${quoteId}`,
+      `Cannot issue: missing ${missing.join(', ')}.`,
       'error'
     );
   }
