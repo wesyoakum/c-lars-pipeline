@@ -151,7 +151,7 @@ export async function onRequest(context) {
                     at: new Date().toISOString(),
                   },
                   context: { ref_type: 'user', ref_id: user.id },
-                  idempotencyKey: `session_started:${user.id}:${new Date().toISOString().slice(0, 13)}`,
+                  idempotencyKey: `session_started:${user.id}:${new Date().toISOString()}`,
                 });
               }
             }
