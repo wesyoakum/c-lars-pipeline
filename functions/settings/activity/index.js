@@ -74,7 +74,7 @@ function pageUrl(e) {
 function urlCell(e) {
   const u = pageUrl(e);
   if (!u) return '<span class="muted">—</span>';
-  return `<a href="${escape(u)}" style="font-size:0.8rem;word-break:break-all">${escape(u)}</a>`;
+  return `<a href="${escape(u)}" title="${escape(u)}" aria-label="Open page"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 3h6v6"/><path d="M17 3L9 11"/><path d="M15 11v5a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1h5"/></svg></a>`;
 }
 
 export async function onRequestGet(context) {
@@ -278,7 +278,7 @@ function liveScript(newestAt) {
       function urlCellHtml(e) {
         var u = getUrl(e);
         if (!u) return '<span class="muted">\\u2014</span>';
-        return '<a href="' + esc(u) + '" style="font-size:0.8rem;word-break:break-all">' + esc(u) + '</a>';
+        return '<a href="' + esc(u) + '" title="' + esc(u) + '" aria-label="Open page"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 3h6v6"/><path d="M17 3L9 11"/><path d="M15 11v5a1 1 0 01-1 1H4a1 1 0 01-1-1V6a1 1 0 011-1h5"/></svg></a>';
       }
 
       function badge(type) {
