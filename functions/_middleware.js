@@ -90,12 +90,27 @@ export async function onRequest(context) {
   context.data.user = user;
   context.data.env = env.PIPELINE_ENV ?? 'production';
 
+  // Call downstream handler first so we can extract the real <title>.
+  const response = await next();
+
   // Fire-and-forget page-view tracking for admin activity log.
   // Only log HTML page views (skip API/JSON/asset requests).
-  const accept = request.headers.get('accept') || '';
-  if (accept.includes('text/html') && env.DB && user.id) {
+  const ct = response.headers.get('content-type') || '';
+  if (ct.includes('text/html') && env.DB && user.id) {
+    // Clone the response so we can read the body without consuming it.
+    const clone = response.clone();
+
     context.waitUntil(
       (async () => {
+        // Extract <title> from the first chunk of HTML.
+        let title = '';
+        try {
+          const text = await clone.text();
+          const m = text.match(/<title>([^<]*)<\/title>/i);
+          if (m) title = m[1].trim();
+        } catch (_) { /* body unreadable — use fallback */ }
+        if (!title) title = pageTitle(url.pathname);
+
         // Synthetic session detection: if last_seen_at is >30 min ago (or null),
         // treat this as a new session and write an audit event.
         try {
@@ -110,7 +125,7 @@ export async function onRequest(context) {
               entityId: user.id,
               eventType: 'session_started',
               user,
-              summary: `Session started (${url.pathname})`,
+              summary: `Session started: ${title}`,
             });
           }
         } catch (_) { /* best-effort */ }
@@ -127,12 +142,12 @@ export async function onRequest(context) {
           entityId: user.id,
           eventType: 'viewed',
           user,
-          summary: pageTitle(url.pathname),
-          changes: { path: url.pathname },
+          summary: title,
+          changes: { url: url.href, path: url.pathname },
         });
       })().catch(() => {/* ignore — table may not exist yet */})
     );
   }
 
-  return next();
+  return response;
 }

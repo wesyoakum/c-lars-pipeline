@@ -66,22 +66,15 @@ function parseChanges(e) {
   try { return JSON.parse(e.changes_json); } catch (_) { return null; }
 }
 
-function pageTitleText(e) {
-  if (e.entity_type === 'page' && e.event_type === 'viewed') {
-    const changes = parseChanges(e);
-    return e.summary || changes?.path || '—';
-  }
-  return '—';
+function pageUrl(e) {
+  const changes = parseChanges(e);
+  return changes?.url || changes?.path || '';
 }
 
-function pageTitleCell(e) {
-  if (e.entity_type === 'page' && e.event_type === 'viewed') {
-    const changes = parseChanges(e);
-    const path = changes?.path || '';
-    const title = e.summary || path || '—';
-    return path ? `<a href="${escape(path)}">${escape(title)}</a>` : escape(title);
-  }
-  return '<span class="muted">—</span>';
+function urlCell(e) {
+  const u = pageUrl(e);
+  if (!u) return '<span class="muted">—</span>';
+  return `<a href="${escape(u)}" style="font-size:0.8rem;word-break:break-all">${escape(u)}</a>`;
 }
 
 export async function onRequestGet(context) {
@@ -160,10 +153,10 @@ const TIMELINE_COLUMNS = [
   { key: 'when',        label: 'When',        sort: 'text',   filter: 'text',   default: true  },
   { key: 'timestamp',   label: 'Timestamp',   sort: 'text',   filter: 'text',   default: true  },
   { key: 'user',        label: 'User',        sort: 'text',   filter: 'select', default: true  },
-  { key: 'page',        label: 'Page',        sort: 'text',   filter: 'select', default: true  },
+  { key: 'title',       label: 'Title',       sort: 'text',   filter: 'text',   default: true  },
+  { key: 'url',         label: 'URL',         sort: 'text',   filter: 'text',   default: true  },
   { key: 'event_type',  label: 'Event',       sort: 'text',   filter: 'select', default: true  },
   { key: 'entity_type', label: 'Entity',      sort: 'text',   filter: 'select', default: true  },
-  { key: 'summary',     label: 'Summary',     sort: 'text',   filter: 'text',   default: true  },
 ];
 
 async function renderTimeline(db) {
@@ -186,10 +179,10 @@ async function renderTimeline(db) {
     when_iso:    e.at,
     timestamp:   fmtDate(e.at),
     user:        e.user_name || e.user_email || '—',
-    page:        pageTitleText(e),
+    title:       e.summary || '',
+    url:         pageUrl(e),
     event_type:  e.event_type,
     entity_type: e.entity_type,
-    summary:     e.summary || '',
     // Extra fields for rendering (not columns)
     _entity_id:     e.entity_id,
     _changes_json:  e.changes_json || '',
@@ -222,12 +215,10 @@ async function renderTimeline(db) {
                 ${escape(r.timestamp)}
               </td>
               <td class="col-user" data-col="user">${escape(r.user)}</td>
-              <td class="col-page" data-col="page">${raw(pageTitleCell({ entity_type: r.entity_type, event_type: r.event_type, summary: r.summary, changes_json: r._changes_json }))}</td>
+              <td class="col-title" data-col="title">${escape(r.title)}</td>
+              <td class="col-url" data-col="url">${raw(urlCell({ changes_json: r._changes_json }))}</td>
               <td class="col-event_type" data-col="event_type">${raw(eventBadge(r.event_type))}</td>
               <td class="col-entity_type" data-col="entity_type">${raw(entityLink(r.entity_type, r._entity_id))}</td>
-              <td class="col-summary" data-col="summary" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-                ${escape(r.summary)}
-              </td>
             </tr>
           `)}
         </tbody>
@@ -278,24 +269,16 @@ function liveScript(newestAt) {
         return t.toLocaleString();
       }
 
-      function pageTitleFromEvent(e) {
-        if (e.entity_type === 'page' && e.event_type === 'viewed') {
-          var changes = null;
-          try { if (e.changes_json) changes = JSON.parse(e.changes_json); } catch(_) {}
-          return e.summary || (changes && changes.path) || '\\u2014';
-        }
-        return '\\u2014';
+      function getUrl(e) {
+        var changes = null;
+        try { if (e.changes_json) changes = JSON.parse(e.changes_json); } catch(_) {}
+        return (changes && (changes.url || changes.path)) || '';
       }
 
-      function pageCellHtml(e) {
-        if (e.entity_type === 'page' && e.event_type === 'viewed') {
-          var changes = null;
-          try { if (e.changes_json) changes = JSON.parse(e.changes_json); } catch(_) {}
-          var path = (changes && changes.path) || '';
-          var title = e.summary || path || '\\u2014';
-          return path ? '<a href="' + esc(path) + '">' + esc(title) + '</a>' : esc(title);
-        }
-        return '<span class="muted">\\u2014</span>';
+      function urlCellHtml(e) {
+        var u = getUrl(e);
+        if (!u) return '<span class="muted">\\u2014</span>';
+        return '<a href="' + esc(u) + '" style="font-size:0.8rem;word-break:break-all">' + esc(u) + '</a>';
       }
 
       function badge(type) {
@@ -314,25 +297,24 @@ function liveScript(newestAt) {
         var when = relTime(e.at);
         var ts = fmtTs(e.at);
         var user = e.user_name || e.user_email || '\\u2014';
-        var page = pageTitleFromEvent(e);
-        var summary = e.summary || '';
-        // data-* attributes for list-table filtering
+        var title = e.summary || '';
+        var url = getUrl(e);
         var attrs = ' data-row-id="' + esc(e.id) + '"'
           + ' data-when="' + esc(when) + '"'
           + ' data-timestamp="' + esc(ts) + '"'
           + ' data-user="' + esc(user) + '"'
-          + ' data-page="' + esc(page) + '"'
+          + ' data-title="' + esc(title) + '"'
+          + ' data-url="' + esc(url) + '"'
           + ' data-event_type="' + esc(e.event_type) + '"'
-          + ' data-entity_type="' + esc(e.entity_type) + '"'
-          + ' data-summary="' + esc(summary) + '"';
+          + ' data-entity_type="' + esc(e.entity_type) + '"';
         return '<tr style="animation:fadeIn .3s"' + attrs + '>'
           + '<td class="col-when" data-col="when"><span title="' + esc(e.at) + '">' + when + '</span></td>'
           + '<td class="col-timestamp" data-col="timestamp" style="white-space:nowrap;font-size:0.8rem;color:var(--text-muted)">' + ts + '</td>'
           + '<td class="col-user" data-col="user">' + esc(user) + '</td>'
-          + '<td class="col-page" data-col="page">' + pageCellHtml(e) + '</td>'
+          + '<td class="col-title" data-col="title">' + esc(title) + '</td>'
+          + '<td class="col-url" data-col="url">' + urlCellHtml(e) + '</td>'
           + '<td class="col-event_type" data-col="event_type">' + badge(e.event_type) + '</td>'
           + '<td class="col-entity_type" data-col="entity_type">' + entityCell(e.entity_type, e.entity_id) + '</td>'
-          + '<td class="col-summary" data-col="summary" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(summary) + '</td>'
           + '</tr>';
       }
 
