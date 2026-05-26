@@ -135,22 +135,25 @@ export async function onRequest(context) {
               summary: `Session started: ${title}`,
             });
 
-            // Notify Wes when any user starts a session.
-            const wesRow = await env.DB.prepare(
-              `SELECT id FROM users WHERE email = 'wes.yoakum@c-lars.com' LIMIT 1`
+            // Notify configured recipients when any user starts a session.
+            const sp = await env.DB.prepare(
+              `SELECT session_notify_user_ids FROM site_prefs WHERE id = 1`
             ).first();
-            if (wesRow) {
+            let recipients = [];
+            try { recipients = JSON.parse(sp?.session_notify_user_ids || '[]'); } catch (_) {}
+            const ts = new Date().toISOString();
+            for (const recipientId of recipients) {
               await notifyExternal(env, {
-                userId: wesRow.id,
+                userId: recipientId,
                 eventType: NOTIFICATION_EVENTS.USER_SESSION_STARTED,
                 data: {
                   user_name: user.display_name || user.email,
                   user_email: user.email,
                   page_title: title,
-                  at: new Date().toISOString(),
+                  at: ts,
                 },
                 context: { ref_type: 'user', ref_id: user.id },
-                idempotencyKey: `session_started:${user.id}:${new Date().toISOString()}`,
+                idempotencyKey: `session_started:${user.id}:${recipientId}:${ts}`,
               });
             }
           }

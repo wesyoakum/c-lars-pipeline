@@ -101,6 +101,34 @@ code {
 .nav-link:hover  { background: var(--bg-alt); text-decoration: none; }
 .nav-link.active { background: var(--bg-alt); font-weight: 600; }
 
+/* ---------- Admin nav reveal ---------- */
+/* Admin-only links sit in a hover/focus-reveal group in the main nav.
+   The trigger word "Admin" is always visible; the links slide out on
+   hover or keyboard focus-within. */
+.nav-admin-reveal {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.nav-admin-trigger {
+  cursor: default;
+  opacity: 0.5;
+  font-size: 0.85em;
+  user-select: none;
+}
+.nav-admin-links {
+  display: none;
+  gap: 0.25rem;
+}
+.nav-admin-reveal:hover > .nav-admin-links,
+.nav-admin-reveal:focus-within > .nav-admin-links {
+  display: flex;
+}
+.nav-admin-reveal:hover > .nav-admin-trigger,
+.nav-admin-reveal:focus-within > .nav-admin-trigger {
+  opacity: 1;
+}
+
 /* ---------- Settings sub-nav ---------- */
 /* Horizontal bar shared by every /settings/* page (settingsSubNav).
    Replaces the old inline-styled nav so the dropdown machinery has a

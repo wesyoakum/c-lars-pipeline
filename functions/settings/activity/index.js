@@ -7,11 +7,12 @@
 //   By user   — per-user activity summary (sessions, last seen, top entities)
 //   Adoption  — active user counts, sessions/day, page views chart
 
-import { all, one } from '../../lib/db.js';
+import { all, one, run } from '../../lib/db.js';
 import { layout, htmlResponse, html, escape, raw } from '../../lib/layout.js';
 import { hasRole } from '../../lib/auth.js';
 import { settingsSubNav } from '../../lib/settings-subnav.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
+import { formBody, redirectWithFlash } from '../../lib/http.js';
 
 const PAGE_SIZE = 200;
 
@@ -107,6 +108,8 @@ export async function onRequestGet(context) {
       body = await renderByUser(env.DB);
     } else if (tab === 'adoption') {
       body = await renderAdoption(env.DB);
+    } else if (tab === 'config') {
+      body = await renderConfig(env.DB, url);
     }
   } catch (err) {
     body = `<div class="alert alert-danger"><strong>Query error:</strong> ${escape(String(err?.message || err))}</div>`;
@@ -117,6 +120,7 @@ export async function onRequestGet(context) {
     { key: 'timeline', label: 'Timeline' },
     { key: 'by-user', label: 'By User' },
     { key: 'adoption', label: 'Adoption' },
+    { key: 'config', label: 'Config' },
   ];
   const tabLinks = tabs.map(t => `
     <a href="/settings/activity?tab=${t.key}"
@@ -145,6 +149,31 @@ export async function onRequestGet(context) {
   return htmlResponse(
     layout('Activity', page, { user, env: data?.env, activeNav: '/settings' })
   );
+}
+
+// ─── POST handler (config save) ────────────────────────────────────
+
+export async function onRequestPost(context) {
+  const { env, data, request } = context;
+  const user = data?.user;
+  if (!hasRole(user, 'admin')) {
+    return new Response('Forbidden', { status: 403 });
+  }
+
+  const form = await formBody(request);
+  const action = form.get('action');
+
+  if (action === 'save_session_notify') {
+    // form sends multiple "user_id" values (one per checked checkbox)
+    const userIds = form.getAll('user_id').filter(Boolean);
+    const json = JSON.stringify(userIds);
+    await run(env.DB,
+      `UPDATE site_prefs SET session_notify_user_ids = ? WHERE id = 1`,
+      [json]);
+    return redirectWithFlash('/settings/activity?tab=config', 'Session notification recipients saved.', env);
+  }
+
+  return redirectWithFlash('/settings/activity?tab=config', 'Unknown action.', env);
 }
 
 // ─── Timeline tab ──────────────────────────────────────────────────
@@ -405,6 +434,45 @@ async function renderByUser(db) {
         <tbody>${rows}</tbody>
       </table>
     </div>
+  `;
+}
+
+// ─── Config tab ────────────────────────────────────────────────────
+
+async function renderConfig(db, url) {
+  const users = await all(db,
+    `SELECT id, email, display_name FROM users WHERE active = 1 ORDER BY display_name`);
+
+  const sp = await one(db,
+    `SELECT session_notify_user_ids FROM site_prefs WHERE id = 1`);
+  let currentIds = [];
+  try { currentIds = JSON.parse(sp?.session_notify_user_ids || '[]'); } catch (_) {}
+  const currentSet = new Set(currentIds);
+
+  const checkboxes = users.map(u => {
+    const checked = currentSet.has(u.id) ? 'checked' : '';
+    const name = u.display_name || u.email;
+    return `
+      <label style="display:flex;align-items:center;gap:0.5rem;padding:0.25rem 0">
+        <input type="checkbox" name="user_id" value="${escape(u.id)}" ${checked}>
+        <span>${escape(name)}</span>
+        <small class="muted">${escape(u.email)}</small>
+      </label>
+    `;
+  }).join('');
+
+  return `
+    <h2 style="margin:0 0 0.5rem">Session notifications</h2>
+    <p class="muted" style="margin-bottom:0.75rem">
+      When any user starts a new session (idle gap &gt; 30 min), send a Teams notification to the selected users.
+    </p>
+    <form method="post" action="/settings/activity">
+      <input type="hidden" name="action" value="save_session_notify">
+      <div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);padding:0.5rem 0.75rem;margin-bottom:0.75rem">
+        ${checkboxes}
+      </div>
+      <button type="submit" class="btn btn-sm">Save</button>
+    </form>
   `;
 }
 

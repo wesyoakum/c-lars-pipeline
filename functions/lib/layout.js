@@ -1638,8 +1638,16 @@ export function layout(title, body, opts = {}) {
       ${navLink('/library', 'Library', activeNav)}
       ${navLink('/reports', 'Reports', activeNav)}
       ${navLink('/settings', 'Settings', activeNav)}
-      ${user && user.email === 'wes.yoakum@c-lars.com' ? navLink('/ai-inbox', 'AI Inbox', activeNav) : ''}
-      ${user && user.email === 'wes.yoakum@c-lars.com' ? navLink('/sandbox', 'Sandbox', activeNav) : ''}
+      ${user && user.role === 'admin' ? `
+        <div class="nav-admin-reveal">
+          <span class="nav-admin-trigger nav-link">Admin</span>
+          <div class="nav-admin-links">
+            ${navLink('/settings/activity', 'Activity', activeNav)}
+            ${user.email === 'wes.yoakum@c-lars.com' ? navLink('/ai-inbox', 'AI Inbox', activeNav) : ''}
+            ${user.email === 'wes.yoakum@c-lars.com' ? navLink('/sandbox', 'Sandbox', activeNav) : ''}
+          </div>
+        </div>
+      ` : ''}
     </nav>
     <div class="header-right">
       ${user ? UNIVERSAL_SEARCH_HTML : ''}
