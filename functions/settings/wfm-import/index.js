@@ -358,6 +358,10 @@ export async function onRequestGet(context) {
               <span x-show="reviewSnapshotId" class="muted" style="font-size:.75rem"
                     x-text="'Snapshot: ' + (reviewSnapshotId || '').slice(0,8)"></span>
               <span style="flex:1"></span>
+              <label style="display:flex;align-items:center;gap:.3rem;font-size:.78rem;cursor:pointer">
+                <input type="checkbox" x-model="reviewShowPipeline">
+                <span class="muted">Pipeline view</span>
+              </label>
               <button class="btn small" @click="reviewBulkAcceptAll()" :disabled="reviewApplying">Accept all</button>
               <button class="btn small" @click="reviewBulkDismissAll()" :disabled="reviewApplying">Dismiss all</button>
               <button class="btn small primary" @click="reviewApply()" :disabled="reviewApplying || reviewApprovedCount === 0"
@@ -389,23 +393,43 @@ export async function onRequestGet(context) {
                           :class="item._decision === 'reject' ? '' : ''"
                           :disabled="reviewApplying">Dismiss</button>
                 </div>
-                <table style="width:100%;font-size:.78rem;border-collapse:collapse">
+                <!-- WFM changes (default view) -->
+                <table x-show="!reviewShowPipeline" style="width:100%;font-size:.78rem;border-collapse:collapse">
+                  <template x-for="c in (item.wfm_changes || [])" :key="c.key">
+                    <tr style="border-bottom:1px solid #f0f0f0">
+                      <td style="padding:.15rem .3rem;width:140px;color:var(--muted,#666);white-space:nowrap" x-text="c.key"></td>
+                      <td style="padding:.15rem .3rem">
+                        <template x-if="c.was == null">
+                          <span style="color:#10b981" x-text="c.now"></span>
+                        </template>
+                        <template x-if="c.was != null">
+                          <span>
+                            <span class="muted" x-text="c.was || '(empty)'"></span>
+                            <span style="margin:0 .3rem">&rarr;</span>
+                            <span style="color:#3b82f6" x-text="c.now || '(empty)'"></span>
+                          </span>
+                        </template>
+                      </td>
+                    </tr>
+                  </template>
+                  <template x-if="!item.wfm_changes || item.wfm_changes.length === 0">
+                    <tr><td colspan="2" class="muted" style="padding:.15rem .3rem">New record</td></tr>
+                  </template>
+                </table>
+                <!-- Pipeline mapping view (toggle) -->
+                <table x-show="reviewShowPipeline" style="width:100%;font-size:.78rem;border-collapse:collapse">
                   <template x-for="(d, field) in item.diff" :key="field">
                     <tr x-show="d.case !== 1 && d.case !== 4 && d.case !== 7"
                         style="border-bottom:1px solid #f0f0f0">
-                      <td style="padding:.15rem .3rem;width:120px;color:var(--muted,#666);white-space:nowrap" x-text="d.label"></td>
+                      <td style="padding:.15rem .3rem;width:140px;color:var(--muted,#666);white-space:nowrap" x-text="d.label"></td>
                       <td style="padding:.15rem .3rem">
-                        <!-- Case 6: insert (no Pipeline value) -->
                         <span x-show="d.case === 6" style="color:#10b981" x-text="d.wfm"></span>
-                        <!-- Case 3: WFM-only change — show was → now -->
                         <span x-show="d.case === 3">
                           <span class="muted" x-text="d.base || '(empty)'"></span>
                           <span style="margin:0 .3rem">&rarr;</span>
                           <span style="color:#3b82f6" x-text="d.wfm || '(empty)'"></span>
                         </span>
-                        <!-- Case 2: Pipeline edited, WFM unchanged -->
                         <span x-show="d.case === 2" class="muted" x-text="d.pipeline + ' (Pipeline edited)'"></span>
-                        <!-- Case 5/8: conflict — show Pipeline vs WFM -->
                         <span x-show="d.case === 5 || d.case === 8">
                           <span style="color:#ef4444;text-decoration:line-through" x-text="d.pipeline || '(empty)'"></span>
                           <span style="margin:0 .3rem">&rarr;</span>
@@ -1239,6 +1263,7 @@ export async function onRequestGet(context) {
                 reviewItems: [],
                 reviewApplying: false,
                 replayBusy: false,
+                reviewShowPipeline: false,
                 lastSnapshotId: ${raw(JSON.stringify(lastSnapshot?.id || null))},
                 get reviewApprovedCount() {
                   return this.reviewItems.filter(i => i._decision === 'approve').length;

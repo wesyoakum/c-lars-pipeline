@@ -55,6 +55,42 @@ export async function onRequestGet(context) {
         created_at`,
     [runId]);
 
+  // Load snapshot base payloads for raw WFM diff.
+  const snapshotRows = await all(env.DB,
+    'SELECT entity_type, external_id, payload_json FROM wfm_import_snapshots');
+  const snapshotMap = new Map();
+  for (const r of snapshotRows) {
+    snapshotMap.set(r.entity_type + ':' + r.external_id, r.payload_json);
+  }
+
+  // Keys to skip in the raw WFM diff (noisy/structural, not useful to review).
+  const SKIP_KEYS = new Set([
+    'UUID', 'Dropbox', 'WebURL', 'History', 'Activities', 'Notes',
+    'Contacts', 'BillingClient', 'Groups', 'Relationships',
+    'Type', // nested object on clients
+  ]);
+
+  function rawWfmDiff(wfmPayload, basePayload) {
+    const changes = [];
+    const allKeys = new Set([
+      ...Object.keys(wfmPayload),
+      ...(basePayload ? Object.keys(basePayload) : []),
+    ]);
+    for (const key of allKeys) {
+      if (SKIP_KEYS.has(key)) continue;
+      const now = wfmPayload[key];
+      const was = basePayload ? basePayload[key] : undefined;
+      // Skip nested objects (Client, Contact, Owner — shown as context instead).
+      if (now && typeof now === 'object') continue;
+      if (was && typeof was === 'object') continue;
+      const nowStr = now == null ? '' : String(now).trim();
+      const wasStr = was == null ? '' : String(was).trim();
+      if (nowStr === wasStr) continue;
+      changes.push({ key, was: wasStr || null, now: nowStr || null });
+    }
+    return changes;
+  }
+
   // Parse JSON fields and add display name.
   const parsed = items.map((item) => {
     let diff = {};
@@ -74,6 +110,12 @@ export async function onRequestGet(context) {
     if (wfmPayload.Contact?.Name) context.contact = wfmPayload.Contact.Name;
     if (wfmPayload.Owner?.Name) context.owner = wfmPayload.Owner.Name;
 
+    // Raw WFM field diff (against snapshot base).
+    let basePayload = null;
+    const snapJson = snapshotMap.get(item.entity_type + ':' + item.external_id);
+    if (snapJson) { try { basePayload = JSON.parse(snapJson); } catch { /* skip */ } }
+    const wfm_changes = rawWfmDiff(wfmPayload, basePayload);
+
     return {
       id:            item.id,
       entity_type:   item.entity_type,
@@ -83,6 +125,7 @@ export async function onRequestGet(context) {
       status:        item.status,
       name:          displayLabel,
       context,
+      wfm_changes,
       diff,
       decided_fields: item.decided_fields_json ? JSON.parse(item.decided_fields_json) : null,
     };
