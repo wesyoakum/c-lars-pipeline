@@ -371,9 +371,12 @@ export async function onRequestGet(context) {
 
             <p x-show="reviewItems.length > 0" class="muted" style="margin:0 0 .5rem 0;font-size:.8rem;line-height:1.4"
                x-text="(() => {
+                 const wfm = {account:'clients',opportunity:'leads',quote:'quotes',job:'jobs'};
+                 const pl  = {account:'accounts',opportunity:'opportunities',quote:'quotes',job:'jobs'};
+                 const labels = reviewShowPipeline ? pl : wfm;
                  const m = {};
                  for (const i of reviewItems) {
-                   const label = {account:'accounts',opportunity:'leads',quote:'quotes',job:'jobs'}[i.entity_type] || i.entity_type;
+                   const label = labels[i.entity_type] || i.entity_type;
                    const k = (i.action === 'insert' ? 'new ' : 'updated ') + label;
                    m[k] = (m[k] || 0) + 1;
                  }
@@ -388,7 +391,10 @@ export async function onRequestGet(context) {
               <div style="margin-bottom:.5rem;padding:.5rem .6rem;background:#fff;border:1px solid var(--border,#e5e7eb);border-radius:4px"
                    :style="item._decision === 'approve' ? 'border-left:3px solid #10b981' : item._decision === 'reject' ? 'border-left:3px solid #ef4444;opacity:.6' : ''">
                 <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem">
-                  <span style="font-size:.7rem;font-weight:600;text-transform:uppercase;color:var(--muted,#666);letter-spacing:.04em" x-text="item.entity_type"></span>
+                  <span style="font-size:.7rem;font-weight:600;text-transform:uppercase;color:var(--muted,#666);letter-spacing:.04em"
+                        x-text="reviewShowPipeline
+                          ? item.entity_type
+                          : {account:'client',opportunity:'lead',quote:'quote',job:'job'}[item.entity_type] || item.entity_type"></span>
                   <span :class="item.action === 'insert' ? 'pill pill-success' : 'pill'" style="font-size:.7rem" x-text="item.action"></span>
                   <strong style="font-size:.85rem" x-text="item.name"></strong>
                   <span x-show="item.context?.client" class="muted" style="font-size:.78rem"
