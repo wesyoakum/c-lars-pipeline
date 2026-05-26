@@ -103,6 +103,32 @@ export function diff(before, after, fields) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Deduplicated entity-view logging
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Log an entity view, but skip if the same user viewed the same entity
+ * in the last `windowMin` minutes. Fire-and-forget — never throws.
+ */
+export async function auditViewDeduped(db, { entityType, entityId, user, windowMin = 5 }) {
+  const recent = await db.prepare(
+    `SELECT 1 FROM audit_events
+      WHERE entity_type = ? AND entity_id = ? AND user_id = ? AND event_type = 'viewed'
+        AND at > datetime('now', ?)
+      LIMIT 1`
+  ).bind(entityType, entityId, user.id, `-${windowMin} minutes`).first();
+  if (recent) return; // already logged recently
+
+  await audit(db, {
+    entityType,
+    entityId,
+    eventType: 'viewed',
+    user,
+    summary: `Viewed ${entityType} ${entityId}`,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Claudia event fan-out
 // ─────────────────────────────────────────────────────────────────────
 //

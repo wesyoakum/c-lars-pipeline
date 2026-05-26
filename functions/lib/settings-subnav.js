@@ -53,6 +53,7 @@ const GROUPS = [
     items: [
       { key: 'auto-tasks',   label: 'Auto-Task Rules', href: '/settings/auto-tasks' },
       { key: 'fake-names',   label: 'Fake names',      href: '/settings/fake-names' },
+      { key: 'activity',     label: 'Activity',        href: '/settings/activity' },
       { key: 'history',      label: 'History',         href: '/settings/history' },
       { key: 'data-refresh', label: 'Data refresh',    href: '/settings/data-refresh' },
       { key: 'claudia',      label: 'Claudia',         href: '/settings/claudia', wesOnly: true },

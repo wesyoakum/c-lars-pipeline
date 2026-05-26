@@ -9,7 +9,7 @@
 // a real GET with `?tab=` so URLs can be shared/bookmarked).
 
 import { one, all, stmt, batch } from '../../lib/db.js';
-import { auditStmt, diff } from '../../lib/audit.js';
+import { auditStmt, diff, auditViewDeduped } from '../../lib/audit.js';
 import {
   validateAccount,
   parseTransactionTypes,
@@ -171,6 +171,11 @@ export async function onRequestGet(context) {
     [accountId]
   );
   if (!account) return notFound(context);
+
+  // Fire-and-forget entity-view audit (deduplicated per user per 5 min)
+  if (user?.id) {
+    context.waitUntil(auditViewDeduped(env.DB, { entityType: 'account', entityId: accountId, user }).catch(() => {}));
+  }
 
   const contacts = await all(
     env.DB,

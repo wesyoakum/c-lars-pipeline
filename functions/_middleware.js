@@ -17,6 +17,7 @@
 
 import { resolveUser } from './lib/auth.js';
 import { unauthorizedResponse } from './lib/layout.js';
+import { audit } from './lib/audit.js';
 
 // Paths that bypass SSO auth entirely.
 //   - Static assets served from /public (no auth needed).
@@ -60,14 +61,32 @@ export async function onRequest(context) {
   const accept = request.headers.get('accept') || '';
   if (accept.includes('text/html') && env.DB && user.id) {
     context.waitUntil(
-      env.DB.prepare(
-        `INSERT INTO user_page_views (user_id, url, at) VALUES (?, ?, datetime('now'))`
-      ).bind(user.id, url.pathname).run()
-        .then(() =>
-          env.DB.prepare(`UPDATE users SET last_seen_at = datetime('now') WHERE id = ?`)
-            .bind(user.id).run()
-        )
-        .catch(() => {/* ignore — table may not exist yet */})
+      (async () => {
+        // Synthetic session detection: if last_seen_at is >30 min ago (or null),
+        // treat this as a new session and write an audit event.
+        try {
+          const row = await env.DB.prepare(
+            `SELECT last_seen_at FROM users WHERE id = ?`
+          ).bind(user.id).first();
+          const lastSeen = row?.last_seen_at ? new Date(row.last_seen_at + 'Z').getTime() : 0;
+          const gap = Date.now() - lastSeen;
+          if (!lastSeen || gap > 30 * 60 * 1000) {
+            await audit(env.DB, {
+              entityType: 'user',
+              entityId: user.id,
+              eventType: 'session_started',
+              user,
+              summary: `Session started (${url.pathname})`,
+            });
+          }
+        } catch (_) { /* best-effort */ }
+
+        await env.DB.prepare(
+          `INSERT INTO user_page_views (user_id, url, at) VALUES (?, ?, datetime('now'))`
+        ).bind(user.id, url.pathname).run();
+        await env.DB.prepare(`UPDATE users SET last_seen_at = datetime('now') WHERE id = ?`)
+          .bind(user.id).run();
+      })().catch(() => {/* ignore — table may not exist yet */})
     );
   }
 

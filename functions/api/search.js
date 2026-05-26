@@ -8,6 +8,7 @@
 // these in a dropdown under the nav search input.
 
 import { all } from '../lib/db.js';
+import { audit } from '../lib/audit.js';
 
 const LIMIT_PER_TYPE = 5;
 
@@ -73,6 +74,25 @@ export async function onRequestGet(context) {
         LIMIT ?`,
       [like, like, LIMIT_PER_TYPE]),
   ]);
+
+  // Log the search (fire-and-forget). Skip very short queries to reduce noise.
+  const user = context.data?.user;
+  if (user?.id) {
+    const counts = {
+      accounts: accounts.length, contacts: contacts.length,
+      opportunities: opps.length, quotes: quotes.length, lines: lines.length,
+    };
+    context.waitUntil(
+      audit(env.DB, {
+        entityType: 'search',
+        entityId: user.id,
+        eventType: 'searched',
+        user,
+        summary: `Searched: "${q}"`,
+        changes: { query: q, result_counts: counts },
+      }).catch(() => {})
+    );
+  }
 
   const results = [];
 
