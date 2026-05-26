@@ -135,25 +135,23 @@ export async function onRequest(context) {
               summary: `Session started: ${title}`,
             });
 
-            // Notify Wes when another user starts a session.
-            if (user.email !== 'wes.yoakum@c-lars.com') {
-              const wesRow = await env.DB.prepare(
-                `SELECT id FROM users WHERE email = 'wes.yoakum@c-lars.com' LIMIT 1`
-              ).first();
-              if (wesRow) {
-                await notifyExternal(env, {
-                  userId: wesRow.id,
-                  eventType: NOTIFICATION_EVENTS.USER_SESSION_STARTED,
-                  data: {
-                    user_name: user.display_name || user.email,
-                    user_email: user.email,
-                    page_title: title,
-                    at: new Date().toISOString(),
-                  },
-                  context: { ref_type: 'user', ref_id: user.id },
-                  idempotencyKey: `session_started:${user.id}:${new Date().toISOString()}`,
-                });
-              }
+            // Notify Wes when any user starts a session.
+            const wesRow = await env.DB.prepare(
+              `SELECT id FROM users WHERE email = 'wes.yoakum@c-lars.com' LIMIT 1`
+            ).first();
+            if (wesRow) {
+              await notifyExternal(env, {
+                userId: wesRow.id,
+                eventType: NOTIFICATION_EVENTS.USER_SESSION_STARTED,
+                data: {
+                  user_name: user.display_name || user.email,
+                  user_email: user.email,
+                  page_title: title,
+                  at: new Date().toISOString(),
+                },
+                context: { ref_type: 'user', ref_id: user.id },
+                idempotencyKey: `session_started:${user.id}:${new Date().toISOString()}`,
+              });
             }
           }
         } catch (_) { /* best-effort */ }
