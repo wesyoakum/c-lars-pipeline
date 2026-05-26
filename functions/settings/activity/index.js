@@ -332,6 +332,10 @@ function liveScript(newestAt) {
             // Update count badge
             var countEl = document.querySelector('[data-role="count"]');
             if (countEl) countEl.textContent = tbody.children.length;
+            // Tell the list-table controller about the new rows so it
+            // applies column order, visibility, sort, and filters.
+            var host = tbody.closest('.opp-list');
+            if (host) host.dispatchEvent(new CustomEvent('list:rows-added'));
           })
           .catch(function() {});
       }

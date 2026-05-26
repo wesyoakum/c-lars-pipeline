@@ -1349,6 +1349,21 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
       _origSyncTableWidth();
       syncHScroll();
     };
+    // -- External row-sync hook ------------------------------------------
+    // Other scripts (e.g. live-poll) can dispatch 'list:rows-added' on the
+    // host element after inserting new <tr> elements. This handler picks
+    // them up and applies the current column order, visibility, sort, and
+    // filters so they blend in seamlessly.
+    host.addEventListener('list:rows-added', function() {
+      allRows = Array.prototype.slice.call(tbody.querySelectorAll('tr[data-row-id]'));
+      if (menuScope.querySelector('[data-role="columns-list"]')) {
+        applyColumnOrder();
+      }
+      applyColumnVisibility();
+      applySort();
+      applyFilters();
+    });
+
   } catch (err) {
     console.error('list controller failed:', err);
   }
