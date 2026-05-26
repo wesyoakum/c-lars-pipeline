@@ -383,11 +383,22 @@ export async function onRequestGet(context) {
                  return Object.entries(m).map(([k,v]) => v + ' ' + k).join(', ');
                })()"></p>
 
+            <div x-show="reviewItems.length > 0" style="display:flex;gap:.4rem;margin-bottom:.5rem;flex-wrap:wrap">
+              <button class="btn small" :class="reviewFilter === 'all' ? 'primary' : ''" @click="reviewFilter = 'all'"
+                      x-text="'All (' + reviewItems.length + ')'"></button>
+              <button class="btn small" :class="reviewFilter === 'wfm_changed' ? 'primary' : ''" @click="reviewFilter = 'wfm_changed'"
+                      x-text="'WFM changed (' + reviewFilterCounts.wfm + ')'"></button>
+              <button class="btn small" :class="reviewFilter === 'mapping_only' ? 'primary' : ''" @click="reviewFilter = 'mapping_only'"
+                      x-text="'Mapping only (' + reviewFilterCounts.mapping + ')'"></button>
+              <button class="btn small" :class="reviewFilter === 'new' ? 'primary' : ''" @click="reviewFilter = 'new'"
+                      x-text="'New (' + reviewFilterCounts.new + ')'"></button>
+            </div>
+
             <template x-if="reviewItems.length === 0">
               <p class="muted" style="margin:.5rem 0">No changes found.</p>
             </template>
 
-            <template x-for="item in reviewItems" :key="item.id">
+            <template x-for="item in reviewFilteredItems" :key="item.id">
               <div style="margin-bottom:.5rem;padding:.5rem .6rem;background:#fff;border:1px solid var(--border,#e5e7eb);border-radius:4px"
                    :style="item._decision === 'approve' ? 'border-left:3px solid #10b981' : item._decision === 'reject' ? 'border-left:3px solid #ef4444;opacity:.6' : ''">
                 <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem">
@@ -430,7 +441,8 @@ export async function onRequestGet(context) {
                     </tr>
                   </template>
                   <template x-if="!item.wfm_changes || item.wfm_changes.length === 0">
-                    <tr><td colspan="2" class="muted" style="padding:.15rem .3rem">New record</td></tr>
+                    <tr><td colspan="2" class="muted" style="padding:.15rem .3rem;font-style:italic"
+                      x-text="item.action === 'insert' ? 'New record' : 'No WFM changes — mapping update only'"></td></tr>
                   </template>
                 </table>
                 <!-- Pipeline mapping view (toggle) -->
@@ -1281,9 +1293,30 @@ export async function onRequestGet(context) {
                 reviewApplying: false,
                 replayBusy: false,
                 reviewShowPipeline: false,
+                reviewFilter: 'all', // 'all' | 'wfm_changed' | 'mapping_only' | 'new'
                 lastSnapshotId: ${raw(JSON.stringify(lastSnapshot?.id || null))},
                 get reviewApprovedCount() {
                   return this.reviewItems.filter(i => i._decision === 'approve').length;
+                },
+                get reviewFilteredItems() {
+                  if (this.reviewFilter === 'all') return this.reviewItems;
+                  return this.reviewItems.filter(i => {
+                    const hasWfmChanges = i.wfm_changes && i.wfm_changes.length > 0;
+                    const isNew = i.action === 'insert';
+                    if (this.reviewFilter === 'wfm_changed') return hasWfmChanges && !isNew;
+                    if (this.reviewFilter === 'mapping_only') return !hasWfmChanges && !isNew;
+                    if (this.reviewFilter === 'new') return isNew;
+                    return true;
+                  });
+                },
+                get reviewFilterCounts() {
+                  let wfm = 0, mapping = 0, newRec = 0;
+                  for (const i of this.reviewItems) {
+                    if (i.action === 'insert') newRec++;
+                    else if (i.wfm_changes && i.wfm_changes.length > 0) wfm++;
+                    else mapping++;
+                  }
+                  return { wfm, mapping, new: newRec };
                 },
 
                 async deltaReviewStart() {
