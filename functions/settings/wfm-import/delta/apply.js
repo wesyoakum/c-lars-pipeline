@@ -69,7 +69,8 @@ export async function onRequestPost(context) {
     runId = latest.id;
   }
 
-  // Load all approved items, ordered by entity dependency.
+  // Load approved items in small batches to stay within the 30s timeout.
+  const batchSize = body?.batch_size || 30;
   const approved = await all(env.DB,
     `SELECT id, entity_type, external_id, action,
             wfm_payload_json, pipeline_snapshot_json,
@@ -84,8 +85,9 @@ export async function onRequestPost(context) {
           WHEN 'job' THEN 4
           ELSE 5
         END,
-        created_at`,
-    [runId]);
+        created_at
+      LIMIT ?`,
+    [runId, batchSize]);
 
   if (approved.length === 0) {
     return json({ ok: true, applied: 0, message: 'No approved items to apply.' });

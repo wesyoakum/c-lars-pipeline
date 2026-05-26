@@ -1475,19 +1475,39 @@ export async function onRequestGet(context) {
                       headers: { 'content-type': 'application/json' },
                       body: JSON.stringify({ decisions }),
                     });
-                    // Apply approved items.
-                    const res = await fetch('/settings/wfm-import/delta/apply', {
-                      method: 'POST', credentials: 'same-origin',
-                      headers: { 'content-type': 'application/json' },
-                      body: JSON.stringify({ run_id: this.reviewRunId }),
-                    });
-                    const j = await res.json();
-                    if (j.ok) {
-                      alert('Applied ' + (j.applied || 0) + ' change(s). ' + (j.remaining || 0) + ' pending.');
+
+                    // Apply in batches of 30 — auto-loop until all approved are applied.
+                    let totalApplied = 0;
+                    let totalRemaining = 0;
+                    while (true) {
+                      let j;
+                      try {
+                        const res = await fetch('/settings/wfm-import/delta/apply', {
+                          method: 'POST', credentials: 'same-origin',
+                          headers: { 'content-type': 'application/json' },
+                          body: JSON.stringify({ run_id: this.reviewRunId, batch_size: 30 }),
+                        });
+                        j = await res.json();
+                      } catch (fetchErr) {
+                        // Timeout — the batch likely completed server-side.
+                        // Wait and check if there are more to apply.
+                        await new Promise(r => setTimeout(r, 3000));
+                        continue;
+                      }
+                      if (!j.ok) {
+                        alert('Apply failed: ' + (j.message || j.error || 'unknown'));
+                        return;
+                      }
+                      totalApplied += j.applied || 0;
+                      totalRemaining = j.remaining || 0;
+                      // If nothing was applied this batch, we're done.
+                      if ((j.applied || 0) === 0) break;
+                    }
+
+                    alert('Applied ' + totalApplied + ' change(s). ' + totalRemaining + ' pending.');
+                    if (totalRemaining === 0) {
                       this.reviewMode = false;
                       this.reviewItems = [];
-                    } else {
-                      alert('Apply failed: ' + (j.message || j.error || 'unknown'));
                     }
                   } catch (e) {
                     alert('Apply failed: ' + (e.message || e));
