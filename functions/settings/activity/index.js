@@ -175,7 +175,7 @@ async function renderTimeline(db, { users, filterUser, filterEvent, filterEntity
 
   const events = await all(db,
     `SELECT ae.id, ae.entity_type, ae.entity_id, ae.event_type, ae.at,
-            ae.summary, ae.user_id,
+            ae.summary, ae.changes_json, ae.user_id,
             u.display_name AS user_name, u.email AS user_email
        FROM audit_events ae
        LEFT JOIN users u ON u.id = ae.user_id
@@ -251,7 +251,7 @@ async function renderTimeline(db, { users, filterUser, filterEvent, filterEntity
     <div style="overflow-x:auto">
       <table class="list-table" style="width:100%">
         <thead><tr>
-          <th>When</th><th>User</th><th>Event</th><th>Entity</th><th>Summary</th>
+          <th>When</th><th>Timestamp</th><th>User</th><th>Page</th><th>Event</th><th>Entity</th><th>Summary</th>
         </tr></thead>
         <tbody id="activity-tbody">${rows}</tbody>
       </table>
@@ -261,11 +261,28 @@ async function renderTimeline(db, { users, filterUser, filterEvent, filterEntity
   `;
 }
 
+function parseChanges(e) {
+  if (!e.changes_json) return null;
+  try { return JSON.parse(e.changes_json); } catch (_) { return null; }
+}
+
+function pageTitleCell(e) {
+  const changes = parseChanges(e);
+  if (e.entity_type === 'page' && e.event_type === 'viewed') {
+    const path = changes?.path || '';
+    const title = e.summary || path || '—';
+    return path ? `<a href="${escape(path)}">${escape(title)}</a>` : escape(title);
+  }
+  return '<span style="color:var(--text-muted)">—</span>';
+}
+
 function timelineRow(e) {
   return `
     <tr>
       <td style="white-space:nowrap;font-size:0.8rem" title="${escape(e.at)}">${fmtRelative(e.at)}</td>
+      <td style="white-space:nowrap;font-size:0.8rem;color:var(--text-muted)">${fmtDate(e.at)}</td>
       <td>${escape(e.user_name || e.user_email || '—')}</td>
+      <td>${pageTitleCell(e)}</td>
       <td>${eventBadge(e.event_type)}</td>
       <td>${entityLink(e.entity_type, e.entity_id)}</td>
       <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escape(e.summary || '')}</td>
@@ -307,6 +324,23 @@ function liveScript(newestAt) {
         return Math.floor(d / 86400) + 'd ago';
       }
 
+      function fmtTs(iso) {
+        if (!iso) return '';
+        var t = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+        return t.toLocaleString();
+      }
+
+      function pageCell(e) {
+        var changes = null;
+        try { if (e.changes_json) changes = JSON.parse(e.changes_json); } catch(_) {}
+        if (e.entity_type === 'page' && e.event_type === 'viewed') {
+          var path = (changes && changes.path) || '';
+          var title = e.summary || path || '\\u2014';
+          return path ? '<a href="' + esc(path) + '">' + esc(title) + '</a>' : esc(title);
+        }
+        return '<span style="color:var(--text-muted)">\\u2014</span>';
+      }
+
       function badge(type) {
         var c = BADGE_COLORS[type] || '#6b7280';
         return '<span style="display:inline-block;padding:1px 8px;border-radius:9999px;font-size:0.75rem;color:#fff;background:' + c + '">' + esc(type) + '</span>';
@@ -315,7 +349,9 @@ function liveScript(newestAt) {
       function buildRow(e) {
         return '<tr style="animation:fadeIn .3s">'
           + '<td style="white-space:nowrap;font-size:0.8rem" title="' + esc(e.at) + '">' + relTime(e.at) + '</td>'
+          + '<td style="white-space:nowrap;font-size:0.8rem;color:var(--text-muted)">' + fmtTs(e.at) + '</td>'
           + '<td>' + esc(e.user_name || e.user_email || '\\u2014') + '</td>'
+          + '<td>' + pageCell(e) + '</td>'
           + '<td>' + badge(e.event_type) + '</td>'
           + '<td>' + esc(e.entity_type) + ' ' + esc((e.entity_id || '').slice(0, 8)) + '</td>'
           + '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(e.summary || '') + '</td>'

@@ -34,6 +34,40 @@ import { audit } from './lib/audit.js';
 //     commands.js is documented in docs/outlook-addin-setup.md).
 const PUBLIC_PREFIXES = ['/css/', '/js/', '/img/', '/favicon.ico', '/api/cron/', '/api/email-ingest', '/outlook-addin/'];
 
+// Derive a human-readable page title from a URL pathname.
+function pageTitle(pathname) {
+  const p = pathname.replace(/\/$/, '') || '/';
+  if (p === '/') return 'Dashboard';
+  // Static top-level pages
+  const TOP = {
+    '/opportunities': 'Opportunities',
+    '/accounts': 'Accounts',
+    '/accounts/contacts': 'Contacts',
+    '/library': 'Items Library',
+    '/documents/library': 'Document Library',
+    '/notifications': 'Notifications',
+    '/ai-inbox': 'AI Inbox',
+    '/settings': 'Settings',
+  };
+  if (TOP[p]) return TOP[p];
+  // Settings sub-pages
+  const settingsMatch = p.match(/^\/settings\/(.+)/);
+  if (settingsMatch) {
+    const sub = settingsMatch[1].split('/')[0].replace(/-/g, ' ');
+    return 'Settings / ' + sub.charAt(0).toUpperCase() + sub.slice(1);
+  }
+  // Entity detail pages — pattern match on UUID segments
+  const segments = p.split('/').filter(Boolean);
+  if (segments[0] === 'opportunities' && segments.length >= 2) {
+    if (segments.length >= 4 && segments[2] === 'quotes') return 'Quote Detail';
+    return 'Opportunity Detail';
+  }
+  if (segments[0] === 'accounts' && segments.length >= 2) return 'Account Detail';
+  if (segments[0] === 'contacts' && segments.length >= 2) return 'Contact Detail';
+  // Fallback: capitalize first segment
+  return segments[0].charAt(0).toUpperCase() + segments[0].slice(1).replace(/-/g, ' ');
+}
+
 export async function onRequest(context) {
   const { request, env, next } = context;
   const url = new URL(request.url);
@@ -93,7 +127,8 @@ export async function onRequest(context) {
           entityId: user.id,
           eventType: 'viewed',
           user,
-          summary: url.pathname,
+          summary: pageTitle(url.pathname),
+          changes: { path: url.pathname },
         });
       })().catch(() => {/* ignore — table may not exist yet */})
     );
