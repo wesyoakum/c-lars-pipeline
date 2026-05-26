@@ -1839,6 +1839,7 @@ function dropUpload() {
       if (files?.length) {
         this.$refs.fileInput.files = files;
         this.fileName = files[0].name;
+        this.$nextTick(() => this.$refs.uploadForm.submit());
       }
     },
     fileSelected(e) {
