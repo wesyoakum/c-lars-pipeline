@@ -89,18 +89,21 @@ export async function onRequestGet(context) {
   const isAdmin = true;
   const isWes = user?.email === 'wes.yoakum@c-lars.com';
 
-  // Load users for filter dropdown
-  const users = await all(env.DB,
-    `SELECT id, email, display_name FROM users WHERE deleted_at IS NULL ORDER BY display_name`);
-
   let body = '';
+  try {
+    // Load users for filter dropdown
+    const users = await all(env.DB,
+      `SELECT id, email, display_name FROM users WHERE deleted_at IS NULL ORDER BY display_name`);
 
-  if (tab === 'timeline') {
-    body = await renderTimeline(env.DB, { users, filterUser, filterEvent, filterEntity, filterFrom, filterTo, cursor });
-  } else if (tab === 'by-user') {
-    body = await renderByUser(env.DB, { users });
-  } else if (tab === 'adoption') {
-    body = await renderAdoption(env.DB);
+    if (tab === 'timeline') {
+      body = await renderTimeline(env.DB, { users, filterUser, filterEvent, filterEntity, filterFrom, filterTo, cursor });
+    } else if (tab === 'by-user') {
+      body = await renderByUser(env.DB, { users });
+    } else if (tab === 'adoption') {
+      body = await renderAdoption(env.DB);
+    }
+  } catch (err) {
+    body = `<div class="alert alert-danger"><strong>Query error:</strong> ${escape(String(err?.message || err))}</div>`;
   }
 
   // Tab nav
@@ -278,7 +281,7 @@ async function renderByUser(db, { users }) {
                 AND pv.at >= datetime('now', '-7 days')) AS views_7d
        FROM users u
       WHERE u.deleted_at IS NULL
-      ORDER BY u.last_seen_at DESC NULLS LAST`
+      ORDER BY u.last_seen_at IS NULL, u.last_seen_at DESC`
   );
 
   if (stats.length === 0) {
