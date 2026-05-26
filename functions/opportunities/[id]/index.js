@@ -7,7 +7,7 @@
 // /opportunities/:id/patch.
 
 import { one, all, stmt, batch } from '../../lib/db.js';
-import { auditStmt, diff, auditViewDeduped } from '../../lib/audit.js';
+import { auditStmt, diff } from '../../lib/audit.js';
 import { validateOpportunity } from '../../lib/validators.js';
 import { layout, htmlResponse, html, escape, raw } from '../../lib/layout.js';
 import { ICON_MIC } from '../../lib/icons.js';
@@ -161,11 +161,6 @@ export async function onRequestGet(context) {
     [oppId]
   );
   if (!opp) return notFound(context);
-
-  // Fire-and-forget entity-view audit (deduplicated per user per 5 min)
-  if (user?.id) {
-    context.waitUntil(auditViewDeduped(env.DB, { entityType: 'opportunity', entityId: oppId, user }).catch(() => {}));
-  }
 
   // Cascade-counts used by the Delete button to spell out what will
   // be wiped. Jobs aren't cascaded (they block the delete instead) so

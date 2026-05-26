@@ -86,6 +86,15 @@ export async function onRequest(context) {
         ).bind(user.id, url.pathname).run();
         await env.DB.prepare(`UPDATE users SET last_seen_at = datetime('now') WHERE id = ?`)
           .bind(user.id).run();
+
+        // Log every page view as an audit event so it shows on the activity timeline.
+        await audit(env.DB, {
+          entityType: 'page',
+          entityId: user.id,
+          eventType: 'viewed',
+          user,
+          summary: url.pathname,
+        });
       })().catch(() => {/* ignore — table may not exist yet */})
     );
   }

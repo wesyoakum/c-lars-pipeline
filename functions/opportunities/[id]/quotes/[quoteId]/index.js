@@ -14,7 +14,7 @@
 // No "Save" button. Header shows contextual actions based on status.
 
 import { one, all, stmt, batch } from '../../../../lib/db.js';
-import { auditStmt, diff, auditViewDeduped } from '../../../../lib/audit.js';
+import { auditStmt, diff } from '../../../../lib/audit.js';
 import { hasRole } from '../../../../lib/auth.js';
 import { now } from '../../../../lib/ids.js';
 import { layout, htmlResponse, html, raw, escape } from '../../../../lib/layout.js';
@@ -269,11 +269,6 @@ export async function onRequestGet(context) {
     [quoteId]
   );
   if (!quote || quote.opportunity_id !== oppId) return notFound(context);
-
-  // Fire-and-forget entity-view audit (deduplicated per user per 5 min)
-  if (user?.id) {
-    context.waitUntil(auditViewDeduped(env.DB, { entityType: 'quote', entityId: quoteId, user }).catch(() => {}));
-  }
 
   // All addresses for the account (for the selector)
   const addresses = quote.account_id

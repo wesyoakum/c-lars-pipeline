@@ -4,7 +4,7 @@
 // POST /contacts/:id — full update (kept for backward compat / validation)
 
 import { one, all, stmt, batch } from '../../lib/db.js';
-import { auditStmt, diff, auditViewDeduped } from '../../lib/audit.js';
+import { auditStmt, diff } from '../../lib/audit.js';
 import { validateContact } from '../../lib/validators.js';
 import { now } from '../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../lib/http.js';
@@ -109,11 +109,6 @@ export async function onRequestGet(context) {
         { user, env: data?.env, activeNav: '/accounts' }),
       { status: 404 }
     );
-  }
-
-  // Fire-and-forget entity-view audit (deduplicated per user per 5 min)
-  if (user?.id) {
-    context.waitUntil(auditViewDeduped(env.DB, { entityType: 'contact', entityId: contactId, user }).catch(() => {}));
   }
 
   const displayName =
