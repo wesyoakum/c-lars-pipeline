@@ -369,19 +369,30 @@ export async function onRequestGet(context) {
               <button class="btn small" @click="reviewMode = false; reviewItems = []; reviewSnapshotId = null;" :disabled="reviewApplying">Close</button>
             </div>
 
-            <p x-show="reviewItems.length > 0" class="muted" style="margin:0 0 .5rem 0;font-size:.8rem;line-height:1.4"
-               x-text="(() => {
-                 const wfm = {account:'clients',opportunity:'leads',quote:'quotes',job:'jobs'};
-                 const pl  = {account:'accounts',opportunity:'opportunities',quote:'quotes',job:'jobs'};
-                 const labels = reviewShowPipeline ? pl : wfm;
-                 const m = {};
-                 for (const i of reviewItems) {
-                   const label = labels[i.entity_type] || i.entity_type;
-                   const k = (i.action === 'insert' ? 'new ' : 'updated ') + label;
-                   m[k] = (m[k] || 0) + 1;
-                 }
-                 return Object.entries(m).map(([k,v]) => v + ' ' + k).join(', ');
-               })()"></p>
+            <div x-show="reviewItems.length > 0" class="muted" style="margin:0 0 .5rem 0;font-size:.8rem;line-height:1.6"
+                 x-html="(() => {
+                   const wfm = {account:'clients',opportunity:'leads',quote:'quotes',job:'jobs'};
+                   const pl  = {account:'accounts',opportunity:'opportunities',quote:'quotes',job:'jobs'};
+                   const labels = reviewShowPipeline ? pl : wfm;
+                   function summarize(items) {
+                     const m = {};
+                     for (const i of items) {
+                       const label = labels[i.entity_type] || i.entity_type;
+                       const k = (i.action === 'insert' ? 'new ' : 'updated ') + label;
+                       m[k] = (m[k] || 0) + 1;
+                     }
+                     return Object.entries(m).map(([k,v]) => v + ' ' + k).join(', ') || 'none';
+                   }
+                   const all = reviewItems;
+                   const wfmChanged = all.filter(i => i.action !== 'insert' && i.wfm_changes && i.wfm_changes.length > 0);
+                   const mappingOnly = all.filter(i => i.action !== 'insert' && (!i.wfm_changes || i.wfm_changes.length === 0));
+                   const newRecs = all.filter(i => i.action === 'insert');
+                   const lines = ['<b>Overall:</b> ' + summarize(all)];
+                   if (wfmChanged.length) lines.push('<b>WFM changed:</b> ' + summarize(wfmChanged));
+                   if (mappingOnly.length) lines.push('<b>Mapping only:</b> ' + summarize(mappingOnly));
+                   if (newRecs.length) lines.push('<b>New:</b> ' + summarize(newRecs));
+                   return lines.join('<br>');
+                 })()"></div>
 
             <div x-show="reviewItems.length > 0" style="display:flex;gap:.4rem;margin-bottom:.5rem;flex-wrap:wrap">
               <button class="btn small" :class="reviewFilter === 'all' ? 'primary' : ''" @click="reviewFilter = 'all'"
