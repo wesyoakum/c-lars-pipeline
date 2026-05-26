@@ -110,6 +110,12 @@ export async function onRequest(context) {
           if (m) title = m[1].trim().replace(/\s*—\s*C-LARS Pipeline$/, '');
         } catch (_) { /* body unreadable — use fallback */ }
         if (!title) title = pageTitle(url.pathname);
+        // Append the ?tab= value so "Account Detail" becomes "Account Detail — Opportunities"
+        const tab = url.searchParams.get('tab');
+        if (tab) {
+          const label = tab.charAt(0).toUpperCase() + tab.slice(1).replace(/-/g, ' ');
+          title += ' — ' + label;
+        }
 
         // Synthetic session detection: if last_seen_at is >30 min ago (or null),
         // treat this as a new session and write an audit event.
