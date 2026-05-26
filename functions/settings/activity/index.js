@@ -11,8 +11,9 @@ import { all, one } from '../../lib/db.js';
 import { layout, htmlResponse, html, escape, raw } from '../../lib/layout.js';
 import { hasRole } from '../../lib/auth.js';
 import { settingsSubNav } from '../../lib/settings-subnav.js';
+import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../../lib/list-table.js';
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 200;
 
 function fmtRelative(iso) {
   if (!iso) return '';
@@ -53,12 +54,34 @@ function entityLink(entityType, entityId) {
     opportunity: `/opportunities/${entityId}`,
     account: `/accounts/${entityId}`,
     contact: `/contacts/${entityId}`,
-    quote: `/opportunities/—/quotes/${entityId}`,
     document: `/documents/${entityId}/download`,
   };
   const href = routes[entityType];
-  if (!href || href.includes('—')) return `${escape(entityType)} ${escape(entityId?.slice(0, 8) || '')}`;
+  if (!href) return `${escape(entityType)} ${escape(entityId?.slice(0, 8) || '')}`;
   return `<a href="${escape(href)}">${escape(entityType)} ${escape(entityId?.slice(0, 8) || '')}</a>`;
+}
+
+function parseChanges(e) {
+  if (!e.changes_json) return null;
+  try { return JSON.parse(e.changes_json); } catch (_) { return null; }
+}
+
+function pageTitleText(e) {
+  if (e.entity_type === 'page' && e.event_type === 'viewed') {
+    const changes = parseChanges(e);
+    return e.summary || changes?.path || '—';
+  }
+  return '—';
+}
+
+function pageTitleCell(e) {
+  if (e.entity_type === 'page' && e.event_type === 'viewed') {
+    const changes = parseChanges(e);
+    const path = changes?.path || '';
+    const title = e.summary || path || '—';
+    return path ? `<a href="${escape(path)}">${escape(title)}</a>` : escape(title);
+  }
+  return '<span class="muted">—</span>';
 }
 
 export async function onRequestGet(context) {
@@ -79,26 +102,16 @@ export async function onRequestGet(context) {
   }
 
   const tab = url.searchParams.get('tab') || 'timeline';
-  const filterUser = url.searchParams.get('user') || '';
-  const filterEvent = url.searchParams.get('event') || '';
-  const filterEntity = url.searchParams.get('entity') || '';
-  const filterFrom = url.searchParams.get('from') || '';
-  const filterTo = url.searchParams.get('to') || '';
-  const cursor = url.searchParams.get('cursor') || '';
 
   const isAdmin = true;
   const isWes = user?.email === 'wes.yoakum@c-lars.com';
 
   let body = '';
   try {
-    // Load users for filter dropdown
-    const users = await all(env.DB,
-      `SELECT id, email, display_name FROM users WHERE active = 1 ORDER BY display_name`);
-
     if (tab === 'timeline') {
-      body = await renderTimeline(env.DB, { users, filterUser, filterEvent, filterEntity, filterFrom, filterTo, cursor });
+      body = await renderTimeline(env.DB);
     } else if (tab === 'by-user') {
-      body = await renderByUser(env.DB, { users });
+      body = await renderByUser(env.DB);
     } else if (tab === 'adoption') {
       body = await renderAdoption(env.DB);
     }
@@ -128,7 +141,9 @@ export async function onRequestGet(context) {
   const page = html`
     ${settingsSubNav('activity', isAdmin, isWes)}
     <section class="card">
-      <h1>Activity</h1>
+      <div class="card-header">
+        <h1>Activity</h1>
+      </div>
       ${raw(tabNav)}
       ${raw(body)}
     </section>
@@ -141,159 +156,92 @@ export async function onRequestGet(context) {
 
 // ─── Timeline tab ──────────────────────────────────────────────────
 
-async function renderTimeline(db, { users, filterUser, filterEvent, filterEntity, filterFrom, filterTo, cursor }) {
-  // Build WHERE clauses
-  const where = [];
-  const params = [];
+const TIMELINE_COLUMNS = [
+  { key: 'when',        label: 'When',        sort: 'text',   filter: 'text',   default: true  },
+  { key: 'timestamp',   label: 'Timestamp',   sort: 'text',   filter: 'text',   default: true  },
+  { key: 'user',        label: 'User',        sort: 'text',   filter: 'select', default: true  },
+  { key: 'page',        label: 'Page',        sort: 'text',   filter: 'select', default: true  },
+  { key: 'event_type',  label: 'Event',       sort: 'text',   filter: 'select', default: true  },
+  { key: 'entity_type', label: 'Entity',      sort: 'text',   filter: 'select', default: true  },
+  { key: 'summary',     label: 'Summary',     sort: 'text',   filter: 'text',   default: true  },
+];
 
-  if (filterUser) {
-    where.push('ae.user_id = ?');
-    params.push(filterUser);
-  }
-  if (filterEvent) {
-    where.push('ae.event_type = ?');
-    params.push(filterEvent);
-  }
-  if (filterEntity) {
-    where.push('ae.entity_type = ?');
-    params.push(filterEntity);
-  }
-  if (filterFrom) {
-    where.push("ae.at >= ?");
-    params.push(filterFrom);
-  }
-  if (filterTo) {
-    where.push("ae.at <= ?");
-    params.push(filterTo + 'T23:59:59');
-  }
-  if (cursor) {
-    where.push('ae.at < ?');
-    params.push(cursor);
-  }
-
-  const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
-
+async function renderTimeline(db) {
   const events = await all(db,
     `SELECT ae.id, ae.entity_type, ae.entity_id, ae.event_type, ae.at,
             ae.summary, ae.changes_json, ae.user_id,
             u.display_name AS user_name, u.email AS user_email
        FROM audit_events ae
        LEFT JOIN users u ON u.id = ae.user_id
-       ${whereClause}
        ORDER BY ae.at DESC
        LIMIT ?`,
-    [...params, PAGE_SIZE + 1]
+    [PAGE_SIZE]
   );
 
-  const hasMore = events.length > PAGE_SIZE;
-  const display = events.slice(0, PAGE_SIZE);
-  const nextCursor = hasMore ? display[display.length - 1].at : '';
+  const newestAt = events.length ? events[0].at : '';
 
-  // Event types for filter dropdown
-  const eventTypes = await all(db,
-    `SELECT DISTINCT event_type FROM audit_events ORDER BY event_type`);
-  const entityTypes = await all(db,
-    `SELECT DISTINCT entity_type FROM audit_events ORDER BY entity_type`);
+  const rowData = events.map(e => ({
+    id:          e.id,
+    when:        fmtRelative(e.at),
+    when_iso:    e.at,
+    timestamp:   fmtDate(e.at),
+    user:        e.user_name || e.user_email || '—',
+    page:        pageTitleText(e),
+    event_type:  e.event_type,
+    entity_type: e.entity_type,
+    summary:     e.summary || '',
+    // Extra fields for rendering (not columns)
+    _entity_id:     e.entity_id,
+    _changes_json:  e.changes_json || '',
+  }));
 
-  // Build filter form
-  const filterForm = `
-    <form method="get" action="/settings/activity" style="display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:1rem;align-items:end">
-      <input type="hidden" name="tab" value="timeline">
-      <label style="display:flex;flex-direction:column;font-size:0.8rem;color:var(--text-muted)">
-        User
-        <select name="user" style="min-width:140px">
-          <option value="">All users</option>
-          ${users.map(u => `<option value="${escape(u.id)}" ${u.id === filterUser ? 'selected' : ''}>${escape(u.display_name || u.email)}</option>`).join('')}
-        </select>
-      </label>
-      <label style="display:flex;flex-direction:column;font-size:0.8rem;color:var(--text-muted)">
-        Event type
-        <select name="event" style="min-width:140px">
-          <option value="">All events</option>
-          ${eventTypes.map(e => `<option value="${escape(e.event_type)}" ${e.event_type === filterEvent ? 'selected' : ''}>${escape(e.event_type)}</option>`).join('')}
-        </select>
-      </label>
-      <label style="display:flex;flex-direction:column;font-size:0.8rem;color:var(--text-muted)">
-        Entity type
-        <select name="entity" style="min-width:140px">
-          <option value="">All entities</option>
-          ${entityTypes.map(e => `<option value="${escape(e.entity_type)}" ${e.entity_type === filterEntity ? 'selected' : ''}>${escape(e.entity_type)}</option>`).join('')}
-        </select>
-      </label>
-      <label style="display:flex;flex-direction:column;font-size:0.8rem;color:var(--text-muted)">
-        From
-        <input type="date" name="from" value="${escape(filterFrom)}" style="min-width:130px">
-      </label>
-      <label style="display:flex;flex-direction:column;font-size:0.8rem;color:var(--text-muted)">
-        To
-        <input type="date" name="to" value="${escape(filterTo)}" style="min-width:130px">
-      </label>
-      <button type="submit" class="btn btn-sm">Filter</button>
-      <a href="/settings/activity?tab=timeline" class="btn btn-sm btn-ghost">Clear</a>
-    </form>
-  `;
-
-  // Newest timestamp for live-poll cursor
-  const newestAt = display.length ? display[0].at : '';
-
-  if (display.length === 0) {
-    return filterForm + `<p style="color:var(--text-muted)">No events found.</p>${liveScript(newestAt)}`;
+  if (events.length === 0) {
+    return html`
+      <div class="card-header">
+        ${listToolbar({ id: 'activity', count: 0, columns: TIMELINE_COLUMNS, compact: true })}
+      </div>
+      <p class="muted">No events found.</p>
+      ${raw(liveScript(newestAt))}
+    `;
   }
 
-  const rows = display.map(e => timelineRow(e)).join('');
-
-  const nextLink = hasMore
-    ? `<a href="/settings/activity?tab=timeline&cursor=${encodeURIComponent(nextCursor)}&user=${encodeURIComponent(filterUser)}&event=${encodeURIComponent(filterEvent)}&entity=${encodeURIComponent(filterEntity)}&from=${encodeURIComponent(filterFrom)}&to=${encodeURIComponent(filterTo)}" class="btn btn-sm" style="margin-top:0.5rem">Older &rarr;</a>`
-    : '';
-
-  return `
-    ${filterForm}
-    <div style="overflow-x:auto">
-      <table class="list-table" style="width:100%">
-        <thead><tr>
-          <th>When</th><th>Timestamp</th><th>User</th><th>Page</th><th>Event</th><th>Entity</th><th>Summary</th>
-        </tr></thead>
-        <tbody id="activity-tbody">${rows}</tbody>
+  return html`
+    <div class="card-header">
+      ${listToolbar({ id: 'activity', count: events.length, columns: TIMELINE_COLUMNS, compact: true })}
+    </div>
+    <div class="opp-list" data-columns="${escape(JSON.stringify(TIMELINE_COLUMNS))}">
+      <table class="data opp-list-table">
+        ${listTableHead(TIMELINE_COLUMNS)}
+        <tbody data-role="rows" id="activity-tbody">
+          ${rowData.map(r => html`
+            <tr data-row-id="${escape(r.id)}" ${raw(rowDataAttrs(TIMELINE_COLUMNS, r))}>
+              <td class="col-when" data-col="when">
+                <span title="${escape(r.when_iso)}">${escape(r.when)}</span>
+              </td>
+              <td class="col-timestamp" data-col="timestamp" style="white-space:nowrap;font-size:0.8rem;color:var(--text-muted)">
+                ${escape(r.timestamp)}
+              </td>
+              <td class="col-user" data-col="user">${escape(r.user)}</td>
+              <td class="col-page" data-col="page">${raw(pageTitleCell({ entity_type: r.entity_type, event_type: r.event_type, summary: r.summary, changes_json: r._changes_json }))}</td>
+              <td class="col-event_type" data-col="event_type">${raw(eventBadge(r.event_type))}</td>
+              <td class="col-entity_type" data-col="entity_type">${raw(entityLink(r.entity_type, r._entity_id))}</td>
+              <td class="col-summary" data-col="summary" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                ${escape(r.summary)}
+              </td>
+            </tr>
+          `)}
+        </tbody>
+        <tfoot>
+          <tr><th colspan="${TIMELINE_COLUMNS.length}">${events.length} event${events.length === 1 ? '' : 's'} (most recent ${PAGE_SIZE})</th></tr>
+        </tfoot>
       </table>
     </div>
-    ${nextLink}
-    ${liveScript(newestAt)}
-  `;
-}
-
-function parseChanges(e) {
-  if (!e.changes_json) return null;
-  try { return JSON.parse(e.changes_json); } catch (_) { return null; }
-}
-
-function pageTitleCell(e) {
-  const changes = parseChanges(e);
-  if (e.entity_type === 'page' && e.event_type === 'viewed') {
-    const path = changes?.path || '';
-    const title = e.summary || path || '—';
-    return path ? `<a href="${escape(path)}">${escape(title)}</a>` : escape(title);
-  }
-  return '<span style="color:var(--text-muted)">—</span>';
-}
-
-function timelineRow(e) {
-  return `
-    <tr>
-      <td style="white-space:nowrap;font-size:0.8rem" title="${escape(e.at)}">${fmtRelative(e.at)}</td>
-      <td style="white-space:nowrap;font-size:0.8rem;color:var(--text-muted)">${fmtDate(e.at)}</td>
-      <td>${escape(e.user_name || e.user_email || '—')}</td>
-      <td>${pageTitleCell(e)}</td>
-      <td>${eventBadge(e.event_type)}</td>
-      <td>${entityLink(e.entity_type, e.entity_id)}</td>
-      <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escape(e.summary || '')}</td>
-    </tr>
+    <script>${raw(listScript('pipeline.activity.v1', 'when', 'desc'))}</script>
+    ${raw(liveScript(newestAt))}
   `;
 }
 
 function liveScript(newestAt) {
-  // Client-side JS that polls /settings/activity/poll every 10s
-  // and prepends new rows. Rebuilds the row HTML client-side to avoid
-  // a second server-render round-trip.
   return `
     <script>
     (function() {
@@ -330,15 +278,24 @@ function liveScript(newestAt) {
         return t.toLocaleString();
       }
 
-      function pageCell(e) {
-        var changes = null;
-        try { if (e.changes_json) changes = JSON.parse(e.changes_json); } catch(_) {}
+      function pageTitleFromEvent(e) {
         if (e.entity_type === 'page' && e.event_type === 'viewed') {
+          var changes = null;
+          try { if (e.changes_json) changes = JSON.parse(e.changes_json); } catch(_) {}
+          return e.summary || (changes && changes.path) || '\\u2014';
+        }
+        return '\\u2014';
+      }
+
+      function pageCellHtml(e) {
+        if (e.entity_type === 'page' && e.event_type === 'viewed') {
+          var changes = null;
+          try { if (e.changes_json) changes = JSON.parse(e.changes_json); } catch(_) {}
           var path = (changes && changes.path) || '';
           var title = e.summary || path || '\\u2014';
           return path ? '<a href="' + esc(path) + '">' + esc(title) + '</a>' : esc(title);
         }
-        return '<span style="color:var(--text-muted)">\\u2014</span>';
+        return '<span class="muted">\\u2014</span>';
       }
 
       function badge(type) {
@@ -346,15 +303,36 @@ function liveScript(newestAt) {
         return '<span style="display:inline-block;padding:1px 8px;border-radius:9999px;font-size:0.75rem;color:#fff;background:' + c + '">' + esc(type) + '</span>';
       }
 
+      function entityCell(type, id) {
+        var routes = { opportunity:'/opportunities/', account:'/accounts/', contact:'/contacts/', document:'/documents/' };
+        var short = (id || '').slice(0, 8);
+        if (routes[type]) return '<a href="' + routes[type] + esc(id) + '">' + esc(type) + ' ' + esc(short) + '</a>';
+        return esc(type) + ' ' + esc(short);
+      }
+
       function buildRow(e) {
-        return '<tr style="animation:fadeIn .3s">'
-          + '<td style="white-space:nowrap;font-size:0.8rem" title="' + esc(e.at) + '">' + relTime(e.at) + '</td>'
-          + '<td style="white-space:nowrap;font-size:0.8rem;color:var(--text-muted)">' + fmtTs(e.at) + '</td>'
-          + '<td>' + esc(e.user_name || e.user_email || '\\u2014') + '</td>'
-          + '<td>' + pageCell(e) + '</td>'
-          + '<td>' + badge(e.event_type) + '</td>'
-          + '<td>' + esc(e.entity_type) + ' ' + esc((e.entity_id || '').slice(0, 8)) + '</td>'
-          + '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(e.summary || '') + '</td>'
+        var when = relTime(e.at);
+        var ts = fmtTs(e.at);
+        var user = e.user_name || e.user_email || '\\u2014';
+        var page = pageTitleFromEvent(e);
+        var summary = e.summary || '';
+        // data-* attributes for list-table filtering
+        var attrs = ' data-row-id="' + esc(e.id) + '"'
+          + ' data-when="' + esc(when) + '"'
+          + ' data-timestamp="' + esc(ts) + '"'
+          + ' data-user="' + esc(user) + '"'
+          + ' data-page="' + esc(page) + '"'
+          + ' data-event_type="' + esc(e.event_type) + '"'
+          + ' data-entity_type="' + esc(e.entity_type) + '"'
+          + ' data-summary="' + esc(summary) + '"';
+        return '<tr style="animation:fadeIn .3s"' + attrs + '>'
+          + '<td class="col-when" data-col="when"><span title="' + esc(e.at) + '">' + when + '</span></td>'
+          + '<td class="col-timestamp" data-col="timestamp" style="white-space:nowrap;font-size:0.8rem;color:var(--text-muted)">' + ts + '</td>'
+          + '<td class="col-user" data-col="user">' + esc(user) + '</td>'
+          + '<td class="col-page" data-col="page">' + pageCellHtml(e) + '</td>'
+          + '<td class="col-event_type" data-col="event_type">' + badge(e.event_type) + '</td>'
+          + '<td class="col-entity_type" data-col="entity_type">' + entityCell(e.entity_type, e.entity_id) + '</td>'
+          + '<td class="col-summary" data-col="summary" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(summary) + '</td>'
           + '</tr>';
       }
 
@@ -363,25 +341,26 @@ function liveScript(newestAt) {
           .then(function(r) { return r.json(); })
           .then(function(data) {
             if (!data.ok || !data.events || !data.events.length) return;
-            // Events come newest-first; insert in reverse so newest ends up on top
-            var html = '';
+            var fragment = '';
             for (var i = data.events.length - 1; i >= 0; i--) {
-              html = buildRow(data.events[i]) + html;
+              fragment = buildRow(data.events[i]) + fragment;
             }
-            tbody.insertAdjacentHTML('afterbegin', html);
+            tbody.insertAdjacentHTML('afterbegin', fragment);
             cursor = data.events[0].at;
+            // Update count badge
+            var countEl = document.querySelector('[data-role="count"]');
+            if (countEl) countEl.textContent = tbody.children.length;
           })
           .catch(function() {});
       }
 
       setInterval(poll, 10000);
 
-      // Also update relative times every 30s
+      // Update relative times every 30s
       setInterval(function() {
-        var cells = tbody.querySelectorAll('td[title]');
-        cells.forEach(function(td) {
-          var iso = td.getAttribute('title');
-          if (iso) td.textContent = relTime(iso);
+        tbody.querySelectorAll('.col-when span[title]').forEach(function(span) {
+          var iso = span.getAttribute('title');
+          if (iso) span.textContent = relTime(iso);
         });
       }, 30000);
     })();
@@ -392,8 +371,7 @@ function liveScript(newestAt) {
 
 // ─── By User tab ───────────────────────────────────────────────────
 
-async function renderByUser(db, { users }) {
-  // Per-user stats: sessions this week, last seen, top entity types touched
+async function renderByUser(db) {
   const stats = await all(db,
     `SELECT u.id, u.email, u.display_name, u.last_seen_at,
             (SELECT COUNT(*) FROM audit_events ae
@@ -411,14 +389,14 @@ async function renderByUser(db, { users }) {
   );
 
   if (stats.length === 0) {
-    return '<p style="color:var(--text-muted)">No users found.</p>';
+    return '<p class="muted">No users found.</p>';
   }
 
   const rows = stats.map(u => {
     const name = u.display_name || u.email || '—';
     return `
       <tr>
-        <td><strong>${escape(name)}</strong><br><small style="color:var(--text-muted)">${escape(u.email || '')}</small></td>
+        <td><strong>${escape(name)}</strong><br><small class="muted">${escape(u.email || '')}</small></td>
         <td style="text-align:center">${u.sessions_7d}</td>
         <td style="text-align:center">${u.events_7d}</td>
         <td style="text-align:center">${u.views_7d}</td>
@@ -447,13 +425,11 @@ async function renderByUser(db, { users }) {
 // ─── Adoption tab ──────────────────────────────────────────────────
 
 async function renderAdoption(db) {
-  // Active users (7d and 30d)
   const active7 = await one(db,
     `SELECT COUNT(DISTINCT user_id) AS cnt FROM user_page_views WHERE at >= datetime('now', '-7 days')`);
   const active30 = await one(db,
     `SELECT COUNT(DISTINCT user_id) AS cnt FROM user_page_views WHERE at >= datetime('now', '-30 days')`);
 
-  // Sessions per day (last 14 days)
   const sessionsPerDay = await all(db,
     `SELECT date(at) AS day, COUNT(*) AS cnt
        FROM audit_events
@@ -463,7 +439,6 @@ async function renderAdoption(db) {
       ORDER BY day`
   );
 
-  // Page views per day (last 14 days)
   const viewsPerDay = await all(db,
     `SELECT date(at) AS day, COUNT(*) AS cnt
        FROM user_page_views
@@ -472,7 +447,6 @@ async function renderAdoption(db) {
       ORDER BY day`
   );
 
-  // Hour-of-day heatmap (last 30 days)
   const hourly = await all(db,
     `SELECT CAST(strftime('%H', at) AS INTEGER) AS hour, COUNT(*) AS cnt
        FROM user_page_views
@@ -481,7 +455,6 @@ async function renderAdoption(db) {
       ORDER BY hour`
   );
 
-  // Build sparkline-style bar charts using plain HTML
   const maxSessions = Math.max(1, ...sessionsPerDay.map(r => r.cnt));
   const maxViews = Math.max(1, ...viewsPerDay.map(r => r.cnt));
   const maxHour = Math.max(1, ...hourly.map(r => r.cnt));
@@ -500,7 +473,6 @@ async function renderAdoption(db) {
     </div>
   `).join('');
 
-  // Hour heatmap as horizontal bar
   const hourBars = Array.from({ length: 24 }, (_, h) => {
     const row = hourly.find(r => r.hour === h);
     const cnt = row?.cnt || 0;
@@ -530,12 +502,12 @@ async function renderAdoption(db) {
 
     <h3 style="margin:1rem 0 0.5rem">Sessions per day</h3>
     <div style="display:flex;align-items:end;gap:2px;height:120px;padding:0 0.5rem">
-      ${sessionBars || '<p style="color:var(--text-muted)">No session data yet.</p>'}
+      ${sessionBars || '<p class="muted">No session data yet.</p>'}
     </div>
 
     <h3 style="margin:1.5rem 0 0.5rem">Page views per day</h3>
     <div style="display:flex;align-items:end;gap:2px;height:120px;padding:0 0.5rem">
-      ${viewBars || '<p style="color:var(--text-muted)">No page view data yet.</p>'}
+      ${viewBars || '<p class="muted">No page view data yet.</p>'}
     </div>
 
     <h3 style="margin:1.5rem 0 0.5rem">Activity by hour (last 30 days)</h3>
