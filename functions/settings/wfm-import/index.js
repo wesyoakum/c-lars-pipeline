@@ -1236,43 +1236,72 @@ export async function onRequestGet(context) {
 
                 async deltaReviewStart() {
                   this.busy = true;
+                  let runId = null;
                   try {
-                    const res = await fetch('/settings/wfm-import/delta/start', {
-                      method: 'POST', credentials: 'same-origin',
-                      headers: { 'content-type': 'application/json' },
-                      body: JSON.stringify({}),
-                    });
-                    const j = await res.json();
-                    if (!j.ok) {
-                      alert('Failed: ' + (j.message || j.error || 'unknown'));
+                    // The WFM API takes 30-90s, which may exceed the HTTP
+                    // timeout. The Worker continues past the timeout and
+                    // writes the run row + pending items to D1. If the
+                    // fetch fails, we poll for the just-created run.
+                    let j;
+                    try {
+                      const res = await fetch('/settings/wfm-import/delta/start', {
+                        method: 'POST', credentials: 'same-origin',
+                        headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify({}),
+                      });
+                      j = await res.json();
+                    } catch (fetchErr) {
+                      // HTTP timeout — the run was created early, poll for it.
+                      j = null;
+                    }
+
+                    if (j && !j.ok) {
+                      // If it's already_in_progress, that's probably our
+                      // timed-out run — poll for it instead of giving up.
+                      if (j.error === 'already_in_progress' && j.run_id) {
+                        runId = j.run_id;
+                      } else {
+                        alert('Failed: ' + (j.message || j.error || 'unknown'));
+                        return;
+                      }
+                    }
+
+                    if (j && j.ok) {
+                      runId = j.run_id;
+                      this.reviewSnapshotId = j.snapshot_id || null;
+                      if (j.snapshot_id) this.lastSnapshotId = j.snapshot_id;
+                      if (j.total === 0) {
+                        alert(j.message || 'Nothing changed in WFM since the last import.');
+                        return;
+                      }
+                    }
+
+                    // If we have a run_id (from response or already_in_progress),
+                    // poll until ready. If no run_id, find the latest in-progress run.
+                    if (!runId) {
+                      const statusRes = await this._findInProgressRun();
+                      if (!statusRes) {
+                        alert('Check timed out and no run was found. Please try again.');
+                        return;
+                      }
+                      runId = statusRes;
+                    }
+
+                    // Poll until the run has pending items or completes.
+                    const result = await this._pollDeltaStatus(runId);
+                    if (!result) return;
+                    if (result.status === 'failed') {
+                      alert('Check failed: ' + (result.summary || 'unknown error'));
                       return;
                     }
-                    this.reviewRunId = j.run_id;
-                    this.reviewSnapshotId = j.snapshot_id || null;
-                    if (j.snapshot_id) this.lastSnapshotId = j.snapshot_id;
-
-                    // Work runs in the background — poll until ready.
-                    if (j.status === 'processing') {
-                      const result = await this._pollDeltaStatus(j.run_id);
-                      if (!result) return; // error already shown
-                      if (result.status === 'failed') {
-                        alert('Check failed: ' + (result.summary || 'unknown error'));
-                        return;
-                      }
-                      if (result.total === 0) {
-                        alert(result.summary || 'Nothing changed in WFM since the last import.');
-                        return;
-                      }
-                    } else {
-                      // Legacy synchronous path (shouldn't happen with new code).
-                      if (j.total === 0) {
-                        alert('Nothing changed in WFM since the last import.');
-                        return;
-                      }
+                    if (result.status === 'completed' && result.total === 0) {
+                      alert(result.summary || 'Nothing changed in WFM since the last import.');
+                      return;
                     }
 
+                    this.reviewRunId = runId;
                     // Fetch the pending items for review.
-                    const rRes = await fetch('/settings/wfm-import/delta/review?run_id=' + j.run_id, {
+                    const rRes = await fetch('/settings/wfm-import/delta/review?run_id=' + runId, {
                       credentials: 'same-origin',
                     });
                     const rj = await rRes.json();
@@ -1288,6 +1317,16 @@ export async function onRequestGet(context) {
                   } finally {
                     this.busy = false;
                   }
+                },
+
+                async _findInProgressRun() {
+                  try {
+                    const res = await fetch('/settings/wfm-import/delta/status?run_id=latest', {
+                      credentials: 'same-origin',
+                    });
+                    const s = await res.json();
+                    return s.run_id || null;
+                  } catch { return null; }
                 },
 
                 async _pollDeltaStatus(runId) {
