@@ -421,6 +421,10 @@ export async function onRequestGet(context) {
                   <strong style="font-size:.85rem" x-text="item.name"></strong>
                   <span x-show="item.context?.client" class="muted" style="font-size:.78rem"
                         x-text="'(' + (item.context?.client || '') + ')'"></span>
+                  <span class="muted" style="font-size:.7rem;font-family:monospace"
+                        x-text="(item.wfm_uuid || '').slice(0,8)"></span>
+                  <span x-show="item.wfm_created" class="muted" style="font-size:.7rem"
+                        x-text="item.wfm_created ? item.wfm_created.slice(0,10) : ''"></span>
                   <span style="flex:1"></span>
                   <button class="btn small" style="font-size:.72rem" @click="reviewDecide(item, 'approve')"
                           :class="item._decision === 'approve' ? 'primary' : ''"

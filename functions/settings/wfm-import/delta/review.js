@@ -109,6 +109,8 @@ export async function onRequestGet(context) {
     if (wfmPayload.Client?.Name) context.client = wfmPayload.Client.Name;
     if (wfmPayload.Contact?.Name) context.contact = wfmPayload.Contact.Name;
     if (wfmPayload.Owner?.Name) context.owner = wfmPayload.Owner.Name;
+    const wfm_uuid = wfmPayload.UUID || item.external_id || null;
+    const wfm_created = wfmPayload.Date || null;
 
     // Raw WFM field diff (against snapshot base).
     let basePayload = null;
@@ -124,6 +126,8 @@ export async function onRequestGet(context) {
       pipeline_row_id: item.pipeline_row_id,
       status:        item.status,
       name:          displayLabel,
+      wfm_uuid,
+      wfm_created,
       context,
       wfm_changes,
       diff,
