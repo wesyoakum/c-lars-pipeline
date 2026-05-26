@@ -256,22 +256,6 @@ export async function onRequestPost(context) {
       const entityType = KIND_TO_ENTITY[kind];
       const ck = kindToCountKey[kind];
 
-      // Fetch detail for full payload.
-      let detail = listRec;
-      if (kind !== 'staff') {
-        const fetched = await fetchDetail(env, kind, uuid, fetchCache);
-        if (fetched) detail = fetched;
-      }
-      const detailJson = JSON.stringify(detail);
-
-      // Dismiss check: skip if user already dismissed this exact payload.
-      const dismissKey = entityType + ':' + uuid;
-      const dismissedPayload = dismissed.get(dismissKey);
-      if (dismissedPayload && dismissedPayload === detailJson) {
-        counts[ck].dismissed_skipped++;
-        continue;
-      }
-
       // Load Pipeline row + snapshot for diff.
       const pipelineRow = (pipelineRows[kind] || new Map()).get(uuid) || null;
       const snapshotKey = entityType + ':' + uuid;
@@ -288,7 +272,29 @@ export async function onRequestPost(context) {
         }
       }
 
-      // Compute diff.
+      // Preliminary diff using list record (no WFM API call). Most mapped
+      // fields exist on both the list and detail records. If nothing looks
+      // changed at the field level, skip the expensive detail fetch.
+      const prelim = computeDiff(entityType, listRec, pipelineRow, snapshotPayload);
+      if (prelim.allUnchanged && !prelim.isInsert) continue;
+
+      // Something changed — fetch detail for the full payload.
+      let detail = listRec;
+      if (kind !== 'staff') {
+        const fetched = await fetchDetail(env, kind, uuid, fetchCache);
+        if (fetched) detail = fetched;
+      }
+      const detailJson = JSON.stringify(detail);
+
+      // Dismiss check: skip if user already dismissed this exact payload.
+      const dismissKey = entityType + ':' + uuid;
+      const dismissedPayload = dismissed.get(dismissKey);
+      if (dismissedPayload && dismissedPayload === detailJson) {
+        counts[ck].dismissed_skipped++;
+        continue;
+      }
+
+      // Full diff with detail record.
       const { diff, hasConflict, hasAutoApply, isInsert, allUnchanged } = computeDiff(
         entityType, detail, pipelineRow, snapshotPayload
       );
