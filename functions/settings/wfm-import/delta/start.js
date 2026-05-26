@@ -215,7 +215,11 @@ export async function onRequestPost(context) {
       loadDismissed(env),
     ]);
 
-    // Phase 2 — coarse filter: find changed/new records.
+    // Phase 2 — coarse filter with field-level pre-check.
+    // The raw JSON comparison (list vs stored detail) always differs
+    // structurally, so we use computeDiff on the list record to skip
+    // records with no actual field-level changes. Only records that
+    // survive this check enter Phase 3 for a WFM detail fetch.
     const KIND_ORDER = [
       ['client',  clients, stored.client],
       ['lead',    leads,   stored.lead],
@@ -231,54 +235,55 @@ export async function onRequestPost(context) {
     };
     const kindToCountKey = { client: 'accounts', lead: 'opportunities', quote: 'quotes', job: 'jobs' };
 
-    const changedRecords = []; // { kind, uuid, listRec }
+    // Pre-parse snapshots into objects once (avoid repeated JSON.parse per record).
+    const snapshotObjs = new Map();
+    for (const [key, jsonStr] of snapshots) {
+      try { snapshotObjs.set(key, JSON.parse(jsonStr)); } catch { /* skip */ }
+    }
+
+    const changedRecords = []; // { kind, uuid, listRec, pipelineRow, snapshotPayload }
     for (const [kind, records, storedMap] of KIND_ORDER) {
       const ck = kindToCountKey[kind];
+      const entityType = KIND_TO_ENTITY[kind];
       for (const rec of records) {
         if (!rec.UUID) continue;
-        const recJson = JSON.stringify(rec);
-        const storedPayload = storedMap.get(rec.UUID);
-        if (!isNewOrChanged(storedPayload, recJson)) continue;
-        if (storedPayload == null) counts[ck].new++;
-        else counts[ck].changed++;
-        changedRecords.push({ kind, uuid: rec.UUID, listRec: rec });
+
+        const isNew = storedMap.get(rec.UUID) == null;
+        if (isNew) {
+          counts[ck].new++;
+          changedRecords.push({ kind, uuid: rec.UUID, listRec: rec, pipelineRow: null, snapshotPayload: null });
+          continue;
+        }
+
+        // Existing record — do a quick field-level diff using the list record.
+        const pipelineRow = (pipelineRows[kind] || new Map()).get(rec.UUID) || null;
+        const snapKey = entityType + ':' + rec.UUID;
+        let snapshotPayload = snapshotObjs.get(snapKey) || null;
+        if (!snapshotPayload && pipelineRow) {
+          const storedWfm = storedMap.get(rec.UUID);
+          if (storedWfm) {
+            try { snapshotPayload = JSON.parse(storedWfm); } catch { /* skip */ }
+          }
+        }
+
+        const prelim = computeDiff(entityType, rec, pipelineRow, snapshotPayload);
+        if (prelim.allUnchanged) continue; // no field-level changes — skip
+
+        counts[ck].changed++;
+        changedRecords.push({ kind, uuid: rec.UUID, listRec: rec, pipelineRow, snapshotPayload });
       }
     }
 
-    // Phase 3 — fetch detail + compute diffs for changed records.
+    // Phase 3 — fetch detail + compute full diffs for changed records only.
     const fetchCache = new Map();
     const pendingRows = [];
-
-    // Supersede any existing pending rows for entities in this batch.
     const supersedeBatch = [];
 
-    for (const { kind, uuid, listRec } of changedRecords) {
+    for (const { kind, uuid, listRec, pipelineRow, snapshotPayload } of changedRecords) {
       const entityType = KIND_TO_ENTITY[kind];
       const ck = kindToCountKey[kind];
 
-      // Load Pipeline row + snapshot for diff.
-      const pipelineRow = (pipelineRows[kind] || new Map()).get(uuid) || null;
-      const snapshotKey = entityType + ':' + uuid;
-      let snapshotPayload = null;
-      const snapshotJson = snapshots.get(snapshotKey);
-      if (snapshotJson) {
-        try { snapshotPayload = JSON.parse(snapshotJson); } catch { /* no snapshot */ }
-      }
-      // Snapshot seeding: if no snapshot but Pipeline has wfm_payload, use that.
-      if (!snapshotPayload && pipelineRow) {
-        const storedWfm = (stored[kind] || new Map()).get(uuid);
-        if (storedWfm) {
-          try { snapshotPayload = JSON.parse(storedWfm); } catch { /* skip */ }
-        }
-      }
-
-      // Preliminary diff using list record (no WFM API call). Most mapped
-      // fields exist on both the list and detail records. If nothing looks
-      // changed at the field level, skip the expensive detail fetch.
-      const prelim = computeDiff(entityType, listRec, pipelineRow, snapshotPayload);
-      if (prelim.allUnchanged && !prelim.isInsert) continue;
-
-      // Something changed — fetch detail for the full payload.
+      // Fetch detail for the full payload.
       let detail = listRec;
       if (kind !== 'staff') {
         const fetched = await fetchDetail(env, kind, uuid, fetchCache);
