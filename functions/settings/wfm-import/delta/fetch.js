@@ -20,7 +20,7 @@ import {
 const LIST_PAGE_SIZE = 100;
 const SINGLE_SHOT_PAGE_SIZE = 1000;
 const MAX_LIST_PAGES = 50;
-const DETAIL_BATCH_SIZE = 15;
+const DETAIL_BATCH_SIZE = 10;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {

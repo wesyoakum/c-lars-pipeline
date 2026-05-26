@@ -1376,16 +1376,26 @@ export async function onRequestGet(context) {
                         return;
                       }
 
-                      // Phase 2: fetch details in batches.
+                      // Phase 2: fetch details in batches (with retry on timeout).
                       let complete = false;
+                      let retries = 0;
                       while (!complete) {
                         this.checkProgress = 'Fetching ' + kind + ' details… ' + (listJ._done || 0) + '/' + listJ.count;
-                        const detRes = await fetch('/settings/wfm-import/delta/fetch', {
-                          method: 'POST', credentials: 'same-origin',
-                          headers: { 'content-type': 'application/json' },
-                          body: JSON.stringify({ snapshot_id, kind, phase: 'details' }),
-                        });
-                        const detJ = await detRes.json();
+                        let detJ;
+                        try {
+                          const detRes = await fetch('/settings/wfm-import/delta/fetch', {
+                            method: 'POST', credentials: 'same-origin',
+                            headers: { 'content-type': 'application/json' },
+                            body: JSON.stringify({ snapshot_id, kind, phase: 'details' }),
+                          });
+                          detJ = await detRes.json();
+                        } catch {
+                          // Timeout — retry up to 3 times per batch.
+                          if (++retries > 3) { alert('Timed out fetching ' + kind + ' details.'); return; }
+                          await new Promise(r => setTimeout(r, 2000));
+                          continue;
+                        }
+                        retries = 0;
                         if (!detJ.ok) {
                           alert('Failed fetching ' + kind + ' details: ' + (detJ.error || 'unknown'));
                           return;
