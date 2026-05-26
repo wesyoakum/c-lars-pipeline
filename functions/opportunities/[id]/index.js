@@ -870,8 +870,9 @@ export async function onRequestGet(context) {
                @click="$refs.fileInput.click()">
             <input type="file" name="file" required x-ref="fileInput" hidden @change="fileSelected($event); $nextTick(() => $refs.uploadForm.submit())">
             <div class="drop-zone-content">
-              <span x-show="!fileName" class="muted">Drop file here or click to browse</span>
-              <span x-show="fileName" x-text="fileName" style="font-weight:500"></span>
+              <span x-show="!fileName && !uploading" class="muted">Drop file here or click to browse</span>
+              <span x-show="fileName && !uploading" x-text="fileName" style="font-weight:500"></span>
+              <span x-show="uploading" style="font-weight:500;color:var(--primary,#3b82f6)">Uploading…</span>
             </div>
           </div>
         </form>
@@ -1208,8 +1209,9 @@ export async function onRequestGet(context) {
                @click="$refs.fileInput.click()">
             <input type="file" name="file" required x-ref="fileInput" hidden @change="fileSelected($event); $nextTick(() => $refs.uploadForm.submit())">
             <div class="drop-zone-content">
-              <span x-show="!fileName" class="muted">Drop file here or click to browse</span>
-              <span x-show="fileName" x-text="fileName" style="font-weight:500"></span>
+              <span x-show="!fileName && !uploading" class="muted">Drop file here or click to browse</span>
+              <span x-show="fileName && !uploading" x-text="fileName" style="font-weight:500"></span>
+              <span x-show="uploading" style="font-weight:500;color:var(--primary,#3b82f6)">Uploading…</span>
             </div>
           </div>
         </form>
@@ -1833,18 +1835,21 @@ function dropUpload() {
   return {
     dragging: false,
     fileName: '',
+    uploading: false,
     handleDrop(e) {
       this.dragging = false;
       const files = e.dataTransfer?.files;
       if (files?.length) {
         this.$refs.fileInput.files = files;
         this.fileName = files[0].name;
+        this.uploading = true;
         this.$nextTick(() => this.$refs.uploadForm.submit());
       }
     },
     fileSelected(e) {
       const f = e.target.files?.[0];
       this.fileName = f ? f.name : '';
+      if (f) this.uploading = true;
     },
   };
 }
