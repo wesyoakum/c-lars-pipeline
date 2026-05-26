@@ -351,6 +351,7 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
         Total includes ${fmtPct(pricing.hiddenCosts.imohPct, 1)} IMOH on quote price for 28.5% target margin.
       </p>` : ''}
 
+      ${kc.refEstimates !== false ? html`
       <div class="reference-estimates">
         <div class="ref-heading">Reference Estimates</div>
         <div class="ref-grid">
@@ -382,6 +383,7 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
           </div>` : ''}
         </div>
       </div>
+      ` : ''}
     </section>
   `;
 }

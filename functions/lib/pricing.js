@@ -106,6 +106,7 @@ export const KIND_CONFIG = {
     // of target price; hidden IMOH brings total cost to 71.5% → 28.5% margin.
     hiddenImohPct: 0.165,
     targetPctOverride: { other: 0 },
+    refEstimates: false,
   },
   service:           { dm: true,  dl: true,  imoh: true,  other: true,  laborTab: true,  dmTab: true  },
 };

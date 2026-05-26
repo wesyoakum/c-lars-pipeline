@@ -876,6 +876,7 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
 
       ${showDiscounts ? renderBuildDiscountEditor({ build, locked, errText }) : ''}
 
+      ${kc.refEstimates !== false ? html`
       <div class="reference-estimates">
         <div class="ref-heading">Reference Estimates</div>
         <div class="ref-grid">
@@ -907,6 +908,7 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
           </div>` : ''}
         </div>
       </div>
+      ` : ''}
     </section>
   `;
 }
