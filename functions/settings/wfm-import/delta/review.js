@@ -68,6 +68,12 @@ export async function onRequestGet(context) {
       ? ((wfmPayload.ID ? wfmPayload.ID + ' — ' : '') + (wfmPayload.Name || ''))
       : name;
 
+    // Parent context (WFM-side names for related entities).
+    const context = {};
+    if (wfmPayload.Client?.Name) context.client = wfmPayload.Client.Name;
+    if (wfmPayload.Contact?.Name) context.contact = wfmPayload.Contact.Name;
+    if (wfmPayload.Owner?.Name) context.owner = wfmPayload.Owner.Name;
+
     return {
       id:            item.id,
       entity_type:   item.entity_type,
@@ -76,6 +82,7 @@ export async function onRequestGet(context) {
       pipeline_row_id: item.pipeline_row_id,
       status:        item.status,
       name:          displayLabel,
+      context,
       diff,
       decided_fields: item.decided_fields_json ? JSON.parse(item.decided_fields_json) : null,
     };

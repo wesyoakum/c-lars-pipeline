@@ -376,6 +376,8 @@ export async function onRequestGet(context) {
                   <span style="font-size:.7rem;font-weight:600;text-transform:uppercase;color:var(--muted,#666);letter-spacing:.04em" x-text="item.entity_type"></span>
                   <span :class="item.action === 'insert' ? 'pill pill-success' : 'pill'" style="font-size:.7rem" x-text="item.action"></span>
                   <strong style="font-size:.85rem" x-text="item.name"></strong>
+                  <span x-show="item.context?.client" class="muted" style="font-size:.78rem"
+                        x-text="'(' + (item.context?.client || '') + ')'"></span>
                   <span style="flex:1"></span>
                   <button class="btn small" style="font-size:.72rem" @click="reviewDecide(item, 'approve')"
                           :class="item._decision === 'approve' ? 'primary' : ''"
@@ -393,9 +395,17 @@ export async function onRequestGet(context) {
                         style="border-bottom:1px solid #f0f0f0">
                       <td style="padding:.15rem .3rem;width:120px;color:var(--muted,#666);white-space:nowrap" x-text="d.label"></td>
                       <td style="padding:.15rem .3rem">
+                        <!-- Case 6: insert (no Pipeline value) -->
                         <span x-show="d.case === 6" style="color:#10b981" x-text="d.wfm"></span>
-                        <span x-show="d.case === 3" style="color:#3b82f6" x-text="d.wfm"></span>
+                        <!-- Case 3: WFM-only change — show was → now -->
+                        <span x-show="d.case === 3">
+                          <span class="muted" x-text="d.base || '(empty)'"></span>
+                          <span style="margin:0 .3rem">&rarr;</span>
+                          <span style="color:#3b82f6" x-text="d.wfm || '(empty)'"></span>
+                        </span>
+                        <!-- Case 2: Pipeline edited, WFM unchanged -->
                         <span x-show="d.case === 2" class="muted" x-text="d.pipeline + ' (Pipeline edited)'"></span>
+                        <!-- Case 5/8: conflict — show Pipeline vs WFM -->
                         <span x-show="d.case === 5 || d.case === 8">
                           <span style="color:#ef4444;text-decoration:line-through" x-text="d.pipeline || '(empty)'"></span>
                           <span style="margin:0 .3rem">&rarr;</span>
