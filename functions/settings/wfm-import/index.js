@@ -369,6 +369,17 @@ export async function onRequestGet(context) {
               <button class="btn small" @click="reviewMode = false; reviewItems = []; reviewSnapshotId = null;" :disabled="reviewApplying">Close</button>
             </div>
 
+            <p x-show="reviewItems.length > 0" class="muted" style="margin:0 0 .5rem 0;font-size:.8rem;line-height:1.4"
+               x-text="(() => {
+                 const m = {};
+                 for (const i of reviewItems) {
+                   const label = {account:'accounts',opportunity:'leads',quote:'quotes',job:'jobs'}[i.entity_type] || i.entity_type;
+                   const k = (i.action === 'insert' ? 'new ' : 'updated ') + label;
+                   m[k] = (m[k] || 0) + 1;
+                 }
+                 return Object.entries(m).map(([k,v]) => v + ' ' + k).join(', ');
+               })()"></p>
+
             <template x-if="reviewItems.length === 0">
               <p class="muted" style="margin:.5rem 0">No changes found.</p>
             </template>
