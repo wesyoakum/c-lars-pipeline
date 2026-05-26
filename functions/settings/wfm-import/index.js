@@ -1377,21 +1377,45 @@ export async function onRequestGet(context) {
                     }
 
                     // Step 3: run diff against Pipeline.
+                    // This may timeout if many records need detail fetches,
+                    // but the Worker continues and writes the pending rows.
                     this.checkProgress = 'Comparing changes…';
-                    const diffRes = await fetch('/settings/wfm-import/delta/diff-run', {
-                      method: 'POST', credentials: 'same-origin',
-                      headers: { 'content-type': 'application/json' },
-                      body: JSON.stringify({ run_id, snapshot_id }),
-                    });
-                    const diff = await diffRes.json();
-                    if (!diff.ok) {
+                    let diff;
+                    try {
+                      const diffRes = await fetch('/settings/wfm-import/delta/diff-run', {
+                        method: 'POST', credentials: 'same-origin',
+                        headers: { 'content-type': 'application/json' },
+                        body: JSON.stringify({ run_id, snapshot_id }),
+                      });
+                      diff = await diffRes.json();
+                    } catch {
+                      // Timeout — poll until the run has results.
+                      diff = null;
+                    }
+
+                    if (diff && !diff.ok) {
                       alert('Diff failed: ' + (diff.message || diff.error || 'unknown'));
                       return;
                     }
 
-                    if (diff.total === 0) {
+                    if (diff && diff.total === 0) {
                       alert(diff.message || 'Nothing changed in WFM since the last import.');
                       return;
+                    }
+
+                    // If diff timed out, poll until the run has pending items.
+                    if (!diff) {
+                      this.checkProgress = 'Waiting for diff to complete…';
+                      const result = await this._pollDeltaStatus(run_id);
+                      if (!result) return;
+                      if (result.status === 'failed') {
+                        alert('Diff failed: ' + (result.summary || 'unknown'));
+                        return;
+                      }
+                      if (result.status === 'completed' && result.total === 0) {
+                        alert(result.summary || 'Nothing changed in WFM since the last import.');
+                        return;
+                      }
                     }
 
                     // Step 4: load review items.
@@ -1402,6 +1426,22 @@ export async function onRequestGet(context) {
                     this.checkProgress = '';
                     this.busy = false;
                   }
+                },
+
+                async _pollDeltaStatus(runId) {
+                  const MAX_POLLS = 60;
+                  for (let i = 0; i < MAX_POLLS; i++) {
+                    await new Promise(r => setTimeout(r, 3000));
+                    try {
+                      const res = await fetch('/settings/wfm-import/delta/status?run_id=' + runId, {
+                        credentials: 'same-origin',
+                      });
+                      const s = await res.json();
+                      if (s.ready) return s;
+                    } catch { /* retry */ }
+                  }
+                  alert('Timed out waiting for diff to complete.');
+                  return null;
                 },
 
                 async _loadReviewItems(runId) {
