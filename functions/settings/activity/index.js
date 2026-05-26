@@ -227,7 +227,7 @@ async function renderTimeline(db) {
         </tfoot>
       </table>
     </div>
-    <script>${raw(listScript('pipeline.activity.v1', 'when', 'desc'))}</script>
+    <script>${raw(listScript('pipeline.activity.v2', 'when', 'desc'))}</script>
     ${raw(liveScript(newestAt))}
   `;
 }
