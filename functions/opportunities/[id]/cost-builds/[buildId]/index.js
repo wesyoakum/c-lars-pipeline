@@ -327,6 +327,14 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
           ${kc.dl   ? categoryRow('dl',    'Direct Labor (DL)',      build.dl_user_cost,    auto.dl,    linked.labor ? notes.dl : (auto.dl !== null ? notes.dl : ''),    linked.labor, eff.dl)    : ''}
           ${kc.imoh ? categoryRow('imoh',  'Indirect Material + OH', build.imoh_user_cost,  auto.imoh,  auto.imoh !== null ? notes.imoh : '',                           false,        eff.imoh)  : ''}
           ${kc.other? categoryRow('other', 'Other',                  build.other_user_cost, auto.other, auto.other !== null ? notes.other : '',                          false,        eff.other) : ''}
+          ${pricing.hiddenCosts.imohPct > 0 ? html`
+          <tr class="muted" style="font-size:0.85em">
+            <td>IMOH (included)</td>
+            <td class="num" id="cb-hidden-imoh">${fmtDollar(pricing.hiddenCosts.imoh)}</td>
+            <td class="num">${fmtPct(pricing.hiddenCosts.imohPct, 1)}</td>
+            <td class="num">${pctOf(pricing.hiddenCosts.imoh, eff.targetPrice)}</td>
+            <td class="num">${pctOf(pricing.hiddenCosts.imoh, eff.quote)}</td>
+          </tr>` : ''}
         </tbody>
         <tfoot>
           <tr>
@@ -338,6 +346,10 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
           </tr>
         </tfoot>
       </table>
+      ${pricing.hiddenCosts.imohPct > 0 ? html`
+      <p class="muted" style="font-size:0.75rem; margin-top:0.4rem">
+        Total includes ${fmtPct(pricing.hiddenCosts.imohPct, 1)} IMOH on quote price for 28.5% target margin.
+      </p>` : ''}
 
       <div class="reference-estimates">
         <div class="ref-heading">Reference Estimates</div>

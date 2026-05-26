@@ -91,7 +91,14 @@ export { DEFAULT_SETTINGS };
 
 export const KIND_CONFIG = {
   new_build:         { dm: true,  dl: true,  imoh: true,  other: true,  laborTab: true,  dmTab: true  },
-  buy_ship:          { dm: true,  dl: false, imoh: false, other: true,  laborTab: false, dmTab: true  },
+  buy_ship:          { dm: true,  dl: false, imoh: false, other: true,  laborTab: false, dmTab: true,
+    // IMOH is baked into the quote price, not editable. The visible
+    // cost (DM + Other) is 55% of quote; hidden IMOH is 16.5%; margin
+    // is 28.5%. DM target overrides to 54.5% so auto-fill from DM
+    // produces the right quote price.
+    hiddenImohPct: 0.165,
+    targetPctOverride: { dm: 0.545 },
+  },
   cylinder_buy_ship: { dm: true,  dl: true,  imoh: false, other: true,  laborTab: true,  dmTab: true  },
   cylinder_build:    { dm: true,  dl: true,  imoh: true,  other: true,  laborTab: true,  dmTab: true  },
   refurb:            { dm: true,  dl: true,  imoh: true,  other: true,  laborTab: true,  dmTab: true  },
@@ -202,13 +209,19 @@ export function computePricing(inputs, settings, options = {}) {
   // Per-kind active categories — inactive categories are excluded from
   // target %, auto-fill, and effective values.
   const active = options.activeCategories || { dm: true, dl: true, imoh: true, other: true };
+  const overrides = options.targetPctOverride || {};
 
-  const pDm    = active.dm    ? s.targetPct.dm    : 0;
-  const pDl    = active.dl    ? s.targetPct.dl    : 0;
-  const pImoh  = active.imoh  ? s.targetPct.imoh  : 0;
-  const pOther = active.other ? s.targetPct.other : 0;
+  let pDm    = active.dm    ? (overrides.dm    ?? s.targetPct.dm)    : 0;
+  let pDl    = active.dl    ? (overrides.dl    ?? s.targetPct.dl)    : 0;
+  let pImoh  = active.imoh  ? (overrides.imoh  ?? s.targetPct.imoh)  : 0;
+  let pOther = active.other ? (overrides.other ?? s.targetPct.other) : 0;
   const pDmDl  = pDm + pDl;
-  const totalTargetPct = pDm + pDl + pImoh + pOther;
+
+  // Hidden IMOH: baked into the quote price but not user-editable.
+  // Added to totalTargetPct so targetPrice = totalCost / 0.715 still
+  // produces the correct 28.5% margin.
+  const hiddenImohPct = options.hiddenImohPct || 0;
+  const totalTargetPct = pDm + pDl + pImoh + pOther + hiddenImohPct;
 
   const dmLink    = normNum(inputs?.dmLibraryTotal);
   const laborLink = normNum(inputs?.laborCalcTotal);
@@ -261,11 +274,16 @@ export function computePricing(inputs, settings, options = {}) {
   const other = active.other ? (otherUser !== null ? otherUser : otherAuto) : null;
   const quote = quoteUser !== null ? quoteUser : quoteAuto;
 
+  // Hidden IMOH: computed from the effective quote price, included in
+  // totalCost but never user-editable (buy_ship kind).
+  const hiddenImoh = (hiddenImohPct > 0 && quote !== null && quote > 0)
+    ? quote * hiddenImohPct : null;
+
   // Total cost: null when literally nothing is known. Otherwise treat
   // unknown categories as 0 (same as calculator).
   const anyCostKnown = (dm !== null) || (dl !== null) || (imoh !== null) || (other !== null);
   const totalCost = anyCostKnown
-    ? ((dm || 0) + (dl || 0) + (imoh || 0) + (other || 0))
+    ? ((dm || 0) + (dl || 0) + (imoh || 0) + (other || 0) + (hiddenImoh || 0))
     : null;
 
   const targetPrice = (totalCost !== null && totalCost > 0)
@@ -341,6 +359,7 @@ export function computePricing(inputs, settings, options = {}) {
     references: { fromQuote, fromDm, fromDmDl },
     targetPct: { dm: pDm, dl: pDl, imoh: pImoh, other: pOther, total: totalTargetPct },
     linked: { dm: useDmLib, labor: useLaborLib },
+    hiddenCosts: { imoh: hiddenImoh, imohPct: hiddenImohPct },
   };
 }
 
@@ -475,7 +494,11 @@ export function computeFromBundle(bundle, settings) {
       laborCalcTotal,
     },
     s,
-    { activeCategories }
+    {
+      activeCategories,
+      hiddenImohPct: kc.hiddenImohPct || 0,
+      targetPctOverride: kc.targetPctOverride || null,
+    }
   );
 
   return {

@@ -241,6 +241,7 @@ export async function onRequestPost(context) {
         notes: pricing.notes,
         auto: pricing.auto,
         linked: pricing.linked,
+        hiddenCosts: pricing.hiddenCosts,
       },
       totals,
       wcCosts,
