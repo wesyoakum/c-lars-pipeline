@@ -4,8 +4,9 @@
 //
 // Hard-delete all WFM-imported rows (external_source LIKE 'wfm%')
 // across every table. Preserves Pipeline-native records. Also clears
-// the wfm_import_runs, wfm_import_plans, wfm_import_pending, and
-// wfm_import_snapshots tables so the next full import starts clean.
+// the wfm_import_runs, wfm_import_plans, wfm_import_pending,
+// wfm_import_snapshots, and wfm_snapshots tables, plus R2 snapshot
+// files, so the next full import starts clean.
 //
 // GET returns a dry-run preview with counts per table.
 // POST executes the wipe.
@@ -14,6 +15,7 @@
 
 import { hasRole } from '../../lib/auth.js';
 import { all, run } from '../../lib/db.js';
+import { deleteAllSnapshots } from '../../lib/wfm-snapshot.js';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
@@ -47,6 +49,7 @@ const INFRA_TABLES = [
   'wfm_import_plans',
   'wfm_import_pending',
   'wfm_import_snapshots',
+  'wfm_snapshots',
 ];
 
 async function countWfm(db, table) {
@@ -123,9 +126,18 @@ export async function onRequestPost(context) {
     }
   }
 
+  // Delete R2 snapshot files
+  let r2Deleted = 0;
+  try {
+    r2Deleted = await deleteAllSnapshots(env.DOCS, env.DB);
+  } catch (e) {
+    errors.push(`R2 snapshots: ${e.message}`);
+  }
+
   return json({
     ok: true,
     wiped: counts,
+    r2_files_deleted: r2Deleted,
     errors: errors.length > 0 ? errors : undefined,
     message: 'WFM data wiped. Ready for reimport.',
   });

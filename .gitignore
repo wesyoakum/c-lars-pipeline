@@ -25,3 +25,6 @@ node_modules/
 
 # Local research / scratch artifacts (e.g. cached OpenAPI specs)
 tmp/
+
+# D1 database save points
+savepoint-*.sql

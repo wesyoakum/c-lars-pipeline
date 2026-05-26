@@ -22,6 +22,7 @@ import { readFlash } from '../../lib/http.js';
 import { hasRole } from '../../lib/auth.js';
 import { settingsSubNav } from '../../lib/settings-subnav.js';
 import { one } from '../../lib/db.js';
+import { latestCompleteSnapshot } from '../../lib/wfm-snapshot.js';
 
 export async function onRequestGet(context) {
   const { env, data, request } = context;
@@ -36,12 +37,15 @@ export async function onRequestGet(context) {
   const url = new URL(request.url);
 
   // Credential status — single-row config table.
-  const creds = await one(env.DB,
-    `SELECT refresh_token IS NOT NULL AS has_refresh,
-            org_id,
-            access_expires_at,
-            updated_at
-       FROM wfm_credentials WHERE id = 1`);
+  const [creds, lastSnapshot] = await Promise.all([
+    one(env.DB,
+      `SELECT refresh_token IS NOT NULL AS has_refresh,
+              org_id,
+              access_expires_at,
+              updated_at
+         FROM wfm_credentials WHERE id = 1`),
+    latestCompleteSnapshot(env.DB),
+  ]);
 
   const hasOauthApp = !!(env.WFM_CLIENT_ID && env.WFM_CLIENT_SECRET);
   const hasRefresh  = !!(creds && creds.has_refresh);
@@ -223,10 +227,17 @@ export async function onRequestGet(context) {
               </label>
               <button type="button" class="btn"
                       @click="deltaReviewStart()"
-                      :disabled="busy || reviewMode || (fullRun && fullRun.status === 'in_progress')"
+                      :disabled="busy || replayBusy || reviewMode || (fullRun && fullRun.status === 'in_progress')"
                       title="Fetch WFM data and show changes for review before importing.">
                 <span x-show="!busy">Check for changes</span>
                 <span x-show="busy">Checking…</span>
+              </button>
+              <button type="button" class="btn" x-show="lastSnapshotId"
+                      @click="replaySnapshot(lastSnapshotId)"
+                      :disabled="busy || replayBusy || reviewMode || (fullRun && fullRun.status === 'in_progress')"
+                      title="Re-run diffs from the last snapshot without fetching from WFM.">
+                <span x-show="!replayBusy">Replay snapshot</span>
+                <span x-show="replayBusy">Replaying…</span>
               </button>
               <button type="button" class="btn primary"
                       @click="fullImportStart()"
@@ -344,12 +355,14 @@ export async function onRequestGet(context) {
             <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem">
               <h3 style="margin:0;font-size:.9rem;font-weight:600">Review WFM Changes</h3>
               <span class="muted" style="font-size:.8rem" x-text="reviewItems.length + ' item(s)'"></span>
+              <span x-show="reviewSnapshotId" class="muted" style="font-size:.75rem"
+                    x-text="'Snapshot: ' + (reviewSnapshotId || '').slice(0,8)"></span>
               <span style="flex:1"></span>
               <button class="btn small" @click="reviewBulkAcceptAll()" :disabled="reviewApplying">Accept all</button>
               <button class="btn small" @click="reviewBulkDismissAll()" :disabled="reviewApplying">Dismiss all</button>
               <button class="btn small primary" @click="reviewApply()" :disabled="reviewApplying || reviewApprovedCount === 0"
                       x-text="reviewApplying ? 'Applying…' : 'Apply ' + reviewApprovedCount + ' approved'"></button>
-              <button class="btn small" @click="reviewMode = false; reviewItems = [];" :disabled="reviewApplying">Close</button>
+              <button class="btn small" @click="reviewMode = false; reviewItems = []; reviewSnapshotId = null;" :disabled="reviewApplying">Close</button>
             </div>
 
             <template x-if="reviewItems.length === 0">
@@ -1212,8 +1225,11 @@ export async function onRequestGet(context) {
                 // ---- Delta review state ----
                 reviewMode: false,
                 reviewRunId: null,
+                reviewSnapshotId: null,
                 reviewItems: [],
                 reviewApplying: false,
+                replayBusy: false,
+                lastSnapshotId: ${JSON.stringify(lastSnapshot?.id || null)},
                 get reviewApprovedCount() {
                   return this.reviewItems.filter(i => i._decision === 'approve').length;
                 },
@@ -1236,6 +1252,8 @@ export async function onRequestGet(context) {
                       return;
                     }
                     this.reviewRunId = j.run_id;
+                    this.reviewSnapshotId = j.snapshot_id || null;
+                    if (j.snapshot_id) this.lastSnapshotId = j.snapshot_id;
                     // Fetch the pending items for review.
                     const rRes = await fetch('/settings/wfm-import/delta/review?run_id=' + j.run_id, {
                       credentials: 'same-origin',
@@ -1303,6 +1321,45 @@ export async function onRequestGet(context) {
                     alert('Apply failed: ' + (e.message || e));
                   } finally {
                     this.reviewApplying = false;
+                  }
+                },
+
+                async replaySnapshot(snapshotId) {
+                  if (!snapshotId) return;
+                  if (!confirm('Replay snapshot ' + snapshotId.slice(0, 8) + '? This re-runs diffs against current Pipeline state without hitting WFM.')) return;
+                  this.replayBusy = true;
+                  try {
+                    const res = await fetch('/settings/wfm-import/delta/replay', {
+                      method: 'POST', credentials: 'same-origin',
+                      headers: { 'content-type': 'application/json' },
+                      body: JSON.stringify({ snapshot_id: snapshotId }),
+                    });
+                    const j = await res.json();
+                    if (!j.ok) {
+                      alert('Replay failed: ' + (j.message || j.error || 'unknown'));
+                      return;
+                    }
+                    if (j.total === 0) {
+                      alert(j.message || 'No changes found from replay.');
+                      return;
+                    }
+                    this.reviewRunId = j.run_id;
+                    this.reviewSnapshotId = j.snapshot_id || null;
+                    const rRes = await fetch('/settings/wfm-import/delta/review?run_id=' + j.run_id, {
+                      credentials: 'same-origin',
+                    });
+                    const rj = await rRes.json();
+                    if (rj.ok) {
+                      this.reviewItems = (rj.items || []).map(item => ({
+                        ...item,
+                        _decision: item.status === 'approved' ? 'approve' : null,
+                      }));
+                      this.reviewMode = true;
+                    }
+                  } catch (e) {
+                    alert('Replay failed: ' + (e.message || e));
+                  } finally {
+                    this.replayBusy = false;
                   }
                 },
 
