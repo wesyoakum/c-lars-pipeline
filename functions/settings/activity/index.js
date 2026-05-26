@@ -93,7 +93,7 @@ export async function onRequestGet(context) {
   try {
     // Load users for filter dropdown
     const users = await all(env.DB,
-      `SELECT id, email, display_name FROM users WHERE deleted_at IS NULL ORDER BY display_name`);
+      `SELECT id, email, display_name FROM users WHERE active = 1 ORDER BY display_name`);
 
     if (tab === 'timeline') {
       body = await renderTimeline(env.DB, { users, filterUser, filterEvent, filterEntity, filterFrom, filterTo, cursor });
@@ -280,7 +280,7 @@ async function renderByUser(db, { users }) {
               WHERE pv.user_id = u.id
                 AND pv.at >= datetime('now', '-7 days')) AS views_7d
        FROM users u
-      WHERE u.deleted_at IS NULL
+      WHERE u.active = 1
       ORDER BY u.last_seen_at IS NULL, u.last_seen_at DESC`
   );
 
