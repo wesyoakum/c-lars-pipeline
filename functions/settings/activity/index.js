@@ -112,15 +112,16 @@ export async function onRequestGet(context) {
     { key: 'by-user', label: 'By User' },
     { key: 'adoption', label: 'Adoption' },
   ];
+  const tabLinks = tabs.map(t => `
+    <a href="/settings/activity?tab=${t.key}"
+       style="padding:0.5rem 1rem;text-decoration:none;font-weight:${t.key === tab ? '600' : '400'};
+              color:${t.key === tab ? 'var(--primary)' : 'var(--text-muted)'};
+              border-bottom:${t.key === tab ? '2px solid var(--primary)' : '2px solid transparent'};
+              margin-bottom:-2px">${t.label}</a>
+  `).join('');
   const tabNav = html`
     <div style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:1rem">
-      ${tabs.map(t => `
-        <a href="/settings/activity?tab=${t.key}"
-           style="padding:0.5rem 1rem;text-decoration:none;font-weight:${t.key === tab ? '600' : '400'};
-                  color:${t.key === tab ? 'var(--primary)' : 'var(--text-muted)'};
-                  border-bottom:${t.key === tab ? '2px solid var(--primary)' : '2px solid transparent'};
-                  margin-bottom:-2px">${t.label}</a>
-      `).join('')}
+      ${raw(tabLinks)}
     </div>
   `;
 
