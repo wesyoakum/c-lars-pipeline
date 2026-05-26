@@ -13,10 +13,9 @@
 
 import { hasRole } from '../../../lib/auth.js';
 import { all, one, run, stmt, batch } from '../../../lib/db.js';
-import { apiGet, recordList, getAccessToken } from '../../../lib/wfm-client.js';
 import { computeDiff, displayName } from './diff.js';
 import {
-  readSnapshotKind, writeSnapshotKind, writeManifest,
+  readSnapshotKind, writeManifest,
   completeSnapshotRow, failSnapshotRow,
 } from '../../../lib/wfm-snapshot.js';
 
@@ -31,26 +30,6 @@ function json(data, status = 200) {
 
 function nowIso() { return new Date().toISOString(); }
 function newId()  { return crypto.randomUUID(); }
-
-// ---------- Detail fetcher ----------
-
-async function fetchDetail(env, kind, uuid, cache) {
-  const key = kind + ':' + uuid;
-  if (cache.has(key)) return cache.get(key);
-  const pathMap = {
-    client: '/client.api/get/',
-    lead:   '/lead.api/get/',
-    quote:  '/quote.api/get/',
-    job:    '/job.api/get/',
-  };
-  const singularMap = { client: 'Client', lead: 'Lead', quote: 'Quote', job: 'Job' };
-  const path = pathMap[kind];
-  if (!path) { cache.set(key, null); return null; }
-  const r = await apiGet(env, path + encodeURIComponent(uuid));
-  const result = r.ok ? (recordList(r.body, singularMap[kind])[0] || null) : null;
-  cache.set(key, result);
-  return result;
-}
 
 // ---------- Load stored data ----------
 
@@ -115,9 +94,7 @@ export async function onRequestPost(context) {
   const t0 = Date.now();
 
   try {
-    await getAccessToken(env);
-
-    // Load snapshot data from R2.
+    // Load snapshot data from R2 (list + details already fetched by /delta/fetch).
     const [clientData, leadData, quoteData, jobData] = await Promise.all([
       readSnapshotKind(env.DOCS, snapshotId, 'client'),
       readSnapshotKind(env.DOCS, snapshotId, 'lead'),
@@ -133,6 +110,14 @@ export async function onRequestPost(context) {
     const leads = leadData.list;
     const quotes = quoteData.list;
     const jobs = jobData.list;
+
+    // Build detail lookup from snapshot (populated by /delta/fetch details phase).
+    const detailLookup = {
+      client: clientData.details || {},
+      lead:   leadData.details || {},
+      quote:  quoteData.details || {},
+      job:    jobData.details || {},
+    };
 
     // Load Pipeline state.
     const [stored, pipelineRows, snapshots, dismissed] = await Promise.all([
@@ -163,21 +148,26 @@ export async function onRequestPost(context) {
       try { snapshotObjs.set(key, JSON.parse(jsonStr)); } catch { /* skip */ }
     }
 
-    const changedRecords = [];
+    // Single pass: use detail records from snapshot for accurate diffs.
+    const pendingRows = [];
+    const supersedeBatch = [];
+
     for (const [kind, records, storedMap] of KIND_ORDER) {
       const ck = kindToCountKey[kind];
       const entityType = KIND_TO_ENTITY[kind];
+      const kindDetails = detailLookup[kind];
+
       for (const rec of records) {
         if (!rec.UUID) continue;
 
         const isNew = storedMap.get(rec.UUID) == null;
-        if (isNew) {
-          counts[ck].new++;
-          changedRecords.push({ kind, uuid: rec.UUID, listRec: rec, pipelineRow: null, snapshotPayload: null });
-          continue;
-        }
+        const pipelineRow = isNew ? null : ((pipelineRows[kind] || new Map()).get(rec.UUID) || null);
 
-        const pipelineRow = (pipelineRows[kind] || new Map()).get(rec.UUID) || null;
+        // Use detail record from snapshot (full fields); fall back to list record.
+        const detail = kindDetails[rec.UUID] || rec;
+        const detailJson = JSON.stringify(detail);
+
+        // Load merge-base snapshot.
         const snapKey = entityType + ':' + rec.UUID;
         let snapshotPayload = snapshotObjs.get(snapKey) || null;
         if (!snapshotPayload && pipelineRow) {
@@ -187,97 +177,62 @@ export async function onRequestPost(context) {
           }
         }
 
-        const prelim = computeDiff(entityType, rec, pipelineRow, snapshotPayload);
-        if (prelim.allUnchanged) continue;
+        // Diff using the full detail record.
+        const { diff, hasConflict, hasAutoApply, isInsert, allUnchanged } = computeDiff(
+          entityType, detail, pipelineRow, snapshotPayload
+        );
 
-        counts[ck].changed++;
-        changedRecords.push({ kind, uuid: rec.UUID, listRec: rec, pipelineRow, snapshotPayload });
+        if (allUnchanged && !isInsert) continue;
+
+        if (isNew) counts[ck].new++;
+        else counts[ck].changed++;
+
+        // Dismiss check.
+        const dismissKey = entityType + ':' + rec.UUID;
+        const dismissedPayload = dismissed.get(dismissKey);
+        if (dismissedPayload && dismissedPayload === detailJson) {
+          counts[ck].dismissed_skipped++;
+          continue;
+        }
+
+        const allCase3 = !isInsert && !hasConflict &&
+          Object.values(diff).every(d => d.case === 1 || d.case === 3 || d.case === 4 || d.case === 7);
+        const autoApproved = allCase3 && hasAutoApply;
+        if (autoApproved) counts[ck].auto_approved++;
+
+        supersedeBatch.push(stmt(env.DB,
+          `UPDATE wfm_import_pending SET status = 'superseded', decided_at = ?
+            WHERE entity_type = ? AND external_id = ? AND status = 'pending'`,
+          [startedAt, entityType, rec.UUID]));
+
+        pendingRows.push({
+          id:                    newId(),
+          run_id:                runId,
+          entity_type:           entityType,
+          external_id:           rec.UUID,
+          action:                isInsert ? 'insert' : 'update',
+          pipeline_row_id:       pipelineRow?.id || null,
+          wfm_payload_json:      detailJson,
+          pipeline_snapshot_json: pipelineRow ? JSON.stringify(pipelineRow) : null,
+          fields_diff_json:      JSON.stringify(diff),
+          status:                autoApproved ? 'approved' : 'pending',
+          decided_fields_json:   autoApproved ? JSON.stringify(
+            Object.fromEntries(Object.keys(diff).map(k => [k, 'wfm']))
+          ) : null,
+          created_at:            startedAt,
+          _name:                 displayName(entityType, detail),
+        });
       }
-    }
-
-    // Phase 3 — fetch detail for changed records.
-    const fetchCache = new Map();
-    const pendingRows = [];
-    const supersedeBatch = [];
-
-    for (const { kind, uuid, listRec, pipelineRow, snapshotPayload } of changedRecords) {
-      const entityType = KIND_TO_ENTITY[kind];
-      const ck = kindToCountKey[kind];
-
-      let detail = listRec;
-      if (kind !== 'staff') {
-        const fetched = await fetchDetail(env, kind, uuid, fetchCache);
-        if (fetched) detail = fetched;
-      }
-      const detailJson = JSON.stringify(detail);
-
-      const dismissKey = entityType + ':' + uuid;
-      const dismissedPayload = dismissed.get(dismissKey);
-      if (dismissedPayload && dismissedPayload === detailJson) {
-        counts[ck].dismissed_skipped++;
-        continue;
-      }
-
-      const { diff, hasConflict, hasAutoApply, isInsert, allUnchanged } = computeDiff(
-        entityType, detail, pipelineRow, snapshotPayload
-      );
-
-      if (allUnchanged && !isInsert) continue;
-
-      const allCase3 = !isInsert && !hasConflict &&
-        Object.values(diff).every(d => d.case === 1 || d.case === 3 || d.case === 4 || d.case === 7);
-      const autoApproved = allCase3 && hasAutoApply;
-      if (autoApproved) counts[ck].auto_approved++;
-
-      supersedeBatch.push(stmt(env.DB,
-        `UPDATE wfm_import_pending SET status = 'superseded', decided_at = ?
-          WHERE entity_type = ? AND external_id = ? AND status = 'pending'`,
-        [startedAt, entityType, uuid]));
-
-      pendingRows.push({
-        id:                    newId(),
-        run_id:                runId,
-        entity_type:           entityType,
-        external_id:           uuid,
-        action:                isInsert ? 'insert' : 'update',
-        pipeline_row_id:       pipelineRow?.id || null,
-        wfm_payload_json:      detailJson,
-        pipeline_snapshot_json: pipelineRow ? JSON.stringify(pipelineRow) : null,
-        fields_diff_json:      JSON.stringify(diff),
-        status:                autoApproved ? 'approved' : 'pending',
-        decided_fields_json:   autoApproved ? JSON.stringify(
-          Object.fromEntries(Object.keys(diff).map(k => [k, 'wfm']))
-        ) : null,
-        created_at:            startedAt,
-        _name:                 displayName(entityType, detail),
-      });
     }
 
     const totalPending = pendingRows.length;
 
-    // Update snapshot with detail data.
-    const snapshotData = {
-      client:  { list: clients,  details: {} },
-      lead:    { list: leads,    details: {} },
-      quote:   { list: quotes,   details: {} },
-      job:     { list: jobs,     details: {} },
-    };
-    for (const [key, val] of fetchCache) {
-      if (!val) continue;
-      const [kind, uuid] = key.split(':');
-      if (snapshotData[kind]) snapshotData[kind].details[uuid] = val;
-    }
-    // Re-write kinds that have details added.
-    for (const kind of ['client', 'lead', 'quote', 'job']) {
-      if (Object.keys(snapshotData[kind].details).length > 0) {
-        await writeSnapshotKind(env.DOCS, snapshotId, kind, snapshotData[kind]);
-      }
-    }
+    // Finalize snapshot (details already written by /delta/fetch).
     const snapshotCounts = {
-      client:  { list: clients.length, details: Object.keys(snapshotData.client.details).length },
-      lead:    { list: leads.length,   details: Object.keys(snapshotData.lead.details).length },
-      quote:   { list: quotes.length,  details: Object.keys(snapshotData.quote.details).length },
-      job:     { list: jobs.length,    details: Object.keys(snapshotData.job.details).length },
+      client:  { list: clients.length, details: Object.keys(detailLookup.client).length },
+      lead:    { list: leads.length,   details: Object.keys(detailLookup.lead).length },
+      quote:   { list: quotes.length,  details: Object.keys(detailLookup.quote).length },
+      job:     { list: jobs.length,    details: Object.keys(detailLookup.job).length },
     };
     await writeManifest(env.DOCS, snapshotId, {
       id: snapshotId, created_at: startedAt, created_by: user?.email,

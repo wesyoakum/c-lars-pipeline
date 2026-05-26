@@ -2,22 +2,25 @@
 //
 // POST /settings/wfm-import/delta/fetch
 //
-// Fetches a single WFM kind (client/lead/quote/job) and writes it
-// to the R2 snapshot. Called by the browser once per kind to stay
-// within the 30s Pages Functions timeout.
+// Two phases per kind:
+//   { snapshot_id, kind, phase: 'list' }    — fetch WFM list, write to R2
+//   { snapshot_id, kind, phase: 'details' } — fetch next batch of details, update R2
 //
-// Body: { snapshot_id, kind }
-// Returns: { ok, kind, count }
+// The browser calls 'list' once, then loops 'details' until complete.
+// Each request stays under 30s.
 //
 // Admin-only.
 
 import { hasRole } from '../../../lib/auth.js';
 import { apiGet, recordList, getAccessToken } from '../../../lib/wfm-client.js';
-import { writeSnapshotKind } from '../../../lib/wfm-snapshot.js';
+import {
+  readSnapshotKind, writeSnapshotKind,
+} from '../../../lib/wfm-snapshot.js';
 
 const LIST_PAGE_SIZE = 100;
 const SINGLE_SHOT_PAGE_SIZE = 1000;
 const MAX_LIST_PAGES = 50;
+const DETAIL_BATCH_SIZE = 15;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -63,17 +66,17 @@ async function fetchSingleShot(env, basePath, primaryKey) {
   return recordList(r.body, primaryKey);
 }
 
-async function fetchKind(env, basePath, primaryKey) {
+async function fetchKindList(env, basePath, primaryKey) {
   const total = await readTotalRecords(env, basePath);
   if (total === null) return await fetchSingleShot(env, basePath, primaryKey);
   return await fetchAllPaginated(env, basePath, primaryKey);
 }
 
-const KIND_CONFIG = {
-  client: { path: '/client.api/list',  key: 'Client' },
-  lead:   { path: null, key: 'Lead' },   // needs date range
-  quote:  { path: null, key: 'Quote' },
-  job:    { path: null, key: 'Job' },
+const KIND_META = {
+  client: { listPath: '/client.api/list',  key: 'Client', detailPath: '/client.api/get/', singular: 'Client' },
+  lead:   { listPath: null, key: 'Lead',   detailPath: '/lead.api/get/',   singular: 'Lead' },
+  quote:  { listPath: null, key: 'Quote',  detailPath: '/quote.api/get/',  singular: 'Quote' },
+  job:    { listPath: null, key: 'Job',    detailPath: '/job.api/get/',    singular: 'Job' },
 };
 
 export async function onRequestPost(context) {
@@ -86,30 +89,75 @@ export async function onRequestPost(context) {
 
   const snapshotId = body?.snapshot_id;
   const kind = body?.kind;
-  if (!snapshotId || !kind) {
-    return json({ ok: false, error: 'snapshot_id and kind required' }, 400);
-  }
-  if (!KIND_CONFIG[kind]) {
-    return json({ ok: false, error: 'invalid kind: ' + kind }, 400);
+  const phase = body?.phase || 'list';
+  if (!snapshotId || !kind || !KIND_META[kind]) {
+    return json({ ok: false, error: 'snapshot_id and valid kind required' }, 400);
   }
 
   try {
     await getAccessToken(env);
+    const meta = KIND_META[kind];
 
-    const dateRange = 'from=2020-01-01&to=2027-12-31';
-    const pathMap = {
-      client: '/client.api/list',
-      lead:   `/lead.api/list?${dateRange}`,
-      quote:  `/quote.api/list?${dateRange}`,
-      job:    `/job.api/list?${dateRange}`,
-    };
+    if (phase === 'list') {
+      // Fetch the WFM list for this kind.
+      const dateRange = 'from=2020-01-01&to=2027-12-31';
+      const path = kind === 'client' ? meta.listPath : `/${kind}.api/list?${dateRange}`;
+      const records = await fetchKindList(env, path, meta.key);
 
-    const records = await fetchKind(env, pathMap[kind], KIND_CONFIG[kind].key);
+      // Write list to R2 (details empty — filled in by 'details' phase).
+      await writeSnapshotKind(env.DOCS, snapshotId, kind, { list: records, details: {} });
 
-    // Write to R2 snapshot (list only — details fetched during diff for changed records).
-    await writeSnapshotKind(env.DOCS, snapshotId, kind, { list: records, details: {} });
+      return json({
+        ok: true, kind, phase: 'list',
+        count: records.length,
+        details_done: 0,
+        details_total: records.length,
+        complete: false,
+      });
+    }
 
-    return json({ ok: true, kind, count: records.length });
+    if (phase === 'details') {
+      // Read current snapshot to find which details still need fetching.
+      const current = await readSnapshotKind(env.DOCS, snapshotId, kind);
+      if (!current || !current.list) {
+        return json({ ok: false, error: 'Run list phase first for ' + kind }, 400);
+      }
+
+      const details = current.details || {};
+      const remaining = current.list.filter(r => r.UUID && !details[r.UUID]);
+
+      if (remaining.length === 0) {
+        return json({
+          ok: true, kind, phase: 'details',
+          details_done: Object.keys(details).length,
+          details_total: current.list.length,
+          complete: true,
+        });
+      }
+
+      // Fetch next batch of details.
+      const batch = remaining.slice(0, DETAIL_BATCH_SIZE);
+      for (const rec of batch) {
+        const r = await apiGet(env, meta.detailPath + encodeURIComponent(rec.UUID));
+        if (r.ok) {
+          const detail = recordList(r.body, meta.singular)[0];
+          if (detail) details[rec.UUID] = detail;
+        }
+      }
+
+      // Write updated snapshot.
+      await writeSnapshotKind(env.DOCS, snapshotId, kind, { list: current.list, details });
+
+      const done = Object.keys(details).length;
+      return json({
+        ok: true, kind, phase: 'details',
+        details_done: done,
+        details_total: current.list.length,
+        complete: done >= current.list.length,
+      });
+    }
+
+    return json({ ok: false, error: 'invalid phase: ' + phase }, 400);
   } catch (err) {
     return json({ ok: false, error: err?.message || String(err) }, 500);
   }

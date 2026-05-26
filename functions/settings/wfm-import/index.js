@@ -1360,19 +1360,39 @@ export async function onRequestGet(context) {
                     this.reviewSnapshotId = snapshot_id;
                     this.lastSnapshotId = snapshot_id;
 
-                    // Step 2: fetch each kind from WFM (one request per kind).
+                    // Step 2: fetch each kind from WFM (list + details).
                     const kinds = ['client', 'lead', 'quote', 'job'];
                     for (const kind of kinds) {
-                      this.checkProgress = 'Fetching ' + kind + 's…';
-                      const fRes = await fetch('/settings/wfm-import/delta/fetch', {
+                      // Phase 1: fetch list.
+                      this.checkProgress = 'Fetching ' + kind + ' list…';
+                      const listRes = await fetch('/settings/wfm-import/delta/fetch', {
                         method: 'POST', credentials: 'same-origin',
                         headers: { 'content-type': 'application/json' },
-                        body: JSON.stringify({ snapshot_id, kind }),
+                        body: JSON.stringify({ snapshot_id, kind, phase: 'list' }),
                       });
-                      const fj = await fRes.json();
-                      if (!fj.ok) {
-                        alert('Failed fetching ' + kind + 's: ' + (fj.error || 'unknown'));
+                      const listJ = await listRes.json();
+                      if (!listJ.ok) {
+                        alert('Failed fetching ' + kind + ' list: ' + (listJ.error || 'unknown'));
                         return;
+                      }
+
+                      // Phase 2: fetch details in batches.
+                      let complete = false;
+                      while (!complete) {
+                        this.checkProgress = 'Fetching ' + kind + ' details… ' + (listJ._done || 0) + '/' + listJ.count;
+                        const detRes = await fetch('/settings/wfm-import/delta/fetch', {
+                          method: 'POST', credentials: 'same-origin',
+                          headers: { 'content-type': 'application/json' },
+                          body: JSON.stringify({ snapshot_id, kind, phase: 'details' }),
+                        });
+                        const detJ = await detRes.json();
+                        if (!detJ.ok) {
+                          alert('Failed fetching ' + kind + ' details: ' + (detJ.error || 'unknown'));
+                          return;
+                        }
+                        listJ._done = detJ.details_done;
+                        this.checkProgress = 'Fetching ' + kind + ' details… ' + detJ.details_done + '/' + detJ.details_total;
+                        complete = detJ.complete;
                       }
                     }
 
