@@ -359,7 +359,7 @@ async function upsertOpportunityFromLead(env, lead, accountId, contactId, ownerU
   // via a different path (old sample import used 'wfm', not 'wfm-lead').
   let existing = await one(env.DB,
     `SELECT id, number FROM opportunities
-      WHERE external_id = ? AND external_source IN ('wfm-lead','wfm','wfm-job','wfm-quote-orphan')`,
+      WHERE external_id = ? AND external_source IN ('wfm-lead','wfm','wfm-job','wfm-quote-orphan','wfm-job-orphan')`,
     [lead.UUID]);
   // Also match by title + account if UUID didn't hit (covers opps
   // originally created from a different WFM entity for the same deal).
@@ -429,8 +429,8 @@ async function upsertOpportunityFromLead(env, lead, accountId, contactId, ownerU
 async function findOpportunityForJob(env, job, accountId) {
   // Check if this job already has a linked opp from a previous import.
   let existing = await one(env.DB,
-    'SELECT id, number FROM opportunities WHERE external_source = ? AND external_id = ?',
-    ['wfm-job', job.UUID]);
+    'SELECT id, number FROM opportunities WHERE external_source IN (?, ?) AND external_id = ?',
+    ['wfm-job', 'wfm-job-orphan', job.UUID]);
   if (existing) return existing;
 
   // Path 1: trace via ApprovedQuoteUUID → quote → opportunity
@@ -451,7 +451,7 @@ async function findOpportunityForJob(env, job, accountId) {
     existing = await one(env.DB,
       `SELECT id, number FROM opportunities
         WHERE title = ? AND account_id = ? AND deleted_at IS NULL
-          AND external_source IN ('wfm', 'wfm-lead', 'wfm-quote-orphan')
+          AND external_source IN ('wfm', 'wfm-lead', 'wfm-quote-orphan', 'wfm-job-orphan')
         ORDER BY created_at LIMIT 1`,
       [s(job.Name), accountId]);
     if (existing) return existing;
@@ -462,7 +462,7 @@ async function findOpportunityForJob(env, job, accountId) {
     const candidates = await all(env.DB,
       `SELECT id, number FROM opportunities
         WHERE account_id = ? AND deleted_at IS NULL
-          AND external_source IN ('wfm', 'wfm-lead', 'wfm-quote-orphan')`,
+          AND external_source IN ('wfm', 'wfm-lead', 'wfm-quote-orphan', 'wfm-job-orphan')`,
       [accountId]);
     if (candidates.length === 1) return candidates[0];
   }
@@ -1008,6 +1008,94 @@ async function synthesizeOpportunityFromQuote(env, q, ctx) {
   return oppId;
 }
 
+// Synthesize a standalone opportunity from a job that has no parent
+// Lead or linked Quote in WFM. Mirrors synthesizeOpportunityFromQuote.
+// The account FK is auto-cascaded from job.Client.UUID.
+async function synthesizeOpportunityFromJob(env, job, ctx) {
+  const accountId = job.Client?.UUID
+    ? await ensureAccount(env, job.Client.UUID, ctx)
+    : null;
+  if (!accountId) return null;
+
+  const cacheKey = 'orphan-job:' + job.UUID;
+  if (ctx.oppByWfmUuid.has(cacheKey)) return ctx.oppByWfmUuid.get(cacheKey);
+
+  // Idempotent: re-keyed on (wfm-job-orphan, job.UUID).
+  let existing = await one(env.DB,
+    'SELECT id, number FROM opportunities WHERE external_source = ? AND external_id = ?',
+    ['wfm-job-orphan', job.UUID]);
+
+  // Check if a wfm or wfm-lead opp with the same title + account exists.
+  if (!existing && accountId && job.Name) {
+    existing = await one(env.DB,
+      `SELECT id, number FROM opportunities
+        WHERE title = ? AND account_id = ? AND deleted_at IS NULL
+          AND external_source IN ('wfm', 'wfm-lead', 'wfm-quote-orphan', 'wfm-job-orphan')
+        ORDER BY created_at LIMIT 1`,
+      [s(job.Name), accountId]);
+    if (existing) {
+      ctx.oppByWfmUuid.set(cacheKey, existing.id);
+      return existing.id;
+    }
+  }
+
+  const typeMap = CATEGORY_NAME_TO_TYPE[job.Type] || { type: 'spares', note: null };
+  const stage = JOB_STATE_TO_STAGE[job.State] || 'job_in_progress';
+  const contactId = job.Contact?.UUID
+    ? (ctx.contactByWfmUuid.get(job.Contact.UUID) || null)
+    : null;
+
+  const noteLine = '[WFM] Synthesized from orphan job ' +
+    (job.ID || job.UUID || '?') +
+    ' — no parent Lead/Quote in WFM at import time.';
+
+  const ts = nowIso();
+  const cols = {
+    title:               s(job.Name) || ('Job ' + (job.ID || job.UUID || '')),
+    description:         s(job.Description),
+    transaction_type:    typeMap.type,
+    stage,
+    estimated_value_usd: n(job.Budget),
+    account_id:          accountId,
+    primary_contact_id:  contactId,
+    notes_internal:      noteLine,
+    wfm_payload:         JSON.stringify(job),
+    deleted_at:          null,
+    updated_at:          ts,
+  };
+
+  let oppId, oppNumber;
+  if (existing) {
+    const setClause = Object.keys(cols).map((k) => `${k} = ?`).join(', ');
+    await run(env.DB,
+      `UPDATE opportunities SET ${setClause} WHERE id = ?`,
+      [...Object.values(cols), existing.id]);
+    oppId = existing.id; oppNumber = existing.number;
+  } else {
+    oppId = uuid();
+    oppNumber = 'WFM-J' + (s(job.ID) || job.UUID || oppId);
+    await run(env.DB,
+      `INSERT INTO opportunities
+         (id, number, external_source, external_id,
+          account_id, primary_contact_id,
+          title, description, transaction_type, stage,
+          estimated_value_usd,
+          notes_internal, wfm_payload,
+          stage_entered_at, created_at, updated_at)
+       VALUES (?, ?, 'wfm-job-orphan', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [oppId, oppNumber, job.UUID,
+       accountId, contactId,
+       cols.title, cols.description, cols.transaction_type, cols.stage,
+       cols.estimated_value_usd,
+       cols.notes_internal, cols.wfm_payload,
+       s(job.StartDate) || ts, s(job.StartDate) || ts, ts]);
+  }
+
+  ctx.oppByWfmUuid.set(cacheKey, oppId);
+  ctx.counts.opportunities_synthesized = (ctx.counts.opportunities_synthesized || 0) + 1;
+  return oppId;
+}
+
 // Find the opportunity for a job referenced by a quote's JobUUID.
 // Jobs never create their own opp — if we can't find one, return null
 // and the quote will fall through to the orphan synthesis path.
@@ -1170,8 +1258,8 @@ export async function processSamples(env, samples, options = {}) {
     'SELECT id, external_id FROM users WHERE external_source = ?', ['wfm']);
   for (const r of priorUsers) userByWfmUuid.set(r.external_id, r.id);
   const priorOpps = await all(env.DB,
-    'SELECT id, external_id FROM opportunities WHERE external_source IN (?, ?, ?)',
-    ['wfm-lead', 'wfm-job', 'wfm-quote-orphan']);
+    'SELECT id, external_id FROM opportunities WHERE external_source IN (?, ?, ?, ?)',
+    ['wfm-lead', 'wfm-job', 'wfm-quote-orphan', 'wfm-job-orphan']);
   for (const r of priorOpps) oppByWfmUuid.set(r.external_id, r.id);
 
   const counts = {
@@ -1391,11 +1479,19 @@ export async function processSamples(env, samples, options = {}) {
         }
       }
 
-      const opp = await findOpportunityForJob(env, job, accountId);
+      let opp = await findOpportunityForJob(env, job, accountId);
+      if (!opp) {
+        // Synthesize an orphan opportunity for this job.
+        const synthId = await synthesizeOpportunityFromJob(env, job, ctx);
+        if (synthId) {
+          opp = await one(env.DB, 'SELECT id, number FROM opportunities WHERE id = ?', [synthId]);
+          links.push({ url: '/opportunities/' + synthId, label: 'Orphan-job opp: ' + (job.Name || job.ID || '?') });
+        }
+      }
       if (!opp) {
         counts.skipped++;
         errors.push('job "' + (job?.Name || job?.ID || '?') +
-          '" skipped: no parent opportunity found (no matching quote, lead, or account opp)');
+          '" skipped: no parent opportunity and could not synthesize (no Client.UUID?)');
         continue;
       }
       await advanceOppFromJob(env, opp.id, job);
@@ -1453,7 +1549,7 @@ export async function onRequestPost(context) {
               AND q.deleted_at IS NULL
               AND q.number IS NOT NULL
          )
-         WHERE external_source IN ('wfm-lead', 'wfm-quote-orphan')
+         WHERE external_source IN ('wfm-lead', 'wfm-quote-orphan', 'wfm-job-orphan')
            AND deleted_at IS NULL
            AND EXISTS (
              SELECT 1 FROM quotes q2
