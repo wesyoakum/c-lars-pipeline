@@ -233,19 +233,14 @@ async function renderTimeline(db, { users, filterUser, filterEvent, filterEntity
     </form>
   `;
 
+  // Newest timestamp for live-poll cursor
+  const newestAt = display.length ? display[0].at : '';
+
   if (display.length === 0) {
-    return filterForm + '<p style="color:var(--text-muted)">No events found.</p>';
+    return filterForm + `<p style="color:var(--text-muted)">No events found.</p>${liveScript(newestAt)}`;
   }
 
-  const rows = display.map(e => `
-    <tr>
-      <td style="white-space:nowrap;font-size:0.8rem" title="${escape(e.at)}">${fmtRelative(e.at)}</td>
-      <td>${escape(e.user_name || e.user_email || '—')}</td>
-      <td>${eventBadge(e.event_type)}</td>
-      <td>${entityLink(e.entity_type, e.entity_id)}</td>
-      <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escape(e.summary || '')}</td>
-    </tr>
-  `).join('');
+  const rows = display.map(e => timelineRow(e)).join('');
 
   const nextLink = hasMore
     ? `<a href="/settings/activity?tab=timeline&cursor=${encodeURIComponent(nextCursor)}&user=${encodeURIComponent(filterUser)}&event=${encodeURIComponent(filterEvent)}&entity=${encodeURIComponent(filterEntity)}&from=${encodeURIComponent(filterFrom)}&to=${encodeURIComponent(filterTo)}" class="btn btn-sm" style="margin-top:0.5rem">Older &rarr;</a>`
@@ -258,10 +253,104 @@ async function renderTimeline(db, { users, filterUser, filterEvent, filterEntity
         <thead><tr>
           <th>When</th><th>User</th><th>Event</th><th>Entity</th><th>Summary</th>
         </tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody id="activity-tbody">${rows}</tbody>
       </table>
     </div>
     ${nextLink}
+    ${liveScript(newestAt)}
+  `;
+}
+
+function timelineRow(e) {
+  return `
+    <tr>
+      <td style="white-space:nowrap;font-size:0.8rem" title="${escape(e.at)}">${fmtRelative(e.at)}</td>
+      <td>${escape(e.user_name || e.user_email || '—')}</td>
+      <td>${eventBadge(e.event_type)}</td>
+      <td>${entityLink(e.entity_type, e.entity_id)}</td>
+      <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escape(e.summary || '')}</td>
+    </tr>
+  `;
+}
+
+function liveScript(newestAt) {
+  // Client-side JS that polls /settings/activity/poll every 10s
+  // and prepends new rows. Rebuilds the row HTML client-side to avoid
+  // a second server-render round-trip.
+  return `
+    <script>
+    (function() {
+      var cursor = ${JSON.stringify(newestAt || new Date().toISOString())};
+      var tbody = document.getElementById('activity-tbody');
+      if (!tbody) return;
+
+      var BADGE_COLORS = {
+        session_started: '#2563eb', viewed: '#6b7280', searched: '#8b5cf6',
+        created: '#16a34a', updated: '#ca8a04', deleted: '#dc2626',
+        downloaded: '#0891b2', stage_changed: '#ea580c'
+      };
+
+      function esc(s) {
+        if (!s) return '';
+        var d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+      }
+
+      function relTime(iso) {
+        if (!iso) return '';
+        var t = new Date(iso.endsWith('Z') ? iso : iso + 'Z').getTime();
+        var d = Math.round((Date.now() - t) / 1000);
+        if (d < 60) return 'just now';
+        if (d < 3600) return Math.floor(d / 60) + 'm ago';
+        if (d < 86400) return Math.floor(d / 3600) + 'h ago';
+        return Math.floor(d / 86400) + 'd ago';
+      }
+
+      function badge(type) {
+        var c = BADGE_COLORS[type] || '#6b7280';
+        return '<span style="display:inline-block;padding:1px 8px;border-radius:9999px;font-size:0.75rem;color:#fff;background:' + c + '">' + esc(type) + '</span>';
+      }
+
+      function buildRow(e) {
+        return '<tr style="animation:fadeIn .3s">'
+          + '<td style="white-space:nowrap;font-size:0.8rem" title="' + esc(e.at) + '">' + relTime(e.at) + '</td>'
+          + '<td>' + esc(e.user_name || e.user_email || '\\u2014') + '</td>'
+          + '<td>' + badge(e.event_type) + '</td>'
+          + '<td>' + esc(e.entity_type) + ' ' + esc((e.entity_id || '').slice(0, 8)) + '</td>'
+          + '<td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(e.summary || '') + '</td>'
+          + '</tr>';
+      }
+
+      function poll() {
+        fetch('/settings/activity/poll?after=' + encodeURIComponent(cursor))
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            if (!data.ok || !data.events || !data.events.length) return;
+            // Events come newest-first; insert in reverse so newest ends up on top
+            var html = '';
+            for (var i = data.events.length - 1; i >= 0; i--) {
+              html = buildRow(data.events[i]) + html;
+            }
+            tbody.insertAdjacentHTML('afterbegin', html);
+            cursor = data.events[0].at;
+          })
+          .catch(function() {});
+      }
+
+      setInterval(poll, 10000);
+
+      // Also update relative times every 30s
+      setInterval(function() {
+        var cells = tbody.querySelectorAll('td[title]');
+        cells.forEach(function(td) {
+          var iso = td.getAttribute('title');
+          if (iso) td.textContent = relTime(iso);
+        });
+      }, 30000);
+    })();
+    </script>
+    <style>@keyframes fadeIn { from { opacity: 0; background: var(--highlight, #fef9c3); } to { opacity: 1; background: transparent; } }</style>
   `;
 }
 
