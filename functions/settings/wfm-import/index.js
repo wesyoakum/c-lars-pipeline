@@ -1450,11 +1450,11 @@ export async function onRequestGet(context) {
                 },
 
                 reviewBulkAcceptAll() {
-                  for (const item of this.reviewItems) item._decision = 'approve';
+                  for (const item of this.reviewFilteredItems) item._decision = 'approve';
                 },
 
                 reviewBulkDismissAll() {
-                  for (const item of this.reviewItems) item._decision = 'reject';
+                  for (const item of this.reviewFilteredItems) item._decision = 'reject';
                 },
 
                 async reviewApply() {
