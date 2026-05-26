@@ -70,7 +70,19 @@ export async function onRequestPost(context) {
   }
 
   // Load approved items in small batches to stay within the 30s timeout.
-  const batchSize = body?.batch_size || 30;
+  // Quotes need WFM API calls for line items, so use a smaller batch.
+  const defaultSize = 30;
+  const requestedSize = body?.batch_size || defaultSize;
+
+  // Peek at what entity types are next to auto-adjust batch size.
+  const nextEntity = await one(env.DB,
+    `SELECT entity_type FROM wfm_import_pending
+      WHERE run_id = ? AND status = 'approved'
+      ORDER BY CASE entity_type WHEN 'account' THEN 1 WHEN 'opportunity' THEN 2 WHEN 'quote' THEN 3 WHEN 'job' THEN 4 ELSE 5 END, created_at
+      LIMIT 1`, [runId]);
+  const batchSize = (nextEntity?.entity_type === 'quote')
+    ? Math.min(requestedSize, 10)  // quotes need WFM API calls for line items
+    : requestedSize;
   const approved = await all(env.DB,
     `SELECT id, entity_type, external_id, action,
             wfm_payload_json, pipeline_snapshot_json,
