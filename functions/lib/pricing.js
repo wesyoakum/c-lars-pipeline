@@ -101,7 +101,12 @@ export const KIND_CONFIG = {
   },
   cylinder_buy_ship: { dm: true,  dl: true,  imoh: false, other: true,  laborTab: true,  dmTab: true  },
   cylinder_build:    { dm: true,  dl: true,  imoh: true,  other: true,  laborTab: true,  dmTab: true  },
-  refurb:            { dm: true,  dl: true,  imoh: true,  other: true,  laborTab: true,  dmTab: true  },
+  refurb:            { dm: true,  dl: true,  imoh: false, other: true,  laborTab: true,  dmTab: true,
+    // IMOH hidden at 16.5%, Other defaults to 0. DM (30%) + DL (25%) = 55%
+    // of target price; hidden IMOH brings total cost to 71.5% → 28.5% margin.
+    hiddenImohPct: 0.165,
+    targetPctOverride: { other: 0 },
+  },
   service:           { dm: true,  dl: true,  imoh: true,  other: true,  laborTab: true,  dmTab: true  },
 };
 
