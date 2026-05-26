@@ -230,7 +230,7 @@ export async function onRequestGet(context) {
                       :disabled="busy || replayBusy || reviewMode || (fullRun && fullRun.status === 'in_progress')"
                       title="Fetch WFM data and show changes for review before importing.">
                 <span x-show="!busy">Check for changes</span>
-                <span x-show="busy">Checking…</span>
+                <span x-show="busy" x-text="checkProgress || 'Checking…'"></span>
               </button>
               <button type="button" class="btn" x-show="lastSnapshotId"
                       @click="replaySnapshot(lastSnapshotId)"
@@ -365,7 +365,7 @@ export async function onRequestGet(context) {
               <button class="btn small" @click="reviewBulkAcceptAll()" :disabled="reviewApplying">Accept all</button>
               <button class="btn small" @click="reviewBulkDismissAll()" :disabled="reviewApplying">Dismiss all</button>
               <button class="btn small primary" @click="reviewApply()" :disabled="reviewApplying || reviewApprovedCount === 0"
-                      x-text="reviewApplying ? 'Applying…' : 'Apply ' + reviewApprovedCount + ' approved'"></button>
+                      x-text="reviewApplying ? (applyProgress || 'Applying…') : 'Apply ' + reviewApprovedCount + ' approved'"></button>
               <button class="btn small" @click="reviewMode = false; reviewItems = []; reviewSnapshotId = null;" :disabled="reviewApplying">Close</button>
             </div>
 
@@ -1308,6 +1308,8 @@ export async function onRequestGet(context) {
                 reviewApplying: false,
                 replayBusy: false,
                 reviewShowPipeline: false,
+                applyProgress: '',
+                checkProgress: '',
                 reviewFilter: 'all', // 'all' | 'wfm_changed' | 'mapping_only' | 'new'
                 lastSnapshotId: ${raw(JSON.stringify(lastSnapshot?.id || null))},
                 get reviewApprovedCount() {
@@ -1336,113 +1338,86 @@ export async function onRequestGet(context) {
 
                 async deltaReviewStart() {
                   this.busy = true;
-                  let runId = null;
+                  this.checkProgress = 'Starting…';
                   try {
-                    // The WFM API takes 30-90s, which may exceed the HTTP
-                    // timeout. The Worker continues past the timeout and
-                    // writes the run row + pending items to D1. If the
-                    // fetch fails, we poll for the just-created run.
-                    let j;
-                    try {
-                      const res = await fetch('/settings/wfm-import/delta/start', {
+                    // Step 1: create run + snapshot rows.
+                    const startRes = await fetch('/settings/wfm-import/delta/start', {
+                      method: 'POST', credentials: 'same-origin',
+                      headers: { 'content-type': 'application/json' },
+                      body: JSON.stringify({}),
+                    });
+                    const start = await startRes.json();
+                    if (!start.ok) {
+                      // If already in progress, try to load existing pending items.
+                      if (start.error === 'already_in_progress' && start.run_id) {
+                        return await this._loadReviewItems(start.run_id);
+                      }
+                      alert('Failed: ' + (start.message || start.error));
+                      return;
+                    }
+
+                    const { run_id, snapshot_id } = start;
+                    this.reviewSnapshotId = snapshot_id;
+                    this.lastSnapshotId = snapshot_id;
+
+                    // Step 2: fetch each kind from WFM (one request per kind).
+                    const kinds = ['client', 'lead', 'quote', 'job'];
+                    for (const kind of kinds) {
+                      this.checkProgress = 'Fetching ' + kind + 's…';
+                      const fRes = await fetch('/settings/wfm-import/delta/fetch', {
                         method: 'POST', credentials: 'same-origin',
                         headers: { 'content-type': 'application/json' },
-                        body: JSON.stringify({}),
+                        body: JSON.stringify({ snapshot_id, kind }),
                       });
-                      j = await res.json();
-                    } catch (fetchErr) {
-                      // HTTP timeout — the run was created early, poll for it.
-                      j = null;
-                    }
-
-                    if (j && !j.ok) {
-                      // If it's already_in_progress, that's probably our
-                      // timed-out run — poll for it instead of giving up.
-                      if (j.error === 'already_in_progress' && j.run_id) {
-                        runId = j.run_id;
-                      } else {
-                        alert('Failed: ' + (j.message || j.error || 'unknown'));
+                      const fj = await fRes.json();
+                      if (!fj.ok) {
+                        alert('Failed fetching ' + kind + 's: ' + (fj.error || 'unknown'));
                         return;
                       }
                     }
 
-                    if (j && j.ok) {
-                      runId = j.run_id;
-                      this.reviewSnapshotId = j.snapshot_id || null;
-                      if (j.snapshot_id) this.lastSnapshotId = j.snapshot_id;
-                      if (j.total === 0) {
-                        alert(j.message || 'Nothing changed in WFM since the last import.');
-                        return;
-                      }
-                    }
-
-                    // If we have a run_id (from response or already_in_progress),
-                    // poll until ready. If no run_id, find the latest in-progress run.
-                    if (!runId) {
-                      const statusRes = await this._findInProgressRun();
-                      if (!statusRes) {
-                        alert('Check timed out and no run was found. Please try again.');
-                        return;
-                      }
-                      runId = statusRes;
-                    }
-
-                    // Poll until the run has pending items or completes.
-                    const result = await this._pollDeltaStatus(runId);
-                    if (!result) return;
-                    if (result.status === 'failed') {
-                      alert('Check failed: ' + (result.summary || 'unknown error'));
-                      return;
-                    }
-                    if (result.status === 'completed' && result.total === 0) {
-                      alert(result.summary || 'Nothing changed in WFM since the last import.');
-                      return;
-                    }
-
-                    this.reviewRunId = runId;
-                    // Fetch the pending items for review.
-                    const rRes = await fetch('/settings/wfm-import/delta/review?run_id=' + runId, {
-                      credentials: 'same-origin',
+                    // Step 3: run diff against Pipeline.
+                    this.checkProgress = 'Comparing changes…';
+                    const diffRes = await fetch('/settings/wfm-import/delta/diff-run', {
+                      method: 'POST', credentials: 'same-origin',
+                      headers: { 'content-type': 'application/json' },
+                      body: JSON.stringify({ run_id, snapshot_id }),
                     });
-                    const rj = await rRes.json();
-                    if (rj.ok) {
-                      this.reviewItems = (rj.items || []).map(item => ({
-                        ...item,
-                        _decision: item.status === 'approved' ? 'approve' : null,
-                      }));
-                      this.reviewMode = true;
+                    const diff = await diffRes.json();
+                    if (!diff.ok) {
+                      alert('Diff failed: ' + (diff.message || diff.error || 'unknown'));
+                      return;
                     }
+
+                    if (diff.total === 0) {
+                      alert(diff.message || 'Nothing changed in WFM since the last import.');
+                      return;
+                    }
+
+                    // Step 4: load review items.
+                    await this._loadReviewItems(run_id);
                   } catch (e) {
                     alert('Failed: ' + (e.message || e));
                   } finally {
+                    this.checkProgress = '';
                     this.busy = false;
                   }
                 },
 
-                async _findInProgressRun() {
-                  try {
-                    const res = await fetch('/settings/wfm-import/delta/status?run_id=latest', {
-                      credentials: 'same-origin',
-                    });
-                    const s = await res.json();
-                    return s.run_id || null;
-                  } catch { return null; }
-                },
-
-                async _pollDeltaStatus(runId) {
-                  const MAX_POLLS = 60; // 60 × 3s = 3 minutes max
-                  for (let i = 0; i < MAX_POLLS; i++) {
-                    await new Promise(r => setTimeout(r, 3000));
-                    try {
-                      const res = await fetch('/settings/wfm-import/delta/status?run_id=' + runId, {
-                        credentials: 'same-origin',
-                      });
-                      const s = await res.json();
-                      if (s.ready) return s;
-                    } catch { /* retry */ }
+                async _loadReviewItems(runId) {
+                  this.checkProgress = 'Loading review…';
+                  this.reviewRunId = runId;
+                  const rRes = await fetch('/settings/wfm-import/delta/review?run_id=' + runId, {
+                    credentials: 'same-origin',
+                  });
+                  const rj = await rRes.json();
+                  if (rj.ok) {
+                    this.reviewItems = (rj.items || []).map(item => ({
+                      ...item,
+                      _decision: item.status === 'approved' ? 'approve' : null,
+                    }));
+                    this.reviewMode = true;
                   }
-                  alert('Timed out waiting for delta check to complete.');
-                  return null;
                 },
 
                 reviewDecide(item, decision) {
@@ -1476,9 +1451,11 @@ export async function onRequestGet(context) {
                       body: JSON.stringify({ decisions }),
                     });
 
-                    // Apply in batches of 30 — auto-loop until all approved are applied.
+                    // Apply in batches — auto-loop until all approved are applied.
                     let totalApplied = 0;
+                    let totalToApply = decisions.filter(d => d.decision === 'approve').length;
                     let totalRemaining = 0;
+                    this.applyProgress = 'Applying… 0/' + totalToApply;
                     while (true) {
                       let j;
                       try {
@@ -1500,9 +1477,11 @@ export async function onRequestGet(context) {
                       }
                       totalApplied += j.applied || 0;
                       totalRemaining = j.remaining || 0;
+                      this.applyProgress = 'Applying… ' + totalApplied + '/' + totalToApply;
                       // If nothing was applied this batch, we're done.
                       if ((j.applied || 0) === 0) break;
                     }
+                    this.applyProgress = '';
 
                     alert('Applied ' + totalApplied + ' change(s). ' + totalRemaining + ' pending.');
                     if (totalRemaining === 0) {
