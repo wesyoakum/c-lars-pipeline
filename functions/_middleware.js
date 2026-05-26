@@ -107,7 +107,7 @@ export async function onRequest(context) {
         try {
           const text = await clone.text();
           const m = text.match(/<title>([^<]*)<\/title>/i);
-          if (m) title = m[1].trim();
+          if (m) title = m[1].trim().replace(/\s*—\s*C-LARS Pipeline$/, '');
         } catch (_) { /* body unreadable — use fallback */ }
         if (!title) title = pageTitle(url.pathname);
 
