@@ -18,6 +18,7 @@
 import { resolveUser } from './lib/auth.js';
 import { unauthorizedResponse } from './lib/layout.js';
 import { audit } from './lib/audit.js';
+import { notifyExternal, NOTIFICATION_EVENTS } from './lib/notify-external.js';
 
 // Paths that bypass SSO auth entirely.
 //   - Static assets served from /public (no auth needed).
@@ -133,6 +134,27 @@ export async function onRequest(context) {
               user,
               summary: `Session started: ${title}`,
             });
+
+            // Notify Wes when another user starts a session.
+            if (user.email !== 'wes.yoakum@c-lars.com') {
+              const wesRow = await env.DB.prepare(
+                `SELECT id FROM users WHERE email = 'wes.yoakum@c-lars.com' LIMIT 1`
+              ).first();
+              if (wesRow) {
+                await notifyExternal(env, {
+                  userId: wesRow.id,
+                  eventType: NOTIFICATION_EVENTS.USER_SESSION_STARTED,
+                  data: {
+                    user_name: user.display_name || user.email,
+                    user_email: user.email,
+                    page_title: title,
+                    at: new Date().toISOString(),
+                  },
+                  context: { ref_type: 'user', ref_id: user.id },
+                  idempotencyKey: `session_started:${user.id}:${new Date().toISOString().slice(0, 13)}`,
+                });
+              }
+            }
           }
         } catch (_) { /* best-effort */ }
 

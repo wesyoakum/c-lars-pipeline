@@ -18,6 +18,7 @@ export function renderTeamsCard(eventType, data, context) {
   if (eventType === 'daily_digest') return dailyDigestCard(data, context);
   if (eventType === 'wfm_full_import_done') return wfmFullImportDoneCard(data, context);
   if (eventType === 'claudia_message') return claudiaMessageCard(data, context);
+  if (eventType === 'user_session_started') return userSessionCard(data, context);
   // Fallback — render a generic card so unknown events still surface
   // something useful instead of erroring.
   return genericCard(eventType, data);
@@ -268,6 +269,18 @@ function claudiaMessageCard(data, context) {
     // Default: open the chat so Wes can reply.
     actions.push(openAction('Open chat', '/sandbox/assistant'));
   }
+  return envelope(body, actions);
+}
+
+function userSessionCard(data) {
+  // data: { user_name, user_email, page_title, at }
+  const body = [
+    header('User session started'),
+    text(`**${data.user_name || data.user_email}** is now active`, { size: 'Medium' }),
+  ];
+  if (data.page_title) body.push(pair('First page', data.page_title));
+  if (data.at) body.push(pair('At', formatDue(data.at)));
+  const actions = [openAction('Activity log', '/settings/activity')];
   return envelope(body, actions);
 }
 
