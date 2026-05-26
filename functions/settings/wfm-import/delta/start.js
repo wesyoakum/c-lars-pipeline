@@ -7,6 +7,11 @@
 // field-by-field diffs for user review. Nothing touches Pipeline
 // until the user approves and clicks Apply.
 //
+// Returns immediately with { ok, run_id, snapshot_id, status:'processing' }.
+// The heavy work (WFM API calls, diffing, D1 writes) runs in
+// context.waitUntil() so it survives the 30s Pages Functions timeout.
+// The browser polls GET /delta/status?run_id=... until the run completes.
+//
 // Run mode = 'delta-review' — invisible to the cron worker (which
 // only picks up 'full'/'delta'), so changes sit in the review queue
 // until the user acts.
@@ -38,7 +43,7 @@ function json(data, status = 200) {
 function nowIso() { return new Date().toISOString(); }
 function newId()  { return crypto.randomUUID(); }
 
-// ---------- WFM fetch infrastructure (unchanged) ----------
+// ---------- WFM fetch infrastructure ----------
 
 async function readTotalRecords(env, basePath) {
   const sep = basePath.includes('?') ? '&' : '?';
@@ -116,7 +121,6 @@ async function loadStoredPayloads(env) {
   return { client: toMap(clientRows), lead: toMap(oppRows), quote: toMap(quoteRows), job: toMap(jobRows) };
 }
 
-// Load Pipeline rows for diff (keyed by external_id).
 async function loadPipelineRows(env) {
   const [accts, opps, quotes, jobs] = await Promise.all([
     all(env.DB, "SELECT id, external_id, name, email, phone, fax, website, address_billing, address_physical, account_manager_name, referral_source, export_code, is_archived, is_prospect FROM accounts WHERE external_source = 'wfm' AND external_id IS NOT NULL"),
@@ -128,7 +132,6 @@ async function loadPipelineRows(env) {
   return { client: toMap(accts), lead: toMap(opps), quote: toMap(quotes), job: toMap(jobs) };
 }
 
-// Load snapshots for three-way merge base.
 async function loadSnapshots(env) {
   const rows = await all(env.DB,
     'SELECT entity_type, external_id, payload_json FROM wfm_import_snapshots');
@@ -139,22 +142,15 @@ async function loadSnapshots(env) {
   return map;
 }
 
-// Load dismissed (rejected) pending items for skip-check.
 async function loadDismissed(env) {
   const rows = await all(env.DB,
     "SELECT entity_type, external_id, wfm_payload_json FROM wfm_import_pending WHERE status = 'rejected' ORDER BY created_at DESC");
-  // Keep only the most recent dismissal per entity.
   const map = new Map();
   for (const r of rows) {
     const key = r.entity_type + ':' + r.external_id;
     if (!map.has(key)) map.set(key, r.wfm_payload_json);
   }
   return map;
-}
-
-function isNewOrChanged(stored, recJson) {
-  if (stored == null) return true;
-  return stored !== recJson;
 }
 
 // Entity type mapping: WFM kind → Pipeline entity_type for wfm_import_pending.
@@ -183,20 +179,50 @@ export async function onRequestPost(context) {
 
   const startedAt = nowIso();
   const runId = newId();
-
   const snapshotId = newId();
   const t0 = Date.now();
 
+  // Create run + snapshot rows immediately so the browser can poll.
+  await run(env.DB,
+    `INSERT INTO wfm_import_runs
+       (id, started_at, finished_at, triggered_by, ok, summary,
+        counts_json, errors_json, links_json,
+        selection_summary_json, selection_size,
+        mode, status, options_json, total_planned)
+     VALUES (?, ?, NULL, ?, 0, 'Checking for changes…',
+             '{}', '[]', '[]', '[]', 0,
+             'delta-review', 'in_progress', '{}', 0)`,
+    [runId, startedAt, user.email || '']);
+
+  const prevSnapshot = await latestCompleteSnapshot(env.DB);
+  await createSnapshotRow(env.DB, {
+    id: snapshotId,
+    createdBy: user.email,
+    parentId: prevSnapshot?.id || null,
+  });
+
+  // Return immediately — the browser will poll GET /delta/status.
+  // All heavy work runs in waitUntil (survives past the 30s timeout).
+  context.waitUntil(doWork(env, {
+    runId, snapshotId, startedAt, t0, user, prevSnapshot,
+  }));
+
+  return json({
+    ok: true,
+    run_id: runId,
+    snapshot_id: snapshotId,
+    status: 'processing',
+    message: 'Checking for changes in the background…',
+  });
+}
+
+// ---------- Background work ----------
+
+async function doWork(env, opts) {
+  const { runId, snapshotId, startedAt, t0, user, prevSnapshot } = opts;
+
   try {
     await getAccessToken(env);
-
-    // Create R2 snapshot row + look up previous snapshot.
-    const prevSnapshot = await latestCompleteSnapshot(env.DB);
-    await createSnapshotRow(env.DB, {
-      id: snapshotId,
-      createdBy: user.email,
-      parentId: prevSnapshot?.id || null,
-    });
 
     // Phase 1 — fetch every WFM list.
     const dateRange = 'from=2020-01-01&to=2027-12-31';
@@ -216,10 +242,6 @@ export async function onRequestPost(context) {
     ]);
 
     // Phase 2 — coarse filter with field-level pre-check.
-    // The raw JSON comparison (list vs stored detail) always differs
-    // structurally, so we use computeDiff on the list record to skip
-    // records with no actual field-level changes. Only records that
-    // survive this check enter Phase 3 for a WFM detail fetch.
     const KIND_ORDER = [
       ['client',  clients, stored.client],
       ['lead',    leads,   stored.lead],
@@ -235,13 +257,12 @@ export async function onRequestPost(context) {
     };
     const kindToCountKey = { client: 'accounts', lead: 'opportunities', quote: 'quotes', job: 'jobs' };
 
-    // Pre-parse snapshots into objects once (avoid repeated JSON.parse per record).
     const snapshotObjs = new Map();
     for (const [key, jsonStr] of snapshots) {
       try { snapshotObjs.set(key, JSON.parse(jsonStr)); } catch { /* skip */ }
     }
 
-    const changedRecords = []; // { kind, uuid, listRec, pipelineRow, snapshotPayload }
+    const changedRecords = [];
     for (const [kind, records, storedMap] of KIND_ORDER) {
       const ck = kindToCountKey[kind];
       const entityType = KIND_TO_ENTITY[kind];
@@ -255,7 +276,6 @@ export async function onRequestPost(context) {
           continue;
         }
 
-        // Existing record — do a quick field-level diff using the list record.
         const pipelineRow = (pipelineRows[kind] || new Map()).get(rec.UUID) || null;
         const snapKey = entityType + ':' + rec.UUID;
         let snapshotPayload = snapshotObjs.get(snapKey) || null;
@@ -267,7 +287,7 @@ export async function onRequestPost(context) {
         }
 
         const prelim = computeDiff(entityType, rec, pipelineRow, snapshotPayload);
-        if (prelim.allUnchanged) continue; // no field-level changes — skip
+        if (prelim.allUnchanged) continue;
 
         counts[ck].changed++;
         changedRecords.push({ kind, uuid: rec.UUID, listRec: rec, pipelineRow, snapshotPayload });
@@ -283,7 +303,6 @@ export async function onRequestPost(context) {
       const entityType = KIND_TO_ENTITY[kind];
       const ck = kindToCountKey[kind];
 
-      // Fetch detail for the full payload.
       let detail = listRec;
       if (kind !== 'staff') {
         const fetched = await fetchDetail(env, kind, uuid, fetchCache);
@@ -291,7 +310,6 @@ export async function onRequestPost(context) {
       }
       const detailJson = JSON.stringify(detail);
 
-      // Dismiss check: skip if user already dismissed this exact payload.
       const dismissKey = entityType + ':' + uuid;
       const dismissedPayload = dismissed.get(dismissKey);
       if (dismissedPayload && dismissedPayload === detailJson) {
@@ -299,21 +317,17 @@ export async function onRequestPost(context) {
         continue;
       }
 
-      // Full diff with detail record.
       const { diff, hasConflict, hasAutoApply, isInsert, allUnchanged } = computeDiff(
         entityType, detail, pipelineRow, snapshotPayload
       );
 
-      // Skip if all fields are unchanged (cases 1, 4, 7).
       if (allUnchanged && !isInsert) continue;
 
-      // Auto-approve case 3: all fields are WFM-only changes.
       const allCase3 = !isInsert && !hasConflict &&
         Object.values(diff).every(d => d.case === 1 || d.case === 3 || d.case === 4 || d.case === 7);
       const autoApproved = allCase3 && hasAutoApply;
       if (autoApproved) counts[ck].auto_approved++;
 
-      // Supersede older pending rows for this entity.
       supersedeBatch.push(stmt(env.DB,
         `UPDATE wfm_import_pending SET status = 'superseded', decided_at = ?
           WHERE entity_type = ? AND external_id = ? AND status = 'pending'`,
@@ -340,8 +354,7 @@ export async function onRequestPost(context) {
 
     const totalPending = pendingRows.length;
 
-    // Phase 3.5 — write R2 snapshot (non-blocking).
-    // Captures all list records + detail records fetched during Phase 3.
+    // Phase 3.5 — write R2 snapshot.
     const snapshotData = {
       client:  { list: clients,  details: {} },
       lead:    { list: leads,    details: {} },
@@ -361,34 +374,30 @@ export async function onRequestPost(context) {
       job:     { list: jobs.length,    details: Object.keys(snapshotData.job.details).length },
     };
 
-    // Write to R2 in the background so the response returns immediately.
-    const writeSnapshot = async () => {
-      try {
-        for (const kind of ['client', 'lead', 'quote', 'job']) {
-          await writeSnapshotKind(env.DOCS, snapshotId, kind, snapshotData[kind]);
-        }
-        await writeManifest(env.DOCS, snapshotId, {
-          id: snapshotId,
-          created_at: startedAt,
-          created_by: user.email,
-          parent_id: prevSnapshot?.id || null,
-          counts: snapshotCounts,
-          diff_run_id: runId,
-        });
-        await completeSnapshotRow(env.DB, {
-          id: snapshotId,
-          counts: snapshotCounts,
-          durationMs: Date.now() - t0,
-          diffRunId: runId,
-        });
-      } catch (snapErr) {
-        try { await failSnapshotRow(env.DB, { id: snapshotId, error: snapErr.message }); }
-        catch (_) { /* best-effort */ }
+    try {
+      for (const kind of ['client', 'lead', 'quote', 'job']) {
+        await writeSnapshotKind(env.DOCS, snapshotId, kind, snapshotData[kind]);
       }
-    };
-    context.waitUntil(writeSnapshot());
+      await writeManifest(env.DOCS, snapshotId, {
+        id: snapshotId,
+        created_at: startedAt,
+        created_by: user.email,
+        parent_id: prevSnapshot?.id || null,
+        counts: snapshotCounts,
+        diff_run_id: runId,
+      });
+      await completeSnapshotRow(env.DB, {
+        id: snapshotId,
+        counts: snapshotCounts,
+        durationMs: Date.now() - t0,
+        diffRunId: runId,
+      });
+    } catch (snapErr) {
+      try { await failSnapshotRow(env.DB, { id: snapshotId, error: snapErr.message }); }
+      catch (_) { /* best-effort */ }
+    }
 
-    // Phase 4 — persist run row + pending rows.
+    // Phase 4 — update run row + persist pending rows.
     const kindSummary = Object.entries(counts)
       .filter(([_, v]) => v.changed + v.new > 0)
       .map(([k, v]) => `${k}: ${v.changed} changed + ${v.new} new`)
@@ -397,41 +406,19 @@ export async function onRequestPost(context) {
       ? 'No changes found.'
       : `${totalPending} changes for review — ${kindSummary}`;
 
-    await run(env.DB,
-      `INSERT INTO wfm_import_runs
-         (id, started_at, finished_at, triggered_by, ok, summary,
-          counts_json, errors_json, links_json,
-          selection_summary_json, selection_size,
-          mode, status, options_json, total_planned)
-       VALUES (?, ?, NULL, ?, 0, ?, ?, ?, ?, ?, ?, 'delta-review', ?, ?, ?)`,
-      [
-        runId, startedAt, user.email || '', summary,
-        JSON.stringify(counts),
-        JSON.stringify([]),
-        JSON.stringify([]),
-        JSON.stringify(Object.entries(counts).map(([k, v]) => ({
-          kind: k, fetched: v.fetched,
-          queued: v.changed + v.new,
-          auto_approved: v.auto_approved,
-        }))),
-        totalPending,
-        totalPending === 0 ? 'completed' : 'in_progress',
-        JSON.stringify({}),
-        totalPending,
-      ]);
-
     if (totalPending === 0) {
       await run(env.DB,
-        'UPDATE wfm_import_runs SET finished_at = ?, ok = 1 WHERE id = ?',
-        [nowIso(), runId]);
-      return json({
-        ok: true,
-        run_id: runId,
-        snapshot_id: snapshotId,
-        total: 0,
-        counts,
-        message: 'Nothing changed in WFM since the last import.',
-      });
+        `UPDATE wfm_import_runs
+            SET status = 'completed', finished_at = ?, ok = 1,
+                summary = ?, counts_json = ?,
+                selection_summary_json = ?, selection_size = 0, total_planned = 0
+          WHERE id = ?`,
+        [nowIso(), summary, JSON.stringify(counts),
+         JSON.stringify(Object.entries(counts).map(([k, v]) => ({
+           kind: k, fetched: v.fetched, queued: 0, auto_approved: 0,
+         }))),
+         runId]);
+      return;
     }
 
     // Supersede old pending rows.
@@ -456,26 +443,31 @@ export async function onRequestPost(context) {
       await batch(env.DB, stmts);
     }
 
-    return json({
-      ok: true,
-      run_id: runId,
-      snapshot_id: snapshotId,
-      total: totalPending,
-      counts,
-      auto_approved: pendingRows.filter(r => r.status === 'approved').length,
-      message: summary,
-    });
+    // Finalize run row.
+    await run(env.DB,
+      `UPDATE wfm_import_runs
+          SET summary = ?, counts_json = ?,
+              selection_summary_json = ?, selection_size = ?, total_planned = ?
+        WHERE id = ?`,
+      [summary, JSON.stringify(counts),
+       JSON.stringify(Object.entries(counts).map(([k, v]) => ({
+         kind: k, fetched: v.fetched,
+         queued: v.changed + v.new,
+         auto_approved: v.auto_approved,
+       }))),
+       totalPending, totalPending, runId]);
+    // Note: status stays 'in_progress' for the review UI to pick up.
+
   } catch (err) {
     try {
       await run(env.DB,
         `UPDATE wfm_import_runs
             SET status = 'failed', finished_at = ?,
-                summary = 'failed during delta review planning: ' || ?
+                summary = 'failed during delta review: ' || ?
           WHERE id = ?`,
         [nowIso(), String(err.message || err), runId]);
-    } catch (_) { /* run row may not exist yet */ }
+    } catch (_) { /* best-effort */ }
     try { await failSnapshotRow(env.DB, { id: snapshotId, error: err.message }); }
     catch (_) { /* best-effort */ }
-    return json({ ok: false, error: 'delta_review_failed', message: err?.message || String(err) }, 500);
   }
 }

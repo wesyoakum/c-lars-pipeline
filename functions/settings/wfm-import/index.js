@@ -1247,13 +1247,30 @@ export async function onRequestGet(context) {
                       alert('Failed: ' + (j.message || j.error || 'unknown'));
                       return;
                     }
-                    if (j.total === 0) {
-                      alert('Nothing changed in WFM since the last import.');
-                      return;
-                    }
                     this.reviewRunId = j.run_id;
                     this.reviewSnapshotId = j.snapshot_id || null;
                     if (j.snapshot_id) this.lastSnapshotId = j.snapshot_id;
+
+                    // Work runs in the background — poll until ready.
+                    if (j.status === 'processing') {
+                      const result = await this._pollDeltaStatus(j.run_id);
+                      if (!result) return; // error already shown
+                      if (result.status === 'failed') {
+                        alert('Check failed: ' + (result.summary || 'unknown error'));
+                        return;
+                      }
+                      if (result.total === 0) {
+                        alert(result.summary || 'Nothing changed in WFM since the last import.');
+                        return;
+                      }
+                    } else {
+                      // Legacy synchronous path (shouldn't happen with new code).
+                      if (j.total === 0) {
+                        alert('Nothing changed in WFM since the last import.');
+                        return;
+                      }
+                    }
+
                     // Fetch the pending items for review.
                     const rRes = await fetch('/settings/wfm-import/delta/review?run_id=' + j.run_id, {
                       credentials: 'same-origin',
@@ -1271,6 +1288,22 @@ export async function onRequestGet(context) {
                   } finally {
                     this.busy = false;
                   }
+                },
+
+                async _pollDeltaStatus(runId) {
+                  const MAX_POLLS = 60; // 60 × 3s = 3 minutes max
+                  for (let i = 0; i < MAX_POLLS; i++) {
+                    await new Promise(r => setTimeout(r, 3000));
+                    try {
+                      const res = await fetch('/settings/wfm-import/delta/status?run_id=' + runId, {
+                        credentials: 'same-origin',
+                      });
+                      const s = await res.json();
+                      if (s.ready) return s;
+                    } catch { /* retry */ }
+                  }
+                  alert('Timed out waiting for delta check to complete.');
+                  return null;
                 },
 
                 reviewDecide(item, decision) {
