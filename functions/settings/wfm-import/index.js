@@ -17,7 +17,7 @@
 //   POST /settings/wfm-import/commit          — apply the import
 //   POST /settings/wfm-import/set-credentials — seed/update refresh token
 
-import { layout, htmlResponse, html, escape } from '../../lib/layout.js';
+import { layout, htmlResponse, html, raw, escape } from '../../lib/layout.js';
 import { readFlash } from '../../lib/http.js';
 import { hasRole } from '../../lib/auth.js';
 import { settingsSubNav } from '../../lib/settings-subnav.js';
@@ -1229,7 +1229,7 @@ export async function onRequestGet(context) {
                 reviewItems: [],
                 reviewApplying: false,
                 replayBusy: false,
-                lastSnapshotId: ${JSON.stringify(lastSnapshot?.id || null)},
+                lastSnapshotId: ${raw(JSON.stringify(lastSnapshot?.id || null))},
                 get reviewApprovedCount() {
                   return this.reviewItems.filter(i => i._decision === 'approve').length;
                 },
