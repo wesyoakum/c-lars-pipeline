@@ -213,6 +213,7 @@ export async function gatherDashboardCharts(db) {
 
   const topAccounts = {
     labels: topAccountsRows.map(a => a.alias ? `${a.name} (${a.alias})` : a.name),
+    names: topAccountsRows.map(a => a.name),
     values: topAccountsRows.map(a => Number(a.pipeline)),
     counts: topAccountsRows.map(a => a.opp_count),
   };
@@ -337,6 +338,12 @@ export async function gatherDashboardCharts(db) {
     colors: ['#10b981', '#991b1b', '#ef4444', '#dc2626'],
     pct: sparesWinPct,
     total: sparesTotal,
+    stageLabelMap: {
+      Won: [stageLabels.get('completed'), stageLabels.get('job_in_progress')].filter(Boolean),
+      Expired: [stageLabels.get('quote_expired')].filter(Boolean),
+      Lost: [stageLabels.get('lost')].filter(Boolean),
+      Died: [stageLabels.get('closed_died')].filter(Boolean),
+    },
   };
 
   const charts = { stage, type, owner, topAccounts, segment, aging, bookings, forecast, bottleneck, heatmap, sparesWinRate };
@@ -658,6 +665,43 @@ export function buildChartInitScript(prefix, chartsJson) {
             }
           }
         });
+      });
+
+      // -- Drill-through: click a bar/slice → filtered list page ----------
+      function drillTo(base, filters) {
+        var p = [];
+        for (var k in filters) {
+          if (filters[k] == null) continue;
+          var v = Array.isArray(filters[k]) ? filters[k].map(encodeURIComponent).join(',') : encodeURIComponent(filters[k]);
+          p.push('f_' + k + '=' + v);
+        }
+        window.location.href = base + (p.length ? '?' + p.join('&') : '');
+      }
+      var drill = {
+        stage: function(i) { return ['/opportunities', {stage_label: stage.labels[i]}]; },
+        type: function(i) { return ['/opportunities', {type_label: type.labels[i]}]; },
+        owner: function(i) { return ['/opportunities', {owner: owner.labels[i]}]; },
+        topAccounts: function(i) { return ['/opportunities', {account_name: topacct.names ? topacct.names[i] : topacct.labels[i]}]; },
+        bottleneck: function(i) { return ['/opportunities', {stage_label: bn.labels[i]}]; },
+        sparesWinRate: function(i) {
+          var lbl = swr.labels[i];
+          var stgs = swr.stageLabelMap && swr.stageLabelMap[lbl];
+          return stgs && stgs.length ? ['/opportunities', {stage_label: stgs, type_label: 'Spares'}] : null;
+        },
+      };
+      Object.keys(drill).forEach(function(key) {
+        var canvas = el(key);
+        if (!canvas) return;
+        var chart = Chart.getChart(canvas);
+        if (!chart) return;
+        chart.options.onClick = function(e, elements) {
+          if (!elements.length) return;
+          var target = drill[key](elements[0].index);
+          if (target) drillTo(target[0], target[1]);
+        };
+        chart.options.onHover = function(e, elements, ch) {
+          ch.canvas.style.cursor = elements.length ? 'pointer' : 'default';
+        };
       });
 
       console.log(LOG, 'done. created:', created, 'skipped:', skipped, 'failed:', failed);

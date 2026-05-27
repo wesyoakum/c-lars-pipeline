@@ -455,6 +455,24 @@ export async function onRequestGet(context) {
 
       makeBarChart('sales-owner-chart', 'owner-mode-toggle', ${raw(ownerChartData)});
       makeBarChart('sales-type-chart', 'type-mode-toggle', ${raw(typeChartData)});
+
+      // Drill-through: click bar → filtered opp list
+      function salesDrill(canvasId, filterKey) {
+        var canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        var ch = Chart.getChart(canvas);
+        if (!ch) return;
+        ch.options.onClick = function(e, elements) {
+          if (!elements.length) return;
+          var lbl = ch.data.labels[elements[0].index];
+          window.location.href = '/opportunities?f_' + filterKey + '=' + encodeURIComponent(lbl);
+        };
+        ch.options.onHover = function(e, elements, c) {
+          c.canvas.style.cursor = elements.length ? 'pointer' : 'default';
+        };
+      }
+      salesDrill('sales-owner-chart', 'owner');
+      salesDrill('sales-type-chart', 'type_label');
     });
     </script>
   `;
@@ -702,6 +720,15 @@ function buildActivityChartsScript(payloadJson) {
                     }
                   }
                 }
+              },
+              onClick: function(e, elements) {
+                if (!elements.length) return;
+                var outcomeToStatus = {Accepted:'Accepted',Rejected:'Rejected',Expired:'Expired',Cancelled:'Dead'};
+                var lbl = labels[elements[0].index];
+                window.location.href = '/quotes?f_status_label=' + encodeURIComponent(outcomeToStatus[lbl] || lbl);
+              },
+              onHover: function(e, elements, ch) {
+                ch.canvas.style.cursor = elements.length ? 'pointer' : 'default';
               }
             }
           });

@@ -600,6 +600,34 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         filterState_card  = JSON.parse(JSON.stringify(savedFilters));
       }
     }
+    // URL-driven filter override: ?f_<col>=val[,val2,...] replaces the
+    // full filter state so chart drill-through links land clean.
+    try {
+      var _url = new URLSearchParams(window.location.search);
+      var _uf = {};
+      var _hasF = false;
+      _url.forEach(function(val, key) {
+        if (key.indexOf('f_') !== 0) return;
+        var colKey = key.slice(2);
+        var col = columnMeta(colKey);
+        if (!col) return;
+        _hasF = true;
+        if (col.filter === 'select') {
+          _uf[colKey] = { values: val.split(',') };
+        } else if (col.filter === 'multiselect') {
+          _uf[colKey] = { values: val.split(','), mode: 'or' };
+        } else if (col.filter === 'text') {
+          _uf[colKey] = { text: val };
+        } else if (col.filter === 'range') {
+          var parts = val.split(',');
+          _uf[colKey] = { min: parts[0] || '', max: parts[1] || '' };
+        }
+      });
+      if (_hasF) {
+        filterState_table = _uf;
+        filterState_card = JSON.parse(JSON.stringify(_uf));
+      }
+    } catch (_e) {}
     function getFilterState() {
       return state.viewMode === 'card' ? filterState_card : filterState_table;
     }
