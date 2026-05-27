@@ -308,7 +308,7 @@ export async function onRequestGet(context) {
       // Tooltip always carries both numbers so the user can compare
       // without flipping modes.
       var tip = esc(s) + ' — ' + counts[s] + ' opps · ' + fmt$(values[s]);
-      return '<div class="osc-row" title="'+tip+'"><span class="osc-label" title="'+esc(s)+'">'+esc(s)+'</span>'+
+      return '<div class="osc-row" style="cursor:pointer" data-stage="'+esc(s)+'" title="'+tip+'"><span class="osc-label" title="'+esc(s)+'">'+esc(s)+'</span>'+
              '<span class="osc-track"><span class="osc-bar" style="width:'+pct+'%;background:'+color+'"></span></span>'+
              '<span class="osc-count">'+rightLabel+'</span></div>';
     }).join('');
@@ -316,6 +316,12 @@ export async function onRequestGet(context) {
   }
   render();
   if (host) host.addEventListener('list:filtered', render);
+  bodyEl.addEventListener('click', function(e) {
+    var row = e.target.closest('.osc-row');
+    if (!row) return;
+    var s = row.getAttribute('data-stage');
+    if (s) window.location.href = '/opportunities?f_stage_label=' + encodeURIComponent(s);
+  });
 })();
 `;
 

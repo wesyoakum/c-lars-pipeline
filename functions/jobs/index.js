@@ -230,7 +230,7 @@ export async function onRequestGet(context) {
       var color = palette[idx % palette.length];
       var rightLabel = mode === 'value' ? fmt$(mv) : String(mv);
       var tip = esc(s) + ' — ' + counts[s] + ' jobs · ' + fmt$(values[s]);
-      return '<div class="jc-row" title="'+tip+'"><span class="jc-label" title="'+esc(s)+'">'+esc(s)+'</span>'+
+      return '<div class="jc-row" style="cursor:pointer" data-filter="'+esc(s)+'" title="'+tip+'"><span class="jc-label" title="'+esc(s)+'">'+esc(s)+'</span>'+
              '<span class="jc-track"><span class="jc-bar" style="width:'+pct+'%;background:'+color+'"></span></span>'+
              '<span class="jc-count">'+rightLabel+'</span></div>';
     }).join('');
@@ -243,6 +243,18 @@ export async function onRequestGet(context) {
   }
   render();
   if (host) host.addEventListener('list:filtered', render);
+  wfmBody.addEventListener('click', function(e) {
+    var row = e.target.closest('.jc-row');
+    if (!row) return;
+    var s = row.getAttribute('data-filter');
+    if (s) window.location.href = '/jobs?f_wfm_status=' + encodeURIComponent(s);
+  });
+  oppBody.addEventListener('click', function(e) {
+    var row = e.target.closest('.jc-row');
+    if (!row) return;
+    var s = row.getAttribute('data-filter');
+    if (s) window.location.href = '/jobs?f_opp_stage=' + encodeURIComponent(s);
+  });
 })();
 `;
 

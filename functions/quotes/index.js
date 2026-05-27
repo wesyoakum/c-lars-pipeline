@@ -252,7 +252,7 @@ export async function onRequestGet(context) {
       var v = sMetric[s]; var pct = Math.round(v / sAxis * 100); var color = palette[idx % palette.length];
       var rl = mode === 'value' ? fmt$(v) : String(v);
       var tip = esc(s)+' — '+sCounts[s]+' quotes · '+fmt$(sValues[s]);
-      return '<div class="qsc-row" title="'+tip+'"><span class="qsc-label" title="'+esc(s)+'">'+esc(s)+'</span><span class="qsc-track"><span class="qsc-bar" style="width:'+pct+'%;background:'+color+'"></span></span><span class="qsc-count">'+rl+'</span></div>';
+      return '<div class="qsc-row" style="cursor:pointer" data-filter="'+esc(s)+'" title="'+tip+'"><span class="qsc-label" title="'+esc(s)+'">'+esc(s)+'</span><span class="qsc-track"><span class="qsc-bar" style="width:'+pct+'%;background:'+color+'"></span></span><span class="qsc-count">'+rl+'</span></div>';
     }).join('');
 
     // Render opp stage bars
@@ -261,11 +261,23 @@ export async function onRequestGet(context) {
     oOrder.sort(function(a,b){ var da=(a in stageKeyIndex?stageKeyIndex[a]:9999),db=(b in stageKeyIndex?stageKeyIndex[b]:9999); return da!==db?da-db:a.localeCompare(b); });
     oppBody.innerHTML = oOrder.map(function(s,idx){
       var v = oCounts[s]; var pct = Math.round(v / oAxis * 100); var color = palette[idx % palette.length];
-      return '<div class="qsc-row" title="'+esc(s)+': '+v+'"><span class="qsc-label" title="'+esc(s)+'">'+esc(s)+'</span><span class="qsc-track"><span class="qsc-bar" style="width:'+pct+'%;background:'+color+'"></span></span><span class="qsc-count">'+v+'</span></div>';
+      return '<div class="qsc-row" style="cursor:pointer" data-filter="'+esc(s)+'" title="'+esc(s)+': '+v+'"><span class="qsc-label" title="'+esc(s)+'">'+esc(s)+'</span><span class="qsc-track"><span class="qsc-bar" style="width:'+pct+'%;background:'+color+'"></span></span><span class="qsc-count">'+v+'</span></div>';
     }).join('');
   }
   render();
   if (host) host.addEventListener('list:filtered', render);
+  statusBody.addEventListener('click', function(e) {
+    var row = e.target.closest('.qsc-row');
+    if (!row) return;
+    var s = row.getAttribute('data-filter');
+    if (s) window.location.href = '/quotes?f_status_label=' + encodeURIComponent(s);
+  });
+  oppBody.addEventListener('click', function(e) {
+    var row = e.target.closest('.qsc-row');
+    if (!row) return;
+    var s = row.getAttribute('data-filter');
+    if (s) window.location.href = '/quotes?f_opp_stage=' + encodeURIComponent(s);
+  });
 })();
 `;
 
