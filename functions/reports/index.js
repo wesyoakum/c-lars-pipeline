@@ -301,69 +301,82 @@ export async function onRequestGet(context) {
   const newOppsMonthlySeries = monthSeries(newOppsMonthly);
   const quotesIssuedMonthlySeries = monthSeries(quotesIssuedMonthly);
 
+  // Drill-through URLs for KPI cards
+  const kpiActiveStages = ['lead', 'rfq_received', 'quote_drafted', 'quote_submitted', 'quote_under_revision', 'revised_quote_submitted'];
+  const kpiPipelineStages = [...kpiActiveStages, 'quote_expired'];
+  const kpiWonStages = ['completed', 'job_in_progress'];
+  const kpiTerminalStages = [...kpiWonStages, 'lost', 'closed_died', 'quote_expired'];
+  function oppFilterUrl(keys) {
+    return '/opportunities?f_stage_label=' + keys.map(k => stageLabels.get(k)).filter(Boolean).map(encodeURIComponent).join(',');
+  }
+  const kpiUrls = {
+    pipeline: oppFilterUrl(kpiPipelineStages),
+    activeOpps: oppFilterUrl(kpiActiveStages),
+    activeQuotes: '/quotes?f_status_label=' + ['Draft', 'Issued', 'Revision Draft', 'Revision Issued'].map(encodeURIComponent).join(','),
+    winRate: oppFilterUrl(kpiTerminalStages),
+    bookingsYTD: oppFilterUrl(kpiWonStages),
+  };
+
   const executiveTab = html`
+    <style>.metric-card-link{text-decoration:none;color:inherit;display:block}.metric-card-link:hover{box-shadow:0 0 0 2px var(--accent,#3b82f6);border-radius:var(--radius,6px)}</style>
     <div class="dashboard-metrics" style="margin-bottom:1rem">
-      <div class="metric-card">
+      <a href="${kpiUrls.pipeline}" class="metric-card metric-card-link">
         <span class="metric-value">$${formatMoney(totals.pipeline)}</span>
         <span class="metric-label">Open pipeline</span>
-      </div>
-      <div class="metric-card">
+      </a>
+      <a href="${kpiUrls.activeOpps}" class="metric-card metric-card-link">
         <span class="metric-value">${activeOppCount?.n ?? 0}</span>
         <span class="metric-label">Active opportunities</span>
-      </div>
-      <div class="metric-card">
+      </a>
+      <a href="${kpiUrls.pipeline}" class="metric-card metric-card-link">
         <span class="metric-value">$${formatMoney(totals.pipeline)}</span>
         <span class="metric-label">Pipeline value</span>
-      </div>
-      <div class="metric-card">
+      </a>
+      <a href="${kpiUrls.activeQuotes}" class="metric-card metric-card-link">
         <span class="metric-value">${activeQuoteCount?.n ?? 0}</span>
         <span class="metric-label">Active quotes</span>
-      </div>
-      <div class="metric-card">
+      </a>
+      <a href="${kpiUrls.winRate}" class="metric-card metric-card-link">
         <span class="metric-value">${rptWinRate}%</span>
         <span class="metric-label">Win rate (90d)</span>
-      </div>
-      <div class="metric-card">
+      </a>
+      <a href="${kpiUrls.bookingsYTD}" class="metric-card metric-card-link">
         <span class="metric-value">$${formatMoney(bookings2026?.total ?? 0)}</span>
         <span class="metric-label">Bookings YTD 2026</span>
-      </div>
+      </a>
     </div>
 
     <div class="dashboard-charts">
-      <!-- Row 1 -->
       <section class="card">
-        <h2>1 · ${escape(slideByKey('stage').title)}</h2>
+        <h2>${escape(slideByKey('stage').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('stage').caption)}</p>
         <div class="chart-wrap"><canvas id="rpt-stage"></canvas></div>
       </section>
       <section class="card">
-        <h2>2 · ${escape(slideByKey('type').title)}</h2>
+        <h2>${escape(slideByKey('type').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('type').caption)}</p>
         <div class="chart-wrap"><canvas id="rpt-type"></canvas></div>
       </section>
 
-      <!-- Row 2 -->
       <section class="card">
-        <h2>3 · ${escape(slideByKey('owner').title)}</h2>
+        <h2>${escape(slideByKey('owner').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('owner').caption)}</p>
         <div class="chart-wrap"><canvas id="rpt-owner"></canvas></div>
       </section>
       <section class="card">
-        <h2>4 · ${escape(slideByKey('topAccounts').title)}</h2>
+        <h2>${escape(slideByKey('topAccounts').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('topAccounts').caption)}</p>
         <div class="chart-wrap"><canvas id="rpt-topAccounts"></canvas></div>
       </section>
 
-      <!-- Row 3 -->
       <section class="card">
-        <h2>6 · ${escape(slideByKey('aging').title)}</h2>
+        <h2>${escape(slideByKey('aging').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('aging').caption)}</p>
         <div class="chart-wrap"><canvas id="rpt-aging"></canvas></div>
       </section>
 
-      <!-- Row 4 - full width - heatmap -->
       <section class="card" style="grid-column: 1 / -1">
-        <h2>10 · ${escape(slideByKey('heatmap').title)}</h2>
+        <h2>${escape(slideByKey('heatmap').title)}</h2>
         <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('heatmap').caption)}</p>
         ${renderHeatmapGrid(charts.heatmap)}
       </section>
@@ -824,6 +837,29 @@ function buildActivityChartsScript(payloadJson) {
   // shape is identical ({ label, n, value } per bucket).
   makeWeeklyChart('act-new-opps-month', DATA.newOppsMonthly, 'New opportunities', 'Estimated value');
   makeWeeklyChart('act-quotes-issued-month', DATA.quotesIssuedMonthly, 'Quotes issued', 'Quoted value');
+
+  // Drill-through: click a bar → filtered list by month
+  function actDrill(canvasId, series, target) {
+    var canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    var chart = Chart.getChart(canvas);
+    if (!chart) return;
+    chart.options.onClick = function(e, elements) {
+      if (!elements.length) return;
+      var idx = elements[0].index;
+      var item = series[idx];
+      var month = (item.mondayIso || item.key || '').slice(0, 7);
+      if (!month) return;
+      window.location.href = target + '?f_created=' + encodeURIComponent(month);
+    };
+    chart.options.onHover = function(e, elements, ch) {
+      ch.canvas.style.cursor = elements.length ? 'pointer' : 'default';
+    };
+  }
+  actDrill('act-new-opps', DATA.newOpps, '/opportunities');
+  actDrill('act-quotes-issued', DATA.quotesIssued, '/quotes');
+  actDrill('act-new-opps-month', DATA.newOppsMonthly, '/opportunities');
+  actDrill('act-quotes-issued-month', DATA.quotesIssuedMonthly, '/quotes');
   } // end drawWeeklies
 
   if (document.readyState === 'loading') {

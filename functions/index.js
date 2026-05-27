@@ -136,6 +136,22 @@ export async function onRequestGet(context) {
     kind: s.kind,
   })));
 
+  // Drill-through URLs for KPI cards
+  const kpiActiveStages = ['lead', 'rfq_received', 'quote_drafted', 'quote_submitted', 'quote_under_revision', 'revised_quote_submitted'];
+  const kpiPipelineStages = [...kpiActiveStages, 'quote_expired'];
+  const kpiWonStages = ['completed', 'job_in_progress'];
+  const kpiTerminalStages = [...kpiWonStages, 'lost', 'closed_died', 'quote_expired'];
+  function oppFilterUrl(keys) {
+    return '/opportunities?f_stage_label=' + keys.map(k => stageLabels.get(k)).filter(Boolean).map(encodeURIComponent).join(',');
+  }
+  const kpiUrls = {
+    pipeline: oppFilterUrl(kpiPipelineStages),
+    activeOpps: oppFilterUrl(kpiActiveStages),
+    activeQuotes: '/quotes?f_status_label=' + ['Draft', 'Issued', 'Revision Draft', 'Revision Issued'].map(encodeURIComponent).join(','),
+    winRate: oppFilterUrl(kpiTerminalStages),
+    bookingsYTD: oppFilterUrl(kpiWonStages),
+  };
+
   // Which slide to show for each index (used to render the stage
   // container below). Order matches CHART_SLIDES.
   const body = html`
@@ -143,27 +159,28 @@ export async function onRequestGet(context) {
       <h1 class="page-title">Dashboard</h1>
     </section>
 
+    <style>.metric-card-link{text-decoration:none;color:inherit;display:block}.metric-card-link:hover{box-shadow:0 0 0 2px var(--accent,#3b82f6);border-radius:var(--radius,6px)}</style>
     <div class="dashboard-metrics">
-      <div class="metric-card">
+      <a href="${kpiUrls.activeOpps}" class="metric-card metric-card-link">
         <span class="metric-value">${oppCount?.n ?? 0}</span>
         <span class="metric-label">Active opportunities</span>
-      </div>
-      <div class="metric-card">
+      </a>
+      <a href="${kpiUrls.pipeline}" class="metric-card metric-card-link">
         <span class="metric-value">$${formatMoney(totals.pipeline)}</span>
         <span class="metric-label">Pipeline value</span>
-      </div>
-      <div class="metric-card">
+      </a>
+      <a href="${kpiUrls.activeQuotes}" class="metric-card metric-card-link">
         <span class="metric-value">${quoteCount?.n ?? 0}</span>
         <span class="metric-label">Active quotes</span>
-      </div>
-      <div class="metric-card">
+      </a>
+      <a href="${kpiUrls.winRate}" class="metric-card metric-card-link">
         <span class="metric-value">${winRate}%</span>
         <span class="metric-label">Win rate (90d)</span>
-      </div>
-      <div class="metric-card">
+      </a>
+      <a href="${kpiUrls.bookingsYTD}" class="metric-card metric-card-link">
         <span class="metric-value">$${formatMoney(bookings2026?.total ?? 0)}</span>
         <span class="metric-label">Bookings YTD 2026</span>
-      </div>
+      </a>
     </div>
 
     <!-- Hero chart carousel — auto-rotates through 10 portfolio charts -->

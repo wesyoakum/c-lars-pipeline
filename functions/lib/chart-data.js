@@ -683,6 +683,11 @@ export function buildChartInitScript(prefix, chartsJson) {
         owner: function(i) { return ['/opportunities', {owner: owner.labels[i]}]; },
         topAccounts: function(i) { return ['/opportunities', {account_name: topacct.names ? topacct.names[i] : topacct.labels[i]}]; },
         bottleneck: function(i) { return ['/opportunities', {stage_label: bn.labels[i]}]; },
+        aging: function(i) {
+          var lbl = ag.labels[i];
+          if (lbl.indexOf('Expired') === 0) return ['/quotes', {status_label: 'Expired'}];
+          return ['/quotes', {status_label: ['Draft','Issued','Revision Draft','Revision Issued']}];
+        },
         sparesWinRate: function(i) {
           var lbl = swr.labels[i];
           var stgs = swr.stageLabelMap && swr.stageLabelMap[lbl];
