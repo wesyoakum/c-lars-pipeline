@@ -140,6 +140,7 @@ export async function getQuoteDocData(env, quoteId) {
     env.DB,
     `SELECT * FROM quote_lines
       WHERE quote_id = ?
+        AND deleted_at IS NULL
         AND COALESCE(is_active, 1) = 1
       ORDER BY sort_order, id`,
     [quoteId]

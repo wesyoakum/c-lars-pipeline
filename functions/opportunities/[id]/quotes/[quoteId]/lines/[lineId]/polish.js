@@ -41,7 +41,7 @@ export async function onRequestPost(context) {
        JOIN quotes q         ON q.id = ql.quote_id
        LEFT JOIN opportunities o ON o.id = q.opportunity_id
        LEFT JOIN accounts a      ON a.id = o.account_id
-      WHERE ql.id = ?`,
+      WHERE ql.id = ? AND ql.deleted_at IS NULL`,
     [lineId]);
 
   if (!row) return json({ ok: false, error: 'line_not_found' }, 404);

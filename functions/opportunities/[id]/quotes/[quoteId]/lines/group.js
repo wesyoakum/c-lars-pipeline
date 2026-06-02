@@ -77,6 +77,7 @@ export async function onRequestPost(context) {
     `SELECT id, sort_order, is_option, line_type, parent_line_id
        FROM quote_lines
       WHERE quote_id = ?
+        AND deleted_at IS NULL
         AND id IN (${placeholders})`,
     [quoteId, ...ids]
   );
@@ -98,6 +99,7 @@ export async function onRequestPost(context) {
     env.DB,
     `SELECT 1 AS x FROM quote_lines
       WHERE quote_id = ?
+        AND deleted_at IS NULL
         AND parent_line_id IN (${placeholders})
       LIMIT 1`,
     [quoteId, ...ids]

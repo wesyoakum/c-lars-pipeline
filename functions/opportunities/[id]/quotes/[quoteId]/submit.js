@@ -72,7 +72,7 @@ export async function onRequestPost(context) {
 
   // Check at least one active line item.
   const lineCount = await one(env.DB,
-    'SELECT COUNT(*) AS cnt FROM quote_lines WHERE quote_id = ? AND is_active = 1',
+    'SELECT COUNT(*) AS cnt FROM quote_lines WHERE quote_id = ? AND deleted_at IS NULL AND is_active = 1',
     [quoteId]);
   if (!lineCount?.cnt) missing.push('At least one line item');
 

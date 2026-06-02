@@ -72,7 +72,7 @@ export async function onRequestPost(context) {
     `SELECT sort_order, item_type, title, part_number, description, quantity, unit,
             unit_price, extended_price, notes, line_notes, is_option
        FROM quote_lines
-      WHERE quote_id = ?
+      WHERE quote_id = ? AND deleted_at IS NULL
       ORDER BY sort_order, id`,
     [sourceId]
   );

@@ -37,7 +37,7 @@ async function loadContext(env, params) {
        FROM quote_lines ql
        JOIN quotes q ON q.id = ql.quote_id
        JOIN opportunities o ON o.id = q.opportunity_id
-      WHERE ql.id = ? AND q.id = ? AND o.id = ?`,
+      WHERE ql.id = ? AND ql.deleted_at IS NULL AND q.id = ? AND o.id = ?`,
     [lineId, quoteId, oppId]
   );
   if (!line) return null;

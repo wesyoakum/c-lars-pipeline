@@ -31,6 +31,7 @@ export async function onRequestPost(context) {
        FROM quote_lines ql
        JOIN quotes q ON q.id = ql.quote_id
       WHERE ql.quote_id = ?
+        AND ql.deleted_at IS NULL
         AND q.opportunity_id = ?
         AND ql.katana_sales_order_id IS NOT NULL`,
     [quoteId, oppId]);

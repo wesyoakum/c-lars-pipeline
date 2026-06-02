@@ -69,7 +69,7 @@ export async function onRequestPost(context) {
 
   const before = await one(
     env.DB,
-    'SELECT * FROM quote_lines WHERE id = ? AND quote_id = ?',
+    'SELECT * FROM quote_lines WHERE id = ? AND quote_id = ? AND deleted_at IS NULL',
     [lineId, quoteId]
   );
   if (!before) {

@@ -714,18 +714,18 @@ export function quoteTotalsRecomputeStmt(db, quoteId, ts) {
   return stmt(
     db,
     `UPDATE quotes
-        SET subtotal_price = (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ? AND COALESCE(is_active, 1) = 1 AND id NOT IN (SELECT parent_line_id FROM quote_lines WHERE quote_id = ? AND parent_line_id IS NOT NULL)),
+        SET subtotal_price = (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ? AND deleted_at IS NULL AND COALESCE(is_active, 1) = 1 AND id NOT IN (SELECT parent_line_id FROM quote_lines WHERE quote_id = ? AND deleted_at IS NULL AND parent_line_id IS NOT NULL)),
             total_price    =
-              (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ? AND COALESCE(is_active, 1) = 1 AND id NOT IN (SELECT parent_line_id FROM quote_lines WHERE quote_id = ? AND parent_line_id IS NOT NULL))
+              (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ? AND deleted_at IS NULL AND COALESCE(is_active, 1) = 1 AND id NOT IN (SELECT parent_line_id FROM quote_lines WHERE quote_id = ? AND deleted_at IS NULL AND parent_line_id IS NOT NULL))
               - CASE
                   WHEN COALESCE(discount_is_phantom, 0) = 1 THEN 0
                   WHEN discount_amount IS NOT NULL AND discount_amount > 0 THEN
                     MIN(
                       discount_amount,
-                      (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ? AND COALESCE(is_active, 1) = 1 AND id NOT IN (SELECT parent_line_id FROM quote_lines WHERE quote_id = ? AND parent_line_id IS NOT NULL))
+                      (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ? AND deleted_at IS NULL AND COALESCE(is_active, 1) = 1 AND id NOT IN (SELECT parent_line_id FROM quote_lines WHERE quote_id = ? AND deleted_at IS NULL AND parent_line_id IS NOT NULL))
                     )
                   WHEN discount_pct IS NOT NULL AND discount_pct > 0 THEN
-                    (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ? AND COALESCE(is_active, 1) = 1 AND id NOT IN (SELECT parent_line_id FROM quote_lines WHERE quote_id = ? AND parent_line_id IS NOT NULL))
+                    (SELECT COALESCE(SUM(extended_price), 0) FROM quote_lines WHERE quote_id = ? AND deleted_at IS NULL AND COALESCE(is_active, 1) = 1 AND id NOT IN (SELECT parent_line_id FROM quote_lines WHERE quote_id = ? AND deleted_at IS NULL AND parent_line_id IS NOT NULL))
                       * (MIN(discount_pct, 100.0) / 100.0)
                   ELSE 0
                 END

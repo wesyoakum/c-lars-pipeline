@@ -44,7 +44,7 @@ export async function onRequestPost(context) {
 
   const parent = await one(
     env.DB,
-    'SELECT id, title FROM quote_lines WHERE id = ? AND quote_id = ? AND parent_line_id IS NULL',
+    'SELECT id, title FROM quote_lines WHERE id = ? AND quote_id = ? AND deleted_at IS NULL AND parent_line_id IS NULL',
     [lineId, quoteId]
   );
   if (!parent) {
@@ -53,7 +53,7 @@ export async function onRequestPost(context) {
 
   const children = await all(
     env.DB,
-    'SELECT id FROM quote_lines WHERE quote_id = ? AND parent_line_id = ?',
+    'SELECT id FROM quote_lines WHERE quote_id = ? AND deleted_at IS NULL AND parent_line_id = ?',
     [quoteId, lineId]
   );
   if (!children.length) {

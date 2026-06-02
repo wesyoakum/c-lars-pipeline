@@ -64,7 +64,7 @@ export async function onRequestPost(context) {
 
   const maxRow = await one(
     env.DB,
-    'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort FROM quote_lines WHERE quote_id = ?',
+    'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort FROM quote_lines WHERE quote_id = ? AND deleted_at IS NULL',
     [quoteId]
   );
   const sortOrder = Number(maxRow?.next_sort ?? 0);

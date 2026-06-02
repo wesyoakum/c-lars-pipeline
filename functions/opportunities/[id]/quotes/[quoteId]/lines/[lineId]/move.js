@@ -49,7 +49,7 @@ export async function onRequestPost(context) {
 
   const line = await one(
     env.DB,
-    'SELECT id, sort_order, parent_line_id FROM quote_lines WHERE id = ? AND quote_id = ?',
+    'SELECT id, sort_order, parent_line_id FROM quote_lines WHERE id = ? AND quote_id = ? AND deleted_at IS NULL',
     [lineId, quoteId]
   );
   if (!line) {
@@ -68,6 +68,7 @@ export async function onRequestPost(context) {
       `SELECT id, sort_order
          FROM quote_lines
         WHERE quote_id = ?
+          AND deleted_at IS NULL
           AND parent_line_id = ?
           AND sort_order ${op} ?
         ORDER BY sort_order ${order}
@@ -82,6 +83,7 @@ export async function onRequestPost(context) {
       `SELECT id, sort_order
          FROM quote_lines
         WHERE quote_id = ?
+          AND deleted_at IS NULL
           AND parent_line_id IS NULL
           AND sort_order ${op} ?
         ORDER BY sort_order ${order}

@@ -288,7 +288,7 @@ export async function onRequestGet(context) {
             cb.quote_price_user AS build_quote_price, cb.number AS build_number
        FROM quote_lines ql
        LEFT JOIN cost_builds cb ON cb.quote_line_id = ql.id
-      WHERE ql.quote_id = ?
+      WHERE ql.quote_id = ? AND ql.deleted_at IS NULL
       ORDER BY ql.sort_order, ql.id`,
     [quoteId]
   );

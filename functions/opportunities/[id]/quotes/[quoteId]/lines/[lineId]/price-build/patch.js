@@ -37,7 +37,7 @@ export async function onRequestPost(context) {
     `SELECT ql.*, q.opportunity_id, q.number AS quote_number, q.revision
        FROM quote_lines ql
        JOIN quotes q ON q.id = ql.quote_id
-      WHERE ql.id = ? AND q.id = ? AND q.opportunity_id = ?`,
+      WHERE ql.id = ? AND ql.deleted_at IS NULL AND q.id = ? AND q.opportunity_id = ?`,
     [lineId, quoteId, oppId]
   );
   if (!line) return json({ ok: false, error: 'Line item not found' }, 404);
