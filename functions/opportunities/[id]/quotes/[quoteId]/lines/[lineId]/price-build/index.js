@@ -513,19 +513,15 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
         timer = setTimeout(doSave, 500);
       }
 
-      // Listen for changes on all inputs, selects, textareas, and checkboxes.
-      // The price override field only saves on blur/Enter (not keystroke) to
-      // avoid saving intermediate values while the user is still typing.
+      // Listen for changes on all inputs — recalc instantly, save after debounce.
       form.addEventListener('input', function(e) {
         if (e.target.matches('input:not([type="file"]):not([type="hidden"]), textarea')) {
           recalcLocal();
-          if (e.target.name !== 'quote_price_user') {
-            scheduleAutoSave();
-          }
+          scheduleAutoSave();
         }
       });
       form.addEventListener('change', function(e) {
-        if (e.target.matches('input, select, textarea')) {
+        if (e.target.matches('input[type="checkbox"], select')) {
           recalcLocal();
           scheduleAutoSave();
         }
