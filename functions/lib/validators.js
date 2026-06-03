@@ -604,15 +604,19 @@ export function quoteTypeSubtitle(quoteType) {
 // selectable label so the per-kind field/behavior differences can be
 // built out later. Order = display order in the picker.
 export const PRICE_BUILD_KINDS = [
-  { value: 'new_build',         label: 'New Build' },
-  { value: 'buy_ship',          label: 'Buy/Ship' },
-  { value: 'cylinder_buy_ship', label: 'Cylinder (Buy/Ship)' },
-  { value: 'cylinder_build',    label: 'Cylinder (Build)' },
-  { value: 'refurb',            label: 'Refurb' },
-  { value: 'service',           label: 'Service' },
+  { value: 'standard', label: 'Standard' },
+  // Service pricing is not yet implemented — shown disabled in the UI.
+  // { value: 'service', label: 'Service' },
 ];
-const PRICE_BUILD_KIND_SET = new Set(PRICE_BUILD_KINDS.map((k) => k.value));
-export const DEFAULT_PRICE_BUILD_KIND = 'new_build';
+// Legacy kinds that all map to the standard config.
+const LEGACY_KINDS = new Set([
+  'new_build', 'buy_ship', 'cylinder_buy_ship', 'cylinder_build', 'refurb', 'service',
+]);
+const PRICE_BUILD_KIND_SET = new Set([
+  ...PRICE_BUILD_KINDS.map((k) => k.value),
+  ...LEGACY_KINDS,
+]);
+export const DEFAULT_PRICE_BUILD_KIND = 'standard';
 
 /**
  * Coerce any stored/posted build_kind to a valid kind. Legacy values

@@ -85,35 +85,41 @@ export { DEFAULT_SETTINGS };
 // 1b. Per-kind configuration
 // =====================================================================
 //
-// Each Price Build kind declares which cost categories are active and
-// which sub-tabs (Labor, DM) should render.  Kinds not listed here
-// fall back to new_build (the full 4-category layout).
+// Simplified pricing model (2026-06):
+//
+//   Standard (everything except Service):
+//     Inputs:  DM, DL, Other
+//     IMOH:    16.5% of price (auto-calculated, not editable)
+//     Price:   (DM + DL + Other) / 0.55
+//     Margin:  28.5% (by construction)
+//
+//   Service: not yet implemented.
+//
+// All legacy kinds (new_build, buy_ship, cylinder_*, refurb) map to the
+// same standard config. The per-kind target pct overrides ensure
+// dm(0.30) + dl(0.245) + other(0.005) = 0.55 so the auto-quote
+// formula produces the right price.
 
-export const KIND_CONFIG = {
-  new_build:         { dm: true,  dl: true,  imoh: true,  other: true,  laborTab: true,  dmTab: true  },
-  buy_ship:          { dm: true,  dl: false, imoh: false, other: true,  laborTab: false, dmTab: true,
-    // IMOH is baked into the quote price, not editable. The visible
-    // cost (DM + Other) is 55% of quote; hidden IMOH is 16.5%; margin
-    // is 28.5%. DM target overrides to 54.5% so auto-fill from DM
-    // produces the right quote price.
-    hiddenImohPct: 0.165,
-    targetPctOverride: { dm: 0.545 },
-  },
-  cylinder_buy_ship: { dm: true,  dl: true,  imoh: false, other: true,  laborTab: true,  dmTab: true  },
-  cylinder_build:    { dm: true,  dl: true,  imoh: true,  other: true,  laborTab: true,  dmTab: true  },
-  refurb:            { dm: true,  dl: true,  imoh: false, other: true,  laborTab: true,  dmTab: true,
-    // IMOH hidden at 16.5%, Other defaults to 0. DM (30%) + DL (25%) = 55%
-    // of target price; hidden IMOH brings total cost to 71.5% → 28.5% margin.
-    hiddenImohPct: 0.165,
-    targetPctOverride: { other: 0 },
-    refEstimates: false,
-  },
-  service:           { dm: true,  dl: true,  imoh: true,  other: true,  laborTab: true,  dmTab: true  },
+const STANDARD_CONFIG = {
+  dm: true, dl: true, imoh: false, other: true,
+  laborTab: false, dmTab: false,
+  hiddenImohPct: 0.165,
+  targetPctOverride: { dl: 0.245 },
 };
 
-/** Return the kind config for a build_kind value. Unknown kinds → new_build. */
+export const KIND_CONFIG = {
+  standard:          { ...STANDARD_CONFIG },
+  new_build:         { ...STANDARD_CONFIG },
+  buy_ship:          { ...STANDARD_CONFIG },
+  cylinder_buy_ship: { ...STANDARD_CONFIG },
+  cylinder_build:    { ...STANDARD_CONFIG },
+  refurb:            { ...STANDARD_CONFIG },
+  service:           { dm: true, dl: true, imoh: true, other: true, laborTab: true, dmTab: true },
+};
+
+/** Return the kind config for a build_kind value. Unknown kinds → standard. */
 export function kindConfig(kind) {
-  return KIND_CONFIG[kind] || KIND_CONFIG.new_build;
+  return KIND_CONFIG[kind] || KIND_CONFIG.standard;
 }
 
 // =====================================================================

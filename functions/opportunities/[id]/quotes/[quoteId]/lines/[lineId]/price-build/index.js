@@ -9,7 +9,7 @@
 
 import { one, all, stmt, batch } from '../../../../../../../lib/db.js';
 import { auditStmt } from '../../../../../../../lib/audit.js';
-import { validateCostBuild, validateWorkcenterEntries, PRICE_BUILD_KINDS, normalizePriceBuildKind } from '../../../../../../../lib/validators.js';
+import { validateCostBuild, validateWorkcenterEntries, normalizePriceBuildKind } from '../../../../../../../lib/validators.js';
 import { layout, htmlResponse, html, escape, raw } from '../../../../../../../lib/layout.js';
 import { uuid, now } from '../../../../../../../lib/ids.js';
 import { redirectWithFlash, formBody, readFlash } from '../../../../../../../lib/http.js';
@@ -18,7 +18,6 @@ import {
   loadCostBuildBundle,
   computeFromBundle,
   kindConfig,
-  workcenterEntryCost,
   computeLineExtendedPrice,
   quoteTotalsRecomputeStmt,
   fmtDollar,
@@ -87,9 +86,6 @@ async function renderCreatePrompt(context, ctx) {
   );
 
   const body = html`
-    <div class="flash flash-info" role="status" style="margin-bottom:0.75rem">
-      Price Builds are under active development. Some features may be incomplete or change without notice.
-    </div>
     <section class="card">
       <div class="card-header">
         <div>
@@ -160,7 +156,6 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
   const showDiscounts =
     ctx.line.quote_show_discounts === 1 || ctx.line.quote_show_discounts === true;
   const url = new URL(request.url);
-  const sub = url.searchParams.get('sub') || 'pricing';
   const { line, oppId, quoteId, lineId } = ctx;
   const buildId = ctx.build.id;
 
@@ -182,59 +177,19 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
 
   const settings = await loadPricingSettings(env.DB);
   const { pricing, totals } = computeFromBundle(bundle, settings);
-  const workcenters = settings.workcenters;
-
-  const allDmItems = await all(env.DB, 'SELECT id, description, cost FROM dm_items ORDER BY description');
-  const dmSelectedIds = new Set(bundle.dmSelections.map((it) => it.id));
-
-  const allLaborItems = await all(env.DB, 'SELECT id, description FROM labor_items ORDER BY description');
-  const laborSelectedIds = new Set(bundle.laborSelections.map((it) => it.id));
-  const allLaborEntries = await all(env.DB, 'SELECT labor_item_id, workcenter, hours, rate FROM labor_item_entries');
-  const allLaborEntriesById = new Map();
-  for (const e of allLaborEntries) {
-    if (!allLaborEntriesById.has(e.labor_item_id)) allLaborEntriesById.set(e.labor_item_id, []);
-    allLaborEntriesById.get(e.labor_item_id).push(e);
-  }
 
   const build = values || bundle.build;
   const locked = bundle.build.status === 'locked';
   const kc = kindConfig(normalizePriceBuildKind(bundle.build.build_kind));
 
-  const currentLaborByWc = new Map(
-    (bundle.currentLabor || []).map((r) => [r.workcenter, r])
-  );
-
   const errText = (k) => (errors[k] ? html`<small class="error">${errors[k]}</small>` : '');
   const base = baseUrl(oppId, quoteId, lineId);
 
   const pricingTabBody = renderPricingSubtab({ build, pricing, totals, settings, errText, locked, showDiscounts, kc });
-  const laborTabBody = kc.laborTab ? renderLaborSubtab({
-    workcenters, settings, currentLaborByWc,
-    currentLaborTotal: totals.currentLaborTotal,
-    allLaborItems, laborSelectedIds, allLaborEntriesById,
-    laborLibTotal: totals.laborLibTotal,
-    useLaborLibrary: !!bundle.build.use_labor_library,
-    laborCalcTotal: totals.laborCalcTotal,
-    errText, locked,
-  }) : '';
-  const dmTabBody = kc.dmTab ? renderDmSubtab({
-    allDmItems, dmSelectedIds, dmLibTotal: totals.dmLibTotal,
-    useDmLibrary: !!bundle.build.use_dm_library, locked,
-  }) : '';
-
-  const subNav = html`
-    <nav class="card" style="padding: 0.5rem 1rem;">
-      <a class="nav-link ${sub === 'pricing' ? 'active' : ''}" href="${base}">Pricing engine</a>
-      ${kc.laborTab ? html`<a class="nav-link ${sub === 'labor' ? 'active' : ''}" href="${base}?sub=labor">Labor cost (${fmtDollar(totals.currentLaborTotal + totals.laborLibTotal)})</a>` : ''}
-      ${kc.dmTab ? html`<a class="nav-link ${sub === 'dm' ? 'active' : ''}" href="${base}?sub=dm">Direct Material (${fmtDollar(totals.dmLibTotal || 0)})</a>` : ''}
-    </nav>`;
 
   const lineDesc = line.description || line.title || 'Line';
   const lineUrl = `/opportunities/${oppId}/quotes/${quoteId}/lines/${lineId}`;
   const header = html`
-    <div class="flash flash-info" role="status" style="margin-bottom:0.75rem">
-      Price Builds are under active development. Some features may be incomplete or change without notice.
-    </div>
     <section class="card">
       <div class="card-header">
         <div>
@@ -251,12 +206,7 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
             Quote <a href="${quoteUrl(oppId, quoteId)}">${escape(line.quote_number)} Rev ${escape(line.revision)}</a>
             · <a href="/opportunities/${escape(oppId)}">${escape(line.opp_number)}</a>
           </p>
-          <div class="pb-kind-row" style="display:flex;align-items:center;gap:.5rem;margin-top:.4rem">
-            <label for="pb-kind" class="muted" style="font-size:.8rem">Price Build kind</label>
-            <select id="pb-kind" class="num-input" style="width:auto;min-width:190px" ${locked ? 'disabled' : ''}>
-              ${PRICE_BUILD_KINDS.map((k) => html`<option value="${escape(k.value)}" ${normalizePriceBuildKind(bundle.build.build_kind) === k.value ? 'selected' : ''}>${escape(k.label)}</option>`)}
-            </select>
-          </div>
+          <div class="muted" style="font-size:.8rem;margin-top:.3rem">Standard pricing — 28.5% target margin</div>
         </div>
         <div class="header-actions">
           ${locked
@@ -295,18 +245,6 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
       });
     });
     </script>
-    <script>${raw(`(function(){
-  var sel=document.getElementById('pb-kind');
-  if(!sel||sel.disabled) return;
-  sel.addEventListener('change',function(){
-    var fd=new FormData(); fd.append('build_kind', sel.value);
-    sel.disabled=true;
-    fetch(${JSON.stringify(base + '/kind')},{method:'POST',credentials:'same-origin',body:fd})
-      .then(function(r){return r.json().catch(function(){return {};});})
-      .then(function(j){ if(j&&j.ok){location.reload();} else {sel.disabled=false;alert((j&&j.error)||'Could not update kind.');} })
-      .catch(function(){sel.disabled=false;alert('Could not update kind.');});
-  });
-})()`)}</script>
   `;
 
   // Document upload + list for reference files
@@ -321,7 +259,7 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
           <input type="hidden" name="opportunity_id" value="${escape(oppId)}">
           <input type="hidden" name="cost_build_id" value="${escape(buildId)}">
           <input type="hidden" name="kind" value="supplier_quote">
-          <input type="hidden" name="return_to" value="${base}?sub=${escape(sub)}">
+          <input type="hidden" name="return_to" value="${base}">
           <div class="drop-zone" :class="{ 'drop-zone-active': dragging }"
                @dragover.prevent="dragging = true"
                @dragleave.prevent="dragging = false"
@@ -367,7 +305,7 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
                 <td class="row-actions">
                   <form method="post" action="/documents/${escape(d.id)}/delete" style="display:inline"
                         onsubmit="return confirm('Delete this document?')">
-                    <input type="hidden" name="return_to" value="${base}?sub=${escape(sub)}">
+                    <input type="hidden" name="return_to" value="${base}">
                     <button class="btn small danger" type="submit">\u00d7</button>
                   </form>
                 </td>
@@ -381,28 +319,10 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
 
   const body = html`
     ${header}
-    ${subNav}
     <div class="cost-build-form" id="cb-form" data-patch-url="${base}/patch">
-      <script type="application/json" id="cb-pricing-data">${raw(JSON.stringify({
-        targetPct: {
-          dm:    kc.dm    ? settings.targetPct.dm    : 0,
-          dl:    kc.dl    ? settings.targetPct.dl    : 0,
-          imoh:  kc.imoh  ? settings.targetPct.imoh  : 0,
-          other: kc.other ? settings.targetPct.other : 0,
-        },
-        totalTargetPct:
-          (kc.dm    ? settings.targetPct.dm    : 0) +
-          (kc.dl    ? settings.targetPct.dl    : 0) +
-          (kc.imoh  ? settings.targetPct.imoh  : 0) +
-          (kc.other ? settings.targetPct.other : 0),
-        marginThresholdGood: settings.marginThresholdGood,
-        defaultLaborRate: settings.defaultLaborRate,
-      }))}</script>
-      <div style="display: ${sub === 'pricing' ? 'block' : 'none'}">${pricingTabBody}</div>
-      ${kc.laborTab ? html`<div style="display: ${sub === 'labor' ? 'block' : 'none'}">${laborTabBody}</div>` : ''}
-      ${kc.dmTab ? html`<div style="display: ${sub === 'dm' ? 'block' : 'none'}">${dmTabBody}</div>` : ''}
+      ${pricingTabBody}
 
-      <div class="field" style="width:100%">
+      <div class="field" style="width:100%;margin-top:1rem">
         <label>Notes</label>
         <textarea name="notes" ${locked ? 'disabled' : ''} style="width:100%; field-sizing:content; min-height:2.5rem; resize:none; padding:0.4rem 0.55rem; border:1px solid var(--border); border-radius:var(--radius); font:inherit; background:var(--bg);">${escape(build.notes ?? '')}</textarea>
       </div>
@@ -467,59 +387,22 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
 
       function collectPayload() {
         var data = {};
-        // Scalar fields
-        var labelEl = form.querySelector('input[name="label"]');
-        if (labelEl) data.label = labelEl.value;
         var notesEl = form.querySelector('textarea[name="notes"]');
         if (notesEl) data.notes = notesEl.value;
 
-        // Cost categories
-        ['dm_user_cost', 'dl_user_cost', 'imoh_user_cost', 'other_user_cost', 'quote_price_user'].forEach(function(name) {
+        // Cost inputs
+        ['dm_user_cost', 'dl_user_cost', 'other_user_cost'].forEach(function(name) {
           var el = form.querySelector('input[name="' + name + '"]');
           if (el) data[name] = el.value;
         });
 
-        // T3.2 Phase 3 — build-level discount fields
+        // Discount fields
         ['discount_amount', 'discount_pct', 'discount_description'].forEach(function(name) {
           var el = form.querySelector('input[name="' + name + '"]');
           if (el) data[name] = el.value;
         });
         var phantomEl = form.querySelector('input[name="discount_is_phantom"]');
         if (phantomEl) data.discount_is_phantom = phantomEl.checked ? '1' : '';
-
-        // Checkboxes
-        var useDm = form.querySelector('input[name="use_dm_library"]');
-        if (useDm) data.use_dm_library = useDm.checked ? '1' : '';
-        var useLab = form.querySelector('input[name="use_labor_library"]');
-        if (useLab) data.use_labor_library = useLab.checked ? '1' : '';
-
-        // Workcenter hours/rates
-        var hours = {};
-        var rates = {};
-        form.querySelectorAll('input[name^="current_hours["]').forEach(function(el) {
-          var wc = el.name.match(/\[(.+)\]/);
-          if (wc) hours[wc[1]] = el.value;
-        });
-        form.querySelectorAll('input[name^="current_rate["]').forEach(function(el) {
-          var wc = el.name.match(/\[(.+)\]/);
-          if (wc) rates[wc[1]] = el.value;
-        });
-        data.current_hours = hours;
-        data.current_rate = rates;
-
-        // DM item selections
-        var dmIds = [];
-        form.querySelectorAll('input[name="dm_item_ids"]:checked').forEach(function(el) {
-          dmIds.push(el.value);
-        });
-        data.dm_item_ids = dmIds;
-
-        // Labor item selections
-        var laborIds = [];
-        form.querySelectorAll('input[name="labor_item_ids"]:checked').forEach(function(el) {
-          laborIds.push(el.value);
-        });
-        data.labor_item_ids = laborIds;
 
         return data;
       }
@@ -528,20 +411,18 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
         if (!res.pricing) return;
         var eff = res.pricing.effective;
         var marg = res.pricing.margin;
-        var refs = res.pricing.references;
-        var totals = res.totals || {};
 
         // Total cost
         var tcEl = document.getElementById('cb-total-cost');
         if (tcEl && eff.totalCost !== undefined) tcEl.textContent = fmtDollar(eff.totalCost);
 
-        // Target price
+        // Target price (= auto-quote)
         var tpEl = document.getElementById('cb-target-price');
-        if (tpEl && eff.targetPrice !== undefined) tpEl.textContent = fmtDollar(eff.targetPrice);
+        if (tpEl && eff.quote !== undefined) tpEl.textContent = fmtDollar(eff.quote);
 
-        // Hidden IMOH (buy_ship kind)
+        // IMOH
         var hiEl = document.getElementById('cb-hidden-imoh');
-        if (hiEl && res.pricing.hiddenCosts) hiEl.textContent = fmtDollar(res.pricing.hiddenCosts.imoh);
+        if (hiEl && res.pricing.hiddenCosts) hiEl.value = res.pricing.hiddenCosts.imoh != null ? fmtDollar(res.pricing.hiddenCosts.imoh) : '';
 
         // Margin
         var mvEl = document.getElementById('cb-margin-value');
@@ -554,8 +435,8 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
         }
         var msEl = document.getElementById('cb-margin-status');
         if (msEl) {
-          if (marg.status === 'good') msEl.textContent = 'Good (> ' + fmtPct(marg.threshold) + ')';
-          else if (marg.status === 'low') msEl.textContent = 'Too low (< ' + fmtPct(marg.threshold) + ')';
+          if (marg.status === 'good') msEl.textContent = 'Target: 28.5%';
+          else if (marg.status === 'low') msEl.textContent = 'Below 28.5% target';
           else msEl.textContent = '';
         }
         var mbEl = document.getElementById('cb-margin-box');
@@ -564,51 +445,6 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
           if (marg.status === 'good') mbEl.classList.add('margin-good');
           else if (marg.status === 'low') mbEl.classList.add('margin-low');
         }
-
-        // Reference estimates
-        if (refs) {
-          var refMap = {
-            'cb-ref-fq-dm': refs.fromQuote && refs.fromQuote.dm,
-            'cb-ref-fq-dl': refs.fromQuote && refs.fromQuote.dl,
-            'cb-ref-fq-imoh': refs.fromQuote && refs.fromQuote.imoh,
-            'cb-ref-fq-other': refs.fromQuote && refs.fromQuote.other,
-            'cb-ref-fdm-price': refs.fromDm && refs.fromDm.price,
-            'cb-ref-fdm-dl': refs.fromDm && refs.fromDm.dl,
-            'cb-ref-fdm-imoh': refs.fromDm && refs.fromDm.imoh,
-            'cb-ref-fdm-other': refs.fromDm && refs.fromDm.other,
-            'cb-ref-fdmdl-price': refs.fromDmDl && refs.fromDmDl.price,
-            'cb-ref-fdmdl-imoh': refs.fromDmDl && refs.fromDmDl.imoh,
-            'cb-ref-fdmdl-other': refs.fromDmDl && refs.fromDmDl.other,
-          };
-          for (var id in refMap) {
-            var el = document.getElementById(id);
-            if (el) el.textContent = fmtDollar(refMap[id]);
-          }
-        }
-
-        // Workcenter costs
-        if (res.wcCosts) {
-          for (var wc in res.wcCosts) {
-            var row = form.querySelector('tr[data-labor-wc="' + wc + '"]');
-            if (row) {
-              var costCell = row.querySelector('[data-labor-cost]');
-              if (costCell) costCell.textContent = res.wcCosts[wc] ? fmtDollar(res.wcCosts[wc]) : '\u2014';
-            }
-          }
-        }
-
-        // Labor totals
-        var ltEl = document.getElementById('cb-labor-total');
-        if (ltEl && totals.currentLaborTotal !== undefined) ltEl.textContent = fmtDollar(totals.currentLaborTotal);
-        var lsEl = document.getElementById('cb-labor-selected-total');
-        if (lsEl && totals.laborLibTotal !== undefined) lsEl.textContent = fmtDollar(totals.laborLibTotal);
-        var llEl = document.getElementById('cb-labor-linked-total');
-        if (llEl && totals.laborCalcTotal !== undefined) llEl.textContent = fmtDollar(totals.laborCalcTotal);
-
-        // DM total
-        var dsEl = document.getElementById('cb-dm-selected-total');
-        if (dsEl && totals.dmLibTotal !== undefined) dsEl.textContent = fmtDollar(totals.dmLibTotal);
-      }
 
       function setStatus(text, type) {
         if (!statusEl) return;
@@ -753,12 +589,7 @@ function renderBuildDiscountEditor({ build, locked, errText }) {
 
 function renderPricingSubtab({ build, pricing, totals, settings, errText, locked, showDiscounts, kc }) {
   const eff = pricing.effective;
-  const auto = pricing.auto;
-  const notes = pricing.notes;
   const marg = pricing.margin;
-  const refs = pricing.references;
-  const targetPct = pricing.targetPct;
-  const linked = pricing.linked;
 
   const fmtInput = (n) => {
     if (n === null || n === undefined || n === '') return '';
@@ -766,149 +597,81 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
     if (Number.isNaN(num)) return String(n);
     return '$' + num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
-  const valOrAuto = (userVal, autoVal) => {
-    if (userVal !== null && userVal !== undefined && userVal !== '') return fmtInput(userVal);
-    if (autoVal !== null && autoVal !== undefined) return fmtInput(autoVal);
-    return '';
-  };
-  const autoClass = (userVal, autoVal) => {
-    if (userVal === null || userVal === undefined || userVal === '') {
-      if (autoVal !== null && autoVal !== undefined) return 'auto-filled';
-    }
-    return '';
-  };
-
-  const pctOf = (cost, base) => {
-    if (cost == null || base == null || base === 0) return '\u2014';
-    return fmtPct(cost / base, 1);
-  };
-
-  const categoryRow = (id, label, userVal, autoVal, noteText, disabled, effCost) => html`
-    <tr>
-      <td><strong>${label}</strong></td>
-      <td class="num">
-        <input type="text" name="${id}_user_cost"
-               value="${userVal == null || userVal === '' ? '' : fmtInput(userVal)}"
-               class="num-input"
-               ${disabled || locked ? 'disabled' : ''} placeholder="$0">
-        ${errText(id + '_user_cost')}
-        ${noteText ? html`<div class="muted" style="font-size:0.75rem">${escape(noteText)}</div>` : ''}
-      </td>
-      <td class="num muted">${fmtPct(targetPct[id], 1)}</td>
-      <td class="num" id="cb-pct-target-${id}">${pctOf(effCost, eff.targetPrice)}</td>
-      <td class="num" id="cb-pct-quote-${id}">${pctOf(effCost, eff.quote)}</td>
-    </tr>`;
 
   return html`
     <section class="card">
-      <h2 class="section-h">Pricing</h2>
+      <h2 class="section-h">Costs</h2>
 
-      <div class="pricing-target-line">
-        <span class="muted">Target Price</span>
-        <span id="cb-target-price">${fmtDollar(eff.targetPrice)}</span>
-      </div>
+      <table class="data compact cost-summary-table">
+        <thead>
+          <tr><th></th><th class="num" style="width:10rem">Amount</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Direct Material (DM)</strong></td>
+            <td class="num">
+              <input type="text" name="dm_user_cost"
+                     value="${build.dm_user_cost != null && build.dm_user_cost !== '' ? fmtInput(build.dm_user_cost) : ''}"
+                     class="num-input" ${locked ? 'disabled' : ''} placeholder="$0">
+              ${errText('dm_user_cost')}
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Direct Labor (DL)</strong></td>
+            <td class="num">
+              <input type="text" name="dl_user_cost"
+                     value="${build.dl_user_cost != null && build.dl_user_cost !== '' ? fmtInput(build.dl_user_cost) : ''}"
+                     class="num-input" ${locked ? 'disabled' : ''} placeholder="$0">
+              ${errText('dl_user_cost')}
+            </td>
+          </tr>
+          <tr>
+            <td><strong>Other</strong></td>
+            <td class="num">
+              <input type="text" name="other_user_cost"
+                     value="${build.other_user_cost != null && build.other_user_cost !== '' ? fmtInput(build.other_user_cost) : ''}"
+                     class="num-input" ${locked ? 'disabled' : ''} placeholder="$0">
+              ${errText('other_user_cost')}
+            </td>
+          </tr>
+          <tr style="color:var(--fg-muted)">
+            <td>IMOH (16.5%)</td>
+            <td class="num">
+              <input type="text" id="cb-hidden-imoh"
+                     value="${fmtInput(pricing.hiddenCosts.imoh)}"
+                     class="num-input" disabled
+                     style="background:var(--bg-alt);color:var(--fg-muted)">
+            </td>
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr>
+            <th>Total Cost</th>
+            <th class="num" id="cb-total-cost">${fmtDollar(eff.totalCost)}</th>
+          </tr>
+        </tfoot>
+      </table>
 
-      <div class="pricing-grid pricing-grid-2">
-        <div class="pricing-box pricing-box-quote">
-          <div class="muted">Quote Price</div>
-          <input type="text" name="quote_price_user"
-                 value="${valOrAuto(build.quote_price_user, auto.quote)}"
-                 class="num-input pricing-input ${(build.quote_price_user == null || build.quote_price_user === '') && auto.quote !== null ? 'pb-autocalc' : ''}"
-                 ${locked ? 'disabled' : ''} placeholder="$0">
-          ${errText('quote_price_user')}
-          <div id="cb-quote-autonote" class="muted" style="font-size:0.7rem;display:${(build.quote_price_user == null || build.quote_price_user === '') && auto.quote !== null ? '' : 'none'}">auto calculated</div>
+      <div class="pricing-grid pricing-grid-2" style="margin-top:1rem">
+        <div class="pricing-box">
+          <div class="muted">Target Price</div>
+          <div class="pricing-value" id="cb-target-price">${fmtDollar(eff.quote)}</div>
+          <div class="muted" style="font-size:0.7rem">= (DM + DL + Other) / 0.55</div>
         </div>
         <div class="pricing-box ${marg.status === 'good' ? 'margin-good' : marg.status === 'low' ? 'margin-low' : ''}" id="cb-margin-box">
-          <div class="muted">Estimated Gross Margin</div>
+          <div class="muted">Gross Margin</div>
           <div class="pricing-value" id="cb-margin-value">
             ${marg.amount !== null
               ? html`${fmtDollar(marg.amount)} (${fmtPct(marg.pct)})`
               : '\u2014'}
           </div>
           <div class="muted" id="cb-margin-status" style="font-size:0.75rem">
-          ${marg.status
-            ? (marg.status === 'good'
-                  ? `Good (> ${fmtPct(marg.threshold)})`
-                  : `Too Low (\u2264 ${fmtPct(marg.threshold)})`)
-            : ''}</div>
+            ${marg.status ? (marg.status === 'good' ? 'Target: 28.5%' : `Below 28.5% target`) : ''}
+          </div>
         </div>
       </div>
-
-      <h2 class="section-h">Cost Inputs &amp; Summary</h2>
-      <p class="muted" style="margin-top:-0.5rem">
-        ${build.build_kind === 'wfm_reference'
-          ? html`<span style="display:inline-block;background:#e0e7ff;color:#3730a3;padding:.05rem .4rem;border-radius:3px;font-size:.78rem;font-weight:600;margin-right:.4rem">WFM imported</span> Cost basis + price came from the WFM quote. Editable; margin recalculates.`
-          : 'Blanks auto-fill from quote \u00d7 target %. Linked DM/labor totals override manual values.'}
-      </p>
-
-      <table class="data compact cost-summary-table">
-        <thead>
-          <tr><th></th><th class="num">Cost</th><th class="num">Target %</th><th class="num">% of Target</th><th class="num">% of Quote</th></tr>
-        </thead>
-        <tbody>
-          ${kc.dm   ? categoryRow('dm',    'Direct Material (DM)',   build.dm_user_cost,    auto.dm,    linked.dm ? notes.dm : (auto.dm !== null ? notes.dm : ''),       linked.dm,    eff.dm)    : ''}
-          ${kc.dl   ? categoryRow('dl',    'Direct Labor (DL)',      build.dl_user_cost,    auto.dl,    linked.labor ? notes.dl : (auto.dl !== null ? notes.dl : ''),    linked.labor, eff.dl)    : ''}
-          ${kc.imoh ? categoryRow('imoh',  'Indirect Material + OH', build.imoh_user_cost,  auto.imoh,  auto.imoh !== null ? notes.imoh : '',                           false,        eff.imoh)  : ''}
-          ${kc.other? categoryRow('other', 'Other',                  build.other_user_cost, auto.other, auto.other !== null ? notes.other : '',                          false,        eff.other) : ''}
-          ${pricing.hiddenCosts.imohPct > 0 ? html`
-          <tr class="muted" style="font-size:0.85em">
-            <td>IMOH (included)</td>
-            <td class="num" id="cb-hidden-imoh">${fmtDollar(pricing.hiddenCosts.imoh)}</td>
-            <td class="num">${fmtPct(pricing.hiddenCosts.imohPct, 1)}</td>
-            <td class="num">${pctOf(pricing.hiddenCosts.imoh, eff.targetPrice)}</td>
-            <td class="num">${pctOf(pricing.hiddenCosts.imoh, eff.quote)}</td>
-          </tr>` : ''}
-        </tbody>
-        <tfoot>
-          <tr>
-            <th>Total Est. Cost</th>
-            <th class="num" id="cb-total-cost">${fmtDollar(eff.totalCost)}</th>
-            <th class="num muted">${fmtPct(targetPct.total, 1)}</th>
-            <th class="num" id="cb-pct-target-total">${pctOf(eff.totalCost, eff.targetPrice)}</th>
-            <th class="num" id="cb-pct-quote-total">${pctOf(eff.totalCost, eff.quote)}</th>
-          </tr>
-        </tfoot>
-      </table>
-      ${pricing.hiddenCosts.imohPct > 0 ? html`
-      <p class="muted" style="font-size:0.75rem; margin-top:0.4rem">
-        Total includes ${fmtPct(pricing.hiddenCosts.imohPct, 1)} IMOH on quote price for 28.5% target margin.
-      </p>` : ''}
 
       ${showDiscounts ? renderBuildDiscountEditor({ build, locked, errText }) : ''}
-
-      ${kc.refEstimates !== false ? html`
-      <div class="reference-estimates">
-        <div class="ref-heading">Reference Estimates</div>
-        <div class="ref-grid">
-          <div>
-            <div class="ref-subhead">Estimates based on Quote Price</div>
-            <table class="ref-table">
-              ${kc.dm    ? html`<tr><td>DM</td><td class="num" id="cb-ref-fq-dm">${fmtDollar(refs.fromQuote.dm)}</td></tr>`    : ''}
-              ${kc.dl    ? html`<tr><td>DL</td><td class="num" id="cb-ref-fq-dl">${fmtDollar(refs.fromQuote.dl)}</td></tr>`    : ''}
-              ${kc.imoh  ? html`<tr><td>IMOH</td><td class="num" id="cb-ref-fq-imoh">${fmtDollar(refs.fromQuote.imoh)}</td></tr>` : ''}
-              ${kc.other ? html`<tr><td>Other</td><td class="num" id="cb-ref-fq-other">${fmtDollar(refs.fromQuote.other)}</td></tr>` : ''}
-            </table>
-          </div>
-          ${kc.dm ? html`<div>
-            <div class="ref-subhead">Estimates from DM only</div>
-            <table class="ref-table">
-              <tr><td>Price</td><td class="num" id="cb-ref-fdm-price">${fmtDollar(refs.fromDm.price)}</td></tr>
-              ${kc.dl    ? html`<tr><td>Labor</td><td class="num" id="cb-ref-fdm-dl">${fmtDollar(refs.fromDm.dl)}</td></tr>`    : ''}
-              ${kc.imoh  ? html`<tr><td>IMOH</td><td class="num" id="cb-ref-fdm-imoh">${fmtDollar(refs.fromDm.imoh)}</td></tr>` : ''}
-              ${kc.other ? html`<tr><td>Other</td><td class="num" id="cb-ref-fdm-other">${fmtDollar(refs.fromDm.other)}</td></tr>` : ''}
-            </table>
-          </div>` : ''}
-          ${kc.dm && kc.dl ? html`<div>
-            <div class="ref-subhead">Estimates from DM + DL</div>
-            <table class="ref-table">
-              <tr><td>Price</td><td class="num" id="cb-ref-fdmdl-price">${fmtDollar(refs.fromDmDl.price)}</td></tr>
-              ${kc.imoh  ? html`<tr><td>IMOH</td><td class="num" id="cb-ref-fdmdl-imoh">${fmtDollar(refs.fromDmDl.imoh)}</td></tr>` : ''}
-              ${kc.other ? html`<tr><td>Other</td><td class="num" id="cb-ref-fdmdl-other">${fmtDollar(refs.fromDmDl.other)}</td></tr>` : ''}
-            </table>
-          </div>` : ''}
-        </div>
-      </div>
-      ` : ''}
     </section>
   `;
 }
@@ -1059,11 +822,7 @@ async function handleCreate(context, ctx, input) {
   const label = input.label || line.description || 'Price build';
   const templateId = input.builds_library_id || null;
 
-  // Every new price build starts as 'new_build'. The kind is a
-  // selectable label on the editor (PRICE_BUILD_KINDS); per-kind
-  // field/behavior differences are deferred, so all kinds render the
-  // same default layout for now.
-  const buildKind = 'new_build';
+  const buildKind = 'standard';
 
   // Auto-generate price build number: P{quoteSeq}.{lineIndex}
   // quoteSeq is the quote's position (1, 2, 3...) and lineIndex is
