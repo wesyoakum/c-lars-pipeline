@@ -328,6 +328,7 @@ function parseOptionalMoney(raw) {
   const s = String(raw).trim();
   if (s === '') return { value: null, error: null };
   const cleaned = s.replace(/[$,\s]/g, '');
+  if (cleaned === '') return { value: null, error: null };
   const n = Number(cleaned);
   if (!Number.isFinite(n)) return { value: null, error: 'Must be a number' };
   if (n < 0) return { value: null, error: 'Must be zero or positive' };
