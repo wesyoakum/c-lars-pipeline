@@ -253,18 +253,21 @@ export function computePricing(inputs, settings, options = {}) {
   let dmAuto = null, dlAuto = null, imohAuto = null, otherAuto = null, quoteAuto = null;
 
   // Quote auto-fill from known costs when quote is blank.
-  // Zero is treated as an explicit user value, not an auto-fill source.
   if (quoteUser === null && dmUser !== null && dmUser > 0) {
     let knownCost = dmUser;
     let knownPct  = pDm;
-    if (active.dl && dlUser !== null && dlUser > 0) {
-      knownCost += dlUser;
-      knownPct  += pDl;
+    if (active.dl && dlUser !== null) {
+      // Include DL even when zero — it's an explicit user value.
+      // For non-hidden-IMOH kinds, only include when > 0 to avoid
+      // distorting the auto-quote with a zero-cost category.
+      if (dlUser > 0 || hiddenImohPct > 0) {
+        knownCost += dlUser;
+        knownPct  += pDl;
+      }
     }
-    // For hidden-IMOH kinds (buy_ship, refurb), include manually-entered
-    // Other in the auto-quote so price = (DM + Other) / 0.55 achieves
-    // the 28.5% target margin correctly.
-    if (hiddenImohPct > 0 && otherUser !== null && otherUser > 0) {
+    // For hidden-IMOH kinds, include Other when entered (even if zero)
+    // so price = (DM + DL + Other) / 0.55 is always correct.
+    if (hiddenImohPct > 0 && otherUser !== null) {
       knownCost += otherUser;
       knownPct  += pOther;
     }
