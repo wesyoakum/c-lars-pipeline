@@ -470,43 +470,11 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
       }
 
       function applyResponse(res) {
-        if (!res.pricing) return;
-        var eff = res.pricing.effective;
-        var marg = res.pricing.margin;
-
-        // Total cost
-        var tcEl = document.getElementById('cb-total-cost');
-        if (tcEl && eff.totalCost !== undefined) tcEl.textContent = fmtDollar(eff.totalCost);
-
-        // Target price (= auto-quote)
-        var tpEl = document.getElementById('cb-target-price');
-        if (tpEl && eff.quote !== undefined) tpEl.textContent = fmtDollar(eff.quote);
-
-        // IMOH
-        var hiEl = document.getElementById('cb-hidden-imoh');
-        if (hiEl && res.pricing.hiddenCosts) hiEl.value = res.pricing.hiddenCosts.imoh != null ? fmtDollar(res.pricing.hiddenCosts.imoh) : '';
-
-        // Margin
-        var mvEl = document.getElementById('cb-margin-value');
-        if (mvEl) {
-          if (marg.amount !== null) {
-            mvEl.innerHTML = fmtDollar(marg.amount) + ' (' + fmtPct(marg.pct) + ')';
-          } else {
-            mvEl.textContent = '\u2014';
-          }
-        }
-        var msEl = document.getElementById('cb-margin-status');
-        if (msEl) {
-          if (marg.status === 'good') msEl.textContent = 'Target: 28.5%';
-          else if (marg.status === 'low') msEl.textContent = 'Below 28.5% target';
-          else msEl.textContent = '';
-        }
-        var mbEl = document.getElementById('cb-margin-box');
-        if (mbEl) {
-          mbEl.classList.remove('margin-good', 'margin-low');
-          if (marg.status === 'good') mbEl.classList.add('margin-good');
-          else if (marg.status === 'low') mbEl.classList.add('margin-low');
-        }
+        // After a server save, just run recalcLocal() to update all
+        // display values from the current input state. This avoids
+        // the server response overwriting client-side recalc with
+        // stale or differently-computed values.
+        recalcLocal();
 
       function setStatus(text, type) {
         if (!statusEl) return;
