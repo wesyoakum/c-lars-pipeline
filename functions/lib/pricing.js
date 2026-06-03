@@ -246,14 +246,23 @@ export function computePricing(inputs, settings, options = {}) {
   // --- Auto-fill pass ---
   let dmAuto = null, dlAuto = null, imohAuto = null, otherAuto = null, quoteAuto = null;
 
-  // Quote auto-fill from DM (and DL) when quote is blank.
+  // Quote auto-fill from known costs when quote is blank.
   // Zero is treated as an explicit user value, not an auto-fill source.
   if (quoteUser === null && dmUser !== null && dmUser > 0) {
+    let knownCost = dmUser;
+    let knownPct  = pDm;
     if (active.dl && dlUser !== null && dlUser > 0) {
-      quoteAuto = (dmUser + dlUser) / pDmDl;
-    } else {
-      quoteAuto = dmUser / pDm;
+      knownCost += dlUser;
+      knownPct  += pDl;
     }
+    // For hidden-IMOH kinds (buy_ship, refurb), include manually-entered
+    // Other in the auto-quote so price = (DM + Other) / 0.55 achieves
+    // the 28.5% target margin correctly.
+    if (hiddenImohPct > 0 && otherUser !== null && otherUser > 0) {
+      knownCost += otherUser;
+      knownPct  += pOther;
+    }
+    quoteAuto = knownCost / knownPct;
   }
 
   // Effective quote drives all remaining auto-fills.
@@ -341,6 +350,15 @@ export function computePricing(inputs, settings, options = {}) {
   else if (dmUser !== null && dlUser !== null) estSrc = 'Estimated from DM + DL';
   else if (dmUser !== null) estSrc = 'Estimated from DM';
 
+  // Quote note: reflect when Other is included in the auto-quote
+  let quoteNote = '';
+  if (quoteAuto !== null) {
+    const parts = ['DM'];
+    if (active.dl && dlUser !== null && dlUser > 0) parts.push('DL');
+    if (hiddenImohPct > 0 && otherUser !== null && otherUser > 0) parts.push('Other');
+    quoteNote = 'Estimated from ' + parts.join(' + ');
+  }
+
   const notes = {
     dm:    active.dm
              ? (useDmLib ? 'Linked to Direct Material library'
@@ -352,9 +370,7 @@ export function computePricing(inputs, settings, options = {}) {
              : '',
     imoh:  active.imoh  && imohAuto  !== null ? estSrc : '',
     other: active.other && otherAuto !== null ? estSrc : '',
-    quote: quoteAuto !== null
-             ? ((active.dl && dlUser !== null) ? 'Estimated from DM + DL' : 'Estimated from DM')
-             : '',
+    quote: quoteNote,
   };
 
   return {
