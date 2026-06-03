@@ -385,13 +385,75 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
         return (Number(n) * 100).toFixed(d !== undefined ? d : 1) + '%';
       }
 
+      function parseDollar(s) {
+        if (s === undefined || s === null || s === '') return 0;
+        var n = Number(String(s).replace(/[$,\s]/g, ''));
+        return isFinite(n) ? n : 0;
+      }
+
+      // Instant client-side recalc — runs on every keystroke before the
+      // server save roundtrip so the user sees numbers update immediately.
+      function recalcLocal() {
+        var dm = parseDollar(form.querySelector('input[name="dm_user_cost"]')?.value);
+        var dl = parseDollar(form.querySelector('input[name="dl_user_cost"]')?.value);
+        var other = parseDollar(form.querySelector('input[name="other_user_cost"]')?.value);
+        var directCosts = dm + dl + other;
+        var targetPrice = directCosts > 0 ? directCosts / 0.55 : 0;
+        var imoh = targetPrice * 0.165;
+        var totalCost = directCosts + imoh;
+
+        // Price override
+        var overrideEl = form.querySelector('input[name="quote_price_user"]');
+        var overrideRaw = overrideEl ? overrideEl.value.trim() : '';
+        var overridePrice = parseDollar(overrideRaw);
+        var useOverride = overrideRaw !== '' && overridePrice > 0;
+        var effectivePrice = useOverride ? overridePrice : targetPrice;
+
+        // When using override, IMOH is still based on target price (costs don't change)
+        var margin = effectivePrice > 0 ? effectivePrice - totalCost : 0;
+        var marginPct = effectivePrice > 0 ? margin / effectivePrice : 0;
+
+        var tcEl = document.getElementById('cb-total-cost');
+        if (tcEl) tcEl.textContent = fmtDollar(totalCost);
+
+        var tpEl = document.getElementById('cb-target-price');
+        if (tpEl) tpEl.textContent = fmtDollar(targetPrice);
+
+        var hiEl = document.getElementById('cb-hidden-imoh');
+        if (hiEl) hiEl.value = fmtDollar(imoh);
+
+        var mvEl = document.getElementById('cb-margin-value');
+        if (mvEl) {
+          if (effectivePrice > 0) {
+            mvEl.innerHTML = fmtDollar(margin) + ' (' + fmtPct(marginPct) + ')';
+          } else {
+            mvEl.textContent = '\u2014';
+          }
+        }
+        var msEl = document.getElementById('cb-margin-status');
+        if (msEl) {
+          if (effectivePrice > 0) {
+            msEl.textContent = marginPct > 0.284 ? 'Target: 28.5%' : 'Below 28.5% target';
+          } else {
+            msEl.textContent = '';
+          }
+        }
+        var mbEl = document.getElementById('cb-margin-box');
+        if (mbEl) {
+          mbEl.classList.remove('margin-good', 'margin-low');
+          if (effectivePrice > 0) {
+            mbEl.classList.add(marginPct > 0.284 ? 'margin-good' : 'margin-low');
+          }
+        }
+      }
+
       function collectPayload() {
         var data = {};
         var notesEl = form.querySelector('textarea[name="notes"]');
         if (notesEl) data.notes = notesEl.value;
 
-        // Cost inputs
-        ['dm_user_cost', 'dl_user_cost', 'other_user_cost'].forEach(function(name) {
+        // Cost inputs + price override
+        ['dm_user_cost', 'dl_user_cost', 'other_user_cost', 'quote_price_user'].forEach(function(name) {
           var el = form.querySelector('input[name="' + name + '"]');
           if (el) data[name] = el.value;
         });
@@ -486,11 +548,13 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
       // Listen for changes on all inputs, selects, textareas, and checkboxes
       form.addEventListener('input', function(e) {
         if (e.target.matches('input:not([type="file"]):not([type="hidden"]), textarea')) {
+          recalcLocal();
           scheduleAutoSave();
         }
       });
       form.addEventListener('change', function(e) {
         if (e.target.matches('input[type="checkbox"], select')) {
+          recalcLocal();
           scheduleAutoSave();
         }
       });
@@ -652,11 +716,20 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
         </tfoot>
       </table>
 
-      <div class="pricing-grid pricing-grid-2" style="margin-top:1rem">
+      <div class="pricing-grid" style="margin-top:1rem;display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.75rem">
         <div class="pricing-box">
           <div class="muted">Target Price</div>
           <div class="pricing-value" id="cb-target-price">${fmtDollar(eff.quote)}</div>
           <div class="muted" style="font-size:0.7rem">= (DM + DL + Other) / 0.55</div>
+        </div>
+        <div class="pricing-box">
+          <div class="muted">Your Price</div>
+          <input type="text" name="quote_price_user"
+                 value="${build.quote_price_user != null && build.quote_price_user !== '' ? fmtInput(build.quote_price_user) : ''}"
+                 class="num-input pricing-input" id="cb-price-override"
+                 ${locked ? 'disabled' : ''} placeholder="Use target"
+                 style="font-size:1.1rem;text-align:center;margin-top:0.2rem">
+          <div class="muted" style="font-size:0.7rem">Leave blank to use target</div>
         </div>
         <div class="pricing-box ${marg.status === 'good' ? 'margin-good' : marg.status === 'low' ? 'margin-low' : ''}" id="cb-margin-box">
           <div class="muted">Gross Margin</div>
