@@ -30,6 +30,8 @@ import {
   quoteTypeSubtitle,
   QUOTE_TYPE_LABELS,
   QUOTE_STATUS_LABELS,
+  PRICE_BUILD_KINDS,
+  normalizePriceBuildKind,
 } from '../../../../lib/validators.js';
 import {
   fmtDollar,
@@ -285,7 +287,8 @@ export async function onRequestGet(context) {
   const lines = await all(
     env.DB,
     `SELECT ql.*, cb.label AS price_build_label, cb.status AS price_build_status,
-            cb.quote_price_user AS build_quote_price, cb.number AS build_number
+            cb.quote_price_user AS build_quote_price, cb.number AS build_number,
+            cb.build_kind AS build_kind
        FROM quote_lines ql
        LEFT JOIN cost_builds cb ON cb.quote_line_id = ql.id
       WHERE ql.quote_id = ? AND ql.deleted_at IS NULL
@@ -3430,6 +3433,43 @@ export async function onRequestGet(context) {
     })();
     </script>
     <script>
+    // Build kind selector: creates/updates the price build when the user picks a kind
+    (function(){
+      document.querySelectorAll('.line-build-kind-select').forEach(function(sel){
+        sel.addEventListener('change', function(){
+          var lineId = sel.dataset.lineId;
+          var kind = sel.value;
+          if (!kind) return; // "— None —" selected, do nothing
+          sel.disabled = true;
+          var oppId = '${escape(oppId)}';
+          var quoteId = '${escape(quoteId)}';
+          fetch('/opportunities/' + oppId + '/quotes/' + quoteId + '/lines/' + lineId + '/ensure-build', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+            body: 'build_kind=' + encodeURIComponent(kind)
+          }).then(function(r){ return r.json(); }).then(function(d){
+            sel.disabled = false;
+            if (!d.ok) { alert(d.error || 'Failed'); sel.value = sel.dataset.costBuildId ? sel.querySelector('option[selected]')?.value || '' : ''; return; }
+            sel.dataset.costBuildId = d.cost_build_id;
+            // Update the calculator icon link to blue if build was just created
+            if (d.created) {
+              var row = sel.closest('tr[data-line-id]');
+              if (row) {
+                var icon = row.querySelector('.line-build-icon');
+                if (icon) icon.style.color = '#3b82f6';
+              }
+            }
+            sel.classList.add('ie-saved');
+            setTimeout(function(){ sel.classList.remove('ie-saved'); }, 1200);
+          }).catch(function(e){
+            sel.disabled = false;
+            console.error('Build kind error:', e);
+          });
+        });
+      });
+    })();
+
     // Supplier typeahead: attaches to all [data-supplier-typeahead] inputs
     (function(){
       var cache = null;
@@ -3821,11 +3861,24 @@ function renderLineDiscountEditor({ line, readOnly, hasDiscount }) {
 function renderLineDetailFields(l, readOnly) {
   const hasAnyDetail = l.dm_cost != null || l.other_cost != null ||
     l.supplier_name || l.delivery_estimate || l.notes_internal;
+  const currentKind = l.build_kind ? normalizePriceBuildKind(l.build_kind) : '';
 
   return html`
     <details class="line-detail-fields" ${hasAnyDetail ? 'open' : ''}>
       <summary class="line-detail-toggle">Internal details</summary>
       <div class="line-detail-grid">
+        <div class="line-detail-field line-detail-wide">
+          <label>Price Build Type</label>
+          <select class="line-build-kind-select"
+                  data-line-id="${escape(l.id)}"
+                  data-cost-build-id="${escape(l.cost_build_id ?? '')}"
+                  ${readOnly ? 'disabled' : ''}>
+            <option value="" ${!currentKind ? 'selected' : ''}>— None —</option>
+            ${PRICE_BUILD_KINDS.map(k => html`
+              <option value="${escape(k.value)}" ${currentKind === k.value ? 'selected' : ''}>${escape(k.label)}</option>
+            `)}
+          </select>
+        </div>
         <div class="line-detail-field">
           <label>DM Cost</label>
           <input type="text" name="dm_cost" value="${escape(l.dm_cost ?? '')}"
