@@ -148,7 +148,7 @@ export async function onRequestGet(context) {
     <section class="card" x-data="jobInline('${escape(job.id)}')">
       <div class="card-header">
         <h1 class="page-title">
-          ${escape(job.number)}
+          ${inlineText('number', job.number)}
           — ${inlineText('title', job.title, { placeholder: 'Add title' })}
         </h1>
         <div class="header-actions" style="display:flex;gap:.4rem;flex-wrap:wrap;align-items:center">

@@ -307,7 +307,7 @@ export async function onRequestGet(context) {
                       data-row-href="/jobs/${escape(r.id)}"
                       data-value="${escape(r.value === '' ? '' : String(r.value))}"
                       ${raw(rowDataAttrs(columns, r))}>
-                    <td class="col-number" data-col="number"><a href="/jobs/${escape(r.id)}"><strong>${escape(r.number)}</strong></a></td>
+                    <td class="col-number" data-col="number"><a href="/jobs/${escape(r.id)}"><strong>${ieText('number', r.number)}</strong></a></td>
                     <td class="col-title" data-col="title">
                       ${ieText('title', r.title)}
                     </td>

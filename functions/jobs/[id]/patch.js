@@ -11,7 +11,7 @@ import { now } from '../../lib/ids.js';
 
 // Fields that may be patched inline.
 const PATCHABLE = new Set([
-  'title', 'notes', 'external_pm_system', 'external_pm_system_ref',
+  'number', 'title', 'notes', 'external_pm_system', 'external_pm_system_ref',
 ]);
 
 function coerce(field, raw) {
@@ -41,6 +41,14 @@ export async function onRequestPost(context) {
   if (!before) return json({ ok: false, error: 'Not found' }, 404);
 
   const newValue = coerce(field, rawValue);
+
+  // Job number must be non-empty and unique
+  if (field === 'number') {
+    if (!newValue) return json({ ok: false, error: 'Job number cannot be blank' }, 400);
+    const dup = await one(env.DB, `SELECT id FROM jobs WHERE number = ? AND id != ?`, [newValue, jobId]);
+    if (dup) return json({ ok: false, error: `Job number "${newValue}" is already in use` }, 409);
+  }
+
   const ts = now();
 
   // Build diff for audit
