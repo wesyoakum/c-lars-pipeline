@@ -630,6 +630,18 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
     return '$' + num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
+  // Target price is always (DM + DL + Other) / 0.55, independent of override
+  const directCosts = (Number(build.dm_user_cost) || 0) + (Number(build.dl_user_cost) || 0) + (Number(build.other_user_cost) || 0);
+  const formulaTargetPrice = directCosts > 0 ? directCosts / 0.55 : null;
+  const formulaImoh = formulaTargetPrice ? formulaTargetPrice * 0.165 : null;
+  const formulaTotalCost = formulaTargetPrice ? directCosts + formulaImoh : null;
+  // Margin uses override price if set, otherwise target
+  const effectivePrice = (build.quote_price_user != null && build.quote_price_user !== '' && Number(build.quote_price_user) > 0)
+    ? Number(build.quote_price_user) : formulaTargetPrice;
+  const marginAmt = effectivePrice && formulaTotalCost ? effectivePrice - formulaTotalCost : null;
+  const marginPct = effectivePrice && marginAmt !== null ? marginAmt / effectivePrice : null;
+  const marginStatus = marginPct !== null ? (marginPct > 0.284 ? 'good' : 'low') : null;
+
   return html`
     <section class="card">
       <h2 class="section-h">Costs</h2>
@@ -670,7 +682,7 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
             <td>IMOH (16.5%)</td>
             <td class="num">
               <input type="text" id="cb-hidden-imoh"
-                     value="${fmtInput(pricing.hiddenCosts.imoh)}"
+                     value="${fmtInput(formulaImoh)}"
                      class="num-input" disabled
                      style="background:var(--bg-alt);color:var(--fg-muted)">
             </td>
@@ -679,7 +691,7 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
         <tfoot>
           <tr>
             <th>Total Cost</th>
-            <th class="num" id="cb-total-cost">${fmtDollar(eff.totalCost)}</th>
+            <th class="num" id="cb-total-cost">${fmtDollar(formulaTotalCost)}</th>
           </tr>
         </tfoot>
       </table>
@@ -687,7 +699,7 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
       <div class="pricing-grid" style="margin-top:1rem;display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.75rem">
         <div class="pricing-box">
           <div class="muted">Target Price</div>
-          <div class="pricing-value" id="cb-target-price">${fmtDollar(eff.quote)}</div>
+          <div class="pricing-value" id="cb-target-price">${fmtDollar(formulaTargetPrice)}</div>
           <div class="muted" style="font-size:0.7rem">= (DM + DL + Other) / 0.55</div>
         </div>
         <div class="pricing-box">
@@ -699,15 +711,15 @@ function renderPricingSubtab({ build, pricing, totals, settings, errText, locked
                  style="font-size:1.1rem;text-align:center;margin-top:0.2rem">
           <div class="muted" style="font-size:0.7rem">Leave blank to use target</div>
         </div>
-        <div class="pricing-box ${marg.status === 'good' ? 'margin-good' : marg.status === 'low' ? 'margin-low' : ''}" id="cb-margin-box">
+        <div class="pricing-box ${marginStatus === 'good' ? 'margin-good' : marginStatus === 'low' ? 'margin-low' : ''}" id="cb-margin-box">
           <div class="muted">Gross Margin</div>
           <div class="pricing-value" id="cb-margin-value">
-            ${marg.amount !== null
-              ? html`${fmtDollar(marg.amount)} (${fmtPct(marg.pct)})`
+            ${marginAmt !== null
+              ? html`${fmtDollar(marginAmt)} (${fmtPct(marginPct)})`
               : '\u2014'}
           </div>
           <div class="muted" id="cb-margin-status" style="font-size:0.75rem">
-            ${marg.status ? (marg.status === 'good' ? 'Target: 28.5%' : `Below 28.5% target`) : ''}
+            ${marginStatus ? (marginStatus === 'good' ? 'Target: 28.5%' : `Below 28.5% target`) : ''}
           </div>
         </div>
       </div>
