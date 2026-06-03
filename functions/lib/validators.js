@@ -863,6 +863,27 @@ export function validateQuoteLine(input) {
   // itself top-level (not a child) and belongs to the same quote.
   value.parent_line_id = trim(input.parent_line_id) || null;
 
+  // Internal detail fields (not visible on customer docs)
+  const { value: dmCost, error: dmCostErr } = parseOptionalMoney(input.dm_cost);
+  if (dmCostErr) errors.dm_cost = dmCostErr;
+  value.dm_cost = dmCost === null ? null : dmCost;
+
+  const { value: otherCost, error: otherCostErr } = parseOptionalMoney(input.other_cost);
+  if (otherCostErr) errors.other_cost = otherCostErr;
+  value.other_cost = otherCost === null ? null : otherCost;
+
+  value.supplier_id = trim(input.supplier_id) || null;
+  value.supplier_name = trim(input.supplier_name) || null;
+  value.delivery_estimate = trim(input.delivery_estimate) || null;
+  value.delivery_show_in_notes =
+    input.delivery_show_in_notes === '1' ||
+    input.delivery_show_in_notes === 'on' ||
+    input.delivery_show_in_notes === 1 ||
+    input.delivery_show_in_notes === true
+      ? 1
+      : 0;
+  value.notes_internal = trim(input.notes_internal) || null;
+
   if (Object.keys(errors).length) return { ok: false, errors };
   return { ok: true, value };
 }

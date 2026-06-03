@@ -42,6 +42,14 @@ const LINE_FIELDS = [
   // section (spares / service / eps / refurb_*). NULL on single-type
   // quotes.
   'line_type',
+  // Internal detail fields
+  'dm_cost',
+  'other_cost',
+  'supplier_id',
+  'supplier_name',
+  'delivery_estimate',
+  'delivery_show_in_notes',
+  'notes_internal',
 ];
 
 export async function onRequestPost(context) {
@@ -141,6 +149,13 @@ export async function onRequestPost(context) {
               discount_description = ?,
               discount_is_phantom = ?,
               line_type = ?,
+              dm_cost = ?,
+              other_cost = ?,
+              supplier_id = ?,
+              supplier_name = ?,
+              delivery_estimate = ?,
+              delivery_show_in_notes = ?,
+              notes_internal = ?,
               updated_at = ?
         WHERE id = ? AND quote_id = ?`,
       [
@@ -161,6 +176,13 @@ export async function onRequestPost(context) {
         value.discount_description ?? null,
         value.discount_is_phantom ?? 0,
         value.line_type ?? null,
+        value.dm_cost ?? null,
+        value.other_cost ?? null,
+        value.supplier_id ?? null,
+        value.supplier_name ?? null,
+        value.delivery_estimate ?? null,
+        value.delivery_show_in_notes ?? 0,
+        value.notes_internal ?? null,
         ts,
         lineId,
         quoteId,
@@ -176,6 +198,20 @@ export async function onRequestPost(context) {
       changes,
     }),
   ]);
+
+  // Two-way sync: if DM or Other changed, push to the linked cost_build
+  const dmChanged = value.dm_cost !== (before.dm_cost ?? null);
+  const otherChanged = value.other_cost !== (before.other_cost ?? null);
+  if ((dmChanged || otherChanged) && before.cost_build_id) {
+    const sets = [];
+    const params = [];
+    if (dmChanged)    { sets.push('dm_user_cost = ?'); params.push(value.dm_cost); }
+    if (otherChanged) { sets.push('other_user_cost = ?'); params.push(value.other_cost); }
+    sets.push('updated_at = ?'); params.push(ts);
+    params.push(before.cost_build_id);
+    // Fire-and-forget — the build will recompute on next open
+    one(env.DB, `UPDATE cost_builds SET ${sets.join(', ')} WHERE id = ?`, params).catch(() => {});
+  }
 
   // Auto-capture to items library (fire-and-forget).
   upsertLibraryItem(env.DB, value).catch(() => {});

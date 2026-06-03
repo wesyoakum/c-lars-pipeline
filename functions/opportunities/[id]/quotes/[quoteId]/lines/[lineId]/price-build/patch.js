@@ -182,6 +182,10 @@ export async function onRequestPost(context) {
       pushedLineExtended = extended;
       pushedLineDiscountApplied = Math.max(0, qty * unitPrice - extended);
 
+      // Two-way sync: push effective DM/Other from the build to the line
+      const effDm = pricing.effective.dm;
+      const effOther = pricing.effective.other;
+
       if (shouldPushDiscount) {
         statements.push(
           stmt(env.DB,
@@ -189,19 +193,25 @@ export async function onRequestPost(context) {
                 SET unit_price = ?, extended_price = ?,
                     discount_amount = ?, discount_pct = ?,
                     discount_description = ?, discount_is_phantom = ?,
+                    dm_cost = ?, other_cost = ?,
                     updated_at = ?
               WHERE id = ?`,
             [unitPrice, extended,
              value.discount_amount, value.discount_pct,
              value.discount_description, value.discount_is_phantom,
+             effDm, effOther,
              ts, lineId]
           )
         );
       } else {
         statements.push(
           stmt(env.DB,
-            'UPDATE quote_lines SET unit_price = ?, extended_price = ?, updated_at = ? WHERE id = ?',
-            [unitPrice, extended, ts, lineId]
+            `UPDATE quote_lines
+                SET unit_price = ?, extended_price = ?,
+                    dm_cost = ?, other_cost = ?,
+                    updated_at = ?
+              WHERE id = ?`,
+            [unitPrice, extended, effDm, effOther, ts, lineId]
           )
         );
       }

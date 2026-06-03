@@ -3666,6 +3666,57 @@ table.data.compact.quote-lines-table .col-price input.num-input {
 }
 .line-notes::placeholder { color: var(--fg-muted); opacity: 0.5; }
 
+/* Line detail fields (internal: DM, Other, Supplier, Delivery, Notes) */
+.line-detail-fields {
+  margin-top: 0.3rem;
+  border-top: 1px dashed var(--border);
+  padding-top: 0.2rem;
+}
+.line-detail-toggle {
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+  cursor: pointer;
+  user-select: none;
+  padding: 0.1rem 0;
+}
+.line-detail-toggle:hover { color: var(--fg); }
+.line-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.3rem 0.6rem;
+  margin-top: 0.2rem;
+  padding: 0.25rem 0;
+}
+.line-detail-field label {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--fg-muted);
+  margin-bottom: 0.1rem;
+}
+.line-detail-field input[type="text"],
+.line-detail-field textarea {
+  width: 100%;
+  font-size: 0.82rem;
+  padding: 0.2rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  box-sizing: border-box;
+}
+.line-detail-wide { grid-column: 1 / -1; }
+.line-internal-notes {
+  font-size: 0.82rem;
+  background: #fef9e7;
+  border-color: #e9d8a6;
+  resize: vertical;
+}
+@media (prefers-color-scheme: dark) {
+  .line-internal-notes {
+    background: #2a2519;
+    border-color: #4a3f2f;
+  }
+}
+
 /* Quotes tab: the "+ New quote" inline create form (type picker + button). */
 .quotes-new-form {
   display: flex;

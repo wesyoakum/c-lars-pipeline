@@ -1135,6 +1135,7 @@ export async function onRequestGet(context) {
                     </div>
                   ` : ''}
                   ${showDiscounts ? renderLineDiscountEditor({ line: l, readOnly, hasDiscount: lineHasDiscount }) : ''}
+                  ${renderLineDetailFields(l, readOnly)}
                   <input type="hidden" name="is_option" value="${l.is_option ? '1' : '0'}">
                   <input type="hidden" name="is_active" value="${active ? '1' : '0'}">
                 </form>
@@ -3428,6 +3429,101 @@ export async function onRequestGet(context) {
       }
     })();
     </script>
+    <script>
+    // Supplier typeahead: attaches to all [data-supplier-typeahead] inputs
+    (function(){
+      var cache = null;
+      function loadSuppliers(){
+        if (cache) return cache;
+        cache = fetch('/api/katana-suppliers', { credentials: 'same-origin' })
+          .then(function(r){ return r.json(); })
+          .then(function(d){ return d.ok ? d.suppliers : []; })
+          .catch(function(){ cache = null; return []; });
+        return cache;
+      }
+      function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+      document.querySelectorAll('[data-supplier-typeahead]').forEach(function(inp){
+        var wrap = inp.closest('.supplier-picker');
+        if (!wrap) return;
+        var hiddenId = wrap.querySelector('input[name="supplier_id"]');
+        if (getComputedStyle(wrap).position === 'static') wrap.style.position = 'relative';
+        var dd = document.createElement('div');
+        dd.className = 'typeahead-dropdown';
+        dd.hidden = true;
+        wrap.appendChild(dd);
+        var activeIdx = -1;
+
+        inp.addEventListener('focus', function(){ loadSuppliers(); });
+        inp.addEventListener('input', function(){
+          var q = inp.value.trim().toLowerCase();
+          hiddenId.value = '';  // clear ID when typing
+          if (q.length < 1) { dd.hidden = true; return; }
+          loadSuppliers().then(function(list){
+            var filtered = list.filter(function(s){ return (s.name||'').toLowerCase().indexOf(q) !== -1; }).slice(0, 10);
+            activeIdx = -1;
+            var items = filtered.map(function(s, i){
+              return '<div class="ta-item" data-idx="'+i+'" data-id="'+esc(String(s.id))+'" data-name="'+esc(s.name)+'"><span class="ta-item-name">'+esc(s.name)+'</span></div>';
+            });
+            if (q.length >= 2) {
+              items.push('<div class="ta-item ta-create" data-idx="'+filtered.length+'" data-create="1"><span style="color:#3b82f6">+ Create &ldquo;'+esc(inp.value.trim())+'&rdquo;</span></div>');
+            }
+            dd.innerHTML = items.join('');
+            dd.hidden = items.length === 0;
+          });
+        });
+
+        dd.addEventListener('click', function(e){
+          var el = e.target.closest('.ta-item');
+          if (!el) return;
+          if (el.dataset.create) {
+            createSupplier(inp.value.trim());
+          } else {
+            selectSupplier(el.dataset.id, el.dataset.name);
+          }
+          dd.hidden = true;
+        });
+
+        inp.addEventListener('keydown', function(e){
+          if (dd.hidden) return;
+          var items = dd.querySelectorAll('.ta-item');
+          if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = Math.min(activeIdx+1, items.length-1); hl(items); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = Math.max(activeIdx-1, 0); hl(items); }
+          else if (e.key === 'Enter' && activeIdx >= 0 && items[activeIdx]) {
+            e.preventDefault();
+            var it = items[activeIdx];
+            if (it.dataset.create) createSupplier(inp.value.trim());
+            else selectSupplier(it.dataset.id, it.dataset.name);
+            dd.hidden = true;
+          } else if (e.key === 'Escape') { dd.hidden = true; }
+        });
+        function hl(items){ items.forEach(function(el,i){ el.classList.toggle('ta-active', i===activeIdx); }); }
+        inp.addEventListener('blur', function(){ setTimeout(function(){ dd.hidden = true; }, 150); });
+
+        function selectSupplier(id, name){
+          hiddenId.value = id;
+          inp.value = name;
+          inp.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        function createSupplier(name){
+          inp.value = name + ' (creating...)';
+          fetch('/api/katana-suppliers', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name })
+          }).then(function(r){ return r.json(); }).then(function(d){
+            if (d.ok && d.supplier) {
+              cache = null; // bust cache
+              selectSupplier(String(d.supplier.id), d.supplier.name || name);
+            } else {
+              inp.value = name;
+              alert(d.error || 'Failed to create supplier');
+            }
+          }).catch(function(){ inp.value = name; });
+        }
+      });
+    })();
+    </script>
   ` : '';
 
   const body = html`${headerSection}<div class="quote-doc">${bannerCard}${detailsSection}${linesSection}${footerSection}</div>${katanaPushModal}${libraryModal}${scripts}${captureScripts}`;
@@ -3716,6 +3812,65 @@ function renderLineDiscountEditor({ line, readOnly, hasDiscount }) {
       </div>
     </div>
   `;
+}
+
+/**
+ * Render the expandable internal detail fields for a line item:
+ * DM/Other costs, supplier, delivery, internal notes.
+ */
+function renderLineDetailFields(l, readOnly) {
+  const hasAnyDetail = l.dm_cost != null || l.other_cost != null ||
+    l.supplier_name || l.delivery_estimate || l.notes_internal;
+
+  return html`
+    <details class="line-detail-fields" ${hasAnyDetail ? 'open' : ''}>
+      <summary class="line-detail-toggle">Internal details</summary>
+      <div class="line-detail-grid">
+        <div class="line-detail-field">
+          <label>DM Cost</label>
+          <input type="text" name="dm_cost" value="${escape(l.dm_cost ?? '')}"
+                 ${readOnly ? 'disabled' : ''} class="num-input" data-autosave
+                 placeholder="0.00">
+        </div>
+        <div class="line-detail-field">
+          <label>Other Cost</label>
+          <input type="text" name="other_cost" value="${escape(l.other_cost ?? '')}"
+                 ${readOnly ? 'disabled' : ''} class="num-input" data-autosave
+                 placeholder="0.00">
+        </div>
+        <div class="line-detail-field line-detail-wide">
+          <label>Supplier</label>
+          <div class="supplier-picker" data-line-id="${escape(l.id)}">
+            <input type="hidden" name="supplier_id" value="${escape(l.supplier_id ?? '')}">
+            <input type="text" name="supplier_name" value="${escape(l.supplier_name ?? '')}"
+                   ${readOnly ? 'disabled' : ''} data-autosave
+                   placeholder="Search Katana suppliers..."
+                   autocomplete="off"
+                   data-supplier-typeahead>
+          </div>
+        </div>
+        <div class="line-detail-field">
+          <label>Delivery</label>
+          <input type="text" name="delivery_estimate" value="${escape(l.delivery_estimate ?? '')}"
+                 ${readOnly ? 'disabled' : ''} data-autosave
+                 placeholder="e.g. 14-16 weeks ARO">
+        </div>
+        <div class="line-detail-field">
+          <label style="display:flex;align-items:center;gap:0.3rem">
+            <input type="checkbox" name="delivery_show_in_notes"
+                   value="1" ${Number(l.delivery_show_in_notes) === 1 ? 'checked' : ''}
+                   ${readOnly ? 'disabled' : ''} data-autosave>
+            Show on quote
+          </label>
+        </div>
+        <div class="line-detail-field line-detail-wide">
+          <label>Internal Notes</label>
+          <textarea name="notes_internal" ${readOnly ? 'disabled' : ''} data-autosave
+                    placeholder="Internal only — never visible to customer"
+                    rows="2" class="line-internal-notes">${escape(l.notes_internal ?? '')}</textarea>
+        </div>
+      </div>
+    </details>`;
 }
 
 function notFound(context) {

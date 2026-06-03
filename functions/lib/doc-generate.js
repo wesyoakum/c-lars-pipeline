@@ -281,9 +281,16 @@ export async function getQuoteDocData(env, quoteId) {
       }
     }
 
+    // Append per-line delivery to notes when the toggle is on
+    let note = line.notes || line.line_notes || '';
+    if (Number(line.delivery_show_in_notes) === 1 && line.delivery_estimate) {
+      const deliveryText = `Delivery: ${line.delivery_estimate}`;
+      note = note ? `${note}\n${deliveryText}` : deliveryText;
+    }
+
     return {
       title: line.title || line.description || '',
-      note: line.notes || line.line_notes || '',
+      note,
       partNumber: line.part_number || '',
       quantity: line.quantity != null ? String(line.quantity) : '',
       unit: line.unit || '',
