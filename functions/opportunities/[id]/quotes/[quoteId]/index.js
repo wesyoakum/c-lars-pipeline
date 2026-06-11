@@ -649,6 +649,14 @@ export async function onRequestGet(context) {
                 <button class="btn danger" type="submit">Delete</button>
               </form>
             ` : ''}
+            <button class="btn" type="button" title="Copy this quote to another opportunity"
+                    onclick="Pipeline.openWizard('duplicate-quote', {
+                      source_quote_id: '${escape(quoteId)}',
+                      source_opp_id: '${escape(oppId)}',
+                      source_quote_label: '${escape(quote.number)} ${escape(quote.revision)}',
+                      account_id: '${escape(quote.account_id ?? '')}',
+                      account_label: '${escape(quote.account_name ?? '')}'
+                    })">Duplicate</button>
             <form method="post" action="/opportunities/${escape(oppId)}/quotes/${escape(quoteId)}/generate-pdf" class="inline-form" target="_blank" rel="noopener">
               <button class="btn btn-icon" type="submit" title="Generate PDF (opens in a new tab)" aria-label="Generate PDF">
                 ${raw(ICON_PDF)}
@@ -1141,6 +1149,7 @@ export async function onRequestGet(context) {
                   ${renderLineDetailFields(l, readOnly)}
                   <input type="hidden" name="is_option" value="${l.is_option ? '1' : '0'}">
                   <input type="hidden" name="is_active" value="${active ? '1' : '0'}">
+                  <input type="hidden" name="part_number" value="${escape(l.part_number ?? '')}">
                 </form>
               </td>
               <td class="num col-qty">
@@ -1194,6 +1203,7 @@ export async function onRequestGet(context) {
                       <input type="text" name="description" placeholder="Description" class="line-desc">
                     </div>
                     <textarea name="line_notes" placeholder="Item notes..." class="line-notes"></textarea>
+                    <input type="hidden" name="part_number" value="">
                   </form>
                 </td>
                 <td class="num col-qty">
@@ -3422,11 +3432,13 @@ export async function onRequestGet(context) {
         var unit = form.querySelector('[name="unit"]');
         var price = form.querySelector('[name="unit_price"]');
         var qty = form.querySelector('[name="quantity"]');
+        var pn = form.querySelector('[name="part_number"]');
         if (desc && !desc.value && it.description) desc.value = it.description;
         if (unit && it.default_unit) unit.value = it.default_unit;
-        if (price && it.default_price) price.value = it.default_price;
+        if (price && it.default_price != null) price.value = it.default_price;
+        if (pn) pn.value = it.part_number || '';
         // Trigger autosave on each field
-        [inp, desc, unit, price].forEach(function(el){
+        [inp, desc, unit, price, pn].forEach(function(el){
           if (el) el.dispatchEvent(new Event('change', { bubbles: true }));
         });
       }

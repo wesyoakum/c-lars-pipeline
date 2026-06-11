@@ -1610,6 +1610,7 @@ export function layout(title, body, opts = {}) {
   <script defer src="/js/wizards/contact.js"></script>
   <script defer src="/js/wizards/opportunity.js"></script>
   <script defer src="/js/wizards/quote.js"></script>
+  <script defer src="/js/wizards/duplicate-quote.js"></script>
   <script defer src="/js/wizards/job.js"></script>
   <script defer src="/js/cascade-delete.js"></script>
   ${user ? '<script defer src="/js/board-sidebar.js"></script>' : ''}
