@@ -392,6 +392,10 @@
       pinnedPrefix: '',
       pinnedValue: '',
 
+      // Quick-form mode: render all fields at once instead of step-by-step.
+      // Toggled via the "Show all fields" link in the steps phase.
+      quickForm: false,
+
       // Per-step "Show inactive" override for entity-select steps.
       // Resets to false on every modal open. Used by:
       //   - visibleSuggestions() — when false, rows with active=0 are
@@ -769,6 +773,7 @@
         // on a per-fetch basis. loadPickerData() decides which mode to
         // pull based on showInactive + the active_only pref.
         this.showInactive = false;
+        this.quickForm = false;
 
         // Smart-start: open in capture mode when the wizard config opts
         // in. Bypass when the prefill already carries meaningful answer
@@ -1239,6 +1244,173 @@
         this.phase = 'steps';
         this.typedInput = this.currentTypedForStep();
         this.focusInput();
+      },
+
+      // Quick-form mode: show all fields at once in a single form.
+      toggleQuickForm: function () {
+        // When switching from step-by-step to quick-form, save the
+        // current step's input so it's not lost.
+        if (!this.quickForm) {
+          var step = this.currentStep();
+          if (step) {
+            var key = step.key;
+            if (step.type === 'text' || step.type === 'textarea') {
+              this.answers[key] = this.typedInput || '';
+            }
+          }
+        }
+        this.quickForm = !this.quickForm;
+        this.error = null;
+      },
+
+      // Returns the list of steps visible in quick-form mode (non-skipped
+      // steps only). Each entry gets a `_qfVal` transient property for the
+      // form's x-model binding.
+      quickFormSteps: function () {
+        var self = this;
+        return this.steps().filter(function (s) {
+          return !self.shouldSkipStep(s);
+        });
+      },
+
+      // Collect quick-form values into answers, validate, and submit.
+      submitQuickForm: function () {
+        var self = this;
+        var steps = this.quickFormSteps();
+        var errors = [];
+
+        for (var i = 0; i < steps.length; i++) {
+          var s = steps[i];
+          var val = this.answers['_qf_' + s.key] || '';
+          if (typeof val === 'string') val = val.trim();
+
+          if (s.type === 'text' || s.type === 'textarea') {
+            if (!val && s.required) {
+              errors.push((s.prompt || s.key) + ' is required.');
+              continue;
+            }
+            this.answers[s.key] = val;
+          } else if (s.type === 'select') {
+            if (!val && s.required) {
+              errors.push((s.prompt || s.key) + ' is required.');
+              continue;
+            }
+            if (val) {
+              var sMatch = (s.options || []).filter(function (o) { return o.value === val; })[0];
+              this.answers[s.key] = sMatch ? { value: sMatch.value, label: sMatch.label } : { value: val, label: val };
+            } else {
+              this.answers[s.key] = null;
+            }
+          } else if (s.type === 'entity-select') {
+            if (!val && s.required && (!this.answers[s.key] || !this.answers[s.key].id)) {
+              errors.push((s.prompt || s.key) + ' is required.');
+              continue;
+            }
+            if (val) {
+              // val is an id — find the entity in the picker data.
+              var kinds = s.entityKinds || [];
+              var found = null;
+              if (kinds.indexOf('account') !== -1) {
+                found = this.accounts.filter(function (a) { return a.id === val; })[0];
+                if (found) this.answers[s.key] = { kind: 'account', id: found.id, label: found.alias || found.name || '' };
+              }
+              if (!found && kinds.indexOf('opportunity') !== -1) {
+                found = this.linkables.filter(function (l) { return l.id === val && l.kind === 'opportunity'; })[0];
+                if (found) this.answers[s.key] = { kind: 'opportunity', id: found.id, label: found.label || '' };
+              }
+              if (!found) this.answers[s.key] = { kind: kinds[0] || 'entity', id: val, label: val };
+            }
+          } else if (s.type === 'user-select') {
+            if (val) {
+              var u = this.users.filter(function (u) { return u.id === val; })[0];
+              if (u) this.answers[s.key] = { id: u.id, label: userLabel(u), email: u.email || '' };
+            }
+            // If not picked and not required, keep whatever default is there.
+            if (!val && s.required && (!this.answers[s.key] || !this.answers[s.key].id)) {
+              errors.push((s.prompt || s.key) + ' is required.');
+              continue;
+            }
+          }
+        }
+
+        if (errors.length) {
+          this.error = errors[0];
+          return;
+        }
+        this.error = null;
+        this.submit();
+      },
+
+      // Seed quick-form temp values from current answers so pre-filled
+      // fields appear populated in the form.
+      seedQuickFormValues: function () {
+        var steps = this.steps();
+        for (var i = 0; i < steps.length; i++) {
+          var s = steps[i];
+          var a = this.answers[s.key];
+          var qfKey = '_qf_' + s.key;
+          if (this.answers[qfKey] !== undefined) continue; // already seeded
+          if (s.type === 'text' || s.type === 'textarea') {
+            this.answers[qfKey] = a || '';
+          } else if (s.type === 'select') {
+            this.answers[qfKey] = (a && a.value) || '';
+          } else if (s.type === 'entity-select') {
+            this.answers[qfKey] = (a && a.id) || '';
+          } else if (s.type === 'user-select') {
+            this.answers[qfKey] = (a && a.id) || '';
+          } else {
+            this.answers[qfKey] = '';
+          }
+        }
+      },
+
+      // Quick-form entity options for a given step (account / opportunity
+      // picker data filtered through the step's filterFn).
+      // Builds a synthetic answers object that includes live quick-form
+      // selections so filterFn (e.g. opp step filtering by account) works
+      // reactively as the user changes dropdowns.
+      quickFormEntityOptions: function (step) {
+        var kinds = step.entityKinds || [];
+        var showAlias = !!(this.prefs && this.prefs.show_alias);
+        var activeOnly = !!(this.prefs && this.prefs.active_only);
+
+        // Build a live answers snapshot that includes quick-form selections
+        // so filterFn can reference them (e.g. opportunity filtered by account).
+        var liveAns = {};
+        for (var k in this.answers) {
+          if (Object.prototype.hasOwnProperty.call(this.answers, k)) liveAns[k] = this.answers[k];
+        }
+        // Map _qf_ entity-select values back to proper answer format
+        var steps = this.steps();
+        for (var si = 0; si < steps.length; si++) {
+          var s = steps[si];
+          if (s.type === 'entity-select') {
+            var qfVal = this.answers['_qf_' + s.key];
+            if (qfVal) {
+              // Find the entity in linkables
+              var found = null;
+              for (var li = 0; li < this.linkables.length; li++) {
+                if (this.linkables[li].id === qfVal) { found = this.linkables[li]; break; }
+              }
+              if (found) liveAns[s.key] = { kind: found.kind, id: found.id, label: found.name || found.label || '' };
+              else liveAns[s.key] = { kind: 'entity', id: qfVal, label: '' };
+            }
+          }
+        }
+
+        var out = [];
+        for (var i = 0; i < this.linkables.length; i++) {
+          var l = this.linkables[i];
+          if (kinds.indexOf(l.kind) < 0) continue;
+          if (activeOnly && l.active === 0) continue;
+          if (typeof step.filterFn === 'function' && !step.filterFn(l, liveAns)) continue;
+          var label;
+          if (l.kind === 'opportunity') label = (l.number || '') + ' \u2014 ' + (l.title || '');
+          else if (l.kind === 'quote') label = (l.number || '') + ' \u2014 ' + (l.title || '');
+          else label = showAlias ? (l.alias || l.name) : (l.alias ? l.name + ' (' + l.alias + ')' : l.name);
+          out.push({ id: l.id, label: label });
+        }
+        return out;
       },
 
       focusInput: function () {

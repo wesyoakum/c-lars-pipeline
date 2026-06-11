@@ -1360,6 +1360,49 @@ code {
      width by virtue of flex:1 on the only child. */
 }
 
+/* Quick-form mode: all fields at once */
+.task-wizard-quickform {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.task-wizard-quickform-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.task-wizard-quickform-label {
+  font-size: 0.82rem;
+  color: var(--fg-muted);
+}
+.task-wizard-quickform-input {
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+}
+.task-wizard-quickform-input:focus {
+  outline: none;
+  border-color: var(--accent, #3b82f6);
+}
+.task-wizard-quickform-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+.task-wizard-quickform-toggle {
+  color: var(--fg-muted);
+  text-decoration: none;
+}
+.task-wizard-quickform-toggle:hover {
+  color: var(--fg);
+  text-decoration: underline;
+}
+
 /* "Show inactive" override, only rendered when the global active_only
    pref is on. Lives just above the suggestions dropdown so the user
    sees it as an explicit escape hatch when searching doesn't find a

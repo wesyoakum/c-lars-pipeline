@@ -72,7 +72,8 @@
             if (!acc || !acc.id) return null;
             return {
               account_id: acc.id,
-              account_label: acc.label || ''
+              account_label: acc.label || '',
+              skipSmartStart: true
             };
           },
           setAnswer: function (result, childAnswers) {

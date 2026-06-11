@@ -697,6 +697,72 @@ const WIZARD_MODAL_MARKUP = (
   '<strong x-text="$store.wizard.pinnedValue"></strong>' +
   '</div>' +
 
+  // ---- Quick-form mode: all fields at once ----
+  '<div x-show="$store.wizard.quickForm" x-init="$watch(\'$store.wizard.quickForm\', function(v){ if(v) $store.wizard.seedQuickFormValues(); })">' +
+  '<div class="task-wizard-quickform">' +
+  '<template x-for="s in $store.wizard.quickFormSteps()" :key="s.key">' +
+  '<label class="task-wizard-quickform-row">' +
+  '<span class="task-wizard-quickform-label" x-text="s.prompt || s.key"></span>' +
+
+  // Text input
+  '<template x-if="s.type === \'text\'">' +
+  '<input type="text" class="task-wizard-quickform-input" ' +
+  'x-model="$store.wizard.answers[\'_qf_\' + s.key]" :placeholder="s.placeholder || \'\'">' +
+  '</template>' +
+
+  // Textarea
+  '<template x-if="s.type === \'textarea\'">' +
+  '<textarea class="task-wizard-quickform-input" rows="2" ' +
+  'x-model="$store.wizard.answers[\'_qf_\' + s.key]" :placeholder="s.placeholder || \'\'"></textarea>' +
+  '</template>' +
+
+  // Select (fixed options)
+  '<template x-if="s.type === \'select\'">' +
+  '<select class="task-wizard-quickform-input" x-model="$store.wizard.answers[\'_qf_\' + s.key]">' +
+  '<template x-for="opt in (s.options || [])" :key="opt.value">' +
+  '<option :value="opt.value" x-text="opt.label"></option>' +
+  '</template>' +
+  '</select>' +
+  '</template>' +
+
+  // Entity-select (dropdown from picker data)
+  '<template x-if="s.type === \'entity-select\'">' +
+  '<select class="task-wizard-quickform-input" x-model="$store.wizard.answers[\'_qf_\' + s.key]">' +
+  '<option value="">\u2014 Select \u2014</option>' +
+  '<template x-for="opt in $store.wizard.quickFormEntityOptions(s)" :key="opt.id">' +
+  '<option :value="opt.id" x-text="opt.label"></option>' +
+  '</template>' +
+  '</select>' +
+  '</template>' +
+
+  // User-select (dropdown from users)
+  '<template x-if="s.type === \'user-select\'">' +
+  '<select class="task-wizard-quickform-input" x-model="$store.wizard.answers[\'_qf_\' + s.key]">' +
+  '<option value="">\u2014 Select \u2014</option>' +
+  '<template x-for="u in $store.wizard.users" :key="u.id">' +
+  '<option :value="u.id" x-text="u.display_name || u.email"></option>' +
+  '</template>' +
+  '</select>' +
+  '</template>' +
+
+  '</label>' +
+  '</template>' +
+  '</div>' +
+
+  // Quick-form action bar
+  '<div class="task-wizard-quickform-actions">' +
+  '<button type="button" class="btn btn-sm" @click="$store.wizard.toggleQuickForm()">Back to steps</button>' +
+  '<button type="button" class="btn btn-sm primary" @click="$store.wizard.submitQuickForm()" ' +
+  ':disabled="$store.wizard.submitting">' +
+  '<span x-show="!$store.wizard.submitting" x-text="$store.wizard.config && $store.wizard.config.submitLabel || \'Create\'"></span>' +
+  '<span x-show="$store.wizard.submitting">Saving\u2026</span>' +
+  '</button>' +
+  '</div>' +
+  '</div>' +
+
+  // ---- Normal step-by-step mode ----
+  '<div x-show="!$store.wizard.quickForm">' +
+
   // Big prompt (the current step's question)
   '<div class="task-wizard-prompt" x-text="$store.wizard.currentPrompt()"></div>' +
 
@@ -773,7 +839,11 @@ const WIZARD_MODAL_MARKUP = (
   // Tab/Enter still work for keyboard users \u2014 these buttons are the
   // touch equivalent.
   '<div class="task-wizard-actionbar">' +
-  '<span class="task-wizard-help" x-text="$store.wizard.currentHint()"></span>' +
+  '<span class="task-wizard-help">' +
+  '<span x-text="$store.wizard.currentHint()"></span>' +
+  ' <a href="#" class="task-wizard-quickform-toggle" @click.prevent="$store.wizard.toggleQuickForm()" ' +
+  'style="font-size:.85em;margin-left:.5rem">Show all fields</a>' +
+  '</span>' +
   '<div class="task-wizard-actions">' +
   '<button type="button" class="btn btn-sm task-wizard-back-btn" @click="$store.wizard.goBack()" ' +
   ':disabled="$store.wizard.stepIndex === 0 || $store.wizard.submitting" ' +
@@ -786,6 +856,8 @@ const WIZARD_MODAL_MARKUP = (
   '</button>' +
   '</div>' +
   '</div>' +
+
+  '</div>' + // /normal step-by-step mode wrapper
 
   '</div>' + // /steps phase wrapper
 
