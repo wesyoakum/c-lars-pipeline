@@ -3427,11 +3427,15 @@ export async function onRequestGet(context) {
       function applyItem(inp, it){
         var form = inp.closest('form');
         if (!form) return;
+        // unit_price, unit, quantity live outside the <form> in sibling
+        // <td> cells (linked via the form= attribute), so search the
+        // parent <tr> row for those fields.
+        var row = inp.closest('tr') || form;
         inp.value = it.name || '';
         var desc = form.querySelector('[name="description"]');
-        var unit = form.querySelector('[name="unit"]');
-        var price = form.querySelector('[name="unit_price"]');
-        var qty = form.querySelector('[name="quantity"]');
+        var unit = row.querySelector('[name="unit"]');
+        var price = row.querySelector('[name="unit_price"]');
+        var qty = row.querySelector('[name="quantity"]');
         var pn = form.querySelector('[name="part_number"]');
         if (desc && !desc.value && it.description) desc.value = it.description;
         if (unit && it.default_unit) unit.value = it.default_unit;
