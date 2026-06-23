@@ -15,6 +15,7 @@ import { auditStmt } from './audit.js';
 import { now } from './ids.js';
 import { stageDef } from './stages.js';
 import { fireEvent } from './auto-tasks.js';
+import { dismissAutoTasksForStage } from './auto-task-dismiss.js';
 
 // Auto-task rule IDs whose completion advances the opp stage, and the
 // stage each one maps to. Centralized here so every path that flips
@@ -178,6 +179,12 @@ export async function changeOppStage(context, oppId, toStage, opts = {}) {
         },
       }),
     ]);
+
+    // Now that the opp sits at the new stage, dismiss any pending
+    // submit-reminder tasks (Submit OC / Submit NTP) whose document
+    // stage we've moved past — they're stale. Awaited (never throws);
+    // uses the opp's transaction_type for per-type sort_order lookup.
+    await dismissAutoTasksForStage(context, oppId, opp.transaction_type, toStage);
 
     // Fire opportunity.stage_changed so auto-task rules (and anyone else
     // listening) see the transition. Non-blocking — failures must not

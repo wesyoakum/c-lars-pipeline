@@ -41,9 +41,15 @@ function truncate(s, max) {
 }
 
 /**
- * Fetch all pending tasks attached to this entity. Tasks can link
- * to an opportunity, an account, or a quote (activities table). We
- * use the matching FK depending on `kind`.
+ * Fetch the pending tasks attached to this entity that should block
+ * inactivation. Tasks can link to an opportunity, an account, or a quote
+ * (activities table); we use the matching FK depending on `kind`.
+ *
+ * Auto-generated tasks (source_rule_id IS NOT NULL) are deliberately
+ * excluded: they're system reminders that get auto-dismissed when the
+ * underlying object reaches a terminal/moot state (lib/auto-task-dismiss.js),
+ * so they must never block the very transition that dismisses them.
+ * Only a user's own hand-created tasks block.
  */
 async function pendingTasksFor(db, kind, id) {
   const col = (
@@ -59,6 +65,7 @@ async function pendingTasksFor(db, kind, id) {
     `SELECT id, subject, body, due_at
        FROM activities
       WHERE ${col} = ? AND status = 'pending'
+        AND source_rule_id IS NULL
       ORDER BY COALESCE(due_at, '9999') ASC
       LIMIT 50`,
     [id]

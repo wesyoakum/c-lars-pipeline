@@ -27,6 +27,7 @@
 import { all, run } from './db.js';
 import { now } from './ids.js';
 import { fireEvent } from './auto-tasks.js';
+import { dismissAutoTasksForQuote } from './auto-task-dismiss.js';
 
 // ---------------------------------------------------------------------
 // Window helpers
@@ -384,6 +385,16 @@ export async function sweepPriceBuildsStale(env, { staleDays = 30 } = {}) {
 async function sweepQuoteExpired(env) {
   const today = todayBucketUtc();
 
+  // 0) Capture the quotes about to expire so we can dismiss their pending
+  //    submit / follow-up reminders after the status flip (the interactive
+  //    expire route does this via transitionQuote; the cron bypasses it).
+  const expiringQuotes = await all(env.DB,
+    `SELECT id FROM quotes
+      WHERE deleted_at IS NULL
+        AND status IN ('issued', 'revision_issued')
+        AND valid_until IS NOT NULL
+        AND valid_until < ?`, [today]);
+
   // 1) Mark individual quotes as 'expired' when their valid_until is past
   //    and they're still in an active status (draft/issued/revision_*).
   const quoteResult = await run(env.DB,
@@ -393,6 +404,13 @@ async function sweepQuoteExpired(env) {
         AND status IN ('issued', 'revision_issued')
         AND valid_until IS NOT NULL
         AND valid_until < ?`, [today]);
+
+  // 1b) Dismiss the now-stale auto-tasks for each expired quote. System
+  //     context (no acting user). Never throws.
+  const sysCtx = { env, data: { user: null } };
+  for (const q of expiringQuotes) {
+    await dismissAutoTasksForQuote(sysCtx, q.id, 'quote expired');
+  }
 
   // 2) Move opps from quote_submitted → quote_expired when every quote
   //    on the opp has a valid_until date in the past.

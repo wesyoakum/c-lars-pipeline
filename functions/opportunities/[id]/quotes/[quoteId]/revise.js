@@ -20,6 +20,7 @@ import { redirectWithFlash } from '../../../../lib/http.js';
 import { quoteTotalsRecomputeStmt } from '../../../../lib/pricing.js';
 import { fireEvent } from '../../../../lib/auto-tasks.js';
 import { changeOppStage } from '../../../../lib/stage-transitions.js';
+import { dismissAutoTasksForQuote } from '../../../../lib/auto-task-dismiss.js';
 
 const CUSTOMER_FACING = new Set(['issued', 'revision_issued', 'accepted', 'rejected', 'expired']);
 
@@ -223,6 +224,14 @@ export async function onRequestPost(context) {
   );
 
   await batch(env.DB, statements);
+
+  // The source quote is now superseded ('dead'); dismiss its pending
+  // auto-generated reminders (submit / follow-up) so they don't nag about
+  // a revision that no longer exists. Only fires when the source was
+  // actually marked dead (customer-facing → superseded). Never throws.
+  if (supersedeSource) {
+    await dismissAutoTasksForQuote(context, source.id, 'superseded by revision');
+  }
 
   // Sync opportunity stage. CO revisions advance to
   // change_order_under_revision; baseline revisions go to

@@ -15,6 +15,7 @@ import { redirectWithFlash } from './http.js';
 import { INACTIVE_QUOTE_STATUSES } from './activeness.js';
 import { checkInactivateBlockers, summarizeBlockers } from './inactivate-blocker.js';
 import { fireEvent } from './auto-tasks.js';
+import { dismissAutoTasksForQuote, QUOTE_DISMISS_STATUSES } from './auto-task-dismiss.js';
 import { notifyQuoteStatusChange } from './notify-external.js';
 
 function isAjaxRequest(request, input) {
@@ -142,6 +143,16 @@ export async function transitionQuote(context, opts) {
       changes,
     }),
   ]);
+
+  // Auto-dismiss the quote's pending auto-generated reminders once the
+  // quote reaches a status that makes "submit it" / "follow up on it"
+  // pointless (accepted / rejected / dead / expired / completed). Awaited
+  // (the helper never throws) so the dismissal is committed before we
+  // build the response — but it must run before afterCommit, which may
+  // advance the opp stage and trigger stage-based dismissal too.
+  if (QUOTE_DISMISS_STATUSES.includes(to)) {
+    await dismissAutoTasksForQuote(context, quoteId, `quote ${to}`);
+  }
 
   // Chained in-request side effects (e.g. opportunity stage transition).
   // Awaited so the caller's Response reflects the post-side-effect state,
