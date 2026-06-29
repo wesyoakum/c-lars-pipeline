@@ -680,7 +680,7 @@ export function listScript(storageKey, defaultSortKey = 'updated', defaultSortDi
         } else if (col.filter === 'multiselect') {
           if (fs.values && fs.values.length > 0) {
             var dk = (col.multiselect && col.multiselect.dataKey) || col.key;
-            var rowTags = String(data[dk] || '').split(/\\s+/).filter(Boolean);
+            var rowTags = String(data[dk] || '').split('|').filter(Boolean);
             var mode = fs.mode || 'or';
             if (mode === 'and') {
               // AND = row must have ALL selected types (exact combo)

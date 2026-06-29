@@ -178,7 +178,7 @@ export async function onRequestGet(context) {
     account_href: acct.href,
     transaction_type: r.transaction_type ?? '',
     type_label: parseTransactionTypes(r.transaction_type).map(t => TYPE_LABELS[t] ?? t).join(', ') || '—',
-    types_raw: parseTransactionTypes(r.transaction_type).map(t => ({ spares: 'Spares', eps: 'New Product', refurb: 'Refurb', service: 'Service' })[t] ?? t).join(' '),
+    types_raw: parseTransactionTypes(r.transaction_type).map(t => ({ spares: 'Spares', eps: 'New Product', refurb: 'Refurb', service: 'Service' })[t] ?? t).join('|'),
     stage_label: stageLabel(catalog, parseTransactionTypes(r.transaction_type)[0] ?? 'spares', r.stage),
     owner_user_id: r.owner_user_id ?? '',
     owner: r.owner_name ?? '',
