@@ -156,10 +156,11 @@ const BACK_TO_TOP_SCRIPT = (
   "  window.addEventListener('scroll', update, { passive: true });\n" +
   "  update();\n" +
   "\n" +
-  "  // Auto-download trigger. When a handler redirects with\n" +
-  "  // ?download=<documentId>, fire a download of that doc via a hidden\n" +
-  "  // anchor, then strip the query param so a refresh doesn't repeat\n" +
-  "  // it. Used by quote issue + OC issue to deliver the generated PDF.\n" +
+  "  // Auto-open trigger. When a handler redirects with\n" +
+  "  // ?download=<documentId>, open that doc in a new tab via a hidden\n" +
+  "  // anchor (PDFs render inline in the browser viewer), then strip the\n" +
+  "  // query param so a refresh doesn't repeat it. Used by quote issue +\n" +
+  "  // OC issue to deliver the generated PDF.\n" +
   "  try {\n" +
   "    var u = new URL(window.location.href);\n" +
   "    var dlId = u.searchParams.get('download');\n" +
@@ -169,6 +170,7 @@ const BACK_TO_TOP_SCRIPT = (
   "      window.history.replaceState({}, '', clean);\n" +
   "      var a = document.createElement('a');\n" +
   "      a.href = '/documents/' + encodeURIComponent(dlId) + '/download';\n" +
+  "      a.target = '_blank';\n" +
   "      a.rel = 'noopener';\n" +
   "      a.style.display = 'none';\n" +
   "      document.body.appendChild(a);\n" +

@@ -298,7 +298,7 @@ async function renderEditor(context, ctx, { values = null, errors = {} } = {}) {
           <tbody>
             ${docs.map(d => html`
               <tr>
-                <td><a href="/documents/${escape(d.id)}/download">${escape(d.title || d.original_filename)}</a></td>
+                <td><a href="/documents/${escape(d.id)}/download" target="_blank" rel="noopener" title="Open in new tab">${escape(d.title || d.original_filename)}</a></td>
                 <td><span class="pill" style="font-size:0.8em">${escape(d.kind)}</span></td>
                 <td class="muted">${formatSize(d.size_bytes)}</td>
                 <td class="muted"><small>${escape((d.uploaded_at || '').slice(0, 16).replace('T', ' '))}</small></td>
