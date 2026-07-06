@@ -212,7 +212,7 @@ export async function onRequestGet(context) {
       <p class="carousel-caption" x-text="slides[current].caption"></p>
 
       <!-- Slide order MUST stay in lock-step with CHART_SLIDES in
-           lib/chart-data.js — the Alpine `slides` array (titles, captions,
+           lib/chart-data.js — the Alpine slides array (titles, captions,
            dots, count) is driven by that constant, so a mismatch shows the
            wrong title over a chart and makes trailing slides unreachable. -->
       <div class="carousel-stage">
