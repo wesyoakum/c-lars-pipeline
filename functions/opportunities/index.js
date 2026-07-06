@@ -18,6 +18,7 @@ import { loadStageCatalog } from '../lib/stages.js';
 import { listScript, listTableHead, listToolbar, rowDataAttrs } from '../lib/list-table.js';
 import { ieText, ieSelect, listInlineEditScript } from '../lib/list-inline-edit.js';
 import { displayAccountForGroupMode } from '../lib/account-groups.js';
+import { quoteActivePredicate } from '../lib/activeness.js';
 
 const TYPE_LABELS = {
   spares: 'Spares',
@@ -64,7 +65,15 @@ export async function onRequestGet(context) {
             a.id AS account_id,
             (SELECT COUNT(*) FROM quotes q WHERE q.opportunity_id = o.id AND q.deleted_at IS NULL) AS quote_count,
             (SELECT GROUP_CONCAT(q.number, ', ') FROM quotes q WHERE q.opportunity_id = o.id AND q.deleted_at IS NULL ORDER BY q.number) AS quote_numbers,
-            (SELECT GROUP_CONCAT(j.number, ', ') FROM jobs j WHERE j.opportunity_id = o.id AND j.deleted_at IS NULL ORDER BY j.number) AS job_numbers
+            (SELECT GROUP_CONCAT(j.number, ', ') FROM jobs j WHERE j.opportunity_id = o.id AND j.deleted_at IS NULL ORDER BY j.number) AS job_numbers,
+            -- Quoted amount: sum of the opp's current quotes. Reuses the
+            -- canonical active set (draft/issued/revision_*/accepted/expired),
+            -- which excludes dead quotes and superseded old revisions
+            -- (revise.js flips a superseded revision to 'dead').
+            (SELECT COALESCE(SUM(q.total_price), 0)
+               FROM quotes q
+              WHERE q.opportunity_id = o.id AND q.deleted_at IS NULL
+                AND ${quoteActivePredicate('q')}) AS quoted_amount
        FROM opportunities o
        LEFT JOIN accounts a ON a.id = o.account_id
        LEFT JOIN users ou ON ou.id = o.owner_user_id
@@ -141,6 +150,7 @@ export async function onRequestGet(context) {
       ] },
     { key: 'owner',        label: 'Owner',        sort: 'text',   filter: 'select', default: true },
     { key: 'value',        label: 'Value',        sort: 'number', filter: 'range',  default: true },
+    { key: 'quoted_amount', label: 'Quoted $',    sort: 'number', filter: 'range',  default: true },
     { key: 'close',        label: 'Close',        sort: 'date',   filter: 'text',   default: true },
     { key: 'updated',      label: 'Updated',      sort: 'date',   filter: 'text',   default: true },
     { key: 'created',      label: 'Created',      sort: 'date',   filter: 'text',   default: false },
@@ -185,6 +195,9 @@ export async function onRequestGet(context) {
     value: r.estimated_value_usd == null ? '' : Number(r.estimated_value_usd),
     value_display:
       r.estimated_value_usd != null ? `$${formatMoney(r.estimated_value_usd)}` : '',
+    // Sum of active quotes (0 → blank so opps with no live quote read clean).
+    quoted_amount: r.quoted_amount ? Number(r.quoted_amount) : '',
+    quoted_amount_display: r.quoted_amount ? `$${formatMoney(r.quoted_amount)}` : '',
     close: r.expected_close_date ?? '',
     updated: (r.updated_at ?? '').slice(0, 10),
     created: (r.created_at ?? '').slice(0, 10),
@@ -381,6 +394,7 @@ export async function onRequestGet(context) {
                         data-stage_label="${escape(r.stage_label)}"
                         data-owner="${escape(r.owner)}"
                         data-value="${escape(r.value === '' ? '' : String(r.value))}"
+                        data-quoted_amount="${escape(r.quoted_amount === '' ? '' : String(r.quoted_amount))}"
                         data-close="${escape(r.close)}"
                         data-updated="${escape(r.updated)}"
                         data-created="${escape(r.created)}"
@@ -412,6 +426,7 @@ export async function onRequestGet(context) {
                           displayText: r.value_display,
                         })}
                       </td>
+                      <td class="col-quoted_amount num" data-col="quoted_amount">${escape(r.quoted_amount_display)}</td>
                       <td class="col-close" data-col="close">
                         ${ieText('expected_close_date', r.close, { inputType: 'date' })}
                       </td>
