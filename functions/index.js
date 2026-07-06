@@ -4,13 +4,14 @@
 // Dashboard with pipeline overview, hero chart carousel, KPI strip,
 // my tasks, my pipeline, and recent quotes.
 //
-// The chart carousel is a 10-slide auto-rotating showcase that uses
-// the same data-gathering helper as the /reports page (see
-// functions/lib/chart-data.js). Slides advance every 7 seconds and
+// The chart carousel is an auto-rotating showcase whose slides are
+// defined by CHART_SLIDES in functions/lib/chart-data.js (the /reports
+// page reuses the same data helper). Slides advance every 7 seconds and
 // pause on hover; users can click prev/next arrows, dot indicators,
-// or the pause toggle. All 10 canvases/grids are always in the DOM
+// or the pause toggle. All canvases/grids are always in the DOM
 // (toggled via opacity+pointer-events, not display:none) so Chart.js
-// can measure them correctly on first init.
+// can measure them correctly on first init. The slide markup below MUST
+// match CHART_SLIDES one-for-one, in order.
 
 import { all, one } from './lib/db.js';
 import { layout, htmlResponse, html, escape, raw } from './lib/layout.js';
@@ -205,18 +206,18 @@ export async function onRequestGet(context) {
       </div>
       <p class="carousel-caption" x-text="slides[current].caption"></p>
 
+      <!-- Slide order MUST stay in lock-step with CHART_SLIDES in
+           lib/chart-data.js — the Alpine `slides` array (titles, captions,
+           dots, count) is driven by that constant, so a mismatch shows the
+           wrong title over a chart and makes trailing slides unreachable. -->
       <div class="carousel-stage">
         <div class="carousel-slide" :class="{active: current === 0}"><canvas id="car-stage"></canvas></div>
         <div class="carousel-slide" :class="{active: current === 1}"><canvas id="car-type"></canvas></div>
         <div class="carousel-slide" :class="{active: current === 2}"><canvas id="car-owner"></canvas></div>
         <div class="carousel-slide" :class="{active: current === 3}"><canvas id="car-topAccounts"></canvas></div>
-        <div class="carousel-slide" :class="{active: current === 4}"><canvas id="car-segment"></canvas></div>
-        <div class="carousel-slide" :class="{active: current === 5}"><canvas id="car-aging"></canvas></div>
-        <div class="carousel-slide" :class="{active: current === 6}"><canvas id="car-bookings"></canvas></div>
-        <div class="carousel-slide" :class="{active: current === 7}"><canvas id="car-forecast"></canvas></div>
-        <div class="carousel-slide" :class="{active: current === 8}"><canvas id="car-bottleneck"></canvas></div>
-        <div class="carousel-slide" :class="{active: current === 9}"><canvas id="car-sparesWinRate"></canvas></div>
-        <div class="carousel-slide" :class="{active: current === 10}">
+        <div class="carousel-slide" :class="{active: current === 4}"><canvas id="car-aging"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 5}"><canvas id="car-sparesWinRate"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 6}">
           <div class="carousel-heatmap-wrap">
             ${renderHeatmapGrid(charts.heatmap)}
           </div>
