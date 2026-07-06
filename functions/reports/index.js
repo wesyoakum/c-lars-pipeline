@@ -353,8 +353,15 @@ export async function onRequestGet(context) {
         <div class="chart-wrap"><canvas id="rpt-stage"></canvas></div>
       </section>
       <section class="card">
-        <h2>${escape(slideByKey('type').title)}</h2>
-        <p class="muted" style="margin-top:-0.5rem;font-size:0.8rem">${escape(slideByKey('type').caption)}</p>
+        <div style="display:flex;align-items:center;gap:.5rem">
+          <h2 style="margin:0">${escape(slideByKey('type').title)}</h2>
+          <span style="flex:1"></span>
+          <div class="sc-toggle" id="rpt-type-toggle">
+            <button type="button" data-mode="value" class="sc-active">Revenue</button>
+            <button type="button" data-mode="count">Count</button>
+          </div>
+        </div>
+        <p class="muted" style="margin-top:0.25rem;font-size:0.8rem">${escape(slideByKey('type').caption)}</p>
         <div class="chart-wrap"><canvas id="rpt-type"></canvas></div>
       </section>
 

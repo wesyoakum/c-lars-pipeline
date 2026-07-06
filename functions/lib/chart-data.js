@@ -204,6 +204,7 @@ export async function gatherDashboardCharts(db) {
   const type = {
     labels: pipelineByTypeRows.map(s => multiTypeLabel(s.transaction_type)),
     values: pipelineByTypeRows.map(s => Number(s.total_value)),
+    counts: pipelineByTypeRows.map(s => Number(s.n)),
   };
 
   const owner = {
@@ -507,17 +508,39 @@ export function buildChartInitScript(prefix, chartsJson) {
 
       var type = ${chartsJson.type};
       if (type.labels.length) make('type', function(canvas) {
-        new Chart(canvas, {
+        // 'value' = revenue ($, default), 'count' = # of opportunities.
+        var typeMode = 'value';
+        var typeChart = new Chart(canvas, {
           type: 'doughnut',
           data: { labels: type.labels, datasets: [{ data: type.values, backgroundColor: palette }] },
           options: {
             responsive: true, maintainAspectRatio: false,
             plugins: {
               legend: { position: 'bottom' },
-              tooltip: { callbacks: { label: function(ctx) { return ctx.label + ': ' + fmt$(ctx.parsed); } } }
+              tooltip: { callbacks: { label: function(ctx) {
+                return typeMode === 'value'
+                  ? ctx.label + ': ' + fmt$(ctx.parsed)
+                  : ctx.label + ': ' + ctx.parsed + ' opp' + (ctx.parsed === 1 ? '' : 's');
+              } } }
             }
           }
         });
+        // Optional revenue/count toggle — same .sc-toggle markup lives on
+        // the dashboard slide (car-type-toggle) and the reports tile
+        // (rpt-type-toggle); wire whichever is present by id.
+        var typeToggle = el('type-toggle');
+        if (typeToggle && type.counts) {
+          typeToggle.querySelectorAll('button').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+              typeMode = btn.getAttribute('data-mode');
+              typeChart.data.datasets[0].data = typeMode === 'value' ? type.values : type.counts;
+              typeChart.update();
+              typeToggle.querySelectorAll('button').forEach(function(b) {
+                b.classList.toggle('sc-active', b === btn);
+              });
+            });
+          });
+        }
       });
 
       var owner = ${chartsJson.owner};

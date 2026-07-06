@@ -160,7 +160,12 @@ export async function onRequestGet(context) {
       <h1 class="page-title">Dashboard</h1>
     </section>
 
-    <style>.metric-card-link{text-decoration:none;color:inherit;display:block}.metric-card-link:hover{box-shadow:0 0 0 2px var(--accent,#3b82f6);border-radius:var(--radius,6px)}</style>
+    <style>.metric-card-link{text-decoration:none;color:inherit;display:block}.metric-card-link:hover{box-shadow:0 0 0 2px var(--accent,#3b82f6);border-radius:var(--radius,6px)}
+      .sc-toggle{display:inline-flex;border:1px solid var(--border,#d8d8d8);border-radius:4px;overflow:hidden;background:#fff}
+      .sc-toggle button{background:transparent;border:0;padding:.1rem .55rem;cursor:pointer;font-size:.7rem;color:var(--muted,#666);line-height:1.4}
+      .sc-toggle button + button{border-left:1px solid var(--border,#d8d8d8)}
+      .sc-toggle button.sc-active{background:#eef2ff;color:#1d4ed8;font-weight:600}
+      .car-chart-toggle{position:absolute;top:8px;right:8px;z-index:2}</style>
     <div class="dashboard-metrics">
       <a href="${kpiUrls.activeOpps}" class="metric-card metric-card-link">
         <span class="metric-value">${oppCount?.n ?? 0}</span>
@@ -212,7 +217,13 @@ export async function onRequestGet(context) {
            wrong title over a chart and makes trailing slides unreachable. -->
       <div class="carousel-stage">
         <div class="carousel-slide" :class="{active: current === 0}"><canvas id="car-stage"></canvas></div>
-        <div class="carousel-slide" :class="{active: current === 1}"><canvas id="car-type"></canvas></div>
+        <div class="carousel-slide" :class="{active: current === 1}">
+          <div class="sc-toggle car-chart-toggle" id="car-type-toggle">
+            <button type="button" data-mode="value" class="sc-active">Revenue</button>
+            <button type="button" data-mode="count">Count</button>
+          </div>
+          <canvas id="car-type"></canvas>
+        </div>
         <div class="carousel-slide" :class="{active: current === 2}"><canvas id="car-owner"></canvas></div>
         <div class="carousel-slide" :class="{active: current === 3}"><canvas id="car-topAccounts"></canvas></div>
         <div class="carousel-slide" :class="{active: current === 4}"><canvas id="car-aging"></canvas></div>
